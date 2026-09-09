@@ -458,23 +458,35 @@ def needs_pipeline_expansion(config: dict) -> bool:
 #                           family, M = N = 16, so a 32x32 warp tile is not an
 #                           instruction. NOT true of the CDNA rows, which is
 #                           precisely why no CDNA arch has a row here at all.
-#   "max_warps_per_block" : {(pipeline, scheduler): cap} -- warp_m * warp_n cap.
+#   "max_warps_per_block" : {(pipeline, scheduler): cap, None: cap} -- warp_m *
+#                           warp_n cap. The ``None`` key is the arch-wide default:
+#                           it applies to every (pipeline, scheduler) pair with no
+#                           more specific entry, including callers that pass
+#                           neither. Use a pair key only where the evidence really
+#                           is pipeline-specific.
 #
 # gfx1250 evidence, both rules (grouped rowcolquant + tensorquant default_config
 # sweep on MI400, 11,840 result rows):
 #   * warp_tile: 2,908 rows returned wrong numbers and 100% of them were
 #     32x32x32; 0 of the 3,760 16x16x64 rows were wrong.
 #   * max_warps_per_block: 3,220 rows aborted at launch and 100% of them were
-#     warp_m*warp_n == 8. The compv3 intrawave pipeline is hand-scheduled for
-#     wave64 MFMA; <=4-warp compv3 is bit-accurate. Corroborated on device by
-#     ROCm/rocm-libraries#11161 (max_rel 0.14-0.87 vs an fp32 CPU reference).
+#     warp_m*warp_n == 8. The failure is "cannot find symbol" -- no launchable
+#     kernel entry was emitted at all -- which is a wave32 block-size property of
+#     the target, not a property of the pipeline that was scheduled into it. The
+#     cap is therefore registered arch-wide (None) rather than for
+#     (compv3, intrawave) only; a pair-keyed cap would leave the mem pipeline
+#     admitting exactly the maps that were measured to abort. This matches what
+#     the Tile Engine whitelist for gfx1250 already asserts unconditionally in
+#     tile_engine/ops/gemm/gemm_validation_utils.py.
+#     Corroborated on device by ROCm/rocm-libraries#11161 for compv3 specifically
+#     (max_rel 0.14-0.87 vs an fp32 CPU reference).
 #     Deliberately not extended to gfx1100/gfx1200/gfx1201: no measurement exists
 #     for those parts and their whole warp table is 8-warp.
 ARCH_VALIDITY_RULES: Dict[str, Dict[str, Any]] = {
     "gfx1250": {
         "warp_map": True,
         "warp_tile": True,
-        "max_warps_per_block": {("compv3", "intrawave"): 4},
+        "max_warps_per_block": {None: 4},
     },
 }
 
@@ -502,13 +514,23 @@ def arch_config_supported(
 ) -> bool:
     """Return True iff this configuration may be emitted for *arch*.
 
-    **The gate is opt-in per arch.** If *arch* is falsy, unknown, or simply has
-    no row in ARCH_VALIDITY_RULES, this returns True immediately and no rule can
-    run. Today only gfx1250 has a row, so on gfx90a / gfx942 / gfx950 -- and on
-    every other arch -- this function is a constant-True no-op by construction,
-    whatever the arch tables happen to contain. Adding an arch to the gate is a
-    deliberate, evidence-backed edit to ARCH_VALIDITY_RULES; it never happens as
-    a side effect of a table gaining or losing a row.
+    *arch* is normalized with :func:`normalize_gfx_arch` before anything is
+    looked up. Callers hand us whatever ``rocm_agent_enumerator`` or
+    ``hipDeviceProp_t::gcnArchName`` reported, and on a real part that is
+    routinely ``"gfx1250:xnack-"``. Looking that string up raw finds no row and
+    returns True, i.e. the gate would be inert on the single most common
+    real-world spelling of the only architecture it gates. Normalizing here also
+    keeps the ARCH_VALIDITY_RULES / WARP_SUPPORTED_COMBINATIONS /
+    WARP_TILE_SUPPORTED_COMBINATIONS lookups consistent, since all three are
+    keyed by the bare target.
+
+    **The gate is opt-in per arch.** If the normalized *arch* is falsy, unknown,
+    or simply has no row in ARCH_VALIDITY_RULES, this returns True immediately
+    and no rule can run. Today only gfx1250 has a row, so on gfx90a / gfx942 /
+    gfx950 -- and on every other arch -- this function is a constant-True no-op
+    by construction, whatever the arch tables happen to contain. Adding an arch
+    to the gate is a deliberate, evidence-backed edit to ARCH_VALIDITY_RULES; it
+    never happens as a side effect of a table gaining or losing a row.
 
     Rules, applied only to a gated arch and only where its row enables them:
 
@@ -518,12 +540,14 @@ def arch_config_supported(
        warp_tile_k]`` must appear in
        WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key].
     3. **Warps-per-block cap** (``"max_warps_per_block"``) -- ``warp_m *
-       warp_n`` must not exceed the cap recorded for (pipeline, scheduler).
+       warp_n`` must not exceed the cap recorded for (pipeline, scheduler), or
+       the arch-wide ``None`` cap when that pair has no entry of its own.
 
     Within a gated arch the rules still never reject on absence of data: a
     missing table row leaves the corresponding rule inert.
     """
-    rules = ARCH_VALIDITY_RULES.get(arch or "")
+    arch = normalize_gfx_arch(arch or "")
+    rules = ARCH_VALIDITY_RULES.get(arch)
     if not rules:
         return True
 
@@ -551,8 +575,13 @@ def arch_config_supported(
         if table and [warp_tile_m, warp_tile_n, warp_tile_k] not in table:
             return False
 
-    if warp_m is not None and warp_n is not None and pipeline and scheduler:
-        cap = rules.get("max_warps_per_block", {}).get((pipeline, scheduler))
+    if warp_m is not None and warp_n is not None:
+        caps = rules.get("max_warps_per_block", {})
+        # Pair-specific entry first, then the arch-wide default. Deliberately not
+        # conditioned on pipeline/scheduler being supplied: on gfx1250 the cap
+        # describes what the target can launch, so a caller that omits its trait
+        # pair must not thereby escape it.
+        cap = caps.get((pipeline, scheduler), caps.get(None))
         if cap is not None and warp_m * warp_n > cap:
             return False
 

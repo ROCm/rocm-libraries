@@ -741,6 +741,71 @@ class TestCentralArchFilter(unittest.TestCase):
         self.assertEqual(arch_warp_tile_key("fp8"), "fp8_fp8_fp32")
         self.assertEqual(arch_warp_tile_key("int8"), "int8_int8_int32")
         self.assertEqual(arch_warp_tile_key("fp8", "bf8"), "fp8_bf8_fp32")
+
+    # -- arch normalization inside the gate ---------------------------------
+    #
+    # A real gfx1250 part reports "gfx1250:xnack-". Looked up raw that string has
+    # no ARCH_VALIDITY_RULES row, so every rule below it was skipped and the gate
+    # returned True -- inert on the most common real-world spelling of the only
+    # arch it gates.
+
+    def test_suffixed_gfx1250_is_still_gated(self):
+        for arch in ("gfx1250:xnack-", "gfx1250:xnack+", "gfx1250:sramecc-:xnack-"):
+            with self.subTest(arch=arch):
+                self.assertFalse(arch_config_supported(
+                    arch, dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+                    pipeline="compv3", scheduler="intrawave"))
+                self.assertFalse(arch_config_supported(
+                    arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                    warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                    pipeline="compv3", scheduler="intrawave"))
+
+    def test_suffixed_gfx1250_still_accepts_valid_configs(self):
+        self.assertTrue(arch_config_supported(
+            "gfx1250:xnack-", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_suffixed_gfx9_stays_ungated(self):
+        self.assertTrue(arch_config_supported(
+            "gfx942:sramecc+:xnack-", dtype="fp8", warp_m=4, warp_n=4, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+            pipeline="mem", scheduler="interwave"))
+
+    # -- the warps-per-block cap is arch-wide, not pipeline-keyed -----------
+    #
+    # The measured failure was "cannot find symbol": no launchable kernel entry
+    # was emitted for an 8-warp block at all. That is a wave32 block-size
+    # property of gfx1250, not a property of the pipeline scheduled into it, so
+    # a cap keyed only to (compv3, intrawave) left mem admitting exactly the
+    # maps that were measured to abort.
+
+    def test_gfx1250_rejects_eight_warp_blocks_on_every_pipeline(self):
+        for pipe in ("compv3", "compv4", "mem"):
+            for sched in ("intrawave", "interwave"):
+                for wm, wn in ((2, 4), (4, 2), (1, 8), (8, 1)):
+                    with self.subTest(pipeline=pipe, scheduler=sched, warps=(wm, wn)):
+                        self.assertFalse(arch_config_supported(
+                            "gfx1250", dtype="fp8", warp_m=wm, warp_n=wn, warp_k=1,
+                            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                            pipeline=pipe, scheduler=sched))
+
+    def test_gfx1250_cap_applies_when_traits_are_not_supplied(self):
+        """A caller that omits pipeline/scheduler must not escape the cap."""
+        self.assertFalse(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64))
+
+    def test_gfx1250_four_warp_blocks_survive_on_every_pipeline(self):
+        for pipe in ("compv3", "compv4", "mem"):
+            with self.subTest(pipeline=pipe):
+                self.assertTrue(arch_config_supported(
+                    "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                    pipeline=pipe, scheduler="intrawave"))
+
+
 class TestNormalizeGfxArch(unittest.TestCase):
     """Feature suffixes must be stripped exactly once, here."""
 
