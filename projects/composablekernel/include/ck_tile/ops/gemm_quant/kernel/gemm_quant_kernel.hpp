@@ -863,8 +863,15 @@ struct QuantGemmMultiDKernel
                         constexpr auto warp_k = GemmPipeline::BlockGemmShape::WarpTile::at(I2);
                         index_t kFlatKSplit   = GemmPipeline::flatKPerWarp * (k_size / warp_k);
                         index_t kFlatK        = GemmPipeline::flatKPerWarp * (kargs.K / warp_k);
-                        index_t kFlatN        = kargs.N * kargs.K / kFlatK;
-                        return make_naive_tensor_view<address_space_enum::global>(
+                        // Widen to 64-bit before the divide so N*K does not overflow int32 for
+                        // B tensors whose element count exceeds 2^31.
+                        index_t kFlatN =
+                            static_cast<index_t>(static_cast<long_index_t>(kargs.N) *
+                                                 static_cast<long_index_t>(kargs.K) / kFlatK);
+                        return make_naive_tensor_view<address_space_enum::global,
+                                                      memory_operation_enum::set,
+                                                      amd_buffer_coherence_enum::coherence_default,
+                                                      kBGlobalLoad>(
                             b_ptr,
                             make_tuple(kFlatN, kFlatKSplit),
                             make_tuple(kFlatK, 1),
@@ -1323,17 +1330,30 @@ struct QuantGemmMultiDKernel
     // configuration whose A/B are loaded through the plain global views.
     CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorGlobalLoadSupported()
     {
-        return kQuantType == QuantType::RowColQuant && !PreshuffleB &&
-               !GemmPipeline::BlockGemmShape::PermuteB;
+        // RowColQuant, non-preshuffled, non-permuted B loaded through the plain global views.
+        const bool rowcol_ok = kQuantType == QuantType::RowColQuant && !PreshuffleB &&
+                               !GemmPipeline::BlockGemmShape::PermuteB;
+        // BQuant preshuffle-B: the flat B window is addressed in 64-bit when the LargeTensors
+        // opt-in is active.  Requires ColumnMajor, non-permuted B.  Restricted to BQuantGrouped
+        // because that path always resolves to the WP pipeline (which exposes LargeTensors),
+        // whereas ABQuantGrouped can resolve to the eight-waves pipeline that does not.
+        const bool bquant_preshuffle_b_ok =
+            kQuantType == QuantType::BQuantGrouped && PreshuffleB &&
+            !GemmPipeline::BlockGemmShape::PermuteB &&
+            std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+        return rowcol_ok || bquant_preshuffle_b_ok;
     }
 
     // Whether the compile-time LargeTensors opt-in is active and the configuration is one
-    // the global load/store path supports.  GemmPipeline::LargeTensors is only read on the
-    // RowColQuant path because only that path uses the plain gemm pipeline (which exposes
-    // LargeTensors); the grouped-quant pipelines do not.
+    // the global load/store path supports.  Read on the RowColQuant path (plain gemm pipeline)
+    // and on the BQuant preshuffle-B path (WP pipeline); both expose LargeTensors.
     CK_TILE_HOST_DEVICE static constexpr bool UseLargeTensorGlobalLoad()
     {
         if constexpr(kQuantType == QuantType::RowColQuant)
+        {
+            return GemmPipeline::LargeTensors && IsLargeTensorGlobalLoadSupported();
+        }
+        else if constexpr(kQuantType == QuantType::BQuantGrouped && PreshuffleB)
         {
             return GemmPipeline::LargeTensors && IsLargeTensorGlobalLoadSupported();
         }
