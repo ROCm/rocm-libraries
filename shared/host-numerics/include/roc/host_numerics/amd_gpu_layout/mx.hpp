@@ -11,8 +11,15 @@
 
 namespace roc::host_numerics::amd_gpu_layout {
 enum class MxScaleStorageLayout {
+    // Contiguous [slow, fast] scale bytes with no architecture-specific padding or permutation.
     Natural,
+
+    // GFX950 block-scale ABI: pad the natural dimensions to the required tile and permute the
+    // bytes into the kernel's tiled scale order.
     Gfx950,
+
+    // GFX1250 block-scale ABI: tile the padded fast dimension in groups of 128 / blockSize,
+    // ordered as [fast tile, slow coordinate, coordinate within the tile].
     Gfx1250,
 };
 
