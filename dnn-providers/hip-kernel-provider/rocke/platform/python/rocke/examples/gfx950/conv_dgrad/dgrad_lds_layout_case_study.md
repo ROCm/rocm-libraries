@@ -134,9 +134,35 @@ python3 python/rocke/benchmark/benchmark_implicit_gemm_conv.py \
     --csv dgrad_sweep.csv
 ```
 
-As with wgrad there is **no `--lds-k-outer` flag**: the layout is deduced by
-`DgradConvSpec.default_lds_k_outer`, which the sweep driver and dispatch both
-call. Keep `--csv` output outside the git work tree.
+The layout is deduced by `DgradConvSpec.default_lds_k_outer`, which the sweep
+driver and dispatch both call. Because that predicate answers the same way for
+every combo of a given shape, a plain sweep measures **one** layout and has no
+baseline to compare against — the `_kouter` suffix appears on every kernel or on
+none. Use `--lds-k-outer {auto,on,off}` to force it and get a real A/B; `auto`
+is the default and reproduces the deduced behaviour. Pair the two runs by config
+identity rather than by rank. Keep `--csv` output outside the git work tree.
+
+Single-config run, for a trace or a focused A/B —
+[`run_one_dgrad.py`](run_one_dgrad.py) is the `<single-config driver>` both this
+study and the wgrad one refer to:
+
+```bash
+python3 python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+    --kouter on --stride 2 --print-name-only    # kernel name, no GPU touched
+
+export ROCPROF_TRACE_DECODER_LIB=<dir containing librocprof-trace-decoder.so>
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
+    --output-dir ./att_out --kernel-regex "rocke_trace_dgrad.*kouter" \
+    -- python3 python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \
+       --kouter on --stride 2 --warmup 1 --iters 2
+```
+
+Two traps that silently give wrong answers. `code.json`'s `Stall` and `Latency`
+columns are hit-weighted **totals** — divide by `Hit` for a per-execution figure;
+a number larger than wall-clock is the tell. And in `inline_frames.json` the
+stacks live under `stacks` (`resolved` is a count) and are ordered
+**outermost-first**, so attribute on the tail; taking the head labels every
+instruction `kernel <- main <- build_...` and attributes nothing.
 
 ## Config table
 
@@ -145,7 +171,7 @@ call. Keep `--csv` output outside the git work tree.
 | tile (m, n, k) | 64, 64, 64 | same as wgrad |
 | warp (m, n) | 2, 2 | 256 threads at wave64 |
 | atom edge | 32 (also validated at 16) | `n = 8` and `n = 4` fragments |
-| pipeline | `mem` | `compv3`/`compv4` are rejected for dgrad |
+| pipeline | `mem` | `compv3`/`compv4` are rejected only on **WMMA** — the `("mem","wavelet")` restriction sits inside the `family == "wmma"` branch, so they are valid on gfx950 and do emit different IR (extra barriers, `setprio`) |
 | epilogue | `default` | dgrad dispatches internally on `needs_atomic` |
 | split-K | 1 | no CK auto-formula; see below |
 | `lds_k_outer` | deduced, B tile only | declines on odd `cpg` |
@@ -153,6 +179,61 @@ call. Keep `--csv` output outside the git work tree.
 Split-K is pinned to 1 in dispatch rather than auto-resolved. The CK formula
 wgrad uses keys on its lopsided `N*Ho*Wo` reduction; dgrad's reduction is
 `Y*X*K`, which is not that shape, so borrowing the formula would be unjustified.
+
+## Finding 4: what an ATT trace says is expensive is not what is on the critical path
+
+A source-correlated ATT capture at the shipped dispatch geometry classifies the
+kernel as **latency-bound on global memory** — the dominant wave state is WAIT
+and every top stall is an `s_waitcnt`. Occupancy is not the limiter: no register
+spills, LDS unchanged across layouts, and achieved occupancy is LDS-capped rather
+than VGPR-capped. (Note when reading resource dumps: the VGPR-derived wave
+ceiling is not achieved occupancy — take `min(VGPR-limited, LDS-limited)`.)
+
+The attribution then pointed at two structures, together about three quarters of
+all stall cycles. **Both were implemented, verified, measured, and rejected.**
+They are recorded here so nobody spends the time again.
+
+**Rejected 1 — batching the tilde load phase.** At stride > 1 the load phase
+emitted a full `s_waitcnt vmcnt(0)` before every `ds_write_b128`: four drains per
+iteration, no overlap, where the stride-1 kernel keeps a load in flight with a
+single `vmcnt(1)`. The cause is a register-allocation artifact, *not* the
+descriptor closure and not the OOB select — the tilde magic-number divide reuses
+the load destination quad as scratch while computing the next address, so the
+allocator coalesced all four `buffer_load_dwordx4` onto one quad and the WAR
+hazard forced the drains. Splitting `emit_load_phase` into `load_global` x2 then
+`store_lds` x2 (the C++ split API already exists and is generic) fixes it exactly
+as designed: four distinct quads, `vmcnt(1)` + `vmcnt(0)`, byte-identity green,
+stride 1 instruction-identical. It changed runtime by **nothing** at the shipped
+geometry. One neighbouring tile improved and six were flat, and the improved one
+did not overtake tiles that were already faster. Reverted — it costs registers
+and moves goldens for no gain.
+
+**Rejected 2 — resolving the tilde block search at build time.**
+`spec.compute_sub_gemms()` runs on the host, so every `block_start` is a
+compile-time constant and the per-CTA binary search (four *dependent*
+`global_load_i32` probes, each paying full scalar-memory latency in the prologue)
+can become a `s_cselect` cascade over literals. Correct, and it does delete the
+memory traffic and about a dozen instructions. Runtime effect: **inside the noise
+floor at every geometry measured.** Prologue work amortises over the K-loop.
+
+The lesson generalises past dgrad: **a large stall bucket means "this is where
+waves sit", not "this cost is removable".** Waves parked on an `s_waitcnt` may be
+absorbing latency that has to be paid whatever the schedule; removing the
+serialization only moves where they wait. Before building against an attribution
+number, find a cheap falsifier — here, compiling one neighbouring geometry and
+timing it costs minutes and would have predicted both outcomes.
+
+Consequence for anyone continuing this work: strided dgrad is bound by **total
+memory time**, so the whole scheduling family (wait staging, prefetch depth,
+prologue hoisting, descriptor caching) is a dead end. A real win has to reduce
+bytes moved or improve locality.
+
+Measuring any of this needs care. Clocks cannot be pinned on every gfx950 host
+(`rocm-smi` may report SCLK/MCLK as unavailable and refuse to leave `auto`), and
+run-to-run spread is far worse at stride > 1 than at stride 1 — single-run
+stride-2 numbers are not evidence. Use a median of several *separate processes*,
+and note that a noise floor derived from adjacent same-process pairs understates
+the drift between two whole runs.
 
 ## Still open
 
