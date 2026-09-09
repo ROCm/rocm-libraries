@@ -117,31 +117,13 @@ def _import_rocisa():
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
 #
-# When ``ROCISA_BACKEND`` is unset, gfx1250 platforms automatically default
-# to the stinkytofu backend. Set ``ROCISA_BACKEND=rocisa`` to explicitly
-# force the native path on gfx1250.
-
-def _detect_default_backend() -> str:
-    """Return ``"stinkytofu"`` if gfx1250 hardware is detected, else ``""``."""
-    import subprocess as _sp
-    rocmpath = os.environ.get(
-        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
-    )
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    if not os.path.exists(enumerator):
-        return ""
-    try:
-        output = _sp.check_output(
-            [enumerator, "-t", "GPU"], timeout=5, stderr=_sp.DEVNULL
-        )
-        if "gfx1250" in output.decode():
-            return "stinkytofu"
-    except Exception:
-        pass
-    return ""
+# The default is ALWAYS the native rocisa backend -- there is no hardware
+# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
+# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
 
 _BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-_BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
+# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
+_BACKEND = _BACKEND_RAW
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -331,7 +313,7 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
 
 
 if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
-                    auto_detected=(not _BACKEND_RAW)):
+                    auto_detected=False):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
