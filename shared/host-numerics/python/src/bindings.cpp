@@ -314,13 +314,15 @@ Tensor scalarFromPython(nb::handle value) {
         (void)tensor.item<std::complex<double>>();
         return tensor.deepCopy();
     }
-    return Tensor(nb::cast<std::complex<double>>(value));
+    nb::object array = nb::module_::import_("numpy").attr("asarray")(value);
+    Tensor tensor = tensorFromNumpy(std::move(array), std::nullopt);
+    (void)tensor.item<std::complex<double>>();
+    return tensor;
 }
 
 Tensor tensorOperand(nb::handle value, ScalarType scalarType) {
     if (nb::isinstance<Tensor>(value)) return nb::cast<Tensor>(value);
-    const Tensor scalar = scalarFromPython(value);
-    return Tensor::scalar(scalarType, scalar.item<std::complex<double>>());
+    return scalarFromPython(value).copyConvertedTo(scalarType);
 }
 }  // namespace roc::host_numerics::python_bindings
 
