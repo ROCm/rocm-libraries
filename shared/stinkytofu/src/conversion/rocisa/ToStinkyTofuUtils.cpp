@@ -795,17 +795,6 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 }
 
-/// Get MSB value from StinkyRegister if it's a VGPR. Returns -1 for non-VGPR.
-int getMsbFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
-    return static_cast<int>(reg.reg.idx) / 256;
-}
-
-int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return 0;
-    return getMsbFromStinkyVgpr(reg) * (-256);
-}
-
 /// Convert a rocisa::Container to StinkyRegister
 ///
 /// This function takes a rocisa::Container pointer and converts it to a
@@ -839,9 +828,8 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
         reg.reg.isMinus = regCont->isMinus ? 1 : 0;
         reg.reg.isAbs = regCont->isAbs ? 1 : 0;
 
-        // TODO: This is a hack to set the offset of the register for use case such as msb, etc.
-        // Set offset for VGPR MSB when supported (use case: vgpr > 255)
-        if (hasVgprMsb) reg.reg.offset = static_cast<int16_t>(getMsbOffsetFromStinkyVgpr(reg));
+        // No bank bias in reg.offset here: it is derived from the index, which
+        // allocation rewrites. InsertVgprMsbPass derives it from the final index.
 
         // Capture symbolic register name if available
         // In rocisa, the symbolic name includes the type prefix and all offsets
