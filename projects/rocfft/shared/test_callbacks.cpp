@@ -27,6 +27,7 @@
 #include "test_callbacks.h"
 #include "hip/hiprtc.h"
 #include "rocfft_complex.h"
+#include <map>
 #include <string>
 
 #ifdef ROCFFT_MPI_ENABLE
@@ -320,6 +321,15 @@ static std::string get_jit_callback_decls(fft_array_type itype, fft_precision pr
 
 std::vector<char> compile_jit_callback(const std::string& src)
 {
+    // Cache the compiled bitcode, keyed by source code string.  GTest
+    // cases run in a single thread, and JIT callbacks are requested
+    // from that same thread, so there's currently no need to guard
+    // this cache with a mutex.
+    static std::unordered_map<std::string, std::vector<char>> cache;
+    auto                                                      cache_it = cache.find(src);
+    if(cache_it != cache.end())
+        return cache_it->second;
+
     struct RaiiState
     {
         hiprtcProgram prog = nullptr;
@@ -388,6 +398,7 @@ std::vector<char> compile_jit_callback(const std::string& src)
     if(nverr != NVRTC_SUCCESS)
         throw hiprtc_runtime_error{"failed to get bitcode", nvrtcResultTohiprtcResult(nverr)};
 #endif
+    cache[src] = code;
     return code;
 }
 
