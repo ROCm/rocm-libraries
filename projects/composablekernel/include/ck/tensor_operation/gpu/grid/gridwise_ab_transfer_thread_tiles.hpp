@@ -162,7 +162,7 @@ struct ABTransferThreadTiles
             }
             else
             {
-                constexpr index_t MN1    = 8;
+                constexpr index_t MN1    = MNPerWmma / 2;
                 constexpr auto base_desc = make_naive_tensor_descriptor(
                     make_tuple(Number<MNPerBlock / MN1>{}, Number<KPerBlock>{}, Number<MN1>{}),
                     make_tuple(Number<KPerBlock + 1>{} * Number<MN1>{}, Number<MN1>{}, I1));
@@ -320,6 +320,7 @@ struct ABTransferThreadTiles
         constexpr index_t NumABTensor = ABsDataType::Size();
         const index_t mn_block_data_idx_on_grid =
             __builtin_amdgcn_readfirstlane(block_mn_id * MNPerBlock);
+
         // workaround because v7r2 is not as general as v4r1
         if constexpr(NumABTensor > 1)
         {
@@ -354,24 +355,37 @@ struct ABTransferThreadTiles
         }
         else
         {
-            return ThreadGroupTensorSliceTransfer_v4r1 < ThisThreadBlock, ABElementwiseOperation,
-                   ck::tensor_operation::element_wise::PassThrough, InMemoryDataOperationEnum::Set,
-                   Sequence<ABK0Number, MNPerBlock, ABK1Number>,
-                   ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1,
-                   ABBlockTransferThreadClusterArrangeOrder,
-                   remove_cvref_t<tuple_element_t<0, ABsDataType>>,
-                   remove_cvref_t<tuple_element_t<0, ABsDataType>>, decltype(grid_descriptor[I0]),
-                   decltype(block_descriptor), ABBlockTransferSrcAccessOrder,
-                   std::conditional_t<UseLdsTranspose, Sequence<0, 2, 1>, Sequence<0, 1, 2>>,
-                   ABBlockTransferSrcVectorDim, UseLdsTranspose ? 1 : 2,
-                   ABBlockTransferSrcScalarPerVector, ABBlockTransferDstScalarPerVector_ABK1, 1, 1,
-                   ABThreadTransferSrcResetCoordinateAfterRun, true,
-                   GlobalBufferNum > (grid_descriptor[I0],
-                                      make_multi_index(k_id, mn_block_data_idx_on_grid, 0),
-                                      ab_element_op,
-                                      block_descriptor,
-                                      make_multi_index(0, 0, 0),
-                                      ck::tensor_operation::element_wise::PassThrough{});
+            using LdsDimAccessOrder =
+                std::conditional_t<UseLdsTranspose, Sequence<0, 2, 1>, Sequence<0, 1, 2>>;
+            constexpr index_t VectorDim = UseLdsTranspose ? 1 : 2;
+            return ThreadGroupTensorSliceTransfer_v4r1<
+                ThisThreadBlock,
+                ABElementwiseOperation,
+                ck::tensor_operation::element_wise::PassThrough,
+                InMemoryDataOperationEnum::Set,
+                Sequence<ABK0Number, MNPerBlock, ABK1Number>,
+                ABBlockTransferThreadClusterLengths_ABK0_MN_ABK1,
+                ABBlockTransferThreadClusterArrangeOrder,
+                remove_cvref_t<tuple_element_t<0, ABsDataType>>,
+                remove_cvref_t<tuple_element_t<0, ABsDataType>>,
+                decltype(grid_descriptor[I0]),
+                decltype(block_descriptor),
+                ABBlockTransferSrcAccessOrder,
+                LdsDimAccessOrder,
+                ABBlockTransferSrcVectorDim,
+                VectorDim,
+                ABBlockTransferSrcScalarPerVector,
+                ABBlockTransferDstScalarPerVector_ABK1,
+                1,
+                1,
+                ABThreadTransferSrcResetCoordinateAfterRun,
+                true,
+                GlobalBufferNum>(grid_descriptor[I0],
+                                 make_multi_index(k_id, mn_block_data_idx_on_grid, 0),
+                                 ab_element_op,
+                                 block_descriptor,
+                                 make_multi_index(0, 0, 0),
+                                 ck::tensor_operation::element_wise::PassThrough{});
         }
     }
 
@@ -418,34 +432,20 @@ struct ABTransferThreadTiles
                 // (rest of the single WMMA tile for single thread) and then over KRow
                 // (rest of the single WMMA tile for single wave)
                 // KPack / KRow / K1 - MNRepeat - K0 / KRow - MNWaves - KRow - MNPerWmma - K1
-                if constexpr(UseLdsTranspose)
-                {
-                    return transform_tensor_descriptor(
-                        BlockDesc{},
-                        make_tuple(
-                            make_unmerge_transform(make_tuple(Number<ABK0 / (KPack / ABK1)>{},
-                                                              KRow,
-                                                              Number<KPack / KRow / ABK1>{})),
-                            make_unmerge_transform(make_tuple(
-                                Number<MNRepeat>{}, Number<MNWaves>{}, Number<MNPerWmma>{})),
-                            make_pass_through_transform(Number<ABK1>{})),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
-                        make_tuple(Sequence<2, 4, 0>{}, Sequence<1, 3, 6>{}, Sequence<5>{}));
-                }
-                else
-                {
-                    return transform_tensor_descriptor(
-                        BlockDesc{},
-                        make_tuple(
-                            make_unmerge_transform(make_tuple(Number<ABK0 / (KPack / ABK1)>{},
-                                                              KRow,
-                                                              Number<KPack / KRow / ABK1>{})),
-                            make_unmerge_transform(make_tuple(
-                                Number<MNRepeat>{}, Number<MNWaves>{}, Number<MNPerWmma>{})),
-                            make_pass_through_transform(Number<ABK1>{})),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
-                        make_tuple(Sequence<2, 4, 0>{}, Sequence<1, 3, 5>{}, Sequence<6>{}));
-                }
+                constexpr index_t MNPerWmma_Dim = UseLdsTranspose ? 6 : 5;
+                constexpr index_t ABK1_Dim      = UseLdsTranspose ? 5 : 6;
+                return transform_tensor_descriptor(
+                    BlockDesc{},
+                    make_tuple(
+                        make_unmerge_transform(make_tuple(
+                            Number<ABK0 / (KPack / ABK1)>{}, KRow, Number<KPack / KRow / ABK1>{})),
+                        make_unmerge_transform(
+                            make_tuple(Number<MNRepeat>{}, Number<MNWaves>{}, Number<MNPerWmma>{})),
+                        make_pass_through_transform(Number<ABK1>{})),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
+                    make_tuple(Sequence<2, 4, 0>{},
+                               Sequence<1, 3, MNPerWmma_Dim>{},
+                               Sequence<ABK1_Dim>{}));
             }
             else
             {

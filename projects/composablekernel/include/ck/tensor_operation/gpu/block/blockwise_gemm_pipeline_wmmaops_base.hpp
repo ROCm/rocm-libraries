@@ -292,7 +292,13 @@ struct BlockwiseGemmWmmaops_pipeline_base
 #endif
         if constexpr(UseLdsTransposeA)
         {
-            return make_tuple(0, 0, 0, waveId_m, wmma_krow, wmma_a_idx % 8, (wmma_a_idx / 8) * 8);
+            return make_tuple(0,
+                              0,
+                              0,
+                              waveId_m,
+                              wmma_krow,
+                              wmma_a_idx % A_K1,
+                              (wmma_a_idx / A_K1) * (MPerWmma / 2));
         }
         else
         {
@@ -316,7 +322,13 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
         if constexpr(UseLdsTransposeB)
         {
-            return make_tuple(0, 0, 0, waveId_n, wmma_krow, wmma_b_idx % 8, (wmma_b_idx / 8) * 8);
+            return make_tuple(0,
+                              0,
+                              0,
+                              waveId_n,
+                              wmma_krow,
+                              wmma_b_idx % B_K1,
+                              (wmma_b_idx / B_K1) * (NPerWmma / 2));
         }
         else
         {
