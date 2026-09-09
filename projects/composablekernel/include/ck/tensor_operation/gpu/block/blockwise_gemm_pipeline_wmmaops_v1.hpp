@@ -1079,7 +1079,9 @@ template <index_t BlockSize,
           index_t NRepeat,
           index_t KPack,
           index_t KInner,
-          bool TransposeC>
+          bool TransposeC,
+          bool UseLdsTransposeA,
+          bool UseLdsTransposeB>
 struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Intrawave,
                                         BlockSize,
                                         ADataType,
@@ -1102,8 +1104,8 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Intrawave,
                                         KInner,
                                         TransposeC,
                                         true,
-                                        false,
-                                        false>
+                                        UseLdsTransposeA,
+                                        UseLdsTransposeB>
     : BlockwiseGemmWmmaops_pipeline_base<BlockSize,
                                          ADataType,
                                          BDataType,
@@ -1124,8 +1126,8 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Intrawave,
                                          KPack,
                                          KInner,
                                          TransposeC,
-                                         false,
-                                         false>
+                                         UseLdsTransposeA,
+                                         UseLdsTransposeB>
 {
     // GlobalPrefetchStages: 2
     // LocalPreFillStages: 1
@@ -1150,7 +1152,12 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Intrawave,
                                                     NRepeat,
                                                     KPack,
                                                     KInner,
-                                                    TransposeC>;
+                                                    TransposeC,
+                                                    UseLdsTransposeA,
+                                                    UseLdsTransposeB>;
+
+    static_assert(!UseLdsTransposeB,
+                  "Lds Transpose not possible: preshuffleB doesn't use LDS for B matrix");
     using Base::I0;
     using Base::I1;
     using Base::MWaves;

@@ -229,6 +229,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
     static constexpr bool UseBlockPaddingA =
         ABlockLdsExtraM || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
+    static_assert(!UseLdsTransposeA ||
+                  (UseBlockPaddingA && AK1Value == 8 && NumATensor == 1 && sizeof(LDSTypeA) == 2));
     using ATransfer = typename std::conditional<
         IsAWaveTransferApplicable,
         ATransferWaveTiles,
@@ -256,6 +258,8 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
 
     static constexpr bool UseBlockPaddingB =
         BBlockLdsExtraN || BlkGemmPipelineVer == BlockGemmPipelineVersion::v4;
+    static_assert(!UseLdsTransposeB ||
+                  (UseBlockPaddingB && BK1Value == 8 && NumBTensor == 1 && sizeof(LDSTypeB) == 2));
     using BTransfer = typename std::conditional<
         IsBPreShuffled,
         ABTransferThreadTilesPreShuffle<BLayout,
