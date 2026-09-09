@@ -80,6 +80,47 @@ def _kernel_columns(frame: pd.DataFrame) -> list[str]:
     return [c for c in frame.columns if c.startswith("kernel.")]
 
 
+def _paired_identities(frame: pd.DataFrame) -> list[tuple[str, str]]:
+    """Columns carrying two spellings of one identity: `X` and `X_id`.
+
+    A convention rather than a fixed list, so this reads any producer's corpus. Where only one
+    of a pair is present there is nothing to disagree, and the check does not apply.
+    """
+    return [(column, f"{column}_id") for column in frame.columns
+            if f"{column}_id" in frame.columns]
+
+
+def _validate_identity_is_unambiguous(frame: pd.DataFrame) -> None:
+    """Two spellings of one identity must agree one-for-one.
+
+    A name bound to two ids -- or an id to two names -- means the corpus merges collections
+    taken against different versions of the engine, where a candidate was renamed or an id
+    reused. Nothing else in the file records which version a row came from.
+
+    Caught rather than tolerated because of what it does downstream silently: the candidate
+    identity spans every `kernel.*` column, so one candidate wearing two names becomes two.
+    Every problem's candidate count inflates and regret is computed over a catalog that
+    existed on no single machine.
+    """
+    for name, identifier in _paired_identities(frame):
+        _validate_pair_agrees(frame, name, identifier)
+
+
+def _validate_pair_agrees(frame: pd.DataFrame, name: str, identifier: str) -> None:
+    pairs = frame[[name, identifier]].dropna().drop_duplicates()
+    for left, right in ((name, identifier), (identifier, name)):
+        bindings = pairs.groupby(left)[right].nunique()
+        ambiguous = bindings[bindings > 1]
+        if not ambiguous.empty:
+            first = ambiguous.index[0]
+            bound = sorted(pairs.loc[pairs[left] == first, right].tolist())
+            raise ValidationError(
+                f"{len(ambiguous)} {left} value(s) are ambiguous: {first!r} is bound to "
+                f"{len(bound)} different {right} values {bound}. The corpus spans engine "
+                "versions that disagree on this candidate."
+            )
+
+
 def _validate(frame: pd.DataFrame) -> None:
     """§8.3's checks, applied where they can finally be applied."""
     for group in ("q.", "kernel.", "device."):
@@ -105,6 +146,8 @@ def _validate(frame: pd.DataFrame) -> None:
         raise ValidationError("minTimeMs exceeds avgTimeMs on a measured row")
     if "stddevMs" in frame.columns and (frame.loc[measured, "stddevMs"] < 0).any():
         raise ValidationError("negative stddevMs")
+
+    _validate_identity_is_unambiguous(frame)
 
     query = _query_columns(frame)
     kernels = _kernel_columns(frame)
