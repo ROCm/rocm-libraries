@@ -283,17 +283,40 @@ private:
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
 
-        for(size_t index = 0; index < _candidates.size(); ++index)
+        // A stall watchdog timeout is a change of measurement method, not a verdict on the
+        // candidate: the plan executed correctly, it just synchronizes inside the timed
+        // region and so cannot be measured with the stream stalled. Dropping it would cache
+        // a slower kernel, and keeping the earlier device-only scores would rank two
+        // incomparable populations, so the whole sweep is discarded and re-measured
+        // unstalled. The timeout disables stalling process-wide, so the second pass cannot
+        // arm, cannot time out, and this runs at most twice.
+        bool stalledPass = !hipdnn_data_sdk::utilities::StallGate::isStallingDisabled();
+        for(;;)
         {
-            const auto timeMs
-                = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
-            if(!timeMs.has_value())
+            ranked.clear();
+            for(size_t index = 0; index < _candidates.size(); ++index)
             {
-                // Omitted, never appended with a sentinel time: a candidate that failed to
-                // time must never be served ahead of the normal ranked path.
-                continue;
+                const auto timeMs
+                    = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
+                if(!timeMs.has_value())
+                {
+                    // Omitted, never appended with a sentinel time: a candidate that failed
+                    // to time must never be served ahead of the normal ranked path.
+                    continue;
+                }
+                ranked.emplace_back(*timeMs, index);
             }
-            ranked.emplace_back(*timeMs, index);
+
+            if(!stalledPass || !hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
+            {
+                break;
+            }
+
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: a stall watchdog timeout ended device-only timing partway through "
+                "benchmarking, so this pass mixed device-only and host-included measurements. "
+                "Discarding it and re-measuring every candidate unstalled.");
+            stalledPass = false;
         }
 
         // stable_sort, not sort: ties must resolve to the lowest candidate index. A plain

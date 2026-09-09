@@ -56,9 +56,9 @@ namespace hipdnn_data_sdk::utilities
  *
  * A watchdog release means the measurement is worthless: it contains the timeout, and
  * the host gap it was supposed to exclude. timedOut() reports it so the caller discards
- * the sample rather than averaging it. Firing also sets a process-wide sticky flag that
- * makes every later arm() a no-op, because the cause is a property of the executed code
- * and re-arming would only buy another timeout.
+ * the sample rather than averaging it. Firing also sets a sticky flag that makes every
+ * later arm() a no-op, because the cause is a property of the executed code and re-arming
+ * would only buy another timeout. See isStallingDisabled() for how far that flag reaches.
  *
  * Not thread-safe for concurrent arm/release: one gate arms one stream at a time.
  */
@@ -194,7 +194,7 @@ public:
             _timedOut = false;
         }
 
-        if(!isUsable() || isDisabledProcessWide())
+        if(!isUsable() || isStallingDisabled())
         {
             return false;
         }
@@ -263,19 +263,29 @@ public:
         return _timedOut;
     }
 
-    /// Clear the process-wide disable. For tests only, so one case that deliberately
-    /// trips the watchdog cannot change the behavior of the next one. Production code
-    /// must not re-enable stalling after a timeout: the condition that caused it is a
-    /// property of the code being measured and has not gone away.
-    static void resetDisabledProcessWideForTesting()
+    /// Clear the disable. For tests only, so one case that deliberately trips the watchdog
+    /// cannot change the behavior of the next one. Production code must not re-enable
+    /// stalling after a timeout: the condition that caused it is a property of the code
+    /// being measured and has not gone away.
+    ///
+    /// Reaches only the caller's own copy of the flag; see isStallingDisabled().
+    static void resetStallingDisabledForTesting()
     {
         disabledFlag().store(false, std::memory_order_relaxed);
     }
 
-    /// True once any gate in this process has timed out. Stalling stays off afterwards:
-    /// the cause is a property of the code being measured, so re-arming would only buy
-    /// another timeout.
-    static bool isDisabledProcessWide()
+    /// True once a gate has timed out. Stalling stays off afterwards: the cause is a
+    /// property of the code being measured, so re-arming would only buy another timeout.
+    ///
+    /// The flag is per shared object, not per process. hipDNN's libraries build with
+    /// hidden visibility, so each module that includes this header links its own copy of
+    /// disabledFlag(). A timeout inside libhipdnn_backend.so therefore does not disable
+    /// stalling inside a provider plugin, and neither can observe the other's flag. That
+    /// is bounded and safe -- each module arms its own gates and reads its own flag, so
+    /// every comparison stays internally consistent, and the cost of the split is at most
+    /// one extra timeout per module. Do not use this to reason about another module's
+    /// state, and reset it in tests from the same module that armed.
+    static bool isStallingDisabled()
     {
         return disabledFlag().load(std::memory_order_relaxed);
     }
@@ -340,8 +350,9 @@ private:
         }
     }
 
-    // Function-local rather than a static data member: one timeout anywhere in the
-    // process turns stalling off for every gate, including ones created later.
+    // Function-local rather than a static data member: one timeout turns stalling off for
+    // every later gate in this module, including ones created afterwards. Hidden
+    // visibility makes the scope per shared object; see isStallingDisabled().
     static std::atomic<bool>& disabledFlag()
     {
         static std::atomic<bool> s_disabled{false};

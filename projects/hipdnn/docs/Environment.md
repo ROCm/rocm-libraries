@@ -686,11 +686,18 @@ hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
 /* Discard the sample when this is true; do not average it. */
 ```
 
-A timeout also logs a warning and disables stalling for the rest of the process, because the cause
+A timeout also logs a warning and disables stalling for the rest of the run, because the cause
 is a property of the code being measured and re-arming would only produce another timeout. Later
-measurements then run unstalled and include host submission overhead. `Graph::autotune()` handles
-this itself: it discards the timed-out sample and re-measures the plan unstalled, so an engine is
-never rejected merely because the timer could not measure it.
+measurements then run unstalled and include host submission overhead. The disable is scoped to
+the hipDNN component that armed the gate, not to the whole process: hipDNN builds with hidden
+visibility, so the backend and a provider plugin each keep their own flag and neither can see
+the other's.
+
+Both benchmarking paths keep a comparison self-consistent rather than dropping the engine.
+`Graph::autotune()` and the kernel ingestor's benchmark mode discard the whole sweep that mixed
+the two measurement methods and re-measure every candidate unstalled, so no engine is rejected
+because the timer could not measure it, and no ranking compares a device-only time against a
+host-included one. The cost is one extra sweep, once.
 
 ### Frontend convenience: `Graph.execute_timed_ext()`
 
@@ -746,7 +753,7 @@ else:
   - `DEVICE_ONLY` -- the stall gate armed for this call; `elapsed_ms`/`elapsedMs` is device time
     with the host submission gap removed.
   - `HOST_INCLUDED` -- arming was declined (an unsupported device, or stalling already disabled
-    process-wide after an earlier watchdog timeout); execution still ran and still timed, but
+    after an earlier watchdog timeout); execution still ran and still timed, but
     the reported span includes host submission overhead exactly like a plain HIP-event bracket.
   - `INVALID` -- either the watchdog released this call's stall (execution completed, but the
     span includes the timeout and must be discarded), or the value is a default/never-measured

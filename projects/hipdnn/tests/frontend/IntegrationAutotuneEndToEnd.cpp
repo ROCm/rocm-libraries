@@ -5,13 +5,19 @@
 // Uses the test_autotune_plugin which supports the autotune knob workflow.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <optional>
+#include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
 
@@ -155,6 +161,168 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     assertAnySucceeded(results);
+}
+
+// Regression test for the mixed-timing-mode recovery in Graph::autotune()
+// (Graph.hpp, the sweepStalled / sawDeviceOnly / sawHostIncluded loop). The
+// test_autotune_plugin's AutotunePluginEngineHostSyncs engine calls
+// hipStreamSynchronize on the plugin's own stream from inside executeOpGraph,
+// so once the autotune stall gate has armed that stream for the timed
+// measurement, the engine deadlocks itself and only the stall watchdog can
+// release it. That is the exact scenario the recovery exists for: engines
+// benchmarked before the timeout are DEVICE_ONLY, engines benchmarked after
+// it (including the retried host-syncing one) are HOST_INCLUDED, and ranking
+// the two populations against each other could hand the win to a slower
+// engine.
+//
+// Before the recovery existed, this failed: the first sweep pass was kept
+// as-is, so the earlier engines' DEVICE_ONLY times were ranked directly
+// against the host-syncing engine's HOST_INCLUDED time instead of the whole
+// pass being discarded and re-measured unstalled.
+class IntegrationAutotuneStallRecovery : public hipdnn_tests::AutotuneIntegrationFixture
+{
+protected:
+    // Mirrors TestProfilingControlDescriptor's stallGateAvailable(): a device
+    // without hipStreamWaitValue32 support never arms, so the mixed-mode path
+    // this test targets cannot occur and the smoke value stays outside its scope.
+    static bool stallGateAvailable()
+    {
+        const hipdnn_data_sdk::utilities::StallGate gate;
+        return gate.isUsable();
+    }
+
+    // libhipdnn_backend.so (the ProfilingControlDescriptor / StallGate that actually
+    // arms and watches the stream) builds with CXX_VISIBILITY_PRESET hidden, so its
+    // copy of StallGate's process-wide latch is private to that shared object:
+    // resetStallingDisabledForTesting() called from this executable cannot reach
+    // it, and once one run trips the watchdog it stays sticky for every later test
+    // in this binary -- exactly the "no reset" problem
+    // test_hip_event_bindings.py's HipStallGate child-process test documents for the
+    // same class. Isolating each strategy in a freshly exec'd child, instead of a
+    // fork, guarantees a never-armed gate for that strategy regardless of test order,
+    // and keeps this test's self-inflicted trip from silently disabling stalling for
+    // every later test in this binary. The child is this same test, selected by exact
+    // name, so its own EXPECT/ASSERT failures are the ones that fail the parent.
+    void runIsolated(const char* testId, AutotuneStrategy strategy)
+    {
+        if(std::getenv("HIPDNN_STALL_RECOVERY_CHILD") == nullptr)
+        {
+            if(!stallGateAvailable())
+            {
+                GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+            }
+
+            std::string selfPath(4096, '\0');
+            const ssize_t n = readlink("/proc/self/exe", selfPath.data(), selfPath.size() - 1);
+            ASSERT_GT(n, 0) << "could not resolve this test binary's own path via "
+                               "/proc/self/exe";
+            selfPath.resize(static_cast<size_t>(n));
+
+            const std::string command
+                = "HIPDNN_STALL_RECOVERY_CHILD=1 \"" + selfPath + "\" --gtest_filter=" + testId;
+            const int rc = std::system(command.c_str());
+            ASSERT_EQ(rc, 0) << "isolated child run of " << testId
+                             << " failed (see its gtest output above)";
+            return;
+        }
+
+        runMixedTimingModeRecovery(strategy);
+    }
+
+    void runMixedTimingModeRecovery(AutotuneStrategy strategy)
+    {
+        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
+        if(!stallGateAvailable())
+        {
+            GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+        }
+
+        ConvGraphBundle bundle;
+        createBuiltConvGraph("autotune_stall_recovery_conv", bundle);
+
+        auto result = bundle.graph->add_all_engines();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t maxWs = 0;
+        result = bundle.graph->get_estimated_max_workspace_size(maxWs);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const Workspace workspace(static_cast<size_t>(maxWs));
+
+        AutotuneConfig config;
+        config.mode = TuneMode::STANDARD;
+        config.strategy = strategy;
+        config.warmupIterations = 1;
+        config.windowSize = 3;
+        config.maxIterations = 5;
+        config.timedIterations = 3;
+
+        std::vector<AutotuneResult> results;
+        const auto start = std::chrono::steady_clock::now();
+        result = bundle.graph->autotune(
+            _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        // Proves this run genuinely deadlocked and was released by the watchdog,
+        // rather than passing because nothing was ever stalled: the host-syncing
+        // engine can only complete once StallGate::DEFAULT_TIMEOUT (2 s) elapses and
+        // the watchdog writes the release signal itself. A run that took the normal
+        // sub-second path for this tiny graph never hit that wait.
+        constexpr auto MIN_EXPECTED_STALL = std::chrono::milliseconds(1500);
+        EXPECT_GE(elapsed, MIN_EXPECTED_STALL)
+            << "run finished in "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+            << " ms; the stall watchdog's ~2s timeout was never waited out, so this "
+               "run did not exercise the mixed-timing-mode recovery";
+
+        // Every succeeded engine must carry the SAME timing quality: a discarded,
+        // re-measured sweep is uniformly HOST_INCLUDED, never a mix of
+        // DEVICE_ONLY and HOST_INCLUDED results.
+        std::optional<TimingQuality> commonQuality;
+        bool checkedAnySucceeded = false;
+        for(const auto& r : results)
+        {
+            if(!r.succeeded)
+            {
+                continue;
+            }
+            checkedAnySucceeded = true;
+            if(!commonQuality.has_value())
+            {
+                commonQuality = r.timingQuality;
+            }
+            EXPECT_EQ(r.timingQuality, *commonQuality)
+                << "engine " << r.engineName
+                << " was ranked with a timing quality that differs from the rest of "
+                   "the pass -- the mixed sweep was not discarded";
+        }
+        ASSERT_TRUE(checkedAnySucceeded) << "No engine succeeded during autotune";
+        ASSERT_TRUE(commonQuality.has_value());
+        EXPECT_EQ(*commonQuality, TimingQuality::HOST_INCLUDED)
+            << "results were not re-measured unstalled after the mixed pass";
+
+        // The winner must come from that same uniformly-measured, re-run pass.
+        const auto winner
+            = std::find_if(results.begin(), results.end(), [](const AutotuneResult& r) {
+                  return r.succeeded && r.rank == 0;
+              });
+        ASSERT_NE(winner, results.end()) << "No winner selected";
+        EXPECT_EQ(winner->timingQuality, TimingQuality::HOST_INCLUDED)
+            << "winner was not one of the uniformly-measured results";
+    }
+};
+
+TEST_F(IntegrationAutotuneStallRecovery, FixedAverageDiscardsMixedTimingSweep)
+{
+    runIsolated("IntegrationAutotuneStallRecovery.FixedAverageDiscardsMixedTimingSweep",
+                AutotuneStrategy::FIXED_AVERAGE);
+}
+
+TEST_F(IntegrationAutotuneStallRecovery, RunUntilStableDiscardsMixedTimingSweep)
+{
+    runIsolated("IntegrationAutotuneStallRecovery.RunUntilStableDiscardsMixedTimingSweep",
+                AutotuneStrategy::RUN_UNTIL_STABLE);
 }
 
 } // namespace

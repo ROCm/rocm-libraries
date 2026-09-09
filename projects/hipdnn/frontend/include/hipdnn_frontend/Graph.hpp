@@ -1904,26 +1904,32 @@ private:
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
 
+                // One lambda for both strategies, so the measurement mode is recorded in
+                // exactly one place. candidateQuality is this engine's mode; the sweep-level
+                // flags decide whether the whole pass has to be discarded.
+                auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
+                auto timeOnce = [&](float& elapsed) -> Error {
+                    auto quality = ::hipdnn_frontend::TimingQuality::INVALID;
+                    auto timeErr = autotune::detail::benchmarkOnce(handle,
+                                                                   *plan.executionPlanDesc,
+                                                                   variantPackDesc,
+                                                                   elapsed,
+                                                                   quality,
+                                                                   sweepStalled);
+                    candidateQuality = quality;
+                    if(quality == ::hipdnn_frontend::TimingQuality::DEVICE_ONLY)
+                    {
+                        sawDeviceOnly = true;
+                    }
+                    else if(quality == ::hipdnn_frontend::TimingQuality::HOST_INCLUDED)
+                    {
+                        sawHostIncluded = true;
+                    }
+                    return timeErr;
+                };
+
                 if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
                 {
-                    auto timeOnce = [&](float& elapsed) -> Error {
-                        auto quality = ::hipdnn_frontend::TimingQuality::INVALID;
-                        auto timeErr = autotune::detail::benchmarkOnce(handle,
-                                                                       *plan.executionPlanDesc,
-                                                                       variantPackDesc,
-                                                                       elapsed,
-                                                                       quality,
-                                                                       sweepStalled);
-                        if(quality == ::hipdnn_frontend::TimingQuality::DEVICE_ONLY)
-                        {
-                            sawDeviceOnly = true;
-                        }
-                        else if(quality == ::hipdnn_frontend::TimingQuality::HOST_INCLUDED)
-                        {
-                            sawHostIncluded = true;
-                        }
-                        return timeErr;
-                    };
                     auto onIteration = [&](int t, float elapsed) {
                         HIPDNN_FE_LOG_INFO("autotune: engine "
                                            << result.engineName << ": iter " << (t + 1) << "/"
@@ -1943,24 +1949,6 @@ private:
                 }
                 else // RUN_UNTIL_STABLE
                 {
-                    auto timeOnce = [&](float& elapsed) -> Error {
-                        auto quality = ::hipdnn_frontend::TimingQuality::INVALID;
-                        auto timeErr = autotune::detail::benchmarkOnce(handle,
-                                                                       *plan.executionPlanDesc,
-                                                                       variantPackDesc,
-                                                                       elapsed,
-                                                                       quality,
-                                                                       sweepStalled);
-                        if(quality == ::hipdnn_frontend::TimingQuality::DEVICE_ONLY)
-                        {
-                            sawDeviceOnly = true;
-                        }
-                        else if(quality == ::hipdnn_frontend::TimingQuality::HOST_INCLUDED)
-                        {
-                            sawHostIncluded = true;
-                        }
-                        return timeErr;
-                    };
                     auto onIteration = [&](int t, float elapsed, float cov, bool covValid) {
                         const std::string covStr = covValid ? std::to_string(cov) : "N/A";
                         HIPDNN_FE_LOG_INFO("autotune: engine "
@@ -1995,6 +1983,7 @@ private:
 
                 // --- Compute statistics ---
                 result.succeeded = true;
+                result.timingQuality = candidateQuality;
                 result.compiledPlanIndex = static_cast<int>(info.planIndex);
                 result.minTimeMs = *std::min_element(timings.begin(), timings.end());
                 result.avgTimeMs = hipdnn_data_sdk::utilities::detail::mean(timings);

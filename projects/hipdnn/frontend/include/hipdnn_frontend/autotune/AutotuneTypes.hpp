@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <cstddef>
@@ -227,6 +228,13 @@ struct AutotuneResult
     float robustTimeMs = 0.0f;
 
     int iterationsRun = 0; ///< Actual number of timed iterations executed
+
+    /// How the times above were measured. DEVICE_ONLY excludes host submission overhead;
+    /// HOST_INCLUDED does not. Every benchmarked result in one autotune() call carries the
+    /// same value, because times measured the two ways are not comparable and ranking them
+    /// against each other can pick a slower engine. INVALID on a result that was never
+    /// benchmarked.
+    TimingQuality timingQuality = TimingQuality::INVALID;
 
     /// For RUN_UNTIL_STABLE, true when the trailing-window variation fell below
     /// stabilityThreshold before maxIterations was reached. For FIXED_AVERAGE, true when

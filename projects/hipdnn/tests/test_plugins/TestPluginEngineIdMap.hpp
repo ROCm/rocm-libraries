@@ -65,6 +65,10 @@ HIPDNN_MAP_TO_ID(AutotunePluginEngineC, -20);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineFails, -21);
 HIPDNN_MAP_TO_ID(AutotunePluginEnginePrimingOnlyFails, -22);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);
+// Enqueues the same timing work as the other engines, then synchronizes the
+// plugin's own stream from inside executeOpGraph. Reproduces a plugin that
+// blocks the host on the stalled stream during a timed autotune sweep.
+HIPDNN_MAP_TO_ID(AutotunePluginEngineHostSyncs, -30);
 
 // Hashed-name fake: its engine id is the FNV-1a-64 hash of "TEST_HASHED_NAME_ENGINE",
 // precomputed for the same reason as the ids above.

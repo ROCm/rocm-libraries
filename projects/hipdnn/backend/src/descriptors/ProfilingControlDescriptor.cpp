@@ -101,7 +101,7 @@ void ProfilingControlDescriptor::finalize()
             "ProfilingControlDescriptor: stall watchdog fired; the timed region blocked the "
             "host on its own stream. Elapsed time {} ms is invalid and must be discarded "
             "(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT). Stalling is now disabled for this "
-            "process, so later measurements include host submission overhead.",
+            "component, so later measurements include host submission overhead.",
             _elapsedMs);
     }
 

@@ -185,7 +185,7 @@ protected:
         TestProfilingControlDescriptor::SetUp();
         // One case deliberately trips the watchdog, which disables stalling for the
         // whole process. Clear it per test so results cannot depend on test order.
-        hipdnn_data_sdk::utilities::StallGate::resetDisabledProcessWideForTesting();
+        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         ASSERT_EQ(hipStreamCreate(&_testStream), hipSuccess);
         _mockHandle = std::make_unique<NiceMock<MockHandle>>();
         ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(_testStream));
@@ -201,7 +201,7 @@ protected:
         }
         // Mirrors the SetUp() reset: a test that deliberately trips the watchdog must not
         // leave stalling disabled for whatever runs next in this binary.
-        hipdnn_data_sdk::utilities::StallGate::resetDisabledProcessWideForTesting();
+        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         TestProfilingControlDescriptor::TearDown();
     }
 
@@ -450,7 +450,7 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     // later arm must decline rather than deadlock again. The decline must still clear the
     // timeout: timedOut() describes the most recent arm attempt, and a reused gate that
     // keeps reporting the old timeout makes every later sample look untimeable.
-    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
     EXPECT_FALSE(gate.arm(_testStream));
     EXPECT_FALSE(gate.timedOut()) << "a declined arm still reports the earlier timeout";
 }
@@ -471,7 +471,7 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
     ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
 
     EXPECT_FALSE(gate.timedOut());
-    EXPECT_FALSE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+    EXPECT_FALSE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 }
 
 // A watchdog release must be visible through the public descriptor, so an external
@@ -680,7 +680,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
 // the process disables stalling process-wide, so a later arm() attempt must also read as
 // unused. The fixture's TearDown() resets the flag this trips, so this test cannot poison
 // later suites in the same binary.
-TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenDisabledProcessWide)
+TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
 {
     if(!stallGateAvailable())
     {
@@ -697,7 +697,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenDisabledProcessWide)
         EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
         EXPECT_TRUE(gate.timedOut());
     }
-    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
