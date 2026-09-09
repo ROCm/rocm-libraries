@@ -64,11 +64,13 @@ def _gpu_ready():
     if not torch.cuda.is_available():
         return False
     name = torch.cuda.get_device_name(0).lower()
+    # Substring match against the runtime device name; kept lowercase and generic
+    # so it accepts every gfx942 part this cohort can run on.
     return "mi300" in name or "gfx942" in name
 
 
 requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 (MI300X) GPU with ROCm torch"
+    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
 )
 
 
@@ -178,7 +180,7 @@ def test_fold_numeric_vs_fp32_windowed_oracle(sq, hq, hk, window, bs):
     # not change the MFMA accumulation order or the fp32 accumulator, so it must
     # not need more headroom than the unfolded kernel.
     #
-    # Measured on MI300A (gfx942, ROCm 7.13, kreb): max_abs = 0.01562 on ALL four
+    # Measured on gfx942 (ROCm 7.13): max_abs = 0.01562 on ALL four
     # cases -- 2.6x inside this gate. That value is exactly 2^-6, i.e. one bf16
     # ulp for outputs in [2, 4), so the residual is the bf16 rounding of the
     # stored output, not accumulation drift. There is no mechanism here that

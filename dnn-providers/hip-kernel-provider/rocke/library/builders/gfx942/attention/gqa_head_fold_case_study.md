@@ -5,8 +5,9 @@ sliding window, paged KV, `block_size <= 32`. Production builder
 `build_gfx942_4warp_gqa` (`kernels/gfx942/attention_tiled_2d.py`), non-lean D128 branch.
 
 **Result.** KV is read once per KV head instead of once per query head.
-**+5.2% to +21.3% wall clock on MI308X across 12 measured points, no regression**,
-and the kernel is numerically **exact** against the unfolded one.
+**No regression across 24 measured points on two gfx942 parts**; ~4-5% at the
+long sequence lengths that dominate prefill, more at short ones (full table in
+§4). The kernel is numerically **exact** against the unfolded one.
 
 Reproduce: `python prefill/gqa_head_fold_bench.py`
 Algorithm write-up: `ALGORITHM.md` §6.4.
@@ -27,9 +28,8 @@ bytes cross the memory interface up to 4 times, with reuse only by luck of L2
 residency.
 
 This was not the first hypothesis. An earlier counter sweep on this same kernel
-found every compute and occupancy counter at parity with the AITER reference, with
-a single outlier: L2 misses. That is what redirected the work from scheduling to
-traffic. (Prior campaign, recorded in the team vault under
+found every compute and occupancy counter unremarkable, with a single outlier:
+L2 misses. That is what redirected the work from scheduling to traffic. (Prior campaign, recorded in the team vault under
 `SDPA/gfx942-gqa-fold-hbm-win`; the numbers below are re-measured here for the
 kernel this document describes.)
 
@@ -59,7 +59,7 @@ The 4× cut in `grid.x` is repaid by the 4× rise in `grid.y`.
 
 ## 3. The mechanism, measured
 
-MI308X (gfx942, ROCm 7.13), sq=8192, bs=16, 7 launches per arm, `rocprofv3 --pmc
+Discrete gfx942 GPU, ROCm 7.13, sq=8192, bs=16, 7 launches per arm, `rocprofv3 --pmc
 TCC_MISS_sum TCC_HIT_sum`. Both arms are the same builder; the fold-off arm forces
 `gfx942_gqa_fold_eligible` false.
 
@@ -79,7 +79,7 @@ Q/O traffic is unchanged by the fold.
 ## 4. Wall clock
 
 `prefill/gqa_head_fold_bench.py`, bf16 D128 GQA 32/8, `sliding_window=4096`,
-warmup 5 / 20 attempts, MI308X (gfx942, ROCm 7.13):
+warmup 5 / 20 attempts, discrete gfx942 GPU, ROCm 7.13:
 
 | sq | bs | nofold ms | fold ms | speedup |
 |---:|---:|---:|---:|---:|
@@ -100,11 +100,12 @@ warmup 5 / 20 attempts, MI308X (gfx942, ROCm 7.13):
 at ~5% from 4096 upward. Both block sizes benefit; `bs=16` is the busier gather
 (`BPT = BN // BS = 2` block-table entries per 32-key tile vs 1 at `bs=32`).
 
-**Device sensitivity is real and worth recording.** The same sweep on an MI300A
-(APU, unified memory) gives **+0.6% to +13.1%**, settling at ~4.0-4.2% for long
-sequences instead of ~5.3%. A traffic optimisation depends on the memory system it
-is relieving, so quote the device with the number. Two independent MI300A runs
-agreed to within 0.1 points, so the difference is the machine, not noise.
+**Part sensitivity is real and worth recording.** The same sweep on a gfx942 APU
+part gives **+0.6% to +13.1%**, settling at ~4.0-4.2% for long sequences instead
+of ~5.3%. A traffic optimisation depends on the memory system it is relieving, so
+quote the part with the number, and lead with the sustained long-sequence figure
+rather than the short-sequence peak. Two independent runs on the APU part agreed
+to within 0.1 points, so the difference is the part, not noise.
 
 ## 5. Correctness
 

@@ -370,13 +370,24 @@ All five predicate inputs are already components of `_tiled_cache_key`, so the
 cache key stays faithful without carrying a separate fold flag.
 
 **Measured.** `gqa_head_fold_bench.py` in `prefill/` A/Bs the fold against the
-same kernel with the predicate forced false. On MI308X (gfx942, ROCm 7.13), bf16
-D128 GQA 32/8, `sliding_window = 4096`, block sizes 16 and 32, seqlens 512-16384:
-**+5.2% to +21.3%, no regression at any of the 12 points**; the gain is largest at
-short sequence lengths and settles at ~5% for 8192-16384. Numerically the fold is
-**exact** — at seqlen 16384 the folded and unfolded kernels agree to `max_abs = 0`,
-as they must, since the fold only repacks rows. The case study
-(`gqa_head_fold_case_study.md`) records the full table and the dead ends.
+same kernel with the predicate forced false — same builder, so the baseline arm is
+the exact pre-fold kernel. bf16 D128 GQA 32/8, `sliding_window = 4096`, block sizes
+16 and 32, seqlens 512-16384, ROCm 7.13, two different gfx942 parts:
+
+| part | range over 12 points | at seqlen >= 4096 |
+|---|---|---|
+| discrete gfx942 GPU | +5.2% to +21.3% | ~5.3% |
+| gfx942 APU | +0.6% to +13.1% | ~4.0-4.2% |
+
+**No regression at any point on either part.** Quote the part with the number: the
+fold removes memory traffic, so how much wall clock that buys depends on the memory
+system being relieved. The headline to carry is the sustained figure — **~4-5% at
+the long sequence lengths that dominate prefill** — not the short-sequence peak.
+
+Numerically the fold is **exact** — at seqlen 16384 the folded and unfolded kernels
+agree to `max_abs = 0`, as they must, since the fold only repacks rows. The case
+study (`gqa_head_fold_case_study.md`) records the full per-part table, the traffic
+counters, and the dead ends.
 
 ---
 
