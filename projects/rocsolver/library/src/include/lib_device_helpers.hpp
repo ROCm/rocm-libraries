@@ -1678,7 +1678,6 @@ __host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
     vj = vi + r * kd; // col within V array
 }
 
-
 //------------------------------------------------------------------------------
 /** BISEARCH implements a binary search to find the position of 'val' in a sorted array 'X'.
     If STRICT = true, it returns the number of elements in 'X' that are strictly smaller than 'val'
@@ -1780,6 +1779,5 @@ __device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool is_str
         }
     }
 }
-
 
 ROCSOLVER_END_NAMESPACE

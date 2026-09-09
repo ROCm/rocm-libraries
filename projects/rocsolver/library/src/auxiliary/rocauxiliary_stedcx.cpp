@@ -78,10 +78,11 @@ try
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
-    size_t size_tmpT, size_work_stack, size_tempvect, size_tempgemm, size_tmpz, size_workArr, size_splits;
-    rocsolver_stedcx_getMemorySize<false, T, S>(evect, n, batch_count, &size_tmpT, 
-                                                &size_work_stack, &size_tempvect, &size_tempgemm,
-                                                &size_tmpz, &size_splits, &size_workArr);
+    size_t size_tmpT, size_work_stack, size_tempvect, size_tempgemm, size_tmpz, size_workArr,
+        size_splits;
+    rocsolver_stedcx_getMemorySize<false, T, S>(evect, n, batch_count, &size_tmpT, &size_work_stack,
+                                                &size_tempvect, &size_tempgemm, &size_tmpz,
+                                                &size_splits, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_tmpT, size_work_stack,
@@ -90,8 +91,8 @@ try
 
     // memory workspace allocation
     void *tmpT, *work_stack, *tempvect, *tempgemm, *tmpz, *splits, *workArr;
-    rocblas_device_malloc mem(handle, size_tmpT, size_work_stack, size_tempvect,
-                              size_tempgemm, size_tmpz, size_splits, size_workArr);
+    rocblas_device_malloc mem(handle, size_tmpT, size_work_stack, size_tempvect, size_tempgemm,
+                              size_tmpz, size_splits, size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 

@@ -83,24 +83,25 @@ try
     // size of reusable workspaces (for calling SYTRD/HETRD, STEBZ, STEIN, and ORMTR/UNMTR)
     size_t size_work1, size_work2, size_work3, size_work4, size_work5, size_work6_ifail;
     // size for temporary arrays
-    size_t size_tmpT, size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev, size_nsplit_workArr;
+    size_t size_tmpT, size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev,
+        size_nsplit_workArr;
 
     rocsolver_syevdx_heevdx_inplace_getMemorySize<false, T, S>(
-        evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock,
+        evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2,
+        &size_work3, &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock,
         &size_isplit_map, &size_tau, &size_nev, &size_nsplit_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4, size_work5,
-            size_work6_ifail, size_D, size_E, size_iblock, size_isplit_map, size_tau, size_nev,
-            size_nsplit_workArr);
+            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
+            size_work5, size_work6_ifail, size_D, size_E, size_iblock, size_isplit_map, size_tau,
+            size_nev, size_nsplit_workArr);
 
     // memory workspace allocation
     void *scalars, *tmpT, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock,
         *isplit_map, *tau, *d_nev, *nsplit_workArr;
-    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
-                              size_work5, size_work6_ifail, size_D, size_E, size_iblock,
+    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3,
+                              size_work4, size_work5, size_work6_ifail, size_D, size_E, size_iblock,
                               size_isplit_map, size_tau, size_nev, size_nsplit_workArr);
 
     if(!mem)

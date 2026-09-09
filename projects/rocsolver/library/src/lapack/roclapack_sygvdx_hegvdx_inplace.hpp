@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -279,8 +279,8 @@ rocblas_status rocsolver_sygvdx_hegvdx_inplace_template(rocblas_handle handle,
 
     rocsolver_syevdx_heevdx_inplace_template<BATCHED, STRIDED, T>(
         handle, evect, erange, uplo, n, A, shiftA, lda, strideA, vl, vu, il, iu, abstol,
-        (rocblas_int*)nullptr, W, strideW, iinfo, batch_count, scalars, tmpT, work1, work2, work3, work4,
-        work5, work6_ifail, D, E, iblock, isplit, tau, d_nev, (T**)work7_workArr);
+        (rocblas_int*)nullptr, W, strideW, iinfo, batch_count, scalars, tmpT, work1, work2, work3,
+        work4, work5, work6_ifail, D, E, iblock, isplit, tau, d_nev, (T**)work7_workArr);
 
     // combine info from POTRF with info from SYEVDX/HEEVDX
     ROCSOLVER_LAUNCH_KERNEL(sygvx_update_info, gridReset, threads, 0, stream, info, iinfo, d_nev, n,

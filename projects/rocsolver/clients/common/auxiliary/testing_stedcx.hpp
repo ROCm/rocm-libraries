@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -155,7 +155,7 @@ void stedcx_initData(const rocblas_handle handle,
             if(i == n / 7 || i == n / 5 || i == n / 3)
                 hD[0][i] *= -1;
         }
-        
+
         // initialize C to the identity matrix
         if(evect == rocblas_evect_original)
         {

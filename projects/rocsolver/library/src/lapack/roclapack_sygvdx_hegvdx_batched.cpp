@@ -92,21 +92,21 @@ try
     // size of temporary info array
     size_t size_iinfo;
     rocsolver_sygvdx_hegvdx_getMemorySize<true, false, T, S>(
-        itype, evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock, &size_isplit,
-        &size_tau, &size_work7_workArr, &size_iinfo, &optim_mem);
+        itype, evect, uplo, n, batch_count, &size_scalars, &size_tmpT, &size_work1, &size_work2,
+        &size_work3, &size_work4, &size_work5, &size_work6_ifail, &size_D, &size_E, &size_iblock,
+        &size_isplit, &size_tau, &size_work7_workArr, &size_iinfo, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
-            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4, size_work5,
-            size_work6_ifail, size_D, size_E, size_iblock, size_isplit, size_tau,
+            handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
+            size_work5, size_work6_ifail, size_D, size_E, size_iblock, size_isplit, size_tau,
             size_work7_workArr, size_iinfo);
 
     // memory workspace allocation
-    void *scalars, *tmpT, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock, *isplit,
-        *tau, *work7_workArr, *iinfo;
-    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3, size_work4,
-                              size_work5, size_work6_ifail, size_D, size_E, size_iblock,
+    void *scalars, *tmpT, *work1, *work2, *work3, *work4, *work5, *work6_ifail, *D, *E, *iblock,
+        *isplit, *tau, *work7_workArr, *iinfo;
+    rocblas_device_malloc mem(handle, size_scalars, size_tmpT, size_work1, size_work2, size_work3,
+                              size_work4, size_work5, size_work6_ifail, size_D, size_E, size_iblock,
                               size_isplit, size_tau, size_work7_workArr, size_iinfo);
 
     if(!mem)
@@ -133,9 +133,10 @@ try
     // execution
     return rocsolver_sygvdx_hegvdx_template<true, false, T>(
         handle, itype, evect, erange, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, vl,
-        vu, il, iu, nev, W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, (T*)tmpT, work1,
-        work2, work3, work4, work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock,
-        (rocblas_int*)isplit, (T*)tau, work7_workArr, (rocblas_int*)iinfo, optim_mem);
+        vu, il, iu, nev, W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, (T*)scalars,
+        (T*)tmpT, work1, work2, work3, work4, work5, (rocblas_int*)work6_ifail, (S*)D, (S*)E,
+        (rocblas_int*)iblock, (rocblas_int*)isplit, (T*)tau, work7_workArr, (rocblas_int*)iinfo,
+        optim_mem);
 }
 catch(...)
 {

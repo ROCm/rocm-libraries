@@ -1,5 +1,5 @@
 /************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -171,9 +171,9 @@ void rocsolver_syevdx_heevdx_getMemorySize(const rocblas_evect evect,
     else
     {
         // extra requirements for computing eigenvalues and vectors (stedcx)
-        rocsolver_stedcx_getMemorySize<BATCHED, T, S>(evect, n, batch_count,
-                                                      size_tmpT, &b3, &c3, size_work4, size_work5,
-                                                      size_work6_ifail, &unused);
+        rocsolver_stedcx_getMemorySize<BATCHED, T, S>(evect, n, batch_count, size_tmpT, &b3, &c3,
+                                                      size_work4, size_work5, size_work6_ifail,
+                                                      &unused);
     }
 
     // get max values
@@ -294,17 +294,17 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
         // **** Use D&C approach ****
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
-            handle, evect, erange, n, vl, vu, il, iu, D, stride, E, stride, nev,
-            W, strideW, Z, shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work2, (S*)work3,
-            (S*)work4, (S*)work5, work6_ifail, (S**)nsplit_workArr);
+            handle, evect, erange, n, vl, vu, il, iu, D, stride, E, stride, nev, W, strideW, Z,
+            shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work2, (S*)work3, (S*)work4,
+            (S*)work5, work6_ifail, (S**)nsplit_workArr);
 
         if(evect == rocblas_evect_original)
         {
             rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
             rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(
                 handle, rocblas_side_left, uplo, rocblas_operation_none, n, h_nev, A, shiftA, lda,
-                strideA, tau, n, Z, shiftZ, ldz, strideZ, batch_count, scalars, (T*)work1, (T*)work2,
-                (T*)work3, (T**)nsplit_workArr);
+                strideA, tau, n, Z, shiftZ, ldz, strideZ, batch_count, scalars, (T*)work1,
+                (T*)work2, (T*)work3, (T**)nsplit_workArr);
         }
     }
 

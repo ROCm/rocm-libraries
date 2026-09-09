@@ -1,5 +1,5 @@
 /************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,14 +29,13 @@
 
 #include "asan_helpers.hpp"
 #include "auxiliary/rocauxiliary_stebz.hpp"
-#include "auxiliary/rocauxiliary_stein.hpp"
 #include "auxiliary/rocauxiliary_stedc.hpp"
+#include "auxiliary/rocauxiliary_stein.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
 ROCSOLVER_BEGIN_NAMESPACE
-
 
 /*************** Main kernels *********************************************************/
 /**************************************************************************************/
@@ -76,25 +75,25 @@ ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
 /** STEDCX_SELECT_KERNEL selects the results of the partial decomposition **/
 template <typename T, typename S, typename U>
 ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
-                                               const rocblas_erange range,
-                                               const rocblas_int n,
-                                               const S vl,
-                                               const S vu,
-                                               const rocblas_int il,
-                                               const rocblas_int iu,
-                                               S* DD,
-                                               const rocblas_stride strideD,
-                                               rocblas_int* nevA,
-                                               S* WW,
-                                               const rocblas_stride strideW,
-                                               U CC,
-                                               const rocblas_int shiftC,
-                                               const rocblas_int ldc,
-                                               const rocblas_stride strideC,
-                                               T* VV,
-                                               const rocblas_int ldv,
-                                               const rocblas_stride strideV,
-                                               const rocblas_int batch_count)
+                                           const rocblas_erange range,
+                                           const rocblas_int n,
+                                           const S vl,
+                                           const S vu,
+                                           const rocblas_int il,
+                                           const rocblas_int iu,
+                                           S* DD,
+                                           const rocblas_stride strideD,
+                                           rocblas_int* nevA,
+                                           S* WW,
+                                           const rocblas_stride strideW,
+                                           U CC,
+                                           const rocblas_int shiftC,
+                                           const rocblas_int ldc,
+                                           const rocblas_stride strideC,
+                                           T* VV,
+                                           const rocblas_int ldv,
+                                           const rocblas_stride strideV,
+                                           const rocblas_int batch_count)
 {
     const int tidx = hipThreadIdx_x;
     const int tidy = hipThreadIdx_y;
@@ -109,7 +108,7 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
     const int mycol = bidy * bdimy + tidy;
     const int step_row = bdimx * gdimx;
     const int step_col = bdimy * gdimy;
-    
+
     // batch instance
     S* D = DD + bid * strideD;
     S* W = WW + bid * strideW;
@@ -146,14 +145,13 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
         {
             for(auto i = myrow; i < n; i += step_row)
                 C[i + (j - in) * ldc] = V[i + j * ldv];
-        }       
-    }  
-        
+        }
+    }
+
     // final number of selected values
     if(myrow == 0 && mycol == 0)
         *nev = out - in;
 }
-
 
 /******************* Host functions ********************************************/
 /*******************************************************************************/
@@ -182,10 +180,11 @@ void rocsolver_stedcx_getMemorySize(const rocblas_evect evect,
     *size_workArr = 0;
     if(n <= 1 || !batch_count)
         return;
-    
-    // requirements for D&C solver 
-    rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count, size_work_stack,
-                    size_tempvect, size_tempgemm, size_tmpz, size_splits, size_workArr);
+
+    // requirements for D&C solver
+    rocsolver_stedc_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count,
+                                                 size_work_stack, size_tempvect, size_tempgemm,
+                                                 size_tmpz, size_splits, size_workArr);
 
     // extra requirements for partial decomposition
     *size_tmpT = sizeof(T) * (n * n) * batch_count;
@@ -274,10 +273,10 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                                          rocblas_int* splits,
                                          S** workArr)
 {
-    ROCSOLVER_ENTER("stedcx", "evect:", evect, "erange:", erange, "n:", n, "vl:", vl, "vu:", vu, "il:", il,
-                    "iu:", iu, "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
+    ROCSOLVER_ENTER("stedcx", "evect:", evect, "erange:", erange, "n:", n, "vl:", vl, "vu:", vu,
+                    "il:", il, "iu:", iu, "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
 
-    // NOTE: only case evect = N and evect = I are implemented as this routine 
+    // NOTE: only case evect = N and evect = I are implemented as this routine
     // is only for internal use by syevdx.
 
     // quick return
@@ -311,28 +310,27 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     rocblas_int ldt = n;
     rocblas_stride strideT = n * n;
     /** TODO: Although stedc accepts batched calls (with C as an array of pointers), in practice it
-            only works for strided-batched (a simple array C). This was never caught in tests because 
+            only works for strided-batched (a simple array C). This was never caught in tests because
             syevd always calls stedc as strided-batched. For this reason, we cannot call stedc using C
             directly; we need to pass a temporary array tmpT. We need to decide if we want to fix this
-            in the future. **/  
+            in the future. **/
     /** TODO: at the last level of the merge tree, we could skip computations of
             eigen values and vectors that are out of the desired range. Whether this could be
             exploited somehow to improve performance must be explored in the future. The new stedc
             code will allow to do this easily as values are always ordered during the merging process.
             Runing the stedcx_select_kernel would not be necessary.**/
     rocsolver_stedc_template<false, ISBATCHED, T>(
-        handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, 
-        tmpT, 0, ldt, strideT, info, batch_count, work_stack, tempvect, 
-        tempgemm, tmpz, splits, workArr);        
+        handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmpT, 0, ldt, strideT,
+        info, batch_count, work_stack, tempvect, tempgemm, tmpz, splits, workArr);
 
     // Discard values and vectors out of range
-    rocblas_int nblocks = ceildiv(n, BS2); 
-    ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, batch_count), dim3(BS2, BS2), 0,
-                            stream, evect, erange, n, vl, vu, il, iu, D, strideD, nev, W, strideW, 
-                            C, shiftC, ldc, strideC, tmpT, ldt, strideT, batch_count);
+    rocblas_int nblocks = ceildiv(n, BS2);
+    ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, batch_count),
+                            dim3(BS2, BS2), 0, stream, evect, erange, n, vl, vu, il, iu, D, strideD,
+                            nev, W, strideW, C, shiftC, ldc, strideC, tmpT, ldt, strideT,
+                            batch_count);
 
     return rocblas_status_success;
 }
 
 ROCSOLVER_END_NAMESPACE
-
