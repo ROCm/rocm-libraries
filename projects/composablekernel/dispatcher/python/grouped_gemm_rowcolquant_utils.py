@@ -58,6 +58,23 @@ from codegen_common import (  # noqa: E402
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
+# ABI revision of the compiled .so, folded into the artifact filename.
+#
+# setup_multiple_rowcolquant_dispatchers() reuses an existing .so when the name
+# matches, and callers that pass a persistent output_dir (the validation
+# harnesses do, precisely to get cache hits) can therefore be handed an artifact
+# built by an older revision of this module. The name used to be keyed on
+# (kernel name, arch) only, which does not describe the exported symbol set, so
+# a .so predating the dispatcher_get_tile_n()/dispatcher_get_pad_n() exports
+# would be selected and then fail at attribute-lookup time with a bare
+# "undefined symbol". Bump this whenever the exported C ABI of
+# bindings/ctypes/grouped_gemm_rowcolquant_ctypes_lib.cpp changes; the new name
+# simply cannot collide with the stale artifact, which is then ignored rather
+# than papered over with a runtime fallback.
+#   1 -> original export set
+#   2 -> added dispatcher_get_tile_n() / dispatcher_get_pad_n()
+_SO_ABI = 2
+
 
 # =============================================================================
 # RowColQuantKernelConfig — byte-exact naming with codegen
@@ -562,6 +579,12 @@ def _compile_rowcolquant_kernel(
     extra_include_dirs: Optional[List[str]] = None,
 ) -> bool:
     """Compile a generated .hpp into a .so via hipcc (compile then link)."""
+    # Normalize once, here at the boundary, so every downstream use -- the arch
+    # defines below and the --offload-arch/-DGFX_ARCH we hand to hipcc -- sees the
+    # bare target. A caller-supplied "gfx1250:xnack-" must not reach the compiler
+    # flags.
+    gfx_arch = normalize_gfx_arch(gfx_arch)
+
     ck_include = _get_ck_include_dir()
     static_lib = _get_dispatcher_static_lib()
 
@@ -572,10 +595,9 @@ def _compile_rowcolquant_kernel(
     # FP8 encoding, so an exact-gfx1250 test here would be WRONG. This is the
     # opposite of the tile selector in codegen_common.rowcol_tensor_quant_default_tile(),
     # which must be exact because gfx1200/gfx1201 have a different 8-bit warp fragment.
-    _arch_base = normalize_gfx_arch(gfx_arch)
-    if _arch_base.startswith("gfx12") or _arch_base == "gfx950":
+    if gfx_arch.startswith("gfx12") or gfx_arch == "gfx950":
         arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
-    if _arch_base == "gfx950":
+    if gfx_arch == "gfx950":
         arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
@@ -655,7 +677,10 @@ def setup_multiple_rowcolquant_dispatchers(
     if not configs:
         return []
 
-    arch = gfx_arch or _detect_gpu_arch()
+    # Normalize the explicit branch too, not just detection: an explicitly passed
+    # "gfx1250:xnack-" would otherwise flow into --offload-arch, -DGFX_ARCH and the
+    # .so cache name. _detect_gpu_arch() already normalizes.
+    arch = normalize_gfx_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix="rowcolquant_dispatcher_"))
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -680,7 +705,9 @@ def setup_multiple_rowcolquant_dispatchers(
         if hpp is None:
             return idx, None
 
-        so = so_dir / f"lib{cfg.name}_{arch}.so"
+        # Name carries the ABI revision: a pre-_SO_ABI artifact in a persistent
+        # output_dir can never be selected here (see _SO_ABI).
+        so = so_dir / f"lib{cfg.name}_{arch}_abi{_SO_ABI}.so"
         if so.exists():
             log.info("  [cached] %s", so.name)
             return idx, so
@@ -741,6 +768,10 @@ def _default_config(dtype: str, gfx_arch: str) -> RowColQuantKernelConfig:
     four pad/persistent flags) is forwarded from the shared dict; only block_size and
     k_block_per_cu are codegen-only and are left to the dataclass defaults.
     """
+    # Normalize at this boundary too: default_fp8_config()/default_bf8_config() are
+    # public entry points, so a caller-supplied "gfx1250:xnack-" must not be stored
+    # on the config and observed by later consumers.
+    gfx_arch = normalize_gfx_arch(gfx_arch)
     traits = ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS
     return RowColQuantKernelConfig(
         dtype=dtype,

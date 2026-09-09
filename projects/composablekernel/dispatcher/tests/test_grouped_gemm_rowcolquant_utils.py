@@ -376,3 +376,117 @@ class TestArchDefines:
         argv = self._compile_argv(monkeypatch, tmp_path, "gfx942:sramecc+:xnack-")
         assert "-DCK_USE_OCP_FP8" not in argv
         assert "-DCK_USE_NATIVE_MX_SUPPORT" not in argv
+
+
+# =============================================================================
+# Compiler-flag arch normalization
+# =============================================================================
+
+
+class TestArchNormalizationInCompileFlags:
+    """A suffixed target must never reach --offload-arch / -DGFX_ARCH.
+
+    normalize_gfx_arch() used to be applied only to the *detected* arch. A caller
+    passing gfx_arch="gfx1250:xnack-" therefore had the raw string forwarded into
+    the compiler flags. Normalization now happens once at the entry boundary.
+    """
+
+    def _compile_argv(self, monkeypatch, tmp_path, gfx_arch):
+        captured = []
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *a, **kw):
+            captured.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr(UTILS.subprocess, "run", fake_run)
+        ok = UTILS._compile_rowcolquant_kernel(
+            hpp_path=tmp_path / "k.hpp",
+            so_path=tmp_path / "k.so",
+            gfx_arch=gfx_arch,
+        )
+        assert ok
+        return captured[0]
+
+    def test_suffixed_arch_is_stripped_from_offload_arch(self, monkeypatch, tmp_path):
+        argv = self._compile_argv(monkeypatch, tmp_path, "gfx1250:xnack-")
+        assert "--offload-arch=gfx1250" in argv
+        assert not any("xnack" in tok for tok in argv), argv
+
+    def test_suffixed_arch_is_stripped_from_gfx_arch_define(self, monkeypatch, tmp_path):
+        argv = self._compile_argv(monkeypatch, tmp_path, "gfx942:sramecc+:xnack-")
+        assert '-DGFX_ARCH="gfx942"' in argv
+
+    def test_default_config_stores_bare_arch(self):
+        assert default_fp8_config(gfx_arch="gfx1250:xnack-").gfx_arch == "gfx1250"
+        assert default_bf8_config(gfx_arch="gfx942:sramecc+").gfx_arch == "gfx942"
+
+
+# =============================================================================
+# .so cache key encodes the ABI
+# =============================================================================
+
+
+class TestSoCacheAbiKey:
+    """A pre-ABI artifact in a persistent output_dir must not be reused.
+
+    setup_multiple_rowcolquant_dispatchers() reuses a .so when the filename
+    matches. The name used to be lib{kernel}_{arch}.so, which says nothing about
+    the exported symbol set, so a .so predating the
+    dispatcher_get_tile_n()/dispatcher_get_pad_n() exports was selected and then
+    died at attribute lookup with "undefined symbol". The name now carries
+    _SO_ABI, so the stale artifact simply cannot be selected.
+    """
+
+    def test_abi_is_versioned(self):
+        assert isinstance(UTILS._SO_ABI, int) and UTILS._SO_ABI >= 2
+
+    def test_pre_abi_artifact_is_not_reused(self, monkeypatch, tmp_path):
+        cfg = default_fp8_config(gfx_arch="gfx950")
+
+        so_dir = tmp_path / "libs"
+        so_dir.mkdir(parents=True)
+        # Exactly the name the old code would have produced and reused.
+        stale = so_dir / f"lib{cfg.name}_gfx950.so"
+        stale.write_bytes(b"stale pre-ABI artifact")
+
+        compiled = []
+
+        def fake_compile(hpp_path, so_path, gfx_arch, **kw):
+            compiled.append(so_path)
+            so_path.write_bytes(b"fresh")
+            return True
+
+        monkeypatch.setattr(UTILS, "_compile_rowcolquant_kernel", fake_compile)
+
+        out = UTILS.setup_multiple_rowcolquant_dispatchers(
+            configs=[cfg], output_dir=tmp_path, gfx_arch="gfx950", parallel=False,
+        )
+
+        assert compiled, "stale pre-ABI .so was reused instead of rebuilt"
+        assert out[0] != stale
+        assert f"_abi{UTILS._SO_ABI}.so" in out[0].name
+        assert stale.read_bytes() == b"stale pre-ABI artifact", "stale file was clobbered"
+
+    def test_second_call_hits_the_cache(self, monkeypatch, tmp_path):
+        cfg = default_fp8_config(gfx_arch="gfx950")
+        calls = []
+
+        def fake_compile(hpp_path, so_path, gfx_arch, **kw):
+            calls.append(so_path)
+            so_path.write_bytes(b"fresh")
+            return True
+
+        monkeypatch.setattr(UTILS, "_compile_rowcolquant_kernel", fake_compile)
+
+        first = UTILS.setup_multiple_rowcolquant_dispatchers(
+            configs=[cfg], output_dir=tmp_path, gfx_arch="gfx950", parallel=False)
+        second = UTILS.setup_multiple_rowcolquant_dispatchers(
+            configs=[cfg], output_dir=tmp_path, gfx_arch="gfx950", parallel=False)
+
+        assert len(calls) == 1, "second call should have hit the cache"
+        assert first[0] == second[0]

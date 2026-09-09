@@ -129,26 +129,33 @@ def _fp8_uses_ocp(arch: str) -> bool:
     return "gfx950" in arch or "gfx12" in arch
 
 
-def _fp8_ml_dtype(dtype: str):
-    """Return the ml_dtypes fp8 type matching the compiled kernel's arch."""
+def _fp8_ml_dtype(dtype: str, arch: str):
+    """Return the ml_dtypes fp8 type matching the compiled kernel's arch.
+
+    `arch` is the arch the kernel is being COMPILED for, which is not necessarily
+    the arch this host detects: main() takes --gfx. Reading the module-level
+    detected arch here would silently encode the host bytes in the other format,
+    and the kernel would decode them to NaN/Inf on device. So it is a parameter,
+    not a global.
+    """
     _require_ml_dtypes()
-    if _fp8_uses_ocp(_GFX_ARCH):
+    if _fp8_uses_ocp(arch):
         return _ml_dtypes.float8_e4m3fn if dtype == "fp8" else _ml_dtypes.float8_e5m2
     return _ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else _ml_dtypes.float8_e5m2fnuz
 
 
-def _encode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+def _encode_fp8(arr: np.ndarray, dtype: str, arch: str) -> np.ndarray:
     """Encode float32 → fp8/bf8 bytes (uint8 view). Requires ml_dtypes.
 
     The fp8 format (OCP vs FNUZ) follows the compiled kernel's arch; see _fp8_uses_ocp.
     """
-    ml_t = _fp8_ml_dtype(dtype)
+    ml_t = _fp8_ml_dtype(dtype, arch)
     return arr.astype(ml_t).view(np.uint8)
 
 
-def _decode_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+def _decode_fp8(arr: np.ndarray, dtype: str, arch: str) -> np.ndarray:
     """Decode fp8/bf8 bytes (uint8 view) → float32. Requires ml_dtypes."""
-    ml_t = _fp8_ml_dtype(dtype)
+    ml_t = _fp8_ml_dtype(dtype, arch)
     return arr.view(ml_t).astype(np.float32)
 
 
@@ -226,16 +233,22 @@ def _run_one(label: str, config, M: int, N: int, K: int,
 # Input factory
 # ---------------------------------------------------------------------------
 
-def _make_inputs(M, N, K, dtype="fp8", seed=42):
+def _make_inputs(M, N, K, dtype="fp8", seed=42, arch=None):
+    """Build host inputs. `arch` must be the arch the kernel is compiled for.
+
+    Defaults to the detected arch, which is right for the pytest cases (they
+    compile for _GFX_ARCH); main() passes its --gfx value explicitly.
+    """
+    arch = _GFX_ARCH if arch is None else arch
     rng = np.random.default_rng(seed)
     A_f32 = rng.uniform(-1.0, 1.0, (M, K)).astype(np.float32)
     B_f32 = rng.uniform(-1.0, 1.0, (K, N)).astype(np.float32)
     AQ    = rng.uniform(0.5, 2.0, (M,)).astype(np.float32)  # per-row A scale
     BQ    = rng.uniform(0.5, 2.0, (N,)).astype(np.float32)  # per-col B scale
-    A_raw = _encode_fp8(A_f32, dtype)
-    B_raw = _encode_fp8(B_f32, dtype)
-    A_dec = _decode_fp8(A_raw, dtype)
-    B_dec = _decode_fp8(B_raw, dtype)
+    A_raw = _encode_fp8(A_f32, dtype, arch)
+    B_raw = _encode_fp8(B_f32, dtype, arch)
+    A_dec = _decode_fp8(A_raw, dtype, arch)
+    B_dec = _decode_fp8(B_raw, dtype, arch)
     return A_raw, A_dec, B_raw, B_dec, AQ, BQ
 
 
@@ -305,12 +318,14 @@ def test_rowcolquant_timing_positive(tmp_path):
 # ---------------------------------------------------------------------------
 
 TESTS = [
+    # arch=gfx, not the detected arch: with --gfx the host encoding must follow the
+    # arch the kernel is compiled for (see _fp8_ml_dtype).
     ("C4/fp8", lambda od, gfx: _run_one(
         "C4/fp8", default_fp8_config(gfx_arch=gfx), 128, 128, 192,
-        *_make_inputs(128, 128, 192, "fp8"), Path(od), gfx_arch=gfx)),
+        *_make_inputs(128, 128, 192, "fp8", arch=gfx), Path(od), gfx_arch=gfx)),
     ("C4/bf8", lambda od, gfx: _run_one(
         "C4/bf8", default_bf8_config(gfx_arch=gfx), 128, 128, 192,
-        *_make_inputs(128, 128, 192, "bf8"), Path(od), gfx_arch=gfx)),
+        *_make_inputs(128, 128, 192, "bf8", arch=gfx), Path(od), gfx_arch=gfx)),
 ]
 
 

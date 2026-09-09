@@ -114,6 +114,37 @@ set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# codegen_common shared-infrastructure regression test. Covers normalize_gfx_arch()
+# and the EXACT-gfx1250 RowColQuant/TensorQuant tile selector: a family-wide match
+# there would hand gfx1200/gfx1201 a tile that compiles cleanly and returns garbage,
+# which no downstream check catches.
+add_test(
+    NAME dispatcher_test_codegen_common
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_codegen_common.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_codegen_common PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Arch-gate predicate used by the RowColQuant/TensorQuant GPU tests. CPU-only: it
+# exercises the string predicate, not a device. Worth its own registration because
+# the failure mode it guards is a SKIP -- CI stays green while covering nothing.
+add_test(
+    NAME dispatcher_test_gpu_test_arch_gate
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gpu_test_arch_gate.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gpu_test_arch_gate PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # gemm_utils host-helper + runner-shape regression test. Also acts as an import
 # canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
 add_test(
