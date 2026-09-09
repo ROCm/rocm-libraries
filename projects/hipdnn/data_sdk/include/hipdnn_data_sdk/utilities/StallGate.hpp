@@ -186,6 +186,14 @@ public:
     /// the gate is then not armed and the stream runs unstalled.
     bool arm(hipStream_t stream)
     {
+        {
+            // Cleared before every early return, so timedOut() describes this arm attempt
+            // only. Leaving it set would make one timeout condemn every later sample from
+            // a reused gate, which is how the ingestor caches its timer.
+            const std::lock_guard<std::mutex> lock(_mutex);
+            _timedOut = false;
+        }
+
         if(!isUsable() || isDisabledProcessWide())
         {
             return false;
@@ -219,7 +227,6 @@ public:
             const std::lock_guard<std::mutex> lock(_mutex);
             _armed = true;
             _armedStream = stream;
-            _timedOut = false;
             _deadline = std::chrono::steady_clock::now() + _timeout;
             if(!_watchdog.joinable())
             {

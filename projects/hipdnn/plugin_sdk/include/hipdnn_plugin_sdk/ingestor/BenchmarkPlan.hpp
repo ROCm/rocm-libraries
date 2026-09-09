@@ -223,7 +223,7 @@ private:
                 {
                     target->release();
                 }
-            } releaseGuard{&gate->value()};
+            } const releaseGuard{&gate->value()};
 
             if(hipEventRecord(start, stream) != hipSuccess)
             {

@@ -692,6 +692,69 @@ measurements then run unstalled and include host submission overhead. `Graph::au
 this itself: it discards the timed-out sample and re-measures the plan unstalled, so an engine is
 never rejected merely because the timer could not measure it.
 
+### Frontend convenience: `Graph.execute_timed_ext()`
+
+`Graph::execute_timed_ext()` (C++) and `Graph.execute_timed_ext()` (Python) measure the graph's
+active plan without exposing profiling descriptors. They share the one-shot timing implementation
+with `Graph::autotune()`, but do not use its warmup or retry policy. Normal `execute()` is unchanged.
+
+```c++
+#include <hipdnn_frontend.hpp>
+#include <iostream>
+
+hipdnn_frontend::ExecutionTiming timing;
+hipdnn_frontend::Error err = graph.execute_timed_ext(handle, variantPack, workspace, timing);
+if(err.is_bad())
+{
+    // Execution or profiling failed. Do not assume the plan has not executed.
+    std::cerr << err.get_message() << '\n';
+}
+else if(timing.quality == hipdnn_frontend::TimingQuality::INVALID)
+{
+    std::cerr << "Execution completed; watchdog invalidated the timing.\n";
+}
+else
+{
+    // timing.quality is DEVICE_ONLY (stall armed) or HOST_INCLUDED (arming was declined).
+    std::cout << *timing.elapsedMs << " ms, "
+              << (timing.quality == hipdnn_frontend::TimingQuality::DEVICE_ONLY
+                      ? "device-only" : "host-included") << '\n';
+}
+```
+
+```python
+import hipdnn_frontend as hipdnn
+
+err, timing = graph.execute_timed_ext(handle, variant_pack, workspace)
+if err.is_bad():
+    print(err.get_message())  # execution or profiling failed; elapsed_ms is None
+elif timing.quality == hipdnn.TimingQuality.INVALID:
+    print("Execution completed; watchdog invalidated the timing.")
+else:
+    print(timing.elapsed_ms, timing.quality)  # DEVICE_ONLY or HOST_INCLUDED
+```
+
+**Semantics:**
+- **Exactly once, blocking.** One `backendExecute` of the active plan, no warmup iteration and
+  no retry on a bad or invalid sample -- a caller that wants averaging (as `autotune()` does)
+  loops and calls this once per iteration itself. The call blocks until the timing is complete
+  (the stop event is synchronized before it returns).
+- **Allocate workspace first.** `workspace` must already be sized and allocated exactly as for
+  `execute()`; nothing here defers or resizes it, and allocating inside the timed region would
+  itself synchronize the device and corrupt the measurement (see above).
+- **Three-way `TimingQuality`:**
+  - `DEVICE_ONLY` -- the stall gate armed for this call; `elapsed_ms`/`elapsedMs` is device time
+    with the host submission gap removed.
+  - `HOST_INCLUDED` -- arming was declined (an unsupported device, or stalling already disabled
+    process-wide after an earlier watchdog timeout); execution still ran and still timed, but
+    the reported span includes host submission overhead exactly like a plain HIP-event bracket.
+  - `INVALID` -- either the watchdog released this call's stall (execution completed, but the
+    span includes the timeout and must be discarded), or the value is a default/never-measured
+    `ExecutionTiming`. `elapsed_ms`/`elapsedMs` is empty in both cases.
+- **A bad `Error` never carries a valid timing.** Execution failures and profiling failures
+  leave `elapsed_ms`/`elapsedMs` empty and `quality` at `INVALID`. A profiling failure can occur
+  after the plan executes; do not replay state-changing work merely because an error was returned.
+
 ## Error Handling
 
 hipDNN provides functions for retrieving error information:

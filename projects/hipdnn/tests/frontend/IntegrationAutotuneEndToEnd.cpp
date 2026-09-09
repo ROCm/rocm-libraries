@@ -5,6 +5,7 @@
 // Uses the test_autotune_plugin which supports the autotune knob workflow.
 
 #include <algorithm>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -24,6 +25,40 @@ namespace
 {
 
 using IntegrationAutotuneEndToEnd = hipdnn_tests::AutotuneIntegrationFixture;
+using IntegrationGpuTimedExecute = hipdnn_tests::AutotuneIntegrationFixture;
+
+TEST_F(IntegrationGpuTimedExecute, ReportsTimingFromActivePlan)
+{
+    auto bundle = createConvGraph("timed_execute_conv");
+    auto error = bundle.graph->build(_handle);
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    bundle.buildVariantPack();
+
+    int64_t workspaceSize = 0;
+    error = bundle.graph->get_workspace_size(workspaceSize);
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    const Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    // Warmup is an explicit caller action, not an extra execution hidden in the API.
+    error = bundle.graph->execute(_handle, bundle.variantPack, workspace.get());
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    ExecutionTiming timing;
+    error = bundle.graph->execute_timed_ext(_handle, bundle.variantPack, workspace.get(), timing);
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_TRUE(std::isfinite(*timing.elapsedMs));
+    EXPECT_GT(*timing.elapsedMs, 0.0f);
+
+    // Other tests may have disabled stalling after a watchdog timeout. Device support
+    // alone does not prove that this call armed the gate; both valid modes are allowed.
+    EXPECT_TRUE(timing.quality == TimingQuality::DEVICE_ONLY
+                || timing.quality == TimingQuality::HOST_INCLUDED);
+    GTEST_LOG_(INFO) << "timed execute: " << *timing.elapsedMs << " ms, "
+                     << (timing.quality == TimingQuality::DEVICE_ONLY ? "device-only"
+                                                                      : "host-included");
+}
 
 // Per-strategy GPU smoke tests. These assert only invariants that
 // hold regardless of measured time (proving the strategy is wired end-to-end

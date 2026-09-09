@@ -24,133 +24,9 @@
 namespace hipdnn_frontend::autotune::detail
 {
 
-// Run one timed iteration using a fresh profiling control descriptor.
-// Creates descriptor, records START -> execute -> STOP -> finalize ->
-// ELAPSED_MS. A new descriptor is created each call because
-// ProfilingControlDescriptor does not support reset - setAttribute throws
-// after finalize.
-//
-// `stalled` requests the stall gate. The gate is best-effort, so it is skipped
-// silently on a device without stream-wait-value support.
-inline Error
-    benchmarkOnceImpl(hipdnnHandle_t handle,
-                      ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
-                      ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& variantPackDesc,
-                      float& elapsedMs,
-                      bool stalled,
-                      bool& timedOut)
-{
-    elapsedMs = 0.0f;
-    timedOut = false;
-
-    // Create a fresh profiling descriptor for this iteration
-    // NOLINTNEXTLINE(misc-const-correctness)
-    ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor profilingDesc(
-        HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
-    if(!profilingDesc.valid())
-    {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create profiling control descriptor"};
-    }
-
-    // Set handle (creates HIP events)
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_HANDLE_EXT,
-            HIPDNN_TYPE_HANDLE,
-            1,
-            static_cast<const void*>(&handle)),
-        "Failed to set handle on profiling descriptor");
-
-    // Stall the stream before recording start, so the measured span begins when the
-    // device starts the work rather than when the host started submitting it. Arming is
-    // silently skipped on a device without stream-wait-value support.
-    bool stallVal = true;
-    if(stalled)
-    {
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-                profilingDesc.get(),
-                HIPDNN_ATTR_PROFILING_STALL_ARM_EXT,
-                HIPDNN_TYPE_BOOLEAN,
-                1,
-                &stallVal),
-            "Failed to arm profiling stall");
-    }
-
-    // Record start event
-    bool startVal = true;
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_START_EXT,
-            HIPDNN_TYPE_BOOLEAN,
-            1,
-            &startVal),
-        "Failed to set profiling start");
-
-    // Execute
-    HIPDNN_CHECK_ERROR(
-        ::hipdnn_frontend::detail::executeWithPlan(handle, execPlan, variantPackDesc));
-
-    // Record stop event
-    bool stopVal = true;
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &stopVal),
-        "Failed to set profiling stop");
-
-    // Release the stall so the queued work runs. An early return before this point
-    // destroys profilingDesc, and the descriptor's StallGate releases and drains; a
-    // return after it leaves nothing armed.
-    if(stalled)
-    {
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            ::hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
-                profilingDesc.get(),
-                HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT,
-                HIPDNN_TYPE_BOOLEAN,
-                1,
-                &stallVal),
-            "Failed to release profiling stall");
-    }
-
-    // Finalize synchronizes events and computes elapsed time
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendFinalize(profilingDesc.get()),
-        "Failed to finalize profiling descriptor");
-
-    // Read elapsed time
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        ::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
-            profilingDesc.get(),
-            HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
-            HIPDNN_TYPE_FLOAT,
-            1,
-            nullptr,
-            &elapsedMs),
-        "Failed to get profiling elapsed ms");
-
-    // A watchdog release means the timed region blocked the host on its own stream, so
-    // the elapsed span contains the timeout instead of a measurement.
-    if(stalled)
-    {
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            ::hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
-                profilingDesc.get(),
-                HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
-                HIPDNN_TYPE_BOOLEAN,
-                1,
-                nullptr,
-                &timedOut),
-            "Failed to get profiling stall timed-out flag");
-    }
-
-    return {ErrorCode::OK, ""};
-}
-
-// Run one timed iteration with the stall gate, and fall back to an unstalled
-// measurement if the gate's watchdog had to fire.
+// Run one timed iteration and report which method measured it. `stalled` selects the
+// stall gate for this iteration; the sweep turns it off for a whole pass rather than
+// per iteration, so every candidate in one pass is measured the same way.
 //
 // A watchdog release means the executed plan blocked the host on its own stream, which
 // the stall cannot coexist with. That is a property of the engine's code path, not a
@@ -158,29 +34,46 @@ inline Error
 // the first timeout disables stalling process-wide, so the retry cannot arm and cannot
 // time out. The engine is measured, just the old way -- a timing method that cannot
 // measure an engine must not be allowed to reject it.
+//
+// `quality` reports how the returned time was obtained: DEVICE_ONLY excludes host
+// submission, HOST_INCLUDED does not. The caller must not rank the two against each
+// other; a HOST_INCLUDED result during a stalled pass is the signal to re-measure the
+// whole sweep unstalled.
+//
+// Shares the one-shot profiling sequence with Graph::execute_timed_ext() via
+// executeWithPlanTimed(); this retry policy is autotune-only.
 inline Error
     benchmarkOnce(hipdnnHandle_t handle,
                   ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
                   ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& variantPackDesc,
-                  float& elapsedMs)
+                  float& elapsedMs,
+                  ::hipdnn_frontend::TimingQuality& quality,
+                  bool stalled = true)
 {
-    bool timedOut = false;
-    HIPDNN_CHECK_ERROR(benchmarkOnceImpl(
-        handle, execPlan, variantPackDesc, elapsedMs, /*stalled=*/true, timedOut));
-    if(!timedOut)
+    elapsedMs = 0.0f;
+    quality = ::hipdnn_frontend::TimingQuality::INVALID;
+
+    ::hipdnn_frontend::ExecutionTiming timing;
+    HIPDNN_CHECK_ERROR(::hipdnn_frontend::detail::executeWithPlanTimed(
+        handle, execPlan, variantPackDesc, timing, stalled));
+    if(timing.quality != ::hipdnn_frontend::TimingQuality::INVALID)
     {
+        elapsedMs = *timing.elapsedMs;
+        quality = timing.quality;
         return {ErrorCode::OK, ""};
     }
 
     HIPDNN_FE_LOG_WARN(
         "autotune: stall watchdog fired; this plan blocks the host on its own stream during "
-        "execution. Re-measuring without the stall. Timings from this point include host "
-        "submission overhead, so they are not comparable with stalled timings measured "
-        "earlier in this run.");
+        "execution. Re-measuring without the stall.");
 
-    bool retryTimedOut = false;
-    HIPDNN_CHECK_ERROR(benchmarkOnceImpl(
-        handle, execPlan, variantPackDesc, elapsedMs, /*stalled=*/false, retryTimedOut));
+    ::hipdnn_frontend::ExecutionTiming retryTiming;
+    HIPDNN_CHECK_ERROR(::hipdnn_frontend::detail::executeWithPlanTimed(
+        handle, execPlan, variantPackDesc, retryTiming, /*stalled=*/false));
+    // Unstalled measurements are always HOST_INCLUDED; the retry cannot time out because
+    // nothing was armed.
+    elapsedMs = *retryTiming.elapsedMs;
+    quality = retryTiming.quality;
     return {ErrorCode::OK, ""};
 }
 

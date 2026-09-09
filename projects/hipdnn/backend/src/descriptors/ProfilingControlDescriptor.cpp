@@ -72,8 +72,11 @@ void ProfilingControlDescriptor::finalize()
                    "Stop event was not recorded.");
 
     // An armed gate holds the stop event unsignalled, so hipEventSynchronize below would
-    // hang forever if the caller armed but never released.
-    _stallGate.release();
+    // hang forever if the caller armed but never released. Absent when nothing ever armed.
+    if(_stallGate.has_value())
+    {
+        _stallGate->release();
+    }
 
     auto status = hipEventSynchronize(_stopEvent.get());
     THROW_IF_NE(status,
@@ -89,7 +92,7 @@ void ProfilingControlDescriptor::finalize()
                 "ProfilingControlDescriptor::finalize() failed: "
                 "hipEventElapsedTime failed.");
 
-    if(_stallGate.timedOut())
+    if(_stallGate.has_value() && _stallGate->timedOut())
     {
         // Loud, because the number below is not a measurement: the watchdog had to
         // break a deadlock caused by the timed region blocking the host on the stalled
@@ -247,15 +250,23 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
         // The boolean value passed via arrayOfElements is intentionally unused: the
         // setAttribute call itself is the trigger, as it is for DEVICE_SYNC above.
         //
+        // Created here rather than with the descriptor, so a caller that only times or
+        // only syncs never pays for signal memory, a control stream, and a thread.
+        if(!_stallGate.has_value())
+        {
+            _stallGate.emplace();
+        }
+
         // A false return is success, not an error. On a device without
         // hipStreamWaitValue32 support the descriptor degrades to the unstalled
         // behavior, which still measures, just with host submission included.
-        if(!_stallGate.arm(_stream))
+        _stallUsed = _stallGate->arm(_stream);
+        if(!_stallUsed)
         {
             HIPDNN_BACKEND_LOG_INFO(
                 "ProfilingControlDescriptor: stall gate unavailable ({}); timing includes "
                 "host submission overhead",
-                _stallGate.lastOperation() == nullptr ? "unknown" : _stallGate.lastOperation());
+                _stallGate->lastOperation() == nullptr ? "unknown" : _stallGate->lastOperation());
         }
         break;
     }
@@ -271,9 +282,12 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                     "ProfilingControlDescriptor::setAttribute(STALL_RELEASE): "
                     "elementCount must be 1.");
 
-        // Releasing a gate that was never armed is a no-op, not an error, so a caller
-        // need not track whether arming succeeded.
-        _stallGate.release();
+        // Releasing a gate that was never armed -- or never created -- is a no-op, not an
+        // error, so a caller need not track whether arming succeeded.
+        if(_stallGate.has_value())
+        {
+            _stallGate->release();
+        }
         break;
     }
     default:
@@ -315,7 +329,7 @@ void ProfilingControlDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
         // Read back after finalize so a caller can discard the sample: a watchdog
         // release means the elapsed time contains the timeout and the host gap the
         // stall was supposed to exclude.
-        const bool timedOut = _stallGate.timedOut();
+        const bool timedOut = _stallGate.has_value() && _stallGate->timedOut();
         getScalar<bool>(timedOut,
                         HIPDNN_TYPE_BOOLEAN,
                         attributeType,
@@ -323,6 +337,20 @@ void ProfilingControlDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                         elementCount,
                         arrayOfElements,
                         "ProfilingControlDescriptor::getAttribute(STALL_TIMED_OUT)");
+        break;
+    }
+    case HIPDNN_ATTR_PROFILING_STALL_USED_EXT:
+    {
+        // Whether arm() actually stalled the stream for this measurement, not the
+        // current armed state (finalize() always releases first). False when
+        // STALL_ARM_EXT was never set, or arming declined.
+        getScalar<bool>(_stallUsed,
+                        HIPDNN_TYPE_BOOLEAN,
+                        attributeType,
+                        requestedElementCount,
+                        elementCount,
+                        arrayOfElements,
+                        "ProfilingControlDescriptor::getAttribute(STALL_USED)");
         break;
     }
     default:

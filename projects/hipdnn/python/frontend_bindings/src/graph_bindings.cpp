@@ -305,6 +305,46 @@ void graphBindings(nb::module_& m)
             nb::arg("variant_pack"),
             nb::arg("workspace") = 0,
             "Execute the graph with the given handle, variant pack, and optional workspace")
+        .def(
+            "execute_timed_ext",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               std::unordered_map<int64_t, uintptr_t>& variantPack,
+               uintptr_t workspace) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                std::unordered_map<int64_t, void*> cppVariantPack;
+                for(const auto& [key, value] : variantPack)
+                {
+                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                    cppVariantPack[key] = reinterpret_cast<void*>(value);
+                }
+
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+
+                ExecutionTiming timing;
+                Error err;
+                {
+                    const nb::gil_scoped_release release;
+                    err = g.execute_timed_ext(rawHandle, cppVariantPack, workspacePtr, timing);
+                }
+                return std::make_pair(err, timing);
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace") = 0,
+            "Execute the active plan once and return (Error, ExecutionTiming). "
+            "Blocks until timing completes, with no hidden warmup or retry. "
+            "Allocate workspace before the call.\n"
+            "On success, quality is DEVICE_ONLY when the stall removed host submission "
+            "overhead, HOST_INCLUDED when stalling was unavailable, or INVALID when the "
+            "watchdog invalidated timing after execution completed. Invalid timing has "
+            "elapsed_ms=None.\n"
+            "A bad Error reports execution or profiling failure and invalidates timing. "
+            "Profiling can fail after execution; do not assume an error means no work ran.")
         .def("get_execution_plan_count",
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "

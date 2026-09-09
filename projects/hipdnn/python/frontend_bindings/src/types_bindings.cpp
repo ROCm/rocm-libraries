@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 
 namespace nb = nanobind;
@@ -194,6 +195,20 @@ void typesBindings(nb::module_& m)
         .def("get_code", &Error::get_code)
         .def("is_good", &Error::is_good)
         .def("is_bad", &Error::is_bad);
+
+    // Bind TimingQuality enum and ExecutionTiming: the exactly-once execute_timed_ext()
+    // result. INVALID covers both "never measured" (default) and "watchdog invalidated
+    // this measurement" -- Graph::execute_timed_ext() distinguishes the latter only via a
+    // simultaneously-good Error, since the execution itself still completed.
+    nb::enum_<TimingQuality>(m, "TimingQuality")
+        .value("DEVICE_ONLY", TimingQuality::DEVICE_ONLY)
+        .value("HOST_INCLUDED", TimingQuality::HOST_INCLUDED)
+        .value("INVALID", TimingQuality::INVALID);
+
+    nb::class_<ExecutionTiming>(m, "ExecutionTiming")
+        .def(nb::init<>())
+        .def_ro("elapsed_ms", &ExecutionTiming::elapsedMs)
+        .def_ro("quality", &ExecutionTiming::quality);
 
     // Bind PluginLoadingMode enum
     nb::enum_<hipdnnPluginLoadingMode_ext_t>(m, "PluginLoadingMode")

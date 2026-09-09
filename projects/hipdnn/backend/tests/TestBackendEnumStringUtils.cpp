@@ -854,6 +854,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT),
                  "HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_STALL_USED_EXT),
+                 "HIPDNN_ATTR_PROFILING_STALL_USED_EXT");
     // Unknown attribute
     EXPECT_STREQ(hipdnnGetAttributeNameString(static_cast<hipdnnBackendAttributeName_t>(-1)),
                  "HIPDNN_ATTR_UNKNOWN");

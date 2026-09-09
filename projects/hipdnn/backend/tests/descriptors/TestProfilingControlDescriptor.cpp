@@ -126,6 +126,17 @@ TEST_F(TestProfilingControlDescriptor, SetAttributeUnsupportedNameThrows)
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
+// STALL_USED_EXT is read-only: enforced by simply never appearing in setAttribute's switch,
+// so a set attempt falls to the same unsupported-name guard as any other unknown name.
+TEST_F(TestProfilingControlDescriptor, SetStallUsedThrowsNotSupported)
+{
+    auto desc = getDescriptor();
+    bool value = true;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
 TEST_F(TestProfilingControlDescriptor, GetAttributeBeforeFinalizeThrows)
 {
     auto desc = getDescriptor();
@@ -135,6 +146,19 @@ TEST_F(TestProfilingControlDescriptor, GetAttributeBeforeFinalizeThrows)
         desc->getAttribute(
             HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed),
         HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestProfilingControlDescriptor, GetStallUsedBeforeFinalizeThrows)
+{
+    auto desc = getDescriptor();
+    bool stallUsed = true;
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT,
+                                                  HIPDNN_TYPE_BOOLEAN,
+                                                  1,
+                                                  &elementCount,
+                                                  &stallUsed),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST_F(TestProfilingControlDescriptor, FinalizeBeforeHandleThrows)
@@ -175,6 +199,9 @@ protected:
             EXPECT_EQ(hipStreamDestroy(_testStream), hipSuccess);
             _testStream = nullptr;
         }
+        // Mirrors the SetUp() reset: a test that deliberately trips the watchdog must not
+        // leave stalling disabled for whatever runs next in this binary.
+        hipdnn_data_sdk::utilities::StallGate::resetDisabledProcessWideForTesting();
         TestProfilingControlDescriptor::TearDown();
     }
 
@@ -420,9 +447,12 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     EXPECT_GE(waited, TIMEOUT) << "watchdog fired before its deadline";
 
     // Sticky: the cause is a property of the measured code, so stalling stays off and a
-    // later arm must decline rather than deadlock again.
+    // later arm must decline rather than deadlock again. The decline must still clear the
+    // timeout: timedOut() describes the most recent arm attempt, and a reused gate that
+    // keeps reporting the old timeout makes every later sample look untimeable.
     EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
     EXPECT_FALSE(gate.arm(_testStream));
+    EXPECT_FALSE(gate.timedOut()) << "a declined arm still reports the earlier timeout";
 }
 
 // The host released in time, so the watchdog must stay out of the way: no timeout
@@ -468,7 +498,9 @@ TEST_F(TestGpuProfilingControlDescriptor, TimedOutAttributeIsFalseForAHealthyMea
 
 // An armed gate holds the stop event unsignalled, so a caller that arms and then hits an
 // error path before releasing would hang in hipEventSynchronize forever. finalize()
-// releases first; this test hangs on regression rather than reporting a wrong number.
+// releases first. The watchdog also ends such a stall, so elapsed time alone cannot tell
+// the two apart: STALL_TIMED_OUT_EXT must be false, which holds only if finalize()
+// released.
 TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
 {
     if(!stallGateAvailable())
@@ -482,6 +514,15 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
     ASSERT_NO_THROW(recordStart(desc));
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(desc->finalize());
+
+    bool timedOut = true;
+    int64_t timedOutCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &timedOutCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut) << "the watchdog released the stall, not finalize()";
 
     float elapsed = -1.0f;
     int64_t elementCount = 0;
@@ -507,4 +548,168 @@ TEST_F(TestGpuProfilingControlDescriptor, StallArmBeforeHandleThrows)
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+// arm() succeeding for this measurement is what STALL_USED_EXT reports, independent of the
+// armed state after release() (finalize() always releases first, so armed is always false
+// by the time this is readable).
+TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueWhenArmSucceeds)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool stallUsed = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    EXPECT_TRUE(stallUsed);
+    EXPECT_EQ(elementCount, 1);
+}
+
+// No STALL_ARM_EXT call at all: the default is false, matching the plain unstalled
+// lifecycle a caller gets by simply never setting the attribute.
+TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWithoutArm)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool stallUsed = true;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    EXPECT_FALSE(stallUsed);
+}
+
+// Wrong attributeType hits the same checkGetArgs guard every other scalar getAttribute uses;
+// no attribute-specific special casing was introduced.
+TEST_F(TestGpuProfilingControlDescriptor, GetStallUsedTypeMismatchThrows)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    int64_t wrongTyped = 0;
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_INT64, 1, &elementCount, &wrongTyped),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+// getScalar<bool>'s query-size branch treats requestedElementCount==0 (or a null
+// arrayOfElements) as a size probe, not an error, so the only malformed count is negative:
+// non-null arrayOfElements past that branch requires requestedElementCount >= 1.
+TEST_F(TestGpuProfilingControlDescriptor, GetStallUsedNegativeElementCountThrows)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool stallUsed = false;
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT,
+                                                  HIPDNN_TYPE_BOOLEAN,
+                                                  -1,
+                                                  &elementCount,
+                                                  &stallUsed),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A watchdog release taken through the descriptor itself (not a raw gate): arm() had
+// succeeded, so STALL_USED_EXT must stay true even though the watchdog -- not the caller --
+// released the stall and STALL_TIMED_OUT_EXT is therefore also true. The two attributes are
+// independent: neither implies the other, and a caller must check both to classify a
+// measurement (used-and-healthy vs. used-but-invalid vs. never-stalled).
+TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdogRelease)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    // The descriptor's stall gate uses the default (2 s) watchdog timeout, so tripping it
+    // for real costs a couple of seconds. The fixture's TearDown() resets the process-wide
+    // disabled flag this trips, so no later suite in this binary inherits it.
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+
+    // Blocks the host on the still-stalled stream; only the descriptor's own watchdog can
+    // release it -- the exact deadlock the watchdog exists to break.
+    EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc)); // no-op: the watchdog already released it
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool stallUsed = false;
+    bool timedOut = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+
+    EXPECT_TRUE(stallUsed) << "arm() succeeded, so STALL_USED_EXT must stay true";
+    EXPECT_TRUE(timedOut) << "the watchdog released the stall, not the caller";
+}
+
+// Arming can decline for a reason other than device support: a prior timeout anywhere in
+// the process disables stalling process-wide, so a later arm() attempt must also read as
+// unused. The fixture's TearDown() resets the flag this trips, so this test cannot poison
+// later suites in the same binary.
+TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenDisabledProcessWide)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    // Trip the watchdog on a raw gate, exactly as WatchdogBreaksSelfInflictedDeadlock does,
+    // to flip the process-wide disabled flag without spending the descriptor's own 2 s
+    // default timeout twice in this file.
+    {
+        hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(300));
+        ASSERT_TRUE(gate.isUsable());
+        ASSERT_TRUE(gate.arm(_testStream));
+        EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+        EXPECT_TRUE(gate.timedOut());
+    }
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isDisabledProcessWide());
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc)); // declines: stalling is disabled process-wide
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc)); // no-op: never armed
+    ASSERT_NO_THROW(desc->finalize());
+
+    bool stallUsed = true;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    EXPECT_FALSE(stallUsed);
 }

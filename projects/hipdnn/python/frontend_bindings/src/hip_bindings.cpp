@@ -201,7 +201,18 @@ public:
         if(!gate.arm(toHipStream(stream)))
         {
             throwOnHipError(gate.lastError(), gate.lastOperation());
+            // Reached only when no HIP call failed, so an earlier watchdog timeout
+            // disabled stalling for this process. Raising is the only way the caller can
+            // tell that the stream is unstalled and the next span includes host time.
+            throw std::runtime_error("HIP stall gate is disabled after a stall watchdog timeout");
         }
+    }
+
+    // True when the watchdog, not this object, released the most recent arm(). The span
+    // measured across that arm contains the timeout and is not a measurement.
+    bool timedOut()
+    {
+        return getChecked().timedOut();
     }
 
     // Release the gate from the otherwise idle control stream; the work stream proceeds
@@ -264,6 +275,9 @@ void hipBindings(nb::module_& m)
         .def("release",
              &HipStallGate::release,
              "Release the gate so stalled work on the stream proceeds")
+        .def("timed_out",
+             &HipStallGate::timedOut,
+             "Return whether the stall watchdog, not release(), ended the last arm()")
         .def("destroy", &HipStallGate::destroy, "Destroy the stall gate");
 
     m.def("hip_device_synchronize",
