@@ -37,7 +37,7 @@ inline int currentProcessId()
 #endif
 }
 
-/// Claims a uniquely-named scratch directory under the system temp path.
+/// Claims a uniquely-named scratch directory under @p base.
 ///
 /// Seeded from the clock, the pid and a per-call counter, so neither a sibling
 /// process nor a second call in this one draws the same name. That matters because
@@ -52,7 +52,12 @@ inline int currentProcessId()
 /// ScopedDirectory itself creates the directory and throws when the name is already
 /// taken, which is the property that makes this safe: a lost race is retried rather
 /// than adopted, and the returned object still owns exactly what it created.
-inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view prefix)
+///
+/// Callers want makeDir() below. This form exists so a test can name an unusable base
+/// directly: the env vars temp_directory_path() consults are advisory, and Windows
+/// ignores them outright for a process running under a service account.
+inline hipdnn_test_sdk::utilities::ScopedDirectory makeDirUnder(const std::filesystem::path& base,
+                                                                std::string_view prefix)
 {
     // Drawn once for the process rather than per call, so the counter alone separates two
     // claims. A seed redrawn each time would leave the next name unpredictable from
@@ -61,7 +66,6 @@ inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view pref
         = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
           ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
     static std::atomic<uint64_t> s_counter{0};
-    const auto base = std::filesystem::temp_directory_path();
 
     for(int attempt = 0; attempt < 64; ++attempt)
     {
@@ -86,6 +90,13 @@ inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view pref
         }
     }
     throw std::runtime_error("scratch::makeDir: no free temp directory name after 64 attempts");
+}
+
+/// Claims a uniquely-named scratch directory under the system temp path. See
+/// makeDirUnder().
+inline hipdnn_test_sdk::utilities::ScopedDirectory makeDir(std::string_view prefix)
+{
+    return makeDirUnder(std::filesystem::temp_directory_path(), prefix);
 }
 
 } // namespace hipdnn_integration_tests::scratch

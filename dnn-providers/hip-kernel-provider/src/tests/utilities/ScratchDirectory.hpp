@@ -15,7 +15,7 @@
 namespace hip_kernel_provider::tests
 {
 
-/// Claims a scratch directory under the temp dir that no other run can be holding.
+/// Claims a scratch directory under @p base that no other run can be holding.
 ///
 /// ScopedDirectory refuses to adopt an existing directory, so a fixed name fails against
 /// any leftover or concurrent copy of the suite. The counter walks past whatever is there,
@@ -24,15 +24,17 @@ namespace hip_kernel_provider::tests
 ///
 /// `label` names the calling suite, so a directory left behind by a crash says which binary
 /// made it.
+///
+/// Callers want claimScratchDirectory() below. This form exists so a test can name an
+/// unusable base directly: the env vars temp_directory_path() consults are advisory, and
+/// Windows ignores them outright for a process running under a service account.
 [[nodiscard]] inline hipdnn_test_sdk::utilities::ScopedDirectory
-    claimScratchDirectory(const std::string& label)
+    claimScratchDirectoryUnder(const std::filesystem::path& base, const std::string& label)
 {
     // Drawn per process, so concurrent runs start from different names rather than both
     // walking up from zero.
     static const unsigned s_session = std::random_device{}();
     static std::atomic<unsigned> s_counter{0};
-
-    const std::filesystem::path base = std::filesystem::temp_directory_path();
 
     std::ostringstream prefix;
     prefix << "hkp_" << label << '_' << std::hex << s_session << '_';
@@ -58,6 +60,13 @@ namespace hip_kernel_provider::tests
         }
     }
     throw std::runtime_error("claimScratchDirectory: no free scratch name under the temp dir");
+}
+
+/// Claims a scratch directory under the temp dir. See claimScratchDirectoryUnder().
+[[nodiscard]] inline hipdnn_test_sdk::utilities::ScopedDirectory
+    claimScratchDirectory(const std::string& label)
+{
+    return claimScratchDirectoryUnder(std::filesystem::temp_directory_path(), label);
 }
 
 } // namespace hip_kernel_provider::tests

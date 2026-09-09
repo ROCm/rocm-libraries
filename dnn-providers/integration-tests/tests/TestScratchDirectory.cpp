@@ -9,11 +9,9 @@
 
 #include "ScratchDirectory.hpp"
 
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-
 using hipdnn_integration_tests::scratch::makeDir;
+using hipdnn_integration_tests::scratch::makeDirUnder;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -29,27 +27,6 @@ unsigned long long counterOf(const std::filesystem::path& claimed)
     EXPECT_NE(separator, std::string::npos) << name;
     return std::stoull(name.substr(separator + 1));
 }
-
-// Points every variable temp_directory_path() consults at one place. Windows reads TMP
-// then TEMP; libstdc++ reads TMPDIR, TMP, TEMP, TEMPDIR. Setting all four means the test
-// does not depend on which of them the standard library happens to prefer.
-class ScopedTempDirOverride
-{
-public:
-    explicit ScopedTempDirOverride(const std::string& value)
-        : _tmpdir("TMPDIR", value)
-        , _tmp("TMP", value)
-        , _temp("TEMP", value)
-        , _tempdir("TEMPDIR", value)
-    {
-    }
-
-private:
-    ScopedEnvironmentVariableSetter _tmpdir;
-    ScopedEnvironmentVariableSetter _tmp;
-    ScopedEnvironmentVariableSetter _temp;
-    ScopedEnvironmentVariableSetter _tempdir;
-};
 
 } // namespace
 
@@ -98,16 +75,17 @@ TEST(TestScratchDirectory, NamesTheDirectoryAfterItsPrefixAndACounter)
     EXPECT_TRUE(std::filesystem::is_directory(claimed.path()));
 }
 
-// A handler with the two catches ordered the other way round compiles, passes the two cases
-// above, and reports an unwritable temp directory as a shortage of free names.
+// The base is named directly rather than pointed at through TMP/TEMP/TMPDIR: an override the
+// platform ignores would leave this claiming under the real temp dir. See ScratchDirectory.hpp.
 TEST(TestScratchDirectory, ReportsAnUnusableTempDirectoryRatherThanNameExhaustion)
 {
     const ScopedDirectory real = makeDir(SCRATCH_PREFIX);
     const std::filesystem::path absent = real.path() / "no-such-directory";
     ASSERT_FALSE(std::filesystem::exists(absent));
 
-    const ScopedTempDirOverride override(absent.string());
-    EXPECT_THROW((void)makeDir(SCRATCH_PREFIX), std::filesystem::filesystem_error);
+    // A handler with the two catches ordered the other way round compiles, passes the two
+    // cases above, and reports this as a shortage of free names.
+    EXPECT_THROW((void)makeDirUnder(absent, SCRATCH_PREFIX), std::filesystem::filesystem_error);
 }
 
 // NOLINTEND(readability-identifier-naming)
