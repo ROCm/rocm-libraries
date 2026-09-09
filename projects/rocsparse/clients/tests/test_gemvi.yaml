@@ -36,13 +36,15 @@ Definitions:
     - { alpha:   -1.0, beta:  1.0,  alphai:  -1.0, betai:  1.0 }
 
   - &alpha_beta_range_checkin
-    - { alpha:   0.0, beta:  1.0,  alphai:  0.0, betai:  0.0 }
     - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
     - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   0.0, beta:  0.0,  alphai:  0.0, betai:  0.0 }
 
   - &alpha_beta_range_checkin_large
-    - { alpha:   1.0, beta:  1.0,  alphai:  1.0, betai:  1.0 }
+    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
+    - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
@@ -106,7 +108,7 @@ Tests:
   M: [2354]
   N: [3320]
   percentage: [17.0, 63.0]
-  alpha_beta: *alpha_beta_range_checkin
+  alpha_beta: *alpha_beta_range_checkin_large
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
 
@@ -125,12 +127,12 @@ Tests:
   category: pre_checkin
   function: gemvi
   precision: *single_double_precisions_complex_real
-  M: [276]
-  N: [303]
-  percentage: [55.0]
+  M: [10, 19]
+  N: [33, 28]
+  percentage: [0.0, 33.0, 63.0, 100.0]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
 
 # Nightly

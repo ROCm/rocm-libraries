@@ -45,6 +45,8 @@ namespace rocsparse
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
+                      "The number of wavefronts per block must be a power of two.");
         static_assert(UNROLL > 0, "UNROLL must be positive.");
 
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -73,7 +75,8 @@ namespace rocsparse
         {
             const I step = UNROLL * nworkers;
 
-            for(I i = worker; (nnz - i) > tail; i += step)
+            I i = worker;
+            for(; (nnz - i) > tail; i += step)
             {
                 for(uint32_t u = 0; u < UNROLL; u++)
                 {
@@ -82,12 +85,6 @@ namespace rocsparse
                     sum[u] = rocsparse::fma(x_val[j], A[(x_ind[j] - idx_base) * lda + row], sum[u]);
                 }
             }
-
-            // Same value as i after the main loop: the first worker + k * step
-            // that no longer satisfies (nnz - i) > tail.
-            const I i = ((nnz - worker) > tail)
-                            ? (worker + (((nnz - worker) - tail - 1) / step + 1) * step)
-                            : worker;
 
             // Fewer than UNROLL entries left for this wavefront.
             for(uint32_t u = 0; u < UNROLL - 1; u++)
@@ -178,11 +175,13 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void
-        gemvi_device_part2(I m, I n, int grid_y, T alpha, T beta, const T* workspace, T* y)
+        gemvi_device_part2(I m, int grid_y, T alpha, T beta, const T* workspace, T* y)
     {
         static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
+                      "The number of wavefronts per block must be a power of two.");
 
         const int lid = hipThreadIdx_x & (WFSIZE - 1);
         const int wid = hipThreadIdx_x / WFSIZE;
