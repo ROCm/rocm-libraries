@@ -54,6 +54,7 @@ import pandas as pd
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
 from .knobs import add_knob_arguments, run_knobs
+from .merge import add_merge_arguments, run_merge
 from .features import (
     build_features_signature,
     compute_features_hash,
@@ -153,6 +154,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_knob_arguments(knobs)
 
+    merge = subparsers.add_parser(
+        "merge",
+        help="join sweeps from several machines of one arch into one corpus",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_merge_arguments(merge)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -167,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_evaluate(args)
     if args.command == "knobs":
         return run_knobs(args)
+    if args.command == "merge":
+        return run_merge(args)
     return _run_train(args)
 
 
