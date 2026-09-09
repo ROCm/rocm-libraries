@@ -80,7 +80,7 @@ class TensorDataMoverLoad(TensorDataMover):
         #TODO: temp hack
         numWaves: int = kernel["NumWaves"]
         wavelen: int = kernel["WavefrontSize"]
-        mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
+        mt: int = kernel["MacroTile0"] if tIdx == 0 else kernel["MacroTile1"]
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
         du: int = kernel["DepthU"]
         if "MXS" in tc:
