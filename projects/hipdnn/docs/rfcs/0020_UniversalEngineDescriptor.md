@@ -631,8 +631,11 @@ selection job and they run at different points in the pipeline:
 | `sort_kernel_catalog` | Ranks the catalog and picks the winning kernel | Kernel selection, after applicability | the catalog ranker, and the main subject of RFC 0019 |
 | `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, for a combinatorial/JIT space | the future candidate generator |
 
-The pipeline is `predict_engine_tflops` (rank engines) -> `predict_applicable_kernels` (produce
-candidates, when present) -> `sort_kernel_catalog` (rank and pick). Every role is **optional**,
+The roles run in pipeline order, which follows the applicability boundary rather than the table order
+above: `predict_applicable_kernels` runs **during** applicability, producing the candidate set for an
+engine whose catalog is not enumerable; `predict_engine_tflops` runs at **engine selection**, over
+engines already found applicable; and `sort_kernel_catalog` runs at **kernel selection**, ranking the
+surviving catalog. Only the first runs before applicability is settled. Every role is **optional**,
 including `sort_kernel_catalog`: an engine naming none orders its catalog by the declared fallback,
 `priority` then descriptor `id` (§ 8, RFC 0017 § 5), which is the state a pack ships in before a
 heuristic is generated for it.

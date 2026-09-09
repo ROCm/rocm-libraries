@@ -170,10 +170,19 @@ In JSON form:
 | `predict_engine_tflops` | Cheap `f(graph) → expected perf` estimate | Engine selection, before any catalog is built | [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)'s engine estimate |
 | `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, combinatorial/JIT case | [Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank)'s candidate generator |
 
-The pipeline is `predict_engine_tflops` (rank engines) → `predict_applicable_kernels` (produce
-candidates, when present) → `sort_kernel_catalog` (rank and pick). Each role is **independently
-optional**, and each value is an **arch → UHD id** map resolved by exact `gcnArchName`, then a `default`
-entry, then unavailable ([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
+The roles run in pipeline order, which follows the applicability boundary rather than the table order
+above:
+
+1. `predict_applicable_kernels` — **during** applicability, producing the candidate set for an engine
+   whose catalog is not enumerable ([Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank));
+2. `predict_engine_tflops` — at **engine selection**, which runs only over engines already found
+   applicable, so a policy can rank them by predicted performance;
+3. `sort_kernel_catalog` — at **kernel selection**, ranking the surviving catalog and picking a winner.
+
+Only the first runs before applicability is settled; the other two run after it
+([Section 10](#10-applicability-flow)). Each role is **independently optional**, and each value is an
+**arch → UHD id** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
+([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
 concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` derives
 from `sort_kernel_catalog`'s `$kernel.*` feature axes and no other ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
