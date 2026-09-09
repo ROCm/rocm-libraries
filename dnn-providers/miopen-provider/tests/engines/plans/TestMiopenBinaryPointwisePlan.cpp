@@ -145,7 +145,7 @@ TEST_F(TestGpuMiopenBinaryPointwisePlan, GetWorkspaceSizeReturnsZero)
 TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorThrowsInternalErrorWhenIn1TensorUidMissing)
 {
     // A default-constructed PointwiseGraphSpec produces a unary-shaped node (no
-    // in_1_tensor_uid) -- isApplicable's check 5 would reject this graph, but here the plan
+    // in_1_tensor_uid) -- isApplicable would reject this graph, but here the plan
     // constructor is invoked directly to exercise its own defense against isApplicable and
     // buildPlan drifting apart.
     PointwiseGraphSpec spec;
