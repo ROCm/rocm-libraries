@@ -359,3 +359,24 @@ def test_pinning_that_orphans_problems_is_never_droppable():
     # Timings are flat by construction, so cost alone would read 0.00% and DROP.
     assert block_m["verdict"] == "KEEP"
     assert "no kernel at all" in block_m["advice"]
+
+
+def test_device_columns_are_not_knobs():
+    """A merged multi-board corpus carries `device.*`, and none of it is tunable.
+
+    The columns exist so one arch-keyed model can tell MI300X from MI325X. They are
+    facts about the card, not choices an AOT build makes, so they must never reach the
+    ranking -- a report suggesting a smaller `device.total_global_mem` would be
+    recommending different hardware.
+    """
+    df = _corpus_with_geometry()
+    df["device.cu_count"] = 304
+    df["device.total_global_mem"] = 192 * 1024**3
+
+    report = analyse_knobs(df)
+    named = {k["name"] for k in report["knobs"]}
+    assert not any(name.startswith("device.") for name in named), named
+    assert "kernel.block_m" in named
+
+    text = format_author_report(report, rank_knobs(report), "eng")
+    assert "total_global_mem" not in text

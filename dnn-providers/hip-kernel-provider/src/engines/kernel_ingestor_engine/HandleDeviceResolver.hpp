@@ -72,11 +72,19 @@ public:
                     + hipGetErrorString(status));
         }
 
-        // HIP's fields narrow to the ingestor's `$device.*` namespace.
+        // HIP's fields narrow to the ingestor's `$device.*` namespace. The memory facts
+        // are here because one arch spans several boards: a gfx942 UHD trained on a
+        // corpus merged from MI300X, MI325X and MI308X needs something that tells them
+        // apart, and compute units alone does not separate boards that share a CU count
+        // and differ in memory.
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
         resolved.gcnArchName = properties.gcnArchName;
         resolved.warpSize = properties.warpSize;
         resolved.multiProcessorCount = properties.multiProcessorCount;
+        resolved.totalGlobalMem = properties.totalGlobalMem;
+        resolved.memoryBusWidth = properties.memoryBusWidth;
+        resolved.memoryClockRate = properties.memoryClockRate;
+        resolved.sharedMemPerBlock = properties.sharedMemPerBlock;
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }

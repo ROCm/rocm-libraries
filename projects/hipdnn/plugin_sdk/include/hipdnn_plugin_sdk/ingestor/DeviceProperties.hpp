@@ -6,6 +6,10 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+#include <variant>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,7 +29,67 @@ struct DeviceProperties
     std::string gcnArchName;
     int warpSize = 0; ///< Threads per wavefront; 0 if unresolved.
     int multiProcessorCount = 0; ///< Compute units; 0 if unresolved.
+
+    // One arch spans several boards, and a UHD is arch-keyed: a gfx942 model trained on
+    // a corpus merged from MI300X, MI325X and MI308X has to be able to tell them apart,
+    // or it averages over their differences. Compute units alone does not: boards exist
+    // that share a CU count and differ in memory, where the faster memory changes which
+    // kernel wins on a bandwidth-bound shape. These are the fields that separate them.
+    /// HBM capacity in bytes; 0 if unresolved.
+    std::size_t totalGlobalMem = 0;
+    /// Memory bus width in bits; 0 if unresolved.
+    int memoryBusWidth = 0;
+    /// Peak memory clock in kHz; 0 if unresolved.
+    int memoryClockRate = 0;
+    /// LDS bytes available to one workgroup; 0 if unresolved.
+    std::size_t sharedMemPerBlock = 0;
 };
+
+/// Theoretical peak HBM bandwidth in bytes/second, or 0 when either input is
+/// unresolved. Double-data-rate, hence the factor of 2; kHz and bits convert to Hz and
+/// bytes. Derived rather than stored so it cannot disagree with the two fields it comes
+/// from, and offered because it is the number a bandwidth-bound kernel actually cares
+/// about -- neither clock nor bus width means much alone.
+inline double peakMemoryBandwidth(const DeviceProperties& properties) noexcept
+{
+    if(properties.memoryClockRate <= 0 || properties.memoryBusWidth <= 0)
+    {
+        return 0.0;
+    }
+    return 2.0 * static_cast<double>(properties.memoryClockRate) * 1000.0
+           * (static_cast<double>(properties.memoryBusWidth) / 8.0);
+}
+
+/// The `$device.*` vocabulary: every device fact a feature signature may name, paired
+/// with its value, in one place.
+///
+/// Two consumers read this and they MUST agree. The feature extractor binds it at
+/// scoring time, and the benchmark recorder writes it as `device.*` columns into the
+/// corpus a model is trained from. A name present in one and missing from the other is
+/// a feature that trains on a column the runtime cannot produce, or a runtime binding
+/// no corpus ever held -- neither fails loudly, both produce a model that is quietly
+/// wrong. Defining the list once is what stops that.
+///
+/// `arch` is deliberately absent: it selects which UHD runs (RFC 0019 §3.1), so a model
+/// splitting on it would be splitting on the thing that chose it.
+inline std::vector<std::pair<std::string, std::variant<std::int64_t, double>>>
+    deviceFeatureValues(const DeviceProperties& properties)
+{
+    const auto integral = [](auto value) {
+        return std::variant<std::int64_t, double>{static_cast<std::int64_t>(value)};
+    };
+    return {
+        // Both spellings, so a signature authored against either resolves.
+        {"cu_count", integral(properties.multiProcessorCount)},
+        {"multi_processor_count", integral(properties.multiProcessorCount)},
+        {"warp_size", integral(properties.warpSize)},
+        {"total_global_mem", integral(properties.totalGlobalMem)},
+        {"memory_bus_width", integral(properties.memoryBusWidth)},
+        {"memory_clock_rate", integral(properties.memoryClockRate)},
+        {"lds_size", integral(properties.sharedMemPerBlock)},
+        {"peak_memory_bandwidth", std::variant<std::int64_t, double>{peakMemoryBandwidth(properties)}},
+    };
+}
 
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit
 /// @p deviceArch? Entries are base ids and the device carries its features, so this is
