@@ -19,7 +19,7 @@ set(HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/back
 set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
-    hipdnn_backend_private
+    hipdnn_backend_private STATIC
     descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/BatchnormOperationDescriptor.cpp

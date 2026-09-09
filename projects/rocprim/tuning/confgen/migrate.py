@@ -46,21 +46,15 @@ def main():
                         modified_lines.append(f"// TARGET: {target}\n")
                         break
 
-            # Detect type guard.
-            # Assume line has 'Based on' string
-            types = re.match(
-                r"^ +// Based on key_type = (?P<key_type>[\w:]+), value_type = (?P<value_type>[\w:]+)",
-                line,
-            )
-            if types is not None:
-                # Inject types into config
+            # Detect type guard (any variable names).
+            types_match = re.match(r"^ +// Based on (?P<types>.+)$", line)
+
+            if types_match is not None:
+                # Parse "a = x, b = y, c = z" into {"a": "x", "b": "y", "c": "z"}
                 config = {}
-                key_type = types["key_type"]
-                if key_type:
-                    config["key_type"] = key_type
-                value_type = types["value_type"]
-                if value_type:
-                    config["value_type"] = value_type
+                for pair in types_match["types"].split(", "):
+                    name, _, value = pair.partition(" = ")
+                    config[name.strip()] = value.strip()
 
                 return_found = False
                 return_complete = False
