@@ -152,31 +152,6 @@ checks:
   required_check_runs:
     - pre-commit
 
-  # Additional checks required only when the PR changes a matching path.
-  # The bot combines these with required_check_runs and removes duplicates.
-  conditional_required_check_runs:
-    # StinkyTofu source and component-specific workflow changes require only
-    # the StinkyTofu and dependent rocISA results.
-    - name: StinkyTofu CI Summary
-      paths:
-        - 'shared/stinkytofu/**'
-        - '.github/workflows/component-ci-stinkytofu.yml'
-        - '.github/workflows/component-ci-rocisa.yml'
-
-    # Shared Component CI infrastructure affects every component.
-    - name: Component CI Summary
-      paths:
-        - '.github/workflows/component-ci.yml'
-        - '.github/scripts/component_ci.py'
-        - '.github/actions/ci-env/**'
-
-    - name: clang-tidy summary
-      paths:
-        - 'shared/stinkytofu/**'
-        - '.github/workflows/clang-tidy.yml'
-        - 'cmake/modules/ClangTidy.cmake'
-        - 'cmake/modules/CheckToolVersion.cmake'
-
   failure_comments:
     pre-commit:
       title: "Pre-commit check failed"

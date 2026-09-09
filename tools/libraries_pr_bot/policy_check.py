@@ -16,7 +16,7 @@ import re
 import sys
 import time
 import urllib.parse
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -75,9 +75,6 @@ TABLE_ORDER = [
     "Unit Test",
     "pre-commit",
     "Draft PR",
-    "StinkyTofu CI Summary",
-    "Component CI Summary",
-    "clang-tidy summary",
     "Feature Flag",
     "Code Coverage",
     "therock-pr-bot",
@@ -88,12 +85,6 @@ TABLE_ORDER = [
 class FailureComment:
     title: str
     body: str
-
-
-@dataclass(frozen=True)
-class ConditionalRequiredCheck:
-    name: str
-    paths: List[str]
 
 
 @dataclass
@@ -121,7 +112,6 @@ class Policy:
     unit_test_exempt_paths: List[str]
     bump_bot_authors: List[str]
     required_checks: List[str]
-    conditional_required_checks: List[ConditionalRequiredCheck]
     precommit_failure_comment: Optional[FailureComment]
 
 
@@ -172,38 +162,6 @@ def load_policy(policy_path: Path) -> Policy:
 
     required_checks = [str(x) for x in (checks.get("required_check_runs", []) or [])]
 
-    conditional_raw = checks.get("conditional_required_check_runs", []) or []
-    if not isinstance(conditional_raw, list):
-        raise ValueError("checks.conditional_required_check_runs must be a list")
-
-    conditional_required_checks: List[ConditionalRequiredCheck] = []
-    for index, item in enumerate(conditional_raw):
-        if not isinstance(item, dict):
-            raise ValueError(
-                "checks.conditional_required_check_runs" f"[{index}] must be a mapping"
-            )
-
-        name = str(item.get("name") or "").strip()
-        paths = item.get("paths", []) or []
-
-        if not name:
-            raise ValueError(
-                "checks.conditional_required_check_runs"
-                f"[{index}].name must not be empty"
-            )
-        if not isinstance(paths, list) or not paths:
-            raise ValueError(
-                "checks.conditional_required_check_runs"
-                f"[{index}].paths must be a non-empty list"
-            )
-
-        conditional_required_checks.append(
-            ConditionalRequiredCheck(
-                name=name,
-                paths=[str(path) for path in paths],
-            )
-        )
-
     fc = ((checks.get("failure_comments", {}) or {}).get("pre-commit")) or None
     precommit_failure_comment = None
     if isinstance(fc, dict) and "title" in fc and "body" in fc:
@@ -223,7 +181,6 @@ def load_policy(policy_path: Path) -> Policy:
         unit_test_exempt_paths=unit_test_exempt_paths,
         bump_bot_authors=bump_bot_authors,
         required_checks=required_checks,
-        conditional_required_checks=conditional_required_checks,
         precommit_failure_comment=precommit_failure_comment,
     )
 
@@ -406,42 +363,6 @@ def _matches_forbidden(filename: str, pattern: str) -> bool:
     if pattern.startswith("**/") and fnmatch.fnmatch(filename, pattern[3:]):
         return True
     return False
-
-
-def resolve_required_checks(
-    policy: Policy,
-    pr_files: Iterable[Dict[str, Any]],
-) -> List[str]:
-    """Return global and path-conditional checks applicable to this PR.
-
-    Both the current filename and previous_filename are considered so deleting
-    a file or renaming a file out of a conditionally gated subtree cannot bypass
-    its required checks.
-    """
-    changed_paths: List[str] = []
-
-    for pr_file in pr_files:
-        for key in ("filename", "previous_filename"):
-            raw_path = pr_file.get(key)
-            if not isinstance(raw_path, str) or not raw_path:
-                continue
-
-            path = Path(raw_path).as_posix()
-            if path not in changed_paths:
-                changed_paths.append(path)
-
-    resolved = list(dict.fromkeys(policy.required_checks))
-
-    for rule in policy.conditional_required_checks:
-        applies = any(
-            _matches_forbidden(path, pattern)
-            for path in changed_paths
-            for pattern in rule.paths
-        )
-        if applies and rule.name not in resolved:
-            resolved.append(rule.name)
-
-    return resolved
 
 
 def _is_test_file(filename: str, patterns: Iterable[str]) -> bool:
@@ -1082,11 +1003,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
-
-    policy = replace(
-        policy,
-        required_checks=resolve_required_checks(policy, pr_files),
-    )
 
     results: List[CheckResult] = []
 

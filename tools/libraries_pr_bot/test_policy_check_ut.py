@@ -72,7 +72,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         unit_test_exempt_paths=[],
         bump_bot_authors=["assistant-librarian", "systems-assistant", "dependabot"],
         required_checks=["pre-commit"],
-        conditional_required_checks=[],
         precommit_failure_comment=None,
     )
     defaults.update(overrides)
@@ -515,14 +514,6 @@ class LoadPolicyTests(unittest.TestCase):
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
         self.assertIn("pre-commit", policy.required_checks)
-        self.assertEqual(
-            [rule.name for rule in policy.conditional_required_checks],
-            [
-                "StinkyTofu CI Summary",
-                "Component CI Summary",
-                "clang-tidy summary",
-            ],
-        )
         # Title policy has been removed from policy.yml — the description
         # min-length is the meaningful text-length gate now.
         self.assertGreaterEqual(policy.description_min_length, 0)
@@ -571,152 +562,6 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("*_gtest.*", policy.unit_test_patterns)
         self.assertIn("Test*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
-
-
-class ConditionalRequiredCheckTests(unittest.TestCase):
-    def make_stinkytofu_policy(self) -> pc.Policy:
-        return make_policy(
-            conditional_required_checks=[
-                pc.ConditionalRequiredCheck(
-                    name="StinkyTofu CI Summary",
-                    paths=["shared/stinkytofu/**"],
-                ),
-                pc.ConditionalRequiredCheck(
-                    name="clang-tidy summary",
-                    paths=["shared/stinkytofu/**"],
-                ),
-            ]
-        )
-
-    def test_stinkytofu_change_requires_conditional_checks(self) -> None:
-        policy = self.make_stinkytofu_policy()
-        pr_files = [
-            {
-                "filename": "shared/stinkytofu/src/Pipeline.cpp",
-                "status": "modified",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            [
-                "pre-commit",
-                "StinkyTofu CI Summary",
-                "clang-tidy summary",
-            ],
-        )
-
-    def test_unrelated_change_does_not_require_conditional_checks(self) -> None:
-        policy = self.make_stinkytofu_policy()
-        pr_files = [
-            {
-                "filename": "projects/rocfft/library/rocfft.cpp",
-                "status": "modified",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            ["pre-commit"],
-        )
-
-    def test_component_ci_infrastructure_requires_global_summary(self) -> None:
-        policy = pc.load_policy(THIS_DIR / "policy.yml")
-        pr_files = [
-            {
-                "filename": ".github/workflows/component-ci.yml",
-                "status": "modified",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            [
-                "pre-commit",
-                "Component CI Summary",
-            ],
-        )
-
-    def test_mixed_change_requires_conditional_checks(self) -> None:
-        policy = self.make_stinkytofu_policy()
-        pr_files = [
-            {
-                "filename": "shared/stinkytofu/src/Pipeline.cpp",
-                "status": "modified",
-            },
-            {
-                "filename": "projects/rocblas/library/rocblas.cpp",
-                "status": "modified",
-            },
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            [
-                "pre-commit",
-                "StinkyTofu CI Summary",
-                "clang-tidy summary",
-            ],
-        )
-
-    def test_removed_stinkytofu_file_requires_conditional_checks(self) -> None:
-        policy = self.make_stinkytofu_policy()
-        pr_files = [
-            {
-                "filename": "shared/stinkytofu/src/OldPass.cpp",
-                "status": "removed",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            [
-                "pre-commit",
-                "StinkyTofu CI Summary",
-                "clang-tidy summary",
-            ],
-        )
-
-    def test_rename_out_of_stinkytofu_uses_previous_filename(self) -> None:
-        policy = self.make_stinkytofu_policy()
-        pr_files = [
-            {
-                "filename": "shared/common/Pipeline.cpp",
-                "previous_filename": "shared/stinkytofu/src/Pipeline.cpp",
-                "status": "renamed",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            [
-                "pre-commit",
-                "StinkyTofu CI Summary",
-                "clang-tidy summary",
-            ],
-        )
-
-    def test_duplicate_check_names_are_removed(self) -> None:
-        policy = make_policy(
-            required_checks=["pre-commit", "StinkyTofu CI Summary"],
-            conditional_required_checks=[
-                pc.ConditionalRequiredCheck(
-                    name="StinkyTofu CI Summary",
-                    paths=["shared/stinkytofu/**"],
-                )
-            ],
-        )
-        pr_files = [
-            {
-                "filename": "shared/stinkytofu/src/Pipeline.cpp",
-                "status": "modified",
-            }
-        ]
-
-        self.assertEqual(
-            pc.resolve_required_checks(policy, pr_files),
-            ["pre-commit", "StinkyTofu CI Summary"],
-        )
 
 
 if __name__ == "__main__":

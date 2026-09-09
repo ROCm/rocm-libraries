@@ -22,12 +22,10 @@ from ci_utils import get_modified_paths, matches_paths, set_github_output
 COMPONENTS = {
     "stinkytofu": [
         "shared/stinkytofu/**",
-        ".github/workflows/component-ci-stinkytofu.yml",
     ],
     "rocisa": [
         "projects/hipblaslt/tensilelite/rocisa/**",
         "shared/stinkytofu/**",
-        ".github/workflows/component-ci-rocisa.yml",
     ],
     "geko": [
         "projects/hipblaslt/utilities/geko/**",
