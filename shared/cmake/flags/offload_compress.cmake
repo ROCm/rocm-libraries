@@ -44,6 +44,9 @@ if(BUILD_OFFLOAD_COMPRESS)
       add_compile_options($<$<COMPILE_LANGUAGE:HIP>:--offload-compress>)
     else()
       add_compile_options("--offload-compress")
+      # HACK: The above will pass '--offload-compress' to non-HIP objects (no
+      # -xhip). We now also have to ignore these warnings.
+      add_compile_options("-Wno-unused-command-line-argument")
     endif()
   else()
     message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
