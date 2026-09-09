@@ -136,6 +136,11 @@ target_link_libraries(
     hip::host
 )
 
+# ContentCarryingTestGraph.hpp lives in flatbuffers_sdk's test tree (plugin_sdk depends on
+# flatbuffers_sdk, not the reverse, so the shared fixture cannot live here). No existing
+# include path exposes cross-SDK test headers, so add it explicitly.
+target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
 if(HIPDNN_UHD_GEN_RUNNABLE)
     # The interpreter that satisfied the probe above, not whatever `python3` resolves to in
     # the test's environment; and the directory `python -m uhd_gen` has to run from, since
@@ -144,11 +149,7 @@ if(HIPDNN_UHD_GEN_RUNNABLE)
         PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
                 HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
 endif()
-# ContentCarryingTestGraph.hpp lives in flatbuffers_sdk's test tree (plugin_sdk depends on
-# flatbuffers_sdk, not the reverse, so the shared fixture cannot live here). No existing
-# include path exposes cross-SDK test headers, so add it explicitly.
-target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../flatbuffers_sdk/tests)
+
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
