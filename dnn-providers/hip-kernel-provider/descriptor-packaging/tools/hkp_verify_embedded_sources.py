@@ -139,19 +139,13 @@ def authored_path(source_root: str, rel_dir: str, source_file: str) -> str:
 def descriptor_files(root: Path) -> list[Path]:
     """Every descriptor JSON under one staged root.
 
-    The packer builds each arch shard in a sibling dot-prefixed directory and
-    renames it into place. A crashed run leaves that directory behind, holding
-    descriptors of the same shape that the build does not ship. Skip it.
+    Unfiltered: the check must span everything install ships, and install
+    excludes only the pack stamp, which is not a `*.json` and so is already
+    outside this walk.
     """
-    found: list[Path] = []
     if not root.exists():
-        return found
-    for path in sorted(root.rglob("*.json")):
-        parents = path.relative_to(root).parts[:-1]
-        if any(part.startswith(".") for part in parents):
-            continue
-        found.append(path)
-    return found
+        return []
+    return sorted(root.rglob("*.json"))
 
 
 def embedded_source_objects(doc: object) -> list[dict]:

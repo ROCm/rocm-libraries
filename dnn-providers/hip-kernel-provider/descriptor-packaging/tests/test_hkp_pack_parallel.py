@@ -750,20 +750,15 @@ def hsaco_corpus(tmp_path):
 def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
     """An hsaco UKD produces no job, and the walk stays the sole error reporter.
 
-    This pins *current* behaviour: `_compile_ukd_variant` reads
-    `kernel_source.source` before the kind dispatch and neither `hsaco` nor
-    `kpack` carries one, so the walk raises `KeyError` and its `unsupported
-    kind` branch is unreachable for a validly-authored UKD of either kind. That
-    the `KeyError` escapes as itself rather than as an `HkpPackError` is a
-    pre-existing defect this test pins rather than fixes; fixing it belongs with
-    the walk's error contract, not with the prewarm.
+    `_variant_key_for` declines the kind, so the prewarm drops it and the walk
+    reaches it and raises the unsupported-kind error itself.
 
     The raise is asserted first on purpose: with the job-list assertion ahead of
     it, a stub job list ends the test before the walk is ever exercised.
     """
     flat = load_flat_input(hsaco_corpus, log=_silent)
 
-    with pytest.raises(KeyError, match="source"):
+    with pytest.raises(HkpPackError, match="unsupported kind 'hsaco'"):
         pipeline.compile_intermediate(
             flat,
             hsaco_corpus,

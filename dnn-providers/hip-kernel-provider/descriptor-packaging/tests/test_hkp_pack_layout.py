@@ -23,7 +23,7 @@ import pytest
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
-from hkp_pack.pipeline import run_pipeline
+from hkp_pack.pipeline import compile_intermediate, run_pipeline
 
 ARCH = "gfx942"
 ROCKE_ARCH = "gfx950"
@@ -137,6 +137,30 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
 
     with pytest.raises(HkpPackError, match="duplicate"):
         load_flat_input(root)
+
+
+@pytest.mark.quick
+def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
+    """A dot-prefixed folder is passed over, and every file it holds is named.
+
+    The source root is user-supplied, so a `.git/` or `.venv/` under it must
+    not become descriptors. A silent skip would be the same invisible omission
+    the verifier exists to prevent, so the log line is part of the behaviour.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/a", empty_arch_fixture)
+    hidden = _nest(root, ".vendor/b", empty_arch_fixture)
+    _rename_ids(hidden, "solo", "vendor")
+    logs = []
+
+    flat = load_flat_input(root, log=logs.append)
+
+    assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
+    assert not [d for d in flat.descriptors if d.path.name.startswith("vendor.")]
+
+    skipped = [m for m in logs if m.startswith("skipping hidden path")]
+    assert any("vendor.kdp.json" in m for m in skipped), logs
+    assert all(".vendor" in m for m in skipped), logs
 
 
 # --- B. Path-preserving output (real compile) -------------------------------
@@ -1201,6 +1225,44 @@ def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
     assert "unsupported kind 'embedded_sources'" in message
     for kind in ("hip", "rocke", "hsaco", "kpack", "embedded_source"):
         assert f"'{kind}'" in message, f"the accepted-kind list omits {kind}"
+
+
+# A kind the walk accepts but no producer compiles: structurally valid per
+# _validate_ukd_fields, and absent from the pass-through set.
+_UNPRODUCED_SOURCES = {
+    "hsaco": {"kind": "hsaco", "file": "PointwiseAdd.co", "symbol": "PointwiseAdd"},
+    "kpack": {
+        "kind": "kpack",
+        "library": f"kpack/hip_kernel_provider_{ARCH}.kpack",
+        "toc_key": "pointwise_add",
+        "symbol": "PointwiseAdd",
+        "sha256": "0" * 64,
+    },
+}
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("kind", sorted(_UNPRODUCED_SOURCES))
+def test_a_kind_no_producer_handles_fails_the_compile(
+    tmp_path, empty_arch_fixture, kind
+):
+    """The compile dispatch refuses a kind it has no arm for.
+
+    The message must NOT carry the accepted-kind list: that list belongs to the
+    load-time raise, and matching it here would let this test pass green
+    without the walk ever reaching the dispatch.
+    """
+    root = _embedded_source_root(
+        tmp_path, empty_arch_fixture, _UNPRODUCED_SOURCES[kind]
+    )
+    flat = load_flat_input(root)
+
+    with pytest.raises(HkpPackError) as excinfo:
+        compile_intermediate(flat, root, ARCH, "hipcc-not-invoked", tmp_path / "inter")
+
+    message = str(excinfo.value)
+    assert f"kernel_source has unsupported kind '{kind}'" in message
+    assert "expected" not in message, message
 
 
 @pytest.mark.quick

@@ -317,36 +317,27 @@ def test_the_check_spans_every_arch_shard(tmp_path):
 
 
 @pytest.mark.quick
-def test_a_staging_directory_is_not_read(tmp_path):
+def test_a_descriptor_under_an_authored_dot_directory_is_checked(tmp_path):
+    """A dot-prefixed folder inside a shard is staged, installed and loaded.
+
+    The loader selects on filename alone and excludes no directory, so a
+    `.vendor/` an author wrote ships and serves. A walk that passed over it
+    would return exit 0 for a descriptor naming a source nobody embedded --
+    indistinguishable from a healthy pass.
+    """
     root = tmp_path / "unit" / "pointwise"
+    hidden_key = "kernels/Vendored.cpp"
     _ukd(root / ARCH, "pointwise_add", KEY)
-    _ukd(root / f".{ARCH}.staging", "retracted", "kernels/Retracted.cpp")
+    _ukd(root / ARCH / ".vendor", "vendored", hidden_key)
     manifest = _manifest(
         tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
     )
 
     result = _run(manifest, [root], _labels(tmp_path))
 
-    assert result.returncode == 0, result.stderr
-    # One descriptor, not two: the count names what the walk reached.
-    assert result.stdout.strip() == _count_line(1, 1)
-
-
-@pytest.mark.quick
-def test_a_staging_directory_below_the_root_is_not_read(tmp_path):
-    """The skip reads every parent segment, so it holds at any depth."""
-    parent = tmp_path / "unit"
-    pack = parent / "pointwise"
-    _ukd(pack / ARCH, "pointwise_add", KEY)
-    _ukd(pack / f".{ARCH}.staging", "retracted", "kernels/Retracted.cpp")
-    manifest = _manifest(
-        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
-    )
-
-    result = _run(manifest, [parent], _labels(tmp_path))
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == _count_line(1, 1)
+    assert result.returncode == 1
+    assert f"embeds no source under the key '{hidden_key}'" in result.stderr
+    assert "vendored.ukd.json" in result.stderr
 
 
 @pytest.mark.quick

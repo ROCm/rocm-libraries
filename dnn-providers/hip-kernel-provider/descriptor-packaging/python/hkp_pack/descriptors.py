@@ -462,9 +462,11 @@ def load_flat_input(root, log=print):
     sources the UKDs name. Each descriptor's type is derived from its
     `<name>.<type>.json` filename. A `*.json` whose name carries no type token
     is not one of ours: warn and skip it rather than aborting the pack, so an
-    incidental file in the source folder is tolerated. Raises HkpPackError on any
-    malformed / missing-field / unknown-type / dangling-reference descriptor that
-    IS type-tagged.
+    incidental file in the source folder is tolerated. A hidden path -- any
+    dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
+    the same way, so nothing the walk passes over is invisible. Raises
+    HkpPackError on any malformed / missing-field / unknown-type /
+    dangling-reference descriptor that IS type-tagged.
 
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
@@ -478,8 +480,16 @@ def load_flat_input(root, log=print):
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
+        rel_path = jp.relative_to(root)
+        # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
+        # source root is user-supplied and plausibly a checkout, so `.git/`,
+        # `.venv/` and friends are skipped rather than refused, unlike the
+        # reserved `kpack/` below -- a hidden path collides with nothing.
+        if any(part.startswith(".") for part in rel_path.parts):
+            log(f"skipping hidden path {rel_path}")
+            continue
         if type_from_filename(jp) is None:
-            log(f"skipping non-descriptor file {jp.relative_to(root)}")
+            log(f"skipping non-descriptor file {rel_path}")
             continue
         rel_dir = jp.parent.relative_to(root)
         # `kpack/` at the arch root is where the archive itself is written, and

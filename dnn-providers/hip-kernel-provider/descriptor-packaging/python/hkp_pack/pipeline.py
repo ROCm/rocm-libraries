@@ -206,8 +206,11 @@ def _compile_ukd_variant(
     """
     ks = ukd["kernel_source"]
     kind = ks["kind"]
-    source = ks["source"]
+    # Only the two producer kinds carry a `source`, so it is read per-arm:
+    # hoisting the read above the dispatch turns the unsupported-kind raise
+    # below into a KeyError.
     if kind == "hip":
+        source = ks["source"]
         entry = ks["entry"]
         build = ks["build"]
         vk = _variant_key_for(ukd, rel_dir)
@@ -232,6 +235,7 @@ def _compile_ukd_variant(
             "spec": None,
         }
     elif kind == "rocke":
+        source = ks["source"]
         builder = ks["builder"]
         spec = ks["spec"]
         vk = _variant_key_for(ukd, rel_dir)
