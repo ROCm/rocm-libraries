@@ -736,7 +736,8 @@ __host__ __device__ void wthread::detach() {
 // Overridable at runtime via the HIPTHREADS_VCORES_PER_WGP environment variable; defaults to
 // HIPTHREADS_DEFAULT_VCORES_PER_WGP if unset or unparseable. Process-wide, not per-device, so the
 // parse happens once ever rather than once per device.
-[[gnu::const]] static __host__ uint32_t getRequestedVcoresPerWgp() {
+[[gnu::const]]
+static __host__ uint32_t getRequestedVcoresPerWgp() {
     static const uint32_t value = [](){
         const char *env = ::std::getenv("HIPTHREADS_VCORES_PER_WGP");
         if (env != nullptr) {
@@ -754,7 +755,8 @@ __host__ __device__ void wthread::detach() {
 // Returns how many CUs make up one HIP "multiprocessor" on device: 2 on RDNA, where
 // hipDeviceAttributeMultiprocessorCount reports WGPs, or 1 on CDNA/GCN, where it already reports
 // CUs. warpSize is the discriminator: wave32 is RDNA, wave64 is CDNA/GCN.
-[[gnu::const]] static __host__ uint32_t getCusPerMultiprocessor(int device) {
+[[gnu::const]]
+static __host__ uint32_t getCusPerMultiprocessor(int device) {
     int warpSize = 0;
     __LIBHIPTHREADS_HIP_CHECK__(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device));
     return (warpSize == 32) ? 2U : 1U;
@@ -766,7 +768,8 @@ __host__ __device__ void wthread::detach() {
 // real CU count is architecture dependent (see getCusPerMultiprocessor). CU counts are even on
 // every architecture we've measured, so that division is exact - it doesn't special-case small
 // requests the way halving requestedVcoresPerWgp itself would need to.
-[[gnu::const]] static __host__ uint64_t getTotalRequestedVcores(int device) {
+[[gnu::const]]
+static __host__ uint64_t getTotalRequestedVcores(int device) {
     int multiprocessorCount = 0;
     __LIBHIPTHREADS_HIP_CHECK__(
         hipDeviceGetAttribute(&multiprocessorCount, hipDeviceAttributeMultiprocessorCount, device));
@@ -781,7 +784,8 @@ __host__ __device__ void wthread::detach() {
 //
 // threading_main is persistent: a vcore that cannot be made resident never runs, and the
 // resident ones never exit while work might arrive. Over-subscribe the grid and it wedges.
-[[gnu::const]] static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
+[[gnu::const]]
+static __host__ uint64_t getOccupancyBasedMaxVcores(int device) {
     // hipOccupancyMaxActiveBlocksPerMultiprocessor is theoretical and over-predicts what a
     // persistent kernel sustains, by an amount that varies by architecture, so the margin is
     // scaled: RDNA sustains ~3/4 of it (gfx1100 reports 44 blocks/WGP, wedges at 36); CDNA far
@@ -812,7 +816,8 @@ __host__ __device__ void wthread::detach() {
 // the total is bounded. Unlike the public API, this can be [[gnu::const]]: for a fixed device the
 // result doesn't depend on anything else. wthread::hardware_concurrency() is what has to worry
 // about which device is current and about caching per device.
-[[gnu::const]] static __host__ uint32_t getDeviceSpecificHardwareConcurrency(int device) {
+[[gnu::const]]
+static __host__ uint32_t getDeviceSpecificHardwareConcurrency(int device) {
     // multiprocessorCount counts WGPs on RDNA (2 CUs each) but CUs on CDNA, so one setting
     // means two densities - which is why the default hung on Instinct but not Navi.
     // getTotalRequestedVcores normalises to CUs so the configured value means the same thing
