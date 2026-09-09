@@ -220,6 +220,22 @@ class TestA2AGemmTransitionPhase:
         body = self._body()
         assert "A2AShardIdx" in body, "the rebind ignores which shard comes next"
 
+    def test_transition_is_branched_over_on_the_final_round(self):
+        body = self._body()
+        skip = "s_cbranch_scc1 label_A2ATransitionEnd"
+        assert "s_cmp_eq_i32 s[sgprA2AShardCounter], 1" in body, (
+            "the transition phase runs on the final round too"
+        )
+        assert body.index(skip) < body.index("A2AShardIdx"), (
+            "the skip branch sits after part of the next round's setup"
+        )
+
+    def test_the_skip_target_clears_the_whole_transition(self):
+        body = self._body()
+        assert body.index("label_A2ATransitionEnd:") > body.rindex("base += shard offset"), (
+            "the skip branch lands mid-rebind, leaving one srd half-advanced"
+        )
+
 
 @pytest.mark.parametrize("config", [_CONFIG, _CONFIG_ODD_TRIP])
 class TestA2AGemmPerRoundState:
