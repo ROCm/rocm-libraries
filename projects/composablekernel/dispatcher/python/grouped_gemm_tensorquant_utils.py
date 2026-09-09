@@ -51,6 +51,7 @@ if _codegen_dir not in sys.path:
 from codegen_common import (  # noqa: E402
     ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
     rowcol_tensor_quant_default_tile,
+    normalize_gfx_arch,
     make_tensorquant_kernel_name,
 )
 
@@ -179,6 +180,8 @@ class TensorQuantDispatcherLib:
                                QK_A, QK_B, k_batch, *time_ms)
       char* dispatcher_get_kernel_name()
       int   dispatcher_get_kernel_count()
+      int   dispatcher_get_tile_n()
+      int   dispatcher_get_pad_n()
       void  dispatcher_cleanup()
     """
 
@@ -225,6 +228,17 @@ class TensorQuantDispatcherLib:
 
         lib.dispatcher_get_kernel_count.restype  = ctypes.c_int
         lib.dispatcher_get_kernel_count.argtypes = []
+
+        # TileN / pad_n are compile-time properties of the single force-included
+        # kernel. They are read back rather than hardcoded so the N-divisibility
+        # diagnostics below stay correct if the default tile changes. No missing-
+        # symbol fallback: this .so is always compiled from the ctypes source that
+        # ships these exports, by this module.
+        lib.dispatcher_get_tile_n.restype  = ctypes.c_int
+        lib.dispatcher_get_tile_n.argtypes = []
+
+        lib.dispatcher_get_pad_n.restype  = ctypes.c_int
+        lib.dispatcher_get_pad_n.argtypes = []
 
         lib.dispatcher_cleanup.restype  = None
         lib.dispatcher_cleanup.argtypes = []
@@ -296,6 +310,14 @@ class TensorQuantDispatcherLib:
     def get_kernel_count(self) -> int:
         return self._lib.dispatcher_get_kernel_count()
 
+    def get_tile_n(self) -> int:
+        """N-tile of the compiled kernel (SelectedKernel::TileN)."""
+        return self._lib.dispatcher_get_tile_n()
+
+    def get_pad_n(self) -> bool:
+        """True when the compiled kernel was generated with pad_n=true."""
+        return bool(self._lib.dispatcher_get_pad_n())
+
     def cleanup(self):
         if not self._cleaned_up:
             self._lib.dispatcher_cleanup()
@@ -327,6 +349,16 @@ class TensorQuantGpuGemmRunner:
     def kernel_name(self) -> str:
         return self._lib.get_kernel_name()
 
+    @property
+    def tile_n(self) -> int:
+        """N-tile of the compiled kernel, read from the .so (not hardcoded)."""
+        return self._lib.get_tile_n()
+
+    @property
+    def pad_n(self) -> bool:
+        """True when the compiled kernel pads N (the N % tile_n rule then lifts)."""
+        return self._lib.get_pad_n()
+
     def run(self, A, B, AQ, BQ, problem: TensorQuantGemmProblem, c_dtype=None) -> TensorQuantGemmResult:
         """
         Run TensorQuant Grouped GEMM.
@@ -344,8 +376,10 @@ class TensorQuantGpuGemmRunner:
           K % 16 == 0     Required even though the default config sets pad_k=True --
                           pad_k covers the K-loop tail, not the global-load vector
                           width.
-          N % 64 == 0     Required because the default config sets pad_n=False, so N
-                          must be a whole number of N-tiles (tile_n=64).
+          N % tile_n == 0 Required whenever the kernel was generated with pad_n=False,
+                          so N must be a whole number of N-tiles. tile_n is a property
+                          of the compiled kernel -- read `self.tile_n` rather than
+                          assuming the value of today's default config.
 
         There is no M constraint: TensorQuant applies scalar A/B scales rather than a
         per-row scale vector, so it is unaffected by the unpadded per-row AQ tail that
@@ -410,13 +444,19 @@ class TensorQuantGpuGemmRunner:
         if rc != 0:
             # rc alone is not actionable, and the C++ explanation goes to stderr, which
             # a caller capturing only the exception never sees. Restate the constraints
-            # here so the traceback is self-contained.
+            # here so the traceback is self-contained. tile_n/pad_n come from the .so,
+            # so this message stays true if the compiled tile changes.
+            n_rule = (
+                "N is unconstrained (pad_n=True)"
+                if self.pad_n
+                else f"N % {self.tile_n} == 0 when pad_n=False"
+            )
             raise RuntimeError(
                 f"dispatcher_run_gemm failed with code {rc} "
                 f"for kernel {self.kernel_name} at M={M} N={N} K={K}. "
                 f"(-1 = rejected by the bridge, -2 = rejected by the kernel, "
                 f"-3 = launch threw.) Shape constraints: K % 16 == 0 (required even "
-                f"with pad_k=True); N % 64 == 0 when pad_n=False. "
+                f"with pad_k=True); {n_rule}. "
                 f"See stderr for the exact reason."
             )
 
@@ -438,7 +478,11 @@ def _detect_gpu_arch() -> str:
         for line in result.stdout.splitlines():
             line = line.strip()
             if line.startswith("gfx") and line != "gfx000":
-                return line
+                # Strip feature suffixes ("gfx1250:xnack-") here so they never reach
+                # --offload-arch / -DGFX_ARCH. The C++ side prefix-matches the runtime
+                # device name against the compile-time GFX_ARCH, so the bare target
+                # still matches a device that reports suffixes.
+                return normalize_gfx_arch(line)
     except Exception as e:
         log.warning("rocm_agent_enumerator failed (%s); defaulting to %s", e, _DEFAULT_GFX_ARCH)
         return _DEFAULT_GFX_ARCH
@@ -509,9 +553,14 @@ def _compile_tensorquant_kernel(
     obj_path = so_path.with_suffix(".o")
 
     arch_defines = []
-    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
+    # Family test on purpose: every gfx12xx part (gfx1200/gfx1201/gfx1250) uses OCP
+    # FP8 encoding, so an exact-gfx1250 test here would be WRONG. This is the
+    # opposite of the tile selector in codegen_common.rowcol_tensor_quant_default_tile(),
+    # which must be exact because gfx1200/gfx1201 have a different 8-bit warp fragment.
+    _arch_base = normalize_gfx_arch(gfx_arch)
+    if _arch_base.startswith("gfx12") or _arch_base == "gfx950":
         arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
-    if "gfx950" in gfx_arch:
+    if _arch_base == "gfx950":
         arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",

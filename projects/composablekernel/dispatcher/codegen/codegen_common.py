@@ -630,6 +630,26 @@ def make_gemm_rowcolquant_kernel_name(
 
 
 # ============================================================================
+# Arch string normalization
+# ============================================================================
+
+
+def normalize_gfx_arch(arch: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
+    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"`` or
+    ``"gfx1250:xnack-"``. Every arch comparison in the codegen/runtime path (and
+    the ``--offload-arch`` we hand to hipcc) wants the bare target, so normalize
+    once at the boundary instead of scattering substring tests that happen to
+    tolerate the suffix.
+
+    This is the single source of truth for that rule; do not re-implement it.
+    """
+    return arch.split(":", 1)[0]
+
+
+# ============================================================================
 # Arch-derived warp tile K
 # ============================================================================
 
@@ -980,11 +1000,11 @@ ROWCOL_TENSOR_QUANT_DEFAULT_TILE = {
     "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
 }
 
-# gfx12xx (RDNA-style WMMA, e.g. gfx1250/MI400) cannot use the tile above: it is sized
+# gfx1250 (RDNA-style WMMA, MI400) cannot use the tile above: it is sized
 # for the gfx9 MFMA 32x32x16 fragment, which does not exist on WMMA hardware, so the
 # kernel compiles but produces all-zero output. The 8-bit WMMA fragment is 16x16x128,
 # and the FlatMM 8-bit tile below is the shape validated against it.
-ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX12 = {
+ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250 = {
     "tile_m": 16, "tile_n": 64, "tile_k": 256,
     "warp_m": 1, "warp_n": 4, "warp_k": 1,
     "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128,
@@ -996,10 +1016,16 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
 
     Kept here, next to the tile dicts themselves, so the rowcolquant and tensorquant
     runtime helpers select the arch-specific tile through one shared code path rather
-    than each carrying its own copy of the gfx12 shape.
+    than each carrying its own copy of the gfx1250 shape.
+
+    The gfx1250 test is EXACT, not a ``gfx12`` family test. gfx1200/gfx1201 are
+    also WMMA parts, but their 8-bit warp fragment is 16x16x16, not the 16x16x64 /
+    16x16x128 of gfx1250, so handing them the gfx1250 tile would compile cleanly
+    and return garbage. Contrast the OCP-FP8 define in the rowcolquant/tensorquant
+    runtime helpers, which *is* correctly family-wide.
     """
-    if "gfx12" in gfx_arch:
-        return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX12)
+    if normalize_gfx_arch(gfx_arch) == "gfx1250":
+        return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250)
     return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
 
 

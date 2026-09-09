@@ -16,9 +16,12 @@ Run:
 import sys
 from pathlib import Path
 
+import pytest
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
+import grouped_gemm_rowcolquant_utils as UTILS
 from grouped_gemm_rowcolquant_utils import (
     RowColQuantKernelConfig,
     RowColQuantGemmProblem,
@@ -320,3 +323,56 @@ class TestDefaultConfigAlignment:
             f"default_bf8_config().name '{cfg.name}' is not produced by _default_config() "
             f"in the codegen. The two defaults have drifted — update one to match the other."
         )
+
+
+# =============================================================================
+# Arch-dependent hipcc defines
+# =============================================================================
+
+
+class TestArchDefines:
+    """The OCP-FP8 define is deliberately a gfx12 *family* test.
+
+    gfx1200/gfx1201/gfx1250 all use OCP FP8 encoding, so narrowing this to an
+    exact gfx1250 match would be wrong. This is the opposite of the tile
+    selector in codegen_common.rowcol_tensor_quant_default_tile(), which must be
+    exact because gfx1200/gfx1201 have a different 8-bit warp fragment. Both
+    behaviours are pinned so neither gets "fixed" into the other.
+    """
+
+    def _compile_argv(self, monkeypatch, tmp_path, gfx_arch):
+        captured = []
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, *a, **kw):
+            captured.append(list(cmd))
+            return _Result()
+
+        monkeypatch.setattr(UTILS.subprocess, "run", fake_run)
+        ok = UTILS._compile_rowcolquant_kernel(
+            hpp_path=tmp_path / "k.hpp",
+            so_path=tmp_path / "k.so",
+            gfx_arch=gfx_arch,
+        )
+        assert ok, "compile helper should report success when hipcc succeeds"
+        return captured[0]
+
+    @pytest.mark.parametrize("arch", ["gfx1200", "gfx1201", "gfx1250", "gfx1250:xnack-"])
+    def test_all_gfx12_parts_get_ocp_fp8(self, monkeypatch, tmp_path, arch):
+        argv = self._compile_argv(monkeypatch, tmp_path, arch)
+        assert "-DCK_USE_OCP_FP8" in argv
+        assert "-DCK_TILE_USE_OCP_FP8" in argv
+
+    def test_gfx950_gets_ocp_fp8_and_mx(self, monkeypatch, tmp_path):
+        argv = self._compile_argv(monkeypatch, tmp_path, "gfx950")
+        assert "-DCK_USE_OCP_FP8" in argv
+        assert "-DCK_USE_NATIVE_MX_SUPPORT" in argv
+
+    def test_gfx942_gets_neither(self, monkeypatch, tmp_path):
+        argv = self._compile_argv(monkeypatch, tmp_path, "gfx942:sramecc+:xnack-")
+        assert "-DCK_USE_OCP_FP8" not in argv
+        assert "-DCK_USE_NATIVE_MX_SUPPORT" not in argv

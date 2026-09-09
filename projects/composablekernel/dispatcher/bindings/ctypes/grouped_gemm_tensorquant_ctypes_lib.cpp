@@ -469,6 +469,23 @@ int dispatcher_run_gemm(const void* A,
  */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
 
+/**
+ * Return the N-tile of the force-included kernel.
+ *
+ * The shape checks in dispatcher_run_gemm derive their bound from SelectedKernel::TileN
+ * so they survive a tile change. Exporting it lets the Python runner report the same
+ * number instead of hardcoding the value of today's default config.
+ */
+int dispatcher_get_tile_n() { return static_cast<int>(SelectedKernel::TileN); }
+
+/**
+ * Return 1 when the force-included kernel was generated with pad_n=true.
+ *
+ * When padding is on the N % TileN constraint does not apply, so the Python
+ * runner needs this to phrase its diagnostics correctly.
+ */
+int dispatcher_get_pad_n() { return SelectedKernel::kPadN ? 1 : 0; }
+
 // This bridge is one-.so-per-kernel by construction: the build force-includes exactly
 // one generated header via `hipcc -include <kernel.hpp>`, giving one SelectedKernel.
 // Scaling to N kernels means N .so files (the pattern bquant/aquant/abquant follow),

@@ -31,7 +31,11 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
 
+# normalize_gfx_arch lives in codegen_common: single source of truth shared by
+# the codegen tile selector, the runtime helpers and these tests.
+from codegen_common import normalize_gfx_arch  # noqa: E402
 from grouped_gemm_rowcolquant_utils import (
     RowColQuantGemmProblem,
     RowColQuantGpuGemmRunner,
@@ -51,17 +55,6 @@ TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
 
 def _has_hipcc() -> bool:
     return shutil.which("hipcc") is not None
-
-
-def normalize_gfx_arch(arch: str) -> str:
-    """Strip feature suffixes from a gfx target string.
-
-    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
-    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"``. Every
-    comparison we do here (and the ``--offload-arch`` we hand to hipcc) wants the
-    bare target, so normalize once at the boundary.
-    """
-    return arch.split(":", 1)[0]
 
 
 def arch_is_supported(arch: str, supported=None) -> bool:
