@@ -706,7 +706,6 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetHoldsNextWmmaUntilAssignedWorkIssues)
 
     StinkyInstruction* firstWmma = createNoCoissueWmma(/*destStart=*/100, /*srcStart=*/200);
     std::vector<StinkyInstruction*> fillers;
-    fillers.reserve(4);
     for (int i = 0; i < 4; ++i)
         fillers.push_back(createVAddInBlock(bb, arch, /*destReg=*/300 + i,
                                             /*src0Reg=*/400 + i * 2,
