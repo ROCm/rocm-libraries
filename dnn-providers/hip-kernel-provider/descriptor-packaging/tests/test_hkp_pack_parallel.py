@@ -47,6 +47,10 @@ _ROCKE_STUB_SPEC = {"tile": 64}
 _K1_SOURCE = "k1.cpp"
 _K2_SOURCE = "k2.cpp"
 
+# An embedded_source names its file relative to its descriptor and is never
+# handed to a producer, so it sits in a child folder no compile ever reads.
+_EMBEDDED_SOURCE_FILE = "kernels/embedded.cpp"
+
 _HIP_SOURCE_TEMPLATE = """\
 #include <hip/hip_runtime.h>
 
@@ -81,6 +85,14 @@ def _hip_ks(source, entry, block):
         "source": source,
         "entry": entry,
         "build": {"defines": {_BLOCK_DEFINE: block}},
+    }
+
+
+def _embedded_ks(entry_point):
+    return {
+        "kind": "embedded_source",
+        "source_file": _EMBEDDED_SOURCE_FILE,
+        "entry_point": entry_point,
     }
 
 
@@ -127,7 +139,7 @@ def _write_json(dest, name, doc):
     (dest / name).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_corpus(dest, *, hip_only=False):
+def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     """Write the selection corpus into `dest`, returning `dest`.
 
     Standard library only, and no interpreter state is touched, so the whole
@@ -139,6 +151,10 @@ def _write_corpus(dest, *, hip_only=False):
     rocke compiler, so a rocke UKD would reach comgr for real. Every other case
     stays: the variant-key dedup pair and the shared standalone UKD are authored
     hip precisely so the subset keeps them.
+
+    `with_embedded=True` appends the two embedded_source cases. It is purely
+    additive: the default corpus, and the `hip_only` subset of it, are what
+    every other consumer here pins.
 
     The cases, in the order the loader sees them (`sorted(rglob("*.json"))`):
 
@@ -159,6 +175,10 @@ def _write_corpus(dest, *, hip_only=False):
     10. an orphan standalone UKD no KDP references. Legal, warns, packs on, and
         is expected ABSENT from the selection.
     11. c11 -- a matching KDP whose entries all filter out, so it is dropped.
+    12. c12 -- a matching KDP with an inline embedded_source UKD (`with_embedded`).
+    13. c13 -- a matching KDP referencing a standalone embedded_source UKD
+        (`with_embedded`). Both pass-through cases run no producer, so neither
+        yields a variant key and neither stages a .co.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -171,6 +191,14 @@ def _write_corpus(dest, *, hip_only=False):
         _HIP_SOURCE_TEMPLATE.format(first="K2", second="K2B", define=_BLOCK_DEFINE),
         encoding="utf-8",
     )
+
+    if with_embedded:
+        embedded = dest / _EMBEDDED_SOURCE_FILE
+        embedded.parent.mkdir(parents=True, exist_ok=True)
+        embedded.write_text(
+            _HIP_SOURCE_TEMPLATE.format(first="E1", second="E1B", define="64"),
+            encoding="utf-8",
+        )
 
     if not hip_only:
         pkg = dest / _ROCKE_STUB_PKG
@@ -334,6 +362,30 @@ def _write_corpus(dest, *, hip_only=False):
         ),
     )
 
+    if with_embedded:
+        # Case 12 -- an inline pass-through UKD.
+        _write_json(
+            dest,
+            "c12_inline_embedded.kdp.json",
+            _kdp(
+                "kdp-c12",
+                [TARGET_ARCH],
+                [_ukd("ukd-inline-embedded", _embedded_ks("E1"))],
+            ),
+        )
+
+        # Case 13 -- a standalone pass-through UKD referenced by id.
+        _write_json(
+            dest,
+            "c13_ref_standalone_embedded.kdp.json",
+            _kdp("kdp-c13", [TARGET_ARCH], ["ukd-standalone-embedded"]),
+        )
+        _write_json(
+            dest,
+            "u_standalone_embedded.ukd.json",
+            _ukd("ukd-standalone-embedded", _embedded_ks("E1B")),
+        )
+
     return dest
 
 
@@ -372,6 +424,12 @@ HIP_ONLY_GOLDEN_SEQUENCE = [
 # through. c11 is dropped, so it contributes neither.
 HIP_ONLY_EXPECTED_CO_COUNT = 6
 HIP_ONLY_EXPECTED_KDP_JSON_COUNT = 8
+
+# The same, over the hip-only subset with the embedded cases added. The two
+# extra KDPs stage their JSON and nothing else; a standalone UKD is emitted by
+# `pack_arch`, not staged here, so c13's own file is not counted.
+MIXED_EXPECTED_CO_COUNT = 6
+MIXED_EXPECTED_KDP_JSON_COUNT = 10
 
 # Entries the generator must NOT yield. The orphan is reachable only from a
 # `ukd_by_id()`-driven enumeration, and the wildcard standalone only if the
@@ -1140,6 +1198,46 @@ def test_serial_and_parallel_stage_identical_trees(tmp_path, monkeypatch):
     # Pinned against the corpus so a staging change that silently drops files
     # cannot make two empty trees compare equal.
     assert len(serial) == HIP_ONLY_EXPECTED_CO_COUNT + HIP_ONLY_EXPECTED_KDP_JSON_COUNT
+    assert serial == parallel
+
+
+@pytest.mark.quick
+def test_mixed_kinds_stage_identical_trees_under_a_real_pool(tmp_path, monkeypatch):
+    """A corpus mixing compiled and pass-through kinds packs the same either way.
+
+    The equivalence above runs on a corpus every entry of which the prewarm
+    keys, so a KDP the pool contributes nothing to is never staged in a parallel
+    pack. `_variant_key_for` declines every embedded_source entry, and those
+    KDPs must reach the tree regardless of which path compiled the rest.
+
+    The pool's construction is asserted rather than assumed. `_prewarm_variants`
+    returns without one below two jobs or two workers, so a selection change
+    that took the corpus under that threshold would leave the second pack serial
+    too -- the trees would still match, over a property no longer exercised.
+    """
+    corpus = _write_corpus(tmp_path / "mixed", hip_only=True, with_embedded=True)
+
+    monkeypatch.setenv("HKP_PACK_JOBS", "1")
+    serial = _staged_tree(corpus, tmp_path / "inter-serial")
+
+    real_pool = pipeline.ProcessPoolExecutor
+    built = []
+
+    def _spy_pool(*args, **kwargs):
+        built.append(kwargs["max_workers"])
+        return real_pool(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "ProcessPoolExecutor", _spy_pool)
+    monkeypatch.setenv("HKP_PACK_JOBS", "4")
+    parallel = _staged_tree(corpus, tmp_path / "inter-parallel")
+
+    # One pool for the one arch, sized to the requested worker count rather than
+    # clamped to the job count, which this corpus keeps above it.
+    assert built == [4]
+
+    # Pinned against the corpus so a staging change that silently drops files
+    # cannot make two empty trees compare equal.
+    assert len(serial) == MIXED_EXPECTED_CO_COUNT + MIXED_EXPECTED_KDP_JSON_COUNT
     assert serial == parallel
 
 

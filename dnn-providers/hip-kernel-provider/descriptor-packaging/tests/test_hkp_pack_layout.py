@@ -1351,6 +1351,18 @@ def _add_wildcard_embedded_kdp(folder):
     )
 
 
+def _add_sharing_embedded_kdp(folder):
+    """A second KDP referencing the same standalone UKD and nothing else."""
+    doc = _read(folder / "solo.kdp.json")
+    doc["id"] = "kdp-solo-shared"
+    doc["name"] = "Solo sharing pack"
+    doc["arch"] = []
+    doc["kernelDescriptors"] = [_STANDALONE_ID]
+    (folder / "solo_shared.kdp.json").write_text(
+        json.dumps(doc, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print, out="out"):
     """Pack a root that compiles nothing, so hipcc must never be invoked."""
     return run_pipeline(
@@ -1506,6 +1518,37 @@ def test_embedded_only_shard_is_emitted_and_logged(
     assert (tmp_path / "out" / ARCH / "pointwise" / "solo.kdp.json").is_file()
     passed_through = [m for m in logs if "emitting kind 'embedded_source'" in m]
     assert len(passed_through) == 2, logs
+
+
+def test_standalone_passthrough_two_kdps_share_is_emitted_once(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """A standalone pass-through UKD is processed once per arch, not once per ref.
+
+    Processing it a second time is idempotent -- the same document lands under
+    the same key -- so the shard is byte-identical either way and cannot witness
+    the difference. The pass-through log line is the only observable, hence the
+    count. Listing precedes the process-once check, so both KDPs still name the
+    id.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+    _add_sharing_embedded_kdp(root / "pointwise")
+    logs = []
+
+    _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH], log=logs.append)
+
+    emitted = (
+        f"standalone UKD {_STANDALONE_FILE}: "
+        "emitting kind 'embedded_source' as authored"
+    )
+    assert logs.count(emitted) == 1, logs
+
+    shard = tmp_path / "out" / ARCH / "pointwise"
+    assert [p.name for p in shard.glob("*.ukd.json")] == [_STANDALONE_FILE]
+    assert _read(shard / _STANDALONE_FILE)["kernel_source"] == _STANDALONE_SOURCE
+
+    for name in ("solo.kdp.json", "solo_shared.kdp.json"):
+        assert _STANDALONE_ID in _read(shard / name)["kernelDescriptors"], name
 
 
 def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(

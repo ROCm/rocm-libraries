@@ -106,6 +106,7 @@ std::vector<std::filesystem::path> packedArchShards()
         << "the packed set root " << unitKpackRoot()                                      \
         << " is not a directory. The staged tree sits elsewhere, or this binary holds a " \
            "stale offset to it.";                                                         \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) declarator name, not an expression */   \
     const auto shards = packedArchShards();                                               \
     if((shards).empty())                                                                  \
     {                                                                                     \

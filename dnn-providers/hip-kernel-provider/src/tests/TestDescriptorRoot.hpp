@@ -84,9 +84,9 @@ inline std::string describeUnusableDescriptorRoot(const std::filesystem::path& r
 /// nothing for it and its arch folders hold no archive at all.
 inline const std::filesystem::path& unitKpackRoot()
 {
-    static const std::filesystem::path root
+    static const std::filesystem::path s_root
         = descriptorSetRoot(HIPKERNELPROVIDER_UNIT_KPACK_RELDIR);
-    return root;
+    return s_root;
 }
 #endif
 

@@ -115,7 +115,7 @@ endfunction()
 #               ENABLE_ROCKE <bool> ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> OUT_ROOT <dir>
 #               [ROCKE_INTERP <path>] [ROCKE_COMGR_LIB <path>]
-#               [ROCKE_WHEEL_STAMP <path>])
+#               [ROCKE_WHEEL_STAMP <path>] [PACK_JOBS <n>])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
 #
 #   The root is walked recursively. Each descriptor's authored
@@ -147,6 +147,12 @@ endfunction()
 #   packaged artifacts. Without that edge the kpacks would keep shipping kernels
 #   compiled from stale wheel contents.
 #
+#   PACK_JOBS caps the worker processes one pack may spawn. Omitted, the packer
+#   sizes itself against the machine, which fits a root large enough to repay the
+#   startup cost. Every root here is a separate custom target with no ordering
+#   edge between them, so the generator runs them at once and unbounded pools
+#   multiply. 1 selects the packer's serial path.
+#
 #   NAME is also the source label the packer writes into every descriptor's
 #   provenance. The function records NAME and the absolute SOURCE_ROOT in a
 #   global registry, which hkp_verify_embedded_sources() reads to resolve a
@@ -155,7 +161,7 @@ endfunction()
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ENABLE_ROCKE ARCHES HIPCC ROCM_KPACK_DIR
         OUT_ROOT ROCKE_INTERP ROCKE_COMGR_LIB
-        ROCKE_WHEEL_STAMP)
+        ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
     if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
@@ -216,6 +222,9 @@ function(hkp_wire_pack_target)
     # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
     # it when set (runtime resolution, no find_library).
     set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
+    if(ARG_PACK_JOBS)
+        list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
+    endif()
     if(ARG_ROCKE_COMGR_LIB)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
@@ -862,7 +871,8 @@ assertion: an unloadable path silently falls through to the next candidate.")
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
+        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
+        PACK_JOBS 1)
 
     hkp_wire_pack_target(
         NAME unit
@@ -871,7 +881,8 @@ assertion: an unloadable path silently falls through to the next candidate.")
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
+        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
+        PACK_JOBS 1)
 
     hkp_wire_pack_target(
         NAME integration_shared
@@ -880,7 +891,8 @@ assertion: an unloadable path silently falls through to the next candidate.")
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_SHARED}"
+        PACK_JOBS 1)
 
     hkp_wire_pack_target(
         NAME integration
@@ -889,7 +901,11 @@ assertion: an unloadable path silently falls through to the next candidate.")
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
+        # The only test root with enough distinct hip variants to build a worker
+        # pool, so it is the one that exercises the parallel path in a real
+        # build. Falls back to the serial path if that root ever drops below two.
+        PACK_JOBS 2)
 
     hkp_wire_pack_target(
         NAME archive_fixture
@@ -898,7 +914,8 @@ assertion: an unloadable path silently falls through to the next candidate.")
         ARCHES "${_arches}"
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
-        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}")
+        OUT_ROOT "${_integration}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+        PACK_JOBS 1)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
 endfunction()
