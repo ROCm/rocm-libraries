@@ -1670,6 +1670,30 @@ trains the model; it reaches the engine only through the public Graph API:
   `iterationsRun`, `workspaceSize`, persisted to JSON. That JSON, joined with the feature row, is the
   training dataset.
 
+**A timing is only a training label once the candidate is known correct.** The tool validates each
+candidate's numerical output against a reference before accepting its measurement, and records the
+verdict on the row. Speed alone is not evidence of a usable kernel, and the two failure directions are
+not symmetric:
+
+- **A wrong-but-fast candidate is the dangerous one.** A kernel that executes, returns quickly, and
+  computes the wrong answer produces the *best* timing in its group, so it becomes the label the model
+  is trained to prefer. Nothing downstream catches it: the contract checks
+  ([Section 6.3](#63-contract-enforcement)) fingerprint the feature contract, not the kernel's output.
+  Without a correctness gate the oracle is silently inverted for that problem.
+- **A missing candidate is a coverage gap, not a corruption.** A kernel wrongly excluded by a matcher
+  never appears, so the model simply never learns it — the trained ranking is intact but incomplete.
+
+Both are recorded rather than dropped. A candidate that builds and runs but fails validation is written
+with its measurement suppressed and an explicit invalid marker, so the model learns the failure surface
+instead of inferring one from absence; a candidate that never became applicable is absent by
+construction and is visible only as thin coverage for that problem
+([Section 13.5](#135-sweep-space-grid-vs-constraint)).
+
+Because applicability decides which candidates are ever timed, an incorrect matcher biases the dataset
+before any model sees it. **OPEN:** what reference the tool validates against per op, and whether
+generation additionally checks matcher coverage — that a problem's candidate set is plausible rather
+than merely non-empty — see [Open Question 19](#operational).
+
 The tool times the **shipped** kernels — it does not re-build a variant grid. The pack is the authority
 on which variants exist; autotune is the authority on how fast each one runs.
 
@@ -2230,6 +2254,16 @@ dependency-gated and land only when a concrete need appears.
     Recommendation: strict equality for v1 (it is the property that makes the knob list meaningful),
     knob removal as a major UED version bump, and revisit (a) if a real consumer is broken by churn.
     *(Impacts [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement), [Section 8.1](#81-descriptor-versions-and-uhd-coupling).)*
+
+19. **Validating the training oracle.** A timing becomes a training label only after the candidate is
+    shown correct ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)), which leaves two questions.
+    (a) **What reference?** Options are a CPU reference executor, a trusted in-catalog kernel, or a
+    cross-engine result; each differs in cost and in what it can certify, and the choice may be per op.
+    (b) **Is matcher coverage checked?** An over-narrow matcher silently omits candidates, so a problem
+    can produce a plausible-looking but impoverished candidate set. Generation could flag a problem whose
+    candidate count is anomalous for its cohort, but distinguishing "correctly narrow" from "wrongly
+    narrow" needs a definition of expected coverage this RFC does not have.
+    *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 13.3](#133-one-source-of-truth-translated-once).)*
 
 ---
 
