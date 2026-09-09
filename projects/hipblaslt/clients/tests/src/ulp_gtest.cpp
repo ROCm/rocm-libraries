@@ -11,7 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include <hipblaslt/host_numerics/HostComparison.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <roc/host_numerics/comparison.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -58,8 +59,9 @@ namespace
         using namespace roc::host_numerics;
         using namespace hipblaslt::host_numerics;
 
-        const Layout layout
-            = hipblaslt::host_numerics::detail::comparisonLayout(M, N, lda, stride, batchCount);
+        const Layout layout(
+            Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
+            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)});
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
         ComparisonOptions options;
         options.allClose                     = false;
@@ -91,20 +93,24 @@ namespace
                                   size_t&     count,
                                   hipDataType type)
     {
-        using namespace hipblaslt::host_numerics;
-
-        HostComparisonRequest request;
-        request.rows                    = M;
-        request.columns                 = N;
-        request.leadingDimension        = lda;
-        request.batchStride             = stride;
-        request.batchCount              = batchCount;
-        request.expected                = hCPU;
-        request.observed                = hGPU;
-        request.type                    = type;
-        request.computeUnitsInLastPlace = true;
-        const auto report               = compareHost(request).unitsInLastPlaceComparison;
-        maxUlp                          = std::max(maxUlp, report.maximumUlp);
+        using namespace roc::host_numerics;
+        const ScalarType scalar = hipblaslt::host_numerics::scalarType(type);
+        const Layout     layout(
+            Shape{static_cast<size_t>(M), static_cast<size_t>(N), static_cast<size_t>(batchCount)},
+            {1, static_cast<ptrdiff_t>(lda), static_cast<ptrdiff_t>(stride)});
+        ComparisonOptions options;
+        options.allClose                     = false;
+        options.computeElementwiseStatistics = false;
+        options.computeFrobenius             = false;
+        options.computeUlp                   = true;
+        options.ulpType                      = scalar;
+        options.maxReportedMismatches        = 0;
+        options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+        const ComparisonReport report
+            = compare(hipblaslt::host_numerics::copyTensorFromEncodedStorage(hGPU, scalar, layout),
+                      hipblaslt::host_numerics::copyTensorFromEncodedStorage(hCPU, scalar, layout),
+                      options);
+        maxUlp = std::max(maxUlp, report.maximumUlp);
         sumUlp += report.sumUlp;
         count += report.ulpCompared;
     }

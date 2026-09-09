@@ -5,6 +5,7 @@
 #include <hipblaslt/host_numerics/norm.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <utility>
@@ -12,36 +13,128 @@
 
 namespace hipblaslt::host_numerics
 {
+    using namespace roc::host_numerics;
+
     namespace
     {
-        HostComparisonReport compareMatmulOutput(const HostComparisonRequest&   source,
-                                                 const MatmulValidationCase&    validationCase,
-                                                 const MatmulValidationOptions& options,
-                                                 bool specialValueConsistency,
-                                                 bool searchAllClose,
-                                                 bool computeUlp)
+        struct ComparisonEvidence
         {
-            HostComparisonRequest request          = source;
-            request.requireSpecialValueConsistency = specialValueConsistency;
-            request.computeRelativeFrobeniusError  = options.compareNorm;
-            request.findAllCloseTolerance          = searchAllClose;
-            request.computeUnitsInLastPlace        = computeUlp;
+            ComparisonReport                   comparison;
+            ComparisonReport                   unitsInLastPlace;
+            double                             relativeFrobeniusError = 0.0;
+            std::optional<ComparisonTolerance> allCloseTolerance;
+        };
 
-            if(options.compareAllClose)
+        ComparisonOptions unitComparisonOptions(ScalarType type)
+        {
+            ComparisonOptions options;
+            options.equalNaNs                    = true;
+            options.computeElementwiseStatistics = false;
+            options.computeFrobenius             = false;
+            options.maxReportedMismatches        = 10;
+
+            if(type == ScalarType::Float32 || type == ScalarType::Float64
+               || type == ScalarType::ComplexFloat32 || type == ScalarType::ComplexFloat64)
             {
-                if(validationCase.allCloseTolerance.absolute != 0
-                   || validationCase.allCloseTolerance.relative != 0)
-                {
-                    request.allCloseMode      = HostAllCloseMode::AllClose;
-                    request.absoluteTolerance = validationCase.allCloseTolerance.absolute;
-                    request.relativeTolerance = validationCase.allCloseTolerance.relative;
-                }
+                options.allClose            = false;
+                options.computeUlp          = true;
+                options.ulpType             = type;
+                options.maximumUlpTolerance = 4.0;
+            }
+            return options;
+        }
+
+        Tensor batchView(const Tensor& tensor, size_t batch)
+        {
+            if(tensor.shape().rank() != 3)
+                return tensor;
+            const std::array<size_t, 3> origin{0, 0, batch};
+            return tensor.shareStorageWithLayout(
+                Layout(Shape{tensor.shape()[0], tensor.shape()[1]},
+                       {tensor.layout().stride(0), tensor.layout().stride(1)},
+                       tensor.layout().elementOffset(origin)));
+        }
+
+        ComparisonEvidence compareMatmulOutput(const MatmulValidationCase::TensorPair& tensors,
+                                               const ComparisonTolerance&              tolerance,
+                                               const MatmulValidationOptions&          validation,
+                                               bool specialValueConsistency,
+                                               bool searchAllClose,
+                                               bool computeUlp)
+        {
+            const auto& [expected, observed] = tensors;
+            ComparisonEvidence result;
+
+            if(validation.compareAllClose || specialValueConsistency)
+            {
+                ComparisonOptions options;
+                if(validation.compareAllClose)
+                    options = tolerance.absolute != 0.0 || tolerance.relative != 0.0
+                                  ? allCloseComparisonOptions(
+                                        tolerance.absolute, tolerance.relative, true)
+                                  : unitComparisonOptions(expected.type());
                 else
+                    options.allClose = false;
+                options.computeElementwiseStatistics = specialValueConsistency;
+                options.computeFrobenius             = false;
+                options.maxReportedMismatches        = validation.compareAllClose ? 10 : 0;
+                options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+                result.comparison = compare(observed, expected, options);
+            }
+
+            if(computeUlp)
+            {
+                ComparisonOptions options;
+                options.allClose                     = false;
+                options.computeElementwiseStatistics = false;
+                options.computeFrobenius             = false;
+                options.computeUlp                   = true;
+                options.ulpType                      = expected.type();
+                options.maxReportedMismatches        = 0;
+                options.selection       = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+                result.unitsInLastPlace = compare(observed, expected, options);
+            }
+
+            if(validation.compareNorm && expected.elementCount() != 0)
+            {
+                ComparisonOptions options;
+                options.allClose                     = false;
+                options.equalNaNs                    = true;
+                options.computeElementwiseStatistics = false;
+                options.computeFrobenius             = true;
+                options.maxReportedMismatches        = 0;
+                options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+
+                const size_t batches
+                    = expected.shape().rank() == 3 ? expected.shape()[2] : size_t{1};
+                for(size_t batch = 0; batch < batches; ++batch)
                 {
-                    request.allCloseMode = HostAllCloseMode::Unit;
+                    const ComparisonReport batchReport
+                        = compare(batchView(observed, batch), batchView(expected, batch), options);
+                    result.relativeFrobeniusError += batchReport.relativeFrobeniusError;
                 }
             }
-            return compareHost(request);
+
+            if(searchAllClose && expected.elementCount() != 0)
+            {
+                ComparisonOptions options            = allCloseComparisonOptions();
+                options.computeElementwiseStatistics = false;
+                options.computeFrobenius             = false;
+                options.maxReportedMismatches        = 0;
+                options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+
+                constexpr std::array<double, 6> candidates{
+                    1e-6,
+                    1e-5,
+                    1e-4,
+                    1e-3,
+                    1e-2,
+                    1e-1,
+                };
+                result.allCloseTolerance
+                    = findAllCloseTolerance(observed, expected, candidates, candidates, options);
+            }
+            return result;
         }
     } // namespace
 
@@ -63,13 +156,13 @@ namespace hipblaslt::host_numerics
 
         for(const auto& validationCase : cases)
         {
-            std::vector<HostComparisonReport> outputReports;
+            std::vector<ComparisonEvidence> outputReports;
             outputReports.reserve(validationCase.outputs.size());
             for(const auto& output : validationCase.outputs)
             {
                 outputReports.push_back(
                     compareMatmulOutput(output,
-                                        validationCase,
+                                        validationCase.allCloseTolerance,
                                         options,
                                         options.compareAllClose || options.compareNorm,
                                         options.searchAllClose,
@@ -77,15 +170,11 @@ namespace hipblaslt::host_numerics
             }
 
             if(options.compareAllClose || options.compareNorm)
-            {
                 for(const auto& report : outputReports)
                     record(report.comparison.nonFiniteMismatches == 0);
-            }
             if(options.compareAllClose)
-            {
                 for(const auto& report : outputReports)
                     record(report.comparison.passed());
-            }
 
             if(options.compareNorm)
             {
@@ -94,13 +183,11 @@ namespace hipblaslt::host_numerics
                     const double normError = std::abs(report.relativeFrobeniusError);
                     metrics.relativeFrobeniusError += normError;
                     if(options.assertNorm)
-                    {
                         record(norm_check(normError,
-                                          validationCase.outputs.front().type,
+                                          validationCase.outputs.front().first.type(),
                                           options.computeType,
                                           options.inputTypeA,
                                           options.inputTypeB));
-                    }
                 }
             }
 
@@ -108,9 +195,9 @@ namespace hipblaslt::host_numerics
             {
                 for(size_t outputIndex = 0; outputIndex < outputReports.size(); ++outputIndex)
                 {
-                    const auto& output = validationCase.outputs[outputIndex];
-                    const auto& report = outputReports[outputIndex];
-                    if(output.rows == 0 || output.columns == 0 || output.batchCount == 0)
+                    const auto& expected = validationCase.outputs[outputIndex].first;
+                    const auto& report   = outputReports[outputIndex];
+                    if(expected.elementCount() == 0)
                         continue;
 
                     allCloseCompared = true;
@@ -130,10 +217,10 @@ namespace hipblaslt::host_numerics
             {
                 for(const auto& report : outputReports)
                 {
-                    metrics.maximumUlp = std::max(metrics.maximumUlp,
-                                                  report.unitsInLastPlaceComparison.maximumUlp);
-                    ulpSum += report.unitsInLastPlaceComparison.sumUlp;
-                    ulpCount += report.unitsInLastPlaceComparison.ulpCompared;
+                    metrics.maximumUlp
+                        = std::max(metrics.maximumUlp, report.unitsInLastPlace.maximumUlp);
+                    ulpSum += report.unitsInLastPlace.sumUlp;
+                    ulpCount += report.unitsInLastPlace.ulpCompared;
                 }
             }
 
@@ -146,7 +233,7 @@ namespace hipblaslt::host_numerics
                           auto selectedOptions        = options;
                           selectedOptions.compareNorm = false;
                           const auto report           = compareMatmulOutput(output->selected,
-                                                                  validationCase,
+                                                                  validationCase.allCloseTolerance,
                                                                   selectedOptions,
                                                                   false,
                                                                   false,
@@ -155,22 +242,24 @@ namespace hipblaslt::host_numerics
                       }
                       if(options.compareNorm)
                       {
-                          auto normOptions             = options;
-                          normOptions.compareAllClose  = false;
-                          const auto report            = compareMatmulOutput(
-                              output->norm, validationCase, normOptions, false, false, false);
+                          auto normOptions            = options;
+                          normOptions.compareAllClose = false;
+                          const auto   report         = compareMatmulOutput(output->norm,
+                                                                  validationCase.allCloseTolerance,
+                                                                  normOptions,
+                                                                  false,
+                                                                  false,
+                                                                  false);
                           const double normError = std::abs(report.relativeFrobeniusError);
                           metrics.relativeFrobeniusError += normError;
                           if(options.assertNorm)
-                          {
                               record(output->useComputeNormPolicy
                                          ? norm_check(normError,
-                                                      output->norm.type,
+                                                      output->norm.first.type(),
                                                       options.computeType,
                                                       options.inputTypeA,
                                                       options.inputTypeB)
-                                         : norm_check(normError, output->norm.type));
-                          }
+                                         : norm_check(normError, output->norm.first.type()));
                       }
                   };
 
