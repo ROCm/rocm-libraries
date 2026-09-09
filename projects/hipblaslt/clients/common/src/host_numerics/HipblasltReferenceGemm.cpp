@@ -48,7 +48,7 @@ namespace hipblaslt::host_numerics
     void referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
                              const hipblaslt::client::MatmulDataTypes&       dataTypes,
                              const hipblaslt::client::PreparedMatmulProblem& preparation,
-                             MatmulReferenceInputs                           inputs,
+                             const MatmulReferenceInputs&                    inputs,
                              hipblaslt_scaling_format                        scaleAMode,
                              hipblaslt_scaling_format                        scaleBMode)
     {
@@ -103,6 +103,6 @@ namespace hipblaslt::host_numerics
         epilogue.outputScale = outputScale;
         if(inputs.d.type() == ScalarType::Int8)
             epilogue.outputConversion = OutputConversion::SaturatingInt8;
-        referenceEpilogueInto(*result, {.output = std::move(inputs.d)}, epilogue);
+        referenceEpilogueInto(*result, {.output = inputs.d}, epilogue);
     }
 } // namespace hipblaslt::host_numerics
