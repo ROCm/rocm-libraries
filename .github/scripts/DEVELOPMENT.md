@@ -59,6 +59,8 @@ from the standard library plus the packages above.
 │   ├── check_wheel_freshness.py        ← fail CI if nightly wheels are stale
 │   │
 │   ├── # PR automation
+│   ├── pr_ci_overview.py               ← validate and render compact PR CI results
+│   ├── pr_ci_overview_github.py        ← collect GitHub results and update the PR comment
 │   ├── pr_category_label.py            ← add/remove category labels from changed paths
 │   ├── apply-labels.py                 ← apply labels to a PR via GitHub API
 │   ├── collect-labels.py               ← collect labels from a source repo
@@ -74,6 +76,8 @@ from the standard library plus the packages above.
 │       ├── fixtures/                   ← .patch files for commit-message tests
 │       ├── multi_arch_test_projects_test.py
 │       ├── resolve_therock_ref_test.py
+│       ├── test_pr_ci_overview.py
+│       ├── test_pr_ci_overview_github.py
 │       ├── test_pr_detect_changed_subtrees.py
 │       ├── test_pr_merge_sync_patches.py
 │       ├── therock_configure_ci_test.py
@@ -96,6 +100,7 @@ from the standard library plus the packages above.
 | `therock-ci.yml` | `resolve_therock_ref.py`, `therock_configure_ci.py` |
 | `therock-multi-arch-ci.yml` | `multi_arch_test_projects.py`, `resolve_therock_ref.py`, `therock_configure_ci.py` |
 | `component-ci.yml` | `component_ci.py` |
+| `pr-ci-overview.yml` | `pr_ci_overview.py`, `pr_ci_overview_github.py` |
 | `therock-ci-nightly.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
@@ -130,13 +135,24 @@ works locally without any extra setup.
 > Until one is added, run the suite locally before merging any change to a
 > script that has coverage.
 
+### Preview the PR CI overview
+
+The overview command is read-only unless `--update-comment` is supplied. With
+`GH_TOKEN` available to the GitHub CLI, render the current data for a pull
+request locally with:
+
+```bash
+python3 .github/scripts/pr_ci_overview_github.py \
+  --repo ROCm/rocm-libraries --pr <NUMBER>
+```
+
 ### Test conventions
 
 - File naming: use `test_<script_stem>.py` for new files. Pre-existing files use
   `<script_stem>_test.py`; leave them as-is when making unrelated changes.
-- Keep tests free of real network calls. `GitHubCLIClient` is the only class
-  that makes HTTP requests — replace it with a `MagicMock` or a hand-written
-  stub in every test that reaches it.
+- Keep tests free of real network calls. Replace `GitHubCLIClient` or a
+  script's `gh` wrapper with a `MagicMock` or hand-written stub in every test
+  that reaches it.
 - Use `tempfile.TemporaryDirectory` for any test that needs real filesystem or
   git operations.
 - Follow the import pattern used by the existing test files:
