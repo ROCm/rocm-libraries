@@ -53,7 +53,12 @@ struct EstimateAsmCyclesPerInstructionAnalysis {
 
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 
-/// Calculate estimate asm cycles for a function
+/// Calculate estimate asm cycles for a function. This is a pure query: unlike
+/// createEstimateAsmCyclesPass(), it does NOT annotate instructions with
+/// `<This is N-cycle>` comments or publish the total-cycles function metadata,
+/// so it is safe to call from AM.getResult<EstimateAsmCyclesAnalysis>() and
+/// other read-only contexts. Use createEstimateAsmCyclesPass() when you want
+/// the annotated IR.
 /// @param func The function to analyze
 /// @param passCtx The pass context
 /// @return The total estimated cycles
