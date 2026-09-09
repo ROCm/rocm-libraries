@@ -35,6 +35,9 @@ test_categories:
     test_patterns:
       - "quick_*"
       - "Smoke/*"
+      # "Quick/*" and "Standard/*" match the C++ suites that carry an explicit
+      # tier prefix (layernorm uses Quick/Standard/Comprehensive/Full).
+      - "Quick/*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -47,6 +50,8 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
+      - "Quick/*"
+      - "Standard/*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -58,34 +63,15 @@ test_categories:
     test_patterns:
       - "*"
     # Layernorm backward is always built (HIPDNN_IT_ALWAYS_BUILT_SOURCES), so
-    # unlike the other C++ graph suites it runs in CI. At 2741 s on gfx1151 it
-    # timed this job out: ROCm/rocm-libraries#11529. Cost is host-side
-    # verification, ~450 ns per tensor element regardless of dtype, so a few big
-    # shapes repeated over 7 dtype fixtures x 2 layouts dominate. Excluding them
-    # brings it to 42 s measured; the "full" tier still runs everything.
+    # unlike the other C++ graph suites it runs in CI. It used to need a list of
+    # hand-maintained exclusions here -- including gtest parameter indices, which
+    # shifted silently whenever the shape list changed -- because its Smoke tier
+    # mixed 24-element axis sweeps with 21M-element production shapes.
     #
-    # Explicit list because YAML cannot concatenate an aliased sequence, hence
-    # the repeated "*DISABLED*" instead of *common_excludes.
-    exclude:
-      - "*DISABLED*"
-      # 1162 s: batch-256/512 volumetric shapes, ~5-29 s a case. The engine's
-      # test-config TOML aims to skip these but its pattern is the forward
-      # suite's "Full5dLargeBatch/" prefix, which the always-built backward
-      # suites do not use, so they ran anyway.
-      - "Full/*IntegrationGpuLayernormBackwardLargeBatch*"
-      # 1274 s: 19 production shapes x 2 bias x 2 layouts x 7 fixtures. No dtype
-      # subset fits -- each fixture alone is ~180 s.
-      - "Full/*IntegrationGpuLayernormBackward*5D*"
-      # One shape, {32,32,14,25,59} (21.1M el), is 263 s of Smoke 5D's 288 s; the
-      # other 22 cases cost 24 s, so only these four go.
-      # Index rather than name because the shape is not in the test name:
-      # Combine(2 layouts, getLayernorm5DTestCases()) gives index = layout * 13 +
-      # case, and this shape is cases 10 and 12 in common/LayernormCommon.hpp.
-      # Re-derive if that list changes -- the indices shift silently.
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/10"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/12"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/23"
-      - "Smoke/*IntegrationGpuLayernormBackward*5D*.Correctness/25"
+    # The shapes now live in disjoint per-tier catalogs in
+    # common/LayernormCommon.hpp, so cost is bounded by tier membership and this
+    # tier needs no layernorm carve-out at all.
+    exclude: *common_excludes
     labels:
       - "comprehensive"
       - "nightly"

@@ -27,6 +27,9 @@ test_categories:
       # GTest treats '/' and '_' as literal chars, so both patterns are needed.
       - "quick_*"
       - "Smoke/*"
+      # "Quick/*" and "Standard/*" match the C++ suites that carry an explicit
+      # tier prefix (layernorm uses Quick/Standard/Comprehensive/Full).
+      - "Quick/*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -39,6 +42,8 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
+      - "Quick/*"
+      - "Standard/*"
     exclude: *common_excludes
     labels:
       - "standard"

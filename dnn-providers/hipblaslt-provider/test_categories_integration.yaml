@@ -33,6 +33,9 @@ test_categories:
       # -DBUILD_CPP_GRAPH_TESTS=ON build gets the rest back.
       - "quick_*"
       - "Smoke/*"
+      # "Quick/*" and "Standard/*" match the C++ suites that carry an explicit
+      # tier prefix (layernorm uses Quick/Standard/Comprehensive/Full).
+      - "Quick/*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -45,6 +48,8 @@ test_categories:
       - "quick_*"
       - "standard_*"
       - "Smoke/*"
+      - "Quick/*"
+      - "Standard/*"
     exclude: *common_excludes
     labels:
       - "standard"
