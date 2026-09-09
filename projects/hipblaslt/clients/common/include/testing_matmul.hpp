@@ -348,7 +348,7 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
-std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>
+std::vector<roc::host_numerics::ComparisonTolerance>
     matmulValidationTolerances(const Arguments&                                  arg,
                                std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                                hipDataType                                       inputTypeA,
@@ -356,9 +356,8 @@ std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>
                                hipDataType                                       outputType,
                                hipDataType                                       computeType)
 {
-    using AllCloseTolerance = hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance;
-    std::vector<AllCloseTolerance>  tolerances(matmulProblems.size());
-    const bool                      bfloat16Output = outputType == HIP_R_16BF;
+    std::vector<roc::host_numerics::ComparisonTolerance> tolerances(matmulProblems.size());
+    const bool                                           bfloat16Output = outputType == HIP_R_16BF;
 
     if(arg.unit_check && hipblaslt_get_arch_major() == 11 && realDataTypeSize(inputTypeA) == 2
        && realDataTypeSize(inputTypeB) == 2)
@@ -3135,34 +3134,23 @@ void testing_matmul_with_bias(const Arguments&                                  
         .computeUlp      = bool(arg.ulp_check),
         .assertNorm      = arg.norm_check_assert,
         .computeType     = arg.compute_type,
-        .inputTypeA      = arg.a_type,
-        .inputTypeB      = arg.b_type,
+        .inputTypeA      = hipblaslt::host_numerics::scalarType(arg.a_type),
+        .inputTypeB      = hipblaslt::host_numerics::scalarType(arg.b_type),
     };
 
     auto makeValidationCases =
-        [&](const std::vector<hipblaslt::host_numerics::MatmulValidationCase::AllCloseTolerance>&
-                allCloseTolerances) {
-            using hipblaslt::host_numerics::HostComparisonRequest;
+        [&](const std::vector<roc::host_numerics::ComparisonTolerance>& allCloseTolerances) {
             using hipblaslt::host_numerics::MatmulValidationCase;
+            using roc::host_numerics::Layout;
+            using roc::host_numerics::Shape;
 
-            auto output = [](int64_t     rows,
-                             int64_t     columns,
-                             int64_t     leadingDimension,
-                             int64_t     batchStride,
-                             int64_t     batchCount,
-                             const void* expected,
-                             const void* observed,
-                             hipDataType type) {
-                HostComparisonRequest request;
-                request.rows             = rows;
-                request.columns          = columns;
-                request.leadingDimension = leadingDimension;
-                request.batchStride      = batchStride;
-                request.batchCount       = batchCount;
-                request.expected         = expected;
-                request.observed         = observed;
-                request.type             = type;
-                return request;
+            auto output = [](const HipHostBuffer& expected,
+                             const HipHostBuffer& observed,
+                             hipDataType          type,
+                             const Layout&        layout) {
+                const auto scalar = hipblaslt::host_numerics::scalarType(type);
+                return MatmulValidationCase::TensorPair{expected.tensor(scalar, layout),
+                                                        observed.tensor(scalar, layout)};
             };
 
             std::vector<MatmulValidationCase> validationCases;
@@ -3173,15 +3161,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                 validationCase.outputs.reserve(matmulProblems.front().batchCount);
                 for(int batch = 0; batch < matmulProblems.front().batchCount; ++batch)
                 {
+                    const auto& matrix = matmulProblems.front().d;
                     validationCase.outputs.push_back(
-                        output(matmulProblems.front().m,
-                               matmulProblems.front().n,
-                               matmulProblems.front().d.leadingDimension(),
-                               0,
-                               1,
-                               hD_gold[batch].buf(),
-                               hD_1[batch].buf(),
-                               To));
+                        output(hD_gold[batch],
+                               hD_1[batch],
+                               To,
+                               Layout(Shape{static_cast<size_t>(matrix.rows()),
+                                            static_cast<size_t>(matrix.columns())},
+                                      {matrix.layout.stride(0), matrix.layout.stride(1)})));
                 }
                 validationCases.push_back(std::move(validationCase));
                 return validationCases;
@@ -3194,59 +3181,39 @@ void testing_matmul_with_bias(const Arguments&                                  
                 const auto&          preparedProblem   = preparedProblems[gemmIdx];
                 MatmulValidationCase validationCase;
                 validationCase.allCloseTolerance = allCloseTolerances[gemmIdx];
-                validationCase.outputs.push_back(output(normalizedProblem.m,
-                                                        normalizedProblem.n,
-                                                        normalizedProblem.d.leadingDimension(),
-                                                        normalizedProblem.d.batchStride(),
-                                                        normalizedProblem.batchCount,
-                                                        hD_gold[gemmIdx].buf(),
-                                                        hD_1[gemmIdx].buf(),
-                                                        To));
+                validationCase.outputs.push_back(
+                    output(hD_gold[gemmIdx], hD_1[gemmIdx], To, normalizedProblem.d.layout));
                 if(arg.amaxD)
                 {
-                    auto request = output(1,
-                                          1,
-                                          1,
-                                          1,
-                                          normalizedProblem.batchCount,
-                                          hAmaxD_gold[gemmIdx].buf(),
-                                          hAmaxD[gemmIdx].buf(),
-                                          Talpha);
+                    auto request = output(hAmaxD_gold[gemmIdx],
+                                          hAmaxD[gemmIdx],
+                                          Talpha,
+                                          Layout::contiguousLastDimensionFastest(Shape{1}));
                     validationCase.maximum
                         = MatmulValidationCase::SideOutput{request, request, false};
                 }
                 if(!arg.gradient && arg.use_e)
                 {
                     const auto& auxiliary = *normalizedProblem.auxiliary;
-                    auto        request   = output(normalizedProblem.m,
-                                          normalizedProblem.n,
-                                          auxiliary.leadingDimension(),
-                                          auxiliary.batchStride(),
-                                          normalizedProblem.batchCount,
-                                          hE_gold[gemmIdx].buf(),
-                                          hE[gemmIdx].buf(),
-                                          Taux);
+                    auto request = output(hE_gold[gemmIdx], hE[gemmIdx], Taux, auxiliary.layout);
                     validationCase.auxiliary
                         = MatmulValidationCase::SideOutput{request, request, true};
                 }
                 if(arg.gradient && arg.bias_vector)
                 {
-                    auto selected       = output(preparedProblem.biasElements,
-                                           1,
-                                           preparedProblem.biasElements,
-                                           preparedProblem.biasElements,
-                                           normalizedProblem.batchCount,
-                                           hBias_gold[gemmIdx].buf(),
-                                           hBias[gemmIdx].buf(),
-                                           Tbias);
-                    auto norm           = output(normalizedProblem.m,
-                                       1,
-                                       normalizedProblem.m,
-                                       normalizedProblem.m,
-                                       normalizedProblem.batchCount,
-                                       hBias_gold[gemmIdx].buf(),
-                                       hBias[gemmIdx].buf(),
-                                       Tbias);
+                    const auto   selected     = output(hBias_gold[gemmIdx],
+                                                 hBias[gemmIdx],
+                                                 Tbias,
+                                                 Layout::contiguousLastDimensionFastest(
+                                                     Shape{preparedProblem.biasElements}));
+                    const size_t biasElements = static_cast<size_t>(
+                        arg.bias_source == hipblaslt_bias_source::b ? normalizedProblem.n
+                                                                    : normalizedProblem.m);
+                    const auto norm
+                        = output(hBias_gold[gemmIdx],
+                                 hBias[gemmIdx],
+                                 Tbias,
+                                 Layout::contiguousLastDimensionFastest(Shape{biasElements}));
                     validationCase.bias = MatmulValidationCase::SideOutput{selected, norm, false};
                 }
                 validationCases.push_back(std::move(validationCase));
