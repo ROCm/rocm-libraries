@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -147,8 +147,8 @@ struct rocfft_field_t
      * @brief Verifies whether this field is consistent as input (resp. output)
      * for embarrassingly-parallel computations of specific types of Fourier
      * Transforms and, if so, returns the corresponding output (resp. input)
-     * field. All of this object's bricks must have full (i.e., non-partial)
-     * length axes in their layouts.
+     * field. All of this object's length axes must be undistributed (see
+     * `has_undistributed_length_axes()`).
      * 
      * @param[in] other_io I/O label for the field to be returned. Explicitly,
      * the calling object's layout is considered an input (resp. output) layout
@@ -170,7 +170,8 @@ struct rocfft_field_t
      * (sharing the same locations, brick-wise).
      * 
      * @throw An `std::logic_error` is thrown if the current object has no brick,
-     * or if any of its bricks has a partial length axis.
+     * or if any of its length axes is distributed (see
+     * `has_undistributed_length_axes()`).
      */
     std::optional<rocfft_field_t>
         get_other_embarrassingly_parallel_io_field(io_data_label           other_io,
@@ -242,6 +243,15 @@ private:
     // public constructor taking ownership of a complete vector of bricks (given all at once).
     rocfft_field_t() = default;
 
+    /**
+     * @brief Validates and refreshes the derived state of a field whose bricks were
+     * added incrementally (and thus unvalidated) through the public C API
+     * (`rocfft_field_create` + `rocfft_field_add_brick`), by re-running the
+     * brick-vector constructor over the current bricks. Intended solely for
+     * finalizing such externally, incrementally-defined fields.
+     *
+     * @note If validation fails, the object is left in an undefined state.
+     */
     inline void finalize()
     {
         rocfft_field_t finalized_field(std::move(bricks));
