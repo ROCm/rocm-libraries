@@ -38,7 +38,7 @@ const auto& GetTestParams()
 {
     static const auto params = [] {
         Gpu supported_gpus = Gpu::gfx950 | Gpu::gfx125X;
-	auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+	    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.Tunable(5);
         return p;
     }();
