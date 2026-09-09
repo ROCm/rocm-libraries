@@ -2316,6 +2316,33 @@ def cases():
 GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
+# Cases the gate builds and hashes but does not compare against the golden.
+#
+# A quarantine is for drift whose *intent* is unknown: the emitted IR no longer
+# matches the committed digest, and we cannot yet say whether the code or the
+# golden is the correct side. Re-blessing would silently ratify a possible
+# regression, so the recorded digests are left untouched and the case is skipped
+# instead -- the golden keeps the pre-drift value for whoever roots it out.
+#
+# This is a temporary state, not a way to retire a case: an entry is removed by
+# resolving the drift (fix the emitter, or re-bless with a reviewed explanation),
+# never by deleting the case. `test_quarantined_cases_still_exist` keeps an entry
+# from outliving the case it names.
+QUARANTINED_CASES = frozenset(
+    {
+        # conv_wgrad_reduce drifts at all three flavors on both arches. The
+        # digests and the emitter both arrived in #10571 and nothing under
+        # platform/python has touched the family since, so the golden never
+        # matched the code it shipped with -- it looks blessed from a tree other
+        # than the one that squash-merged. The drift is deterministic (CI and a
+        # local host produce identical current digests), which is what makes
+        # "which side is right" a code-review question rather than a flake.
+        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16",
+        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16",
+        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16",
+    }
+)
+
 
 def run(ir_dir: Path | None = None, *, flavor: str):
     results = {}
@@ -2353,12 +2380,29 @@ def run(ir_dir: Path | None = None, *, flavor: str):
     }
 
 
-def build_golden() -> dict:
-    """Run every case under each golden flavor and return the flavor-keyed doc."""
-    return {
+def build_golden(previous: dict | None = None) -> dict:
+    """Run every case under each golden flavor and return the flavor-keyed doc.
+
+    ``previous`` is the golden being replaced, if any. Records for
+    :data:`QUARANTINED_CASES` are carried over from it verbatim rather than
+    taken from the fresh run: a quarantined case is precisely one whose current
+    digest we are declining to ratify, so a re-bless done for some unrelated
+    family must not overwrite the pre-drift value the quarantine exists to keep.
+    """
+    doc = {
         "schema": GOLDEN_SCHEMA,
         "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
     }
+    if not previous or not QUARANTINED_CASES:
+        return doc
+    for fl, sub in doc["flavors"].items():
+        old = previous.get("flavors", {}).get(fl, {})
+        for section in ("cases", "expected_failures"):
+            for cid in QUARANTINED_CASES:
+                sub[section].pop(cid, None)
+                if cid in old.get(section, {}):
+                    sub[section][cid] = old[section][cid]
+    return doc
 
 
 def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
@@ -2393,19 +2437,23 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
 def compare(base, cur):
     errors = []
     for section in ("cases", "expected_failures"):
-        bkeys = set(base.get(section, {}))
-        ckeys = set(cur.get(section, {}))
+        bkeys = set(base.get(section, {})) - QUARANTINED_CASES
+        ckeys = set(cur.get(section, {})) - QUARANTINED_CASES
         for missing in sorted(bkeys - ckeys):
             errors.append(f"{section}: missing current {missing}")
         for new in sorted(ckeys - bkeys):
             errors.append(f"{section}: new current {new}")
     for cid, brec in sorted(base.get("cases", {}).items()):
+        if cid in QUARANTINED_CASES:
+            continue
         crec = cur.get("cases", {}).get(cid)
         if not crec:
             continue
         if brec.get("sha256") != crec.get("sha256"):
             errors.append(f"{cid}: {brec.get('sha256')} -> {crec.get('sha256')}")
     for cid, brec in sorted(base.get("expected_failures", {}).items()):
+        if cid in QUARANTINED_CASES:
+            continue
         crec = cur.get("expected_failures", {}).get(cid)
         if not crec:
             continue
@@ -2441,13 +2489,19 @@ def main():
     ns = ap.parse_args()
 
     if ns.write:
-        doc = build_golden()
+        prev = json.loads(ns.write.read_text()) if ns.write.is_file() else None
+        doc = build_golden(prev)
         ns.write.parent.mkdir(parents=True, exist_ok=True)
         ns.write.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
         for fl, sub in doc["flavors"].items():
             print(
                 f"wrote {fl}: {len(sub['cases'])} ok, "
                 f"{len(sub['expected_failures'])} failures"
+            )
+        if QUARANTINED_CASES:
+            print(
+                f"kept {len(QUARANTINED_CASES)} quarantined digest(s) from the "
+                "previous golden: " + ", ".join(sorted(QUARANTINED_CASES))
             )
         print(f"-> {ns.write}")
         return

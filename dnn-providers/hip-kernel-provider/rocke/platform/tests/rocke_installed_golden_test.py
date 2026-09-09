@@ -92,7 +92,11 @@ def _find_golden() -> Path:
 def main() -> int:
     _add_installed_python_paths()
 
-    from rocke_ir_parity_harness import GOLDEN_FLAVORS, check_golden
+    from rocke_ir_parity_harness import (
+        GOLDEN_FLAVORS,
+        QUARANTINED_CASES,
+        check_golden,
+    )
 
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)
@@ -101,6 +105,14 @@ def main() -> int:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
     print(f"rocKE installed golden gate: PASS ({flavors}, golden={golden.name})")
+    # A quarantined case passes by exclusion, not by matching. Say so on every
+    # run so the lane never reports an unqualified green while drift is parked.
+    if QUARANTINED_CASES:
+        print(
+            f"  NOT COMPARED ({len(QUARANTINED_CASES)} quarantined, drift unresolved):"
+        )
+        for cid in sorted(QUARANTINED_CASES):
+            print(f"    {cid}")
     return 0
 
 
