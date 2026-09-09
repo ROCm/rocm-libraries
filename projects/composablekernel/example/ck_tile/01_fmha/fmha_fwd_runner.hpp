@@ -17,7 +17,6 @@
 #include <functional>
 #include <cmath>
 #include <numeric>
-#include <stdexcept>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -1006,27 +1005,29 @@ fwd_result fmha_fwd_run(mode_enum mode,
     {
         float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
         float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        float qkv_max = 3.f;
+        float qkv_max       = 3.f;
+        float max_descale_q = qkv_max / q_dtype_max;
+        float max_descale_k = qkv_max / k_dtype_max;
+        float max_descale_v = qkv_max / v_dtype_max;
 
-        // Powers of two because v_descale ends up in an E8M0 scale operand.
-        // Neighbouring entries differ so an index off-by-one changes the answer.
-        constexpr int kCycle = 4;
-        auto fill_blockscale = [](auto& t, int e_top, int phase) {
-            const auto lens = t.get_lengths();
-            t.ForEach([&](auto& self, auto i) {
-                const int flat = static_cast<int>((i[0] * lens[1] + i[1]) * lens[2] + i[2]);
-                self(i)        = std::ldexp(1.f, e_top - (flat + phase) % kCycle);
-            });
-        };
-        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
+        ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
+            q_descale_host);
+        ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(
+            k_descale_host);
 
-        const float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
-        const int e_v_top       = (init_method == "3") ? top_exp(qkv_max / v_dtype_max) : 2;
-
-        fill_blockscale(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
-        fill_blockscale(k_descale_host, top_exp(qkv_max / k_dtype_max), 1);
-        fill_blockscale(v_descale_host, e_v_top, 2);
+        if(ck_tile::is_gfx125_supported())
+        {
+            // qr_tdm carries v_descale in an E8M0 operand, so sample exact powers of two.
+            ck_tile::FillUniformScaleDistribution<ck_tile::e8m0_t>{
+                max_descale_v / 8.f, max_descale_v, next_seed()}(v_descale_host);
+        }
+        else
+        {
+            ck_tile::FillUniformDistribution<float>{
+                max_descale_v * 0.8f, max_descale_v, next_seed()}(v_descale_host);
+        }
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
@@ -1127,21 +1128,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
     bias_buf.ToDevice(bias_host.data());
     q_descale_buf.ToDevice(q_descale_host.data());
     k_descale_buf.ToDevice(k_descale_host.data());
-    if(qscale.type == quant_scale_enum::blockscale)
-    {
-        // v_descale rides an E8M0 operand, which truncates towards zero.
-        const bool v_descale_is_pow2 =
-            std::all_of(v_descale_host.begin(), v_descale_host.end(), [](auto v) {
-                const float f = ck_tile::type_convert<float>(v);
-                const float r =
-                    ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::e8m0_t>(f));
-                return ck_tile::bit_cast<uint32_t>(f) == ck_tile::bit_cast<uint32_t>(r);
-            });
-        if(!v_descale_is_pow2)
-        {
-            throw std::runtime_error("v_descale must be a power of two with -qscale=bs");
-        }
-    }
     v_descale_buf.ToDevice(v_descale_host.data());
     block_scale_seqstart_q_buf.ToDevice(block_scale_seqstart_q_host.data());
     block_scale_seqstart_k_buf.ToDevice(block_scale_seqstart_k_host.data());
