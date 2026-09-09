@@ -80,7 +80,7 @@ def benchmark_one(
     warmup: int = 5,
     seed: int = 0,
     cap_blocks: int | None = 65536,
-    num_sms: int = 120,
+    num_cus: int = 120,
 ) -> dict[str, Any]:
     """Time one CK DSL `unified_attention` tiled-2D launch on this shape."""
     from kernels import UnifiedAttentionProblem, run_unified_attention_torch
@@ -108,7 +108,7 @@ def benchmark_one(
         use_alibi=shape.has_alibi,
         use_qq_bias=False,
         use_fp8=False,
-        num_sms=num_sms,
+        num_cus=num_cus,
     )
 
     hip_stream = _bench_stream_handle()
@@ -200,10 +200,10 @@ def main() -> int:
         help="cap paged KV-cache num_blocks to bound HBM use (default 65536)",
     )
     parser.add_argument(
-        "--num-sms",
+        "--num-cus",
         type=int,
         default=120,
-        help="num_sms hint passed to UnifiedAttentionProblem (default 120 for MI300/MI350)",
+        help="num_cus hint passed to UnifiedAttentionProblem (default 120 for MI300/MI350)",
     )
     parser.add_argument("--output", "-o", type=Path, default=None)
     parser.add_argument(
@@ -242,7 +242,7 @@ def main() -> int:
                 warmup=args.warmup,
                 seed=args.seed,
                 cap_blocks=args.cap_blocks,
-                num_sms=args.num_sms,
+                num_cus=args.num_cus,
             )
         except (
             Exception

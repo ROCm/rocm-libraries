@@ -8,7 +8,5 @@
 License
 ******************************************
 
-hipThreads is distributed under the Apache License v2.0 with LLVM Exceptions.
-
 .. include:: ../LICENSE.txt
   :literal:

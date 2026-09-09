@@ -595,6 +595,63 @@ class TestHelpers(unittest.TestCase):
             2,
         )
 
+    def test_coalesced_loader_choose_vec_row_axis(self):
+        # vector_axis="row" checks tile_rows % vec instead of tile_cols % vec
+        # (used by wgrad to vectorise the stride-1 free axis). 64x64/256: the
+        # row axis 64%8==0 and 4096/8=512 ≥ 256 (and %256==0) -> vec=8.
+        self.assertEqual(
+            CoalescedTileLoader.choose_vec(
+                tile_rows=64, tile_cols=64, block_size=256, vector_axis="row"
+            ),
+            8,
+        )
+        # Row axis constrains the width even when the column axis would allow
+        # more: tile_rows=20 is divisible by 4 and 2 but not 8, so a row-mode
+        # vector caps at 4 (whereas a 64-wide column axis would permit 8).
+        self.assertEqual(
+            CoalescedTileLoader.choose_vec(
+                tile_rows=20, tile_cols=64, block_size=64, vector_axis="row"
+            ),
+            4,
+        )
+        # rows_per_vec mirrors cols_per_vec but along the row axis.
+        ldr = CoalescedTileLoader(
+            tile_rows=64, tile_cols=32, block_size=256, load_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr.rows_per_vec, 8)
+
+    def test_coalesced_loader_vector_axis_validation(self):
+        # A mistyped vector_axis must fail fast (not silently fall through to the
+        # "col" branch), at both construction entry points.
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader.choose_vec(
+                tile_rows=64, tile_cols=64, block_size=256, vector_axis="Row"
+            )
+        with self.assertRaises(ValueError):
+            CoalescedTileLoader(
+                tile_rows=64,
+                tile_cols=64,
+                block_size=256,
+                load_vec=1,
+                vector_axis="Row",
+            )
+
+    def test_coalesced_loader_from_tile_normalizes_scalar_axis(self):
+        # When choose_vec collapses to 1 the axis is irrelevant; from_tile must
+        # normalise "row" back to the canonical scalar "col" path so a vec==1
+        # loader is byte-identical regardless of the axis requested.
+        ldr = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=1, block_size=64, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr.load_vec, 1)
+        self.assertEqual(ldr.vector_axis, "col")
+        # A width > 1 keeps the requested row axis.
+        ldr_vec = CoalescedTileLoader.from_tile(
+            tile_rows=64, tile_cols=64, block_size=256, max_vec=8, vector_axis="row"
+        )
+        self.assertEqual(ldr_vec.load_vec, 8)
+        self.assertEqual(ldr_vec.vector_axis, "row")
+
     def test_async_loader_choose_dwords(self):
         # 128 halves wide => has to be multiple of 8 halves (dwords=4):
         # tile_rows=64, tile_cols=128, threads=256: chunks = 64*128/8 = 1024 ≥ 256 ✓
@@ -609,6 +666,59 @@ class TestHelpers(unittest.TestCase):
             LdsLayout.padded_k(64, 8).validate_for_async()
         with self.assertRaises(ValueError):
             LdsLayout(logical_cols=64, swizzle="xor").validate_for_async()
+
+    def test_wgrad_async_rejects_non_packed_lds_layout(self):
+        """An explicit lds_layout must reach validate_for_async() for wgrad too.
+
+        The scalar ``lds_k_pad`` guard cannot stand in for this: an explicit
+        ``lds_layout`` object beats the scalar in ``effective_lds_layout()``, and
+        the xor swizzle has no scalar analogue at all. Without the call these
+        specs build and only fail deep inside the emitter, which the sweep
+        drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
+        """
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            is_valid_wgrad_spec,
+        )
+
+        def _spec(**over):
+            return WgradConvSpec(
+                problem=ConvProblem(N=1, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+                name="wgrad_async_guard",
+                data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=1,
+                lds_k_outer=True,
+                async_dma=True,
+                **over,
+            )
+
+        # The packed layout the async intrinsic actually writes is accepted.
+        _spec(lds_layout=LdsLayout.packed_async(64)).validate()
+
+        for bad in (
+            LdsLayout.padded_k(64, 8),
+            LdsLayout(logical_cols=64, swizzle="xor"),
+        ):
+            spec = _spec(lds_layout=bad)
+            with self.assertRaises(ValueError):
+                spec.validate()
+            # And the soft validator reports it rather than skipping silently.
+            ok, why = is_valid_wgrad_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertTrue(why)
 
     def test_schedule_policy_emits_expected_hints(self):
         b = IRBuilder("sched_smoke")
@@ -1497,6 +1607,30 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         legacy = f'target datalayout = "{_datalayout_for_flavor("llvm20")}"'
         self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
         self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
+
+    def test_llvm23_datalayout_is_llvm22_plus_me_mangling(self):
+        """llvm23 is no longer an alias of llvm22: it is the llvm22 layout with
+        the ELF ``m:e`` symbol-mangling spec spliced in after the leading
+        endianness field.
+
+        The toolchain drift guard proves this only on a ROCm 7.13+ host with
+        hipcc; this pins the same contract on the bare CI gate, so an accidental
+        re-alias (or a stray edit to either constant) fails here with a precise
+        message instead of surfacing as an opaque byte-identity golden diff.
+        """
+        from rocke.core.lower_llvm import _DATALAYOUT_LLVM22, _DATALAYOUT_LLVM23
+
+        self.assertNotEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22,
+            "llvm23 is no longer an alias of llvm22 (it adds the m:e spec)",
+        )
+        self.assertEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1),
+            "llvm23 datalayout must be the llvm22 layout plus the m:e "
+            "symbol-mangling spec",
+        )
 
     def test_flavor_for_rocm_clamps_at_both_ends(self):
         """Version mapping is clamped, never raising: newest above, oldest below."""
@@ -6383,7 +6517,13 @@ class TestExtendedHelperBuilds(unittest.TestCase):
         b.global_atomic_add_pk_bf16(ptr, idx, b.zero_vec(BF16, 2))
         b.ret()
         ll = lower_kernel_to_llvm(b.kernel)
-        self.assertIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
+        # There is no llvm.amdgcn.global.atomic.fadd.v2bf16 in the shipping ROCm
+        # LLVM; the packed-bf16 atomic goes through a generic atomicrmw plus the
+        # AMDGPU memory-model metadata that selects global_atomic_pk_add_bf16.
+        self.assertIn("atomicrmw fadd ptr addrspace(1)", ll)
+        self.assertIn("<2 x bfloat>", ll)
+        self.assertIn("amdgpu.no.fine.grained.memory", ll)
+        self.assertNotIn("@llvm.amdgcn.global.atomic.fadd.v2bf16", ll)
 
     def test_umul_hi_i32_lowers_via_zext_mul_lshr_trunc(self):
         from rocke.core.ir import I32, IRBuilder

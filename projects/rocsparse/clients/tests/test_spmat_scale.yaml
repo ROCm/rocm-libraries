@@ -1,0 +1,241 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_range_quick
+    - { alpha:   2.0, alphai:  1.0 }
+
+  - &alpha_range_checkin
+    - { alpha:   0.0, alphai:  0.0 }
+    - { alpha:   3.0, alphai:  0.5 }
+    - { alpha:  -1.5, alphai: -0.8 }
+
+Tests:
+# C = alpha * A
+
+# Quick - representative slice per distinct value-array layout (CSR: nnz, BSR: blocked,
+# ELL: ell_width, SELL: slice-packed). COO/COO AoS/CSC share the CSR nnz layout and the full
+# format cross-product runs in nightly and pre_checkin.
+- name: spmat_scale
+  category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  block_dim: [2]
+  sell_slice_size: [8]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
+  matrix: [rocsparse_matrix_random]
+
+# Quick - Blocked-ELL smoke test (single block size).
+- name: spmat_scale
+  category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  N: [300]
+  block_dim: [2]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale_file
+  category: quick
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos5]
+
+# Nightly - exhaustive format cross-product and full file set (moved out of quick to keep
+# quick runtime low; see PR #9729 review).
+- name: spmat_scale
+  category: nightly
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300, 512]
+  N: [300, 254]
+  block_dim: [2]
+  sell_slice_size: [8]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale
+  category: nightly
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [300, 512]
+  N: [300, 254]
+  block_dim: [2, 4]
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale_file
+  category: nightly
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]
+
+# Pre-checkin
+- name: spmat_scale_bad_arg
+  category: pre_checkin
+  function: spmat_scale_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+
+- name: spmat_scale
+  category: pre_checkin
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [1956]
+  block_dim: [3]
+  sell_slice_size: [16]
+  alpha_alphai: *alpha_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale
+  category: pre_checkin
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [1956]
+  block_dim: [3, 5]
+  alpha_alphai: *alpha_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale
+  category: pre_checkin
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [850]
+  N: [732]
+  block_dim: [4]
+  sell_slice_size: [32]
+  alpha_alphai: *alpha_range_checkin
+  baseA: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale
+  category: pre_checkin
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [850]
+  N: [732]
+  block_dim: [4]
+  alpha_alphai: *alpha_range_checkin
+  baseA: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_bell]
+  matrix: [rocsparse_matrix_random]
+
+- name: spmat_scale_file
+  category: pre_checkin
+  function: spmat_scale
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  alpha_alphai: *alpha_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos3,
+             nos5,
+             nos7,
+             scircuit]

@@ -6,6 +6,7 @@
 
 #include <flatbuffers/flatbuffer_builder.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
@@ -127,6 +128,17 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                              }
 
 )
+
+NLOHMANN_JSON_SERIALIZE_ENUM(ResampleMode,
+                             {{ResampleMode::NOT_SET, "not_set"},
+                              {ResampleMode::MAXPOOL, "maxpool"},
+                              {ResampleMode::AVGPOOL_EXCLUDE_PADDING, "avgpool_exclude_padding"},
+                              {ResampleMode::AVGPOOL_INCLUDE_PADDING, "avgpool_include_padding"}})
+
+NLOHMANN_JSON_SERIALIZE_ENUM(PaddingMode,
+                             {{PaddingMode::PADDING_NOT_SET, "padding_not_set"},
+                              {PaddingMode::NEG_INF_PAD, "neg_inf_pad"},
+                              {PaddingMode::ZERO_PAD, "zero_pad"}})
 }
 
 namespace hipdnn_flatbuffers_sdk::json

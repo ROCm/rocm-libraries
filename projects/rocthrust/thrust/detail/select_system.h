@@ -28,7 +28,9 @@
 #include <thrust/detail/type_deduction.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(type_traits)
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -65,7 +67,7 @@ struct select_system_fn final
 
 } // namespace select_system_detail
 
-THRUST_GLOBAL_CONSTANT select_system_detail::select_system_fn select_system{};
+THRUST_INLINE_CONSTANT select_system_detail::select_system_fn select_system{};
 
 } // namespace detail
 

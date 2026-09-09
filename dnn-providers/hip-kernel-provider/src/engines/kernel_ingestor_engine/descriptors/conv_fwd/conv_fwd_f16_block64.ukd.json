@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "2eb00697-80a3-4ffe-b4cd-2e5c71d9d834",
+  "name": "conv_fwd.f16_block64",
+  "kernel_source": {
+    "kind": "embedded_source",
+    "source_file": "ConvFwd.cpp",
+    "entry_point": "ConvFwd"
+  },
+  "metadata": {
+    "block_size": 64,
+    "dtype": "HALF"
+  },
+  "priority": 0
+}

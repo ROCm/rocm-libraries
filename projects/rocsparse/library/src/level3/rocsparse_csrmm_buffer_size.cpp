@@ -244,6 +244,7 @@ rocsparse_status rocsparse::csrmm_buffer_size(rocsparse_handle          handle,
                                               int64_t                   n,
                                               int64_t                   k,
                                               int64_t                   nnz,
+                                              int64_t                   batch_count_C,
                                               const rocsparse_mat_descr descr,
                                               rocsparse_datatype        compute_datatype,
                                               rocsparse_datatype        csr_val_datatype,
@@ -284,6 +285,15 @@ rocsparse_status rocsparse::csrmm_buffer_size(rocsparse_handle          handle,
                                 csr_row_ptr,
                                 csr_col_ind,
                                 buffer_size));
+
+    // The nnz-split temporary reduction buffers (row_block_red / val_block_red)
+    // are laid out contiguously per batch, so the workspace scales with the
+    // number of output batches. Over-allocate by batch_count_C; this is a safe
+    // upper bound for row-split/default (which need no buffer) as well.
+    if(batch_count_C > 1)
+    {
+        *buffer_size *= static_cast<size_t>(batch_count_C);
+    }
 
     return rocsparse_status_success;
 }

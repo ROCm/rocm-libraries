@@ -19,11 +19,13 @@
  * then this is the single C-side source. */
 static const char ROCKE_TRIPLE[] = "amdgcn-amd-amdhsa";
 /* The AMDGPU datalayout is FLAVOR-KEYED (Python _DATALAYOUT_LLVM20 /
- * _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23): one field drifts between LLVM 20
- * (ROCm 7.0/7.1) and LLVM 22 (ROCm >= 7.2) -- the buffer-fat-pointer address
- * space p8 alignment (...-p8:128:128-... -> ...-p8:128:128:128:48-...). The
- * triple is unchanged across flavors. Must stay byte-identical with the Python
- * constants. */
+ * _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23): two fields drift across flavors --
+ * the buffer-resource address space p8 (the 128-bit buffer descriptor, not the
+ * p7 fat pointer) gained an index-width field in LLVM 22 (...-p8:128:128-... ->
+ * ...-p8:128:128:128:48-...), and the ELF symbol-mangling spec m:e (absent in
+ * LLVM 20 / 22) is present in LLVM 23 (ROCm 7.13+): e-p:64:64-... ->
+ * e-m:e-p:64:64-.... The triple is unchanged across flavors. Must stay
+ * byte-identical with the Python constants. */
 static const char ROCKE_DATALAYOUT_LLVM20[]
     = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
@@ -34,12 +36,16 @@ static const char ROCKE_DATALAYOUT_LLVM22[]
       "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
-/* LLVM 23 has not moved the datalayout off the LLVM 22 shape, exactly as
- * Python's `_DATALAYOUT_LLVM23 = _DATALAYOUT_LLVM22`. Aliasing rather than
- * folding llvm23 into the `else` arm below is what makes a future divergence a
- * one-line edit here instead of a silent wrong-datalayout bug: the `else` arm
- * would keep handing llvm23 the LLVM 22 string with nothing to notice. */
-static const char* const ROCKE_DATALAYOUT_LLVM23 = ROCKE_DATALAYOUT_LLVM22;
+/* LLVM 23 (ROCm 7.13+) adds the ELF symbol-mangling spec m:e that LLVM 22
+ * omits; the p8-indexed layout is otherwise identical (Python
+ * _DATALAYOUT_LLVM23). Kept as its own constant rather than folded into the
+ * `else` arm below so the next divergence is a one-line edit, not a silent
+ * wrong-datalayout bug. */
+static const char ROCKE_DATALAYOUT_LLVM23[]
+    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
 
 /* ================================ registry ============================== */
 
@@ -148,9 +154,9 @@ const char* rocke_isa_triple(const rocke_isa_backend_t* be)
 }
 
 /* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor, branch for
- * branch: LLVM20 gets the legacy p8 layout, LLVM23 its own (currently aliased)
- * constant, and anything else -- including an unexpected value -- the modern
- * LLVM22 form. Mirrors rocke_ll_datalayout_for_flavor in lower_llvm/data.cpp;
+ * branch: LLVM20 gets the legacy p8 layout, LLVM23 its own m:e constant, and
+ * anything else -- including an unexpected value -- the modern LLVM22 form.
+ * Mirrors rocke_ll_datalayout_for_flavor in lower_llvm/data.cpp;
  * the two are held together by test_isa_and_lower_llvm_datalayouts_agree. */
 const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
                                             rocke_llvm_flavor_t flavor)

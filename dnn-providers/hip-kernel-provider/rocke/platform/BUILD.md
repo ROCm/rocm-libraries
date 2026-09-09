@@ -104,7 +104,7 @@ does not exist is now an error rather than a cue to go and find another one.
 
 In-process compile + launch needs the ROCm shared libs at runtime. The Python
 runtime resolves them WITHOUT importing torch
-(`Python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
+(`python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
 `_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;

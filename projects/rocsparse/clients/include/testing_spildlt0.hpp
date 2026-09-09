@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 #ifdef ROCSPARSE_WITH_ILDLT0
 template <typename I, typename J, typename T>

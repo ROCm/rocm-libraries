@@ -23,6 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 // clang-format off
 #ifdef ROCSPARSE_WITH_ILDLT0
@@ -30,6 +31,13 @@
 ROCSPARSE_DO_ROUTINE(spildlt0)
 #else
 #define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
+#endif
+
+#ifdef ROCSPARSE_WITH_ELL_TRSV
+#define ROCSPARSE_FOREACH_ROUTINE_ELL_TRSV    \
+ROCSPARSE_DO_ROUTINE(ellsv)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_ELL_TRSV
 #endif
 
 #define ROCSPARSE_FOREACH_ROUTINE			\
@@ -85,6 +93,7 @@ ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(cscsv)					\
+ROCSPARSE_FOREACH_ROUTINE_ELL_TRSV				\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\
@@ -137,6 +146,11 @@ ROCSPARSE_DO_ROUTINE(prune_dense2csr_by_percentage)		\
 ROCSPARSE_DO_ROUTINE(roti)					\
 ROCSPARSE_DO_ROUTINE(sctr)					\
 ROCSPARSE_DO_ROUTINE(sddmm)					\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_ell)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo_aos)			\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csr)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csc)				\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_coo)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csc)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csr)			\

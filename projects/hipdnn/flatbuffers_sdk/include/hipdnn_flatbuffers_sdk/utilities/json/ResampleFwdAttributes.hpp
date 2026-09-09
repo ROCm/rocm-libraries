@@ -11,17 +11,6 @@
 namespace hipdnn_flatbuffers_sdk::data_objects
 {
 
-NLOHMANN_JSON_SERIALIZE_ENUM(ResampleMode,
-                             {{ResampleMode::NOT_SET, "not_set"},
-                              {ResampleMode::MAXPOOL, "maxpool"},
-                              {ResampleMode::AVGPOOL_EXCLUDE_PADDING, "avgpool_exclude_padding"},
-                              {ResampleMode::AVGPOOL_INCLUDE_PADDING, "avgpool_include_padding"}})
-
-NLOHMANN_JSON_SERIALIZE_ENUM(PaddingMode,
-                             {{PaddingMode::PADDING_NOT_SET, "padding_not_set"},
-                              {PaddingMode::NEG_INF_PAD, "neg_inf_pad"},
-                              {PaddingMode::ZERO_PAD, "zero_pad"}})
-
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& j, const ResampleFwdAttributes& attr)
 {

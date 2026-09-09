@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -306,7 +299,7 @@ OutputIterator gather_if(
  * Iterator</a> and \c InputIterator1's \c value_type must be convertible to \c RandomAccessIterator's \c
  * difference_type. \tparam InputIterator2 must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator2's \c
- * value_type must be convertible to \c Predicate's argument type. \tparam RandomAccessIterator must be a model of <a
+ * value_type must be convertible to \c Predicate's \c argument_type. \tparam RandomAccessIterator must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access iterator</a> and \c
  * RandomAccessIterator's \c value_type must be convertible to \c OutputIterator's \c value_type. \tparam OutputIterator
  * must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam
@@ -330,7 +323,7 @@ OutputIterator gather_if(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -392,7 +385,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
  * Iterator</a> and \c InputIterator1's \c value_type must be convertible to \c RandomAccessIterator's \c
  * difference_type. \tparam InputIterator2 must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator2's \c
- * value_type must be convertible to \c Predicate's argument type. \tparam RandomAccessIterator must be a model of <a
+ * value_type must be convertible to \c Predicate's \c argument_type. \tparam RandomAccessIterator must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access iterator</a> and \c
  * RandomAccessIterator's \c value_type must be convertible to \c OutputIterator's \c value_type. \tparam OutputIterator
  * must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>. \tparam
@@ -414,7 +407,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;

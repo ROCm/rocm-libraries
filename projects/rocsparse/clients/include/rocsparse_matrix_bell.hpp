@@ -30,6 +30,14 @@
 
 #include "rocsparse_clients_routine_trace.hpp"
 
+// Blocked-ELL matrix in the units expected by the rocsparse_create_bell_descr API:
+//   - m, n     : scalar number of rows and columns
+//   - ell_cols : scalar number of padded ELL columns (a multiple of bdim)
+//   - bdim     : block dimension (ell_block_dim)
+// The column-index array holds one block-column index per ELL block slot, of length
+// block_rows * (ell_cols / bdim) with block_rows = (m + bdim - 1) / bdim. The value array holds
+// one scalar entry per (scalar row, padded ELL column), of length m * ell_cols. These match the
+// array lengths validated in rocsparse_create_bell_descr.
 template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
 struct bell_matrix
 {
@@ -38,30 +46,45 @@ struct bell_matrix
 
     I                      m{};
     I                      n{};
-    I                      width{};
-    rocsparse_direction    bdir{};
+    I                      ell_cols{};
     I                      bdim{1};
     rocsparse_index_base   base{};
     rocsparse_storage_mode storage_mode{rocsparse_storage_mode_sorted};
     array_t<I>             ind{};
     array_t<T>             val{};
 
+    // Number of block rows.
+    static I block_rows(I m_, I bdim_)
+    {
+        return (bdim_ > 0) ? ((m_ + bdim_ - 1) / bdim_) : 0;
+    }
+
+    // Length of the column-index array (one block-column index per ELL block slot).
+    static int64_t ind_size(I m_, I ell_cols_, I bdim_)
+    {
+        return (bdim_ > 0) ? (int64_t(block_rows(m_, bdim_)) * (ell_cols_ / bdim_)) : 0;
+    }
+
+    // Length of the value array (one scalar entry per scalar row and padded ELL column).
+    static int64_t val_size(I m_, I ell_cols_)
+    {
+        return int64_t(m_) * ell_cols_;
+    }
+
     bell_matrix(){};
     ~bell_matrix(){};
 
-    bell_matrix(
-        I m_, I n_, I width_, rocsparse_direction bdir_, I bdim_, rocsparse_index_base base_)
+    bell_matrix(I m_, I n_, I ell_cols_, I bdim_, rocsparse_index_base base_)
         : m(m_)
         , n(n_)
-        , width(width_)
-        , bdir(bdir_)
+        , ell_cols(ell_cols_)
         , bdim(bdim_)
         , base(base_)
-        , ind(width_ * m_)
-        , val(width_ * m_ * bdim_ * bdim_){};
+        , ind(ind_size(m_, ell_cols_, bdim_))
+        , val(val_size(m_, ell_cols_)){};
 
     explicit bell_matrix(const bell_matrix<MODE, T, I>& that_, bool transfer = true)
-        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base)
+        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.ell_cols, that_.bdim, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -73,7 +96,7 @@ struct bell_matrix
 
     template <memory_mode::value_t THAT_MODE>
     explicit bell_matrix(const bell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
-        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base)
+        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.ell_cols, that_.bdim, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -87,7 +110,7 @@ struct bell_matrix
     bell_matrix& operator()(const bell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-        this->define(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base);
+        this->define(that_.m, that_.n, that_.ell_cols, that_.bdim, that_.base);
         if(transfer)
         {
             this->transfer_from(that_);
@@ -101,7 +124,7 @@ struct bell_matrix
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         CHECK_HIP_THROW_ERROR((this->m == that.m && this->n == that.n && this->bdim == that.bdim
-                               && this->width == that.width && this->base == that.base)
+                               && this->ell_cols == that.ell_cols && this->base == that.base)
                                   ? hipSuccess
                                   : hipErrorInvalidValue);
 
@@ -109,22 +132,20 @@ struct bell_matrix
         this->val.transfer_from(that.val);
     };
 
-    void
-        define(I m_, I n_, I width_, rocsparse_direction bdir_, I bdim_, rocsparse_index_base base_)
+    void define(I m_, I n_, I ell_cols_, I bdim_, rocsparse_index_base base_)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-        if((this->m != m_) || (this->width != width_) || (this->bdim != bdim_))
+        if((this->m != m_) || (this->ell_cols != ell_cols_) || (this->bdim != bdim_))
         {
-            this->ind.resize(int64_t(m_) * width_);
-            this->val.resize(int64_t(m_) * width_ * bdim_ * bdim_);
+            this->ind.resize(ind_size(m_, ell_cols_, bdim_));
+            this->val.resize(val_size(m_, ell_cols_));
         }
 
-        this->m     = m_;
-        this->n     = n_;
-        this->width = width_;
-        this->bdim  = bdim_;
-        this->bdir  = bdir_;
-        this->base  = base_;
+        this->m        = m_;
+        this->n        = n_;
+        this->ell_cols = ell_cols_;
+        this->bdim     = bdim_;
+        this->base     = base_;
     }
 
     template <memory_mode::value_t THAT_MODE>
@@ -153,9 +174,8 @@ struct bell_matrix
 
                 unit_check_scalar(this->m, that_.m);
                 unit_check_scalar(this->n, that_.n);
-                unit_check_scalar(this->width, that_.width);
+                unit_check_scalar(this->ell_cols, that_.ell_cols);
                 unit_check_enum(this->base, that_.base);
-                unit_check_enum(this->bdir, that_.bdir);
                 unit_check_scalar(this->bdim, that_.bdim);
 
                 this->ind.unit_check(that_.ind);
@@ -180,12 +200,11 @@ struct bell_matrix
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         std::cout << "INFO BELL" << std::endl;
-        std::cout << " m     : " << this->m << std::endl;
-        std::cout << " n     : " << this->n << std::endl;
-        std::cout << " width : " << this->width << std::endl;
-        std::cout << " bdir  : " << this->bdir << std::endl;
-        std::cout << " bdim  : " << this->bdim << std::endl;
-        std::cout << " base  : " << this->base << std::endl;
+        std::cout << " m        : " << this->m << std::endl;
+        std::cout << " n        : " << this->n << std::endl;
+        std::cout << " ell_cols : " << this->ell_cols << std::endl;
+        std::cout << " bdim     : " << this->bdim << std::endl;
+        std::cout << " base     : " << this->base << std::endl;
     }
 };
 

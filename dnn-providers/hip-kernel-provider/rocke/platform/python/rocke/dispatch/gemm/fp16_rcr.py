@@ -20,6 +20,7 @@ from ...instances.common.gemm_universal import (
 )
 from ..core import (
     CandidateRegistry,
+    Capability,
     DispatchResult,
     KernelCandidate,
     KernelId,
@@ -27,10 +28,11 @@ from ..core import (
     Ranker,
     stable_json_hash,
 )
+from .binding import gemm_rcr_binding
 from .common import (
+    GEMM_DIM_VOCABULARY,
     GemmRequest,
     apply_split_k,
-    arch_family_supported,
     rcr_request_errors,
     selector_matches,
 )
@@ -167,22 +169,13 @@ def _make_candidate(
     spec_id: str,
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
-    arch_family: str,
+    arches: Tuple[str, ...],
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, GemmRequest)
-        # Arch-family gate: an RDNA/WMMA candidate must never report support on a
-        # CDNA arch (and vice versa). Without this gate ``_make_spec`` rebuilds an
-        # RDNA candidate with the target's native wave64 + a 16x16x16 MFMA atom
-        # that *also* exists on CDNA, so ``gemm_config_supported`` accepts it and
-        # the prio-10 RDNA candidate wrongly out-ranks the intended CDNA mem
-        # candidate whenever the 128x128 cshuffle tile does not divide.
-        ok, why = arch_family_supported(req, arch_family)
-        if not ok:
-            return False, why
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -195,7 +188,7 @@ def _make_candidate(
         return request_shape_supported(req, spec)
 
     def select(req: OperatorRequest) -> UniversalGemmSpec:
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, GemmRequest)
@@ -211,12 +204,15 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=GEMM_FP16_RCR_ABI_VERSION,
         priority=priority,
-        supports=support,
+        capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build_universal_gemm,
+        bind=lambda result, verify: gemm_rcr_binding(result, verify, dtype="fp16"),
     )
     return candidate
 
@@ -229,7 +225,19 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
     return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
 
 
-GEMM_FP16_REGISTRY = CandidateRegistry(_FAMILY)
+# Explicit gfx targets rather than a cdna/rdna family label. Family does not
+# imply wave size -- gfx1250 is cdna at wave32 -- so a family gate would admit a
+# wave32 target into these wave64 MFMA candidates. An arch absent from a list is
+# a target the candidate was never built or run against.
+_CDNA_MFMA_FP16 = ("gfx942", "gfx950")
+_RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
+
+GEMM_FP16_REGISTRY = CandidateRegistry(
+    _FAMILY,
+    dim_vocabulary=GEMM_DIM_VOCABULARY,
+    require_build=True,
+    require_binding=True,
+)
 GEMM_FP16_REGISTRY.extend(
     (
         _make_candidate(
@@ -237,28 +245,28 @@ GEMM_FP16_REGISTRY.extend(
             spec_id="cdna_cshuffle_default",
             priority=10,
             spec_fn=_spec_cdna_cshuffle,
-            arch_family="cdna",
+            arches=_CDNA_MFMA_FP16,
         ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
             spec_id="rdna_wmma_default",
             priority=10,
             spec_fn=_spec_rdna_wmma,
-            arch_family="rdna",
+            arches=_RDNA_WMMA,
         ),
         _make_candidate(
             name="universal_gemm_fp16_cdna_mem",
             spec_id="cdna_mem_64x128",
             priority=20,
             spec_fn=_spec_cdna_mem,
-            arch_family="cdna",
+            arches=_CDNA_MFMA_FP16,
         ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma_small",
             spec_id="rdna_wmma_32x32",
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
-            arch_family="rdna",
+            arches=_RDNA_WMMA,
         ),
     )
 )
@@ -287,7 +295,12 @@ def _kernel_id(
 
 
 def build_kernel(result: DispatchResult):
-    return build_universal_gemm(result.spec, arch=result.request.arch)
+    """Deprecated in favour of ``result.build()``.
+
+    Kept because benchmark harnesses and examples import it by name; it now
+    delegates so there is one definition of how a selection becomes IR.
+    """
+    return result.build()
 
 
 def gemm_fp16_sweep_space(req: OperatorRequest) -> Sequence[UniversalGemmSpec]:

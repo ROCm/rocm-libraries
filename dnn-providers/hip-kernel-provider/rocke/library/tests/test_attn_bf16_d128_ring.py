@@ -3,12 +3,13 @@
 
 """Regression tests for the gfx942 D128 sliced-K ring routing.
 
-The sliced-K ring (32-wide K slices -> k_groups = HD/32) staged K in 3 LDS slots
-with a kg%3 map. For D128 (k_groups=4) slice 3 reused slot 0, and the reusing DMA
-was unfenced -> numerically WRONG at realistic magnitude (max_abs ~0.5-1.3, both
-dtypes; #9198 masked it with a uniform_(-0.1,0.1) oracle whose near-uniform softmax
-never exercised the rescale across the stale slot). D64 (k_groups=2) never reused
-a slot, so it was always clean.
+The sliced-K ring stages K in ``k_slice_hd``-wide slices (k_groups = HD/k_slice_hd)
+across ``ring_depth`` LDS slots with a kg%depth map. At the 32-wide slice, D128
+(k_groups=4) had slice 3 reuse slot 0, and the reusing DMA was unfenced ->
+numerically WRONG at realistic magnitude (max_abs ~0.5-1.3, both dtypes; #9198
+masked it with a uniform_(-0.1,0.1) oracle whose near-uniform softmax never
+exercised the rescale across the stale slot). D64 was k_groups=2 then and never
+reused a slot; it now routes to width 16 (k_groups=4) and does.
 
 Two independent fixes are in the ring schedule now: a drain-on-reuse fence (always
 applied) and a depth-2 pipeline (ring_depth=2, k%2 -> no reuse). Current routing
@@ -31,7 +32,6 @@ Two layers:
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -133,8 +133,10 @@ def test_d128_launch_meta_matches_spec(gfx942, dtype, hq, hk):
     assert meta.block[0] == 64 * spec.num_warps
 
 
-def test_d64_ring_unchanged(gfx942):
-    # D64 (k_groups=2) is correctness-verified and keeps the depth-3 ring.
+def test_d64_ring_depth_unchanged(gfx942):
+    # D64 keeps the depth-3 ring and nw4. The slice WIDTH moved to 16 (k_groups
+    # 2 -> 4); this deliberately does not pin the width -- test_attn_k_slice_hd.py
+    # owns it, and asserting it here too would give two places to update.
     for dtype in ("bf16", "fp16"):
         s = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
         assert s.use_k_sliced_ring, f"D64 {dtype} must keep the ring"
@@ -187,7 +189,7 @@ requires_gfx942_gpu = pytest.mark.skipif(
 @pytest.mark.parametrize("dtype,tol", [("bf16", 5e-2), ("fp16", 5e-2)])
 @pytest.mark.parametrize("hq,hk", [(32, 8), (16, 16)])
 @pytest.mark.parametrize("sq", [512, 1024, 4096])
-def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
+def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, hk, sq):
     """Launch the production D128 kernel at realistic (unit-variance) magnitude
     and assert max_abs vs the fp32 paged-attn oracle.
 
@@ -204,12 +206,16 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
     # Force the arch resolver so the production selector picks the gfx942 path.
     old_arch = au._RESOLVED_ATTENTION_ARCH
     au._RESOLVED_ATTENTION_ARCH = "gfx942"
+    # monkeypatch.delenv, not os.environ.pop: a bare pop leaks the cleared
+    # override into every later gfx942 routing test in the same process. This
+    # test is GPU-gated, so the leak is invisible on a CPU host and only shows up
+    # in the ordering runs the regression guard is meant to cover.
     for var in (
         "HIPDNN_GFX942_K_SLICED_RING",
         "HIPDNN_GFX942_FLASH_WIDE",
         "HIPDNN_GFX942_FLASH_MLIM",
     ):
-        os.environ.pop(var, None)
+        monkeypatch.delenv(var, raising=False)
     try:
         from builders.common.attention_spec_builder import _tiled_spec_from_problem
 

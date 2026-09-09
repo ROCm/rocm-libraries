@@ -341,10 +341,10 @@ class GFX942Params(BaseOptimizationParams):
 
 
 class GFX942GAParams(BaseOptimizationParams):
-    """GFX942 GA (genetic algorithm) profile.
+    """GFX942 generic search-space profile.
 
     Broad exploratory ranges for all parameters.
-    Inherits directly from BaseOptimizationParams — GA defines its own
+    Inherits directly from BaseOptimizationParams — generic defines its own
     complete parameter set, independent of heuristic.
     """
 
@@ -354,7 +354,11 @@ class GFX942GAParams(BaseOptimizationParams):
 
     @param
     def depth_u(self, ctx: SizeContext) -> ForkParameter:
-        if self._gt.data_type == "D": return self._make_param("DepthU", [8, 16, 32, 64, 128, 256])
+        dt = self._gt.data_type
+        if dt in ("D", "Z"):
+            return self._make_param("DepthU", [8, 16, 32, 64, 128, 256])
+        if dt == "C":
+            return self._make_param("DepthU", [16, 32, 64, 128, 256, 512])
         return self._make_param("DepthU", [32, 64, 128, 256, 512, 1024])
 
     @param
