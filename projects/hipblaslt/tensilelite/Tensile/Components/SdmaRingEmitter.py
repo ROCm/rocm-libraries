@@ -157,7 +157,7 @@ class SdmaRingEmitter:
                               cachedHwReadIdxS, sizeInBytes, outCurS, outOffsetS):
         """Reserve `sizeInBytes` in the ring via a compare-exchange loop and
         compute the wrap-padding. outCurS (2 SGPRs) = reserved base index,
-        outOffsetS (1 SGPR) = pad bytes, sizeInBytes a compile-time immediate.
+        outOffsetS (1 SGPR) = pad bytes, sizeInBytes an immediate or an SGPR.
 
         MUST be CAS, not fetch_add: the wrap padding depends on the CURRENT
         cur_index, so computing the new index and claiming the slot have to be

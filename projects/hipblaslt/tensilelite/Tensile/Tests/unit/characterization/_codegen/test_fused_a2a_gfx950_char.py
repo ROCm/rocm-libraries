@@ -62,3 +62,71 @@ def test_fused_a2a_gfx950_golden(snapshot):
         key=lambda d: d["basename"],
     )
     assert digest == snapshot
+
+
+class _StubSgprPool:
+    """Ascending indices, honouring alignment; checkIn is a no-op."""
+
+    def __init__(self):
+        self.next = 8
+
+    def checkOut(self, n, tag="", preventOverflow=True):
+        idx = self.next
+        self.next += n
+        return idx
+
+    def checkOutAligned(self, n, align, tag="", preventOverflow=True):
+        self.next = -(-self.next // align) * align
+        idx = self.next
+        self.next += n
+        return idx
+
+    def checkIn(self, idx):
+        pass
+
+
+class _StubLabels:
+    def __init__(self):
+        self.n = 0
+
+    def getNameInc(self, name):
+        self.n += 1
+        return "%s_%u" % (name, self.n)
+
+
+class _StubWriter:
+    """The whole KernelWriter surface emitReserveQueueSpace touches."""
+
+    def __init__(self):
+        self.sgprPool = _StubSgprPool()
+        self.labels = _StubLabels()
+
+
+def _reserve_size_operands(size):
+    """src1 of both `cur + size` adds emitted by one emitReserveQueueSpace."""
+    import re
+
+    from rocisa.code import Module
+
+    from Tensile.Components.SdmaRingEmitter import SdmaRingEmitter
+
+    module = Module("reserve")
+    SdmaRingEmitter(groupImm=0x100).emitReserveQueueSpace(
+        module, _StubWriter(), 0, 2, 4, 6, size, 100, 102
+    )
+    return re.findall(
+        r"^s_add_u32 s\d+, s\d+, (\S+)[^\n]*"
+        r"// (?:WrapIntoRing\(cur\) \+|new lo = cur \+) size",
+        str(module),
+        re.M,
+    )
+
+
+def test_reserve_queue_space_takes_an_immediate_size():
+    assert _reserve_size_operands(84) == ["84", "84"]
+
+
+def test_reserve_queue_space_takes_an_sgpr_size():
+    from rocisa.container import sgpr
+
+    assert _reserve_size_operands(sgpr(99)) == ["s99", "s99"]
