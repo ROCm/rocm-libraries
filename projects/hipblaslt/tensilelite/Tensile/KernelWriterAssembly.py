@@ -18725,7 +18725,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(loopLabelBegin[l])
       module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
-      tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2, tag="simdSpecDispatch_tmpSgpr1_2")
+      tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2, tag="simdSpecDispatch_tmpSgpr1_2")
       sgprPC = ContinuousRegister(tmpSgpr1, 3)
       #module.add(SBranch(labelName=loopLabelEnd.getLabelName(), comment="" ))
       module.add(SLongBranchPositive(loopLabelEnd, sgprPC))
