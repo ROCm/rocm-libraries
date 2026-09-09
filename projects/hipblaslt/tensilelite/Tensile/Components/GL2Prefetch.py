@@ -348,7 +348,9 @@ class GL2PrefetchLoad(GL2Prefetch):
     # ----------------------------------------------------------------------
     # StaggerU. The unroll loop is rotated so that step j of the summation reads
     # iteration (StaggerUIter + j) % numIter instead of j, which spreads the K
-    # start of each workgroup and keeps them off the same cache lines. The
+    # start across workgroups and keeps them off the same cache lines -- across
+    # cluster-IDs under a workgroup cluster, where declareStaggerParms hands every
+    # WG in a cluster the same StaggerUIter so cross-WG multicast still hits. The
     # prefetch stream has to follow the same rotation or it would warm lines the
     # loads never touch, so it needs the two pieces the real load stream uses:
     #   - a start shift onto the rotated position (staggerStartIterDelta), and

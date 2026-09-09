@@ -52,6 +52,15 @@
 #     against its *own* chunk rather than aggregated, so a group landing on the
 #     wrong K slice fails. The group index is fed from the grid z axis rather
 #     than split out of workgroup y as production does; see build_kernel.
+#   - StaggerU: the unroll loop is rotated so step j reads iteration
+#     (StaggerUIter + j) % numIter, and the prefetch has to walk the same rotated
+#     order -- a start shifted onto the rotated position plus a one-off wrap back
+#     to the first iteration. Under a workgroup cluster the rotation is per
+#     cluster-ID, so every WG in a cluster shares one StaggerUIter and cross-WG
+#     multicast still hits. That is what lets one programmed value stand in for the
+#     whole cluster grid here, and what keeps the footprint aggregatable across it.
+#     StaggerUIter is an input to the prefetch (declareStaggerParms derives it
+#     earlier, from the cluster-ID under a cluster), so it is programmed directly.
 #   - Non-power-of-2 MacroTile (e.g. 384 for A/B, 192/96 for MX scales): exercises
 #     MT offset, non-POT gl2ncc (vectorStaticDivideAndRemainder), and non-POT
 #     perpendicular/coalesced extents. DepthU remains a multiple of MatrixInstK.
@@ -189,9 +198,11 @@ class GL2Config:
                               # the summation loop by. None leaves the StaggerU paths
                               # out entirely; an int (0 included) emits them, so 0
                               # covers "stagger code generated, StaggerU off at
-                              # runtime" -- what every non-cluster GL2 kernel now
-                              # builds. Must be < the smallest group's numIter, which
-                              # declareStaggerParms guarantees in production.
+                              # runtime". Under a cluster this one value is the whole
+                              # cluster's rotation (it is per cluster-ID, not per WG),
+                              # so programming it as a constant across the grid is what
+                              # production does. Must be < the smallest group's numIter,
+                              # which declareStaggerParms guarantees in production.
 
     @property
     def n_wg(self):
@@ -496,10 +507,13 @@ CONFIGS = [
     # its numIter and rotation so the wrap falls on a stage the kernel actually
     # exports, since a prefetch that never rolls over is indistinguishable from
     # a plain shift. Stage s prefetches (StaggerUIter + PGR + s) % numIter, so
-    # the wrap lands on stage numIter - StaggerUIter - PGR. ----
+    # the wrap lands on stage numIter - StaggerUIter - PGR.
+    # Clusters rotate too (per cluster-ID rather than per WG), so the rotation
+    # composes with the cooperative fan-out; the cluster shapes below run it from
+    # the degenerate [1,1] up to [4,4] and across a non-POT extent. ----
     # StaggerU off at runtime (StaggerUIter==0) with the rotation code emitted
-    # anyway -- what every non-cluster GL2 kernel now builds, and the case where
-    # a stray rotation or an early wrap would be pure regression.
+    # anyway -- the case where a stray rotation or an early wrap would be pure
+    # regression.
     GL2Config("su_off", [_A(True, 256), _B(True, 256)], cluster=(2, 2), stagger=0),
     # Plain rotation, wrap on stage 3 of 0..4 (8 - 3 - 2), so stages before and
     # after the roll-over are both checked. Mixed layouts: the wrap is one step
@@ -562,6 +576,30 @@ CONFIGS = [
     GL2Config("su_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
               size_i=384, size_j=384, stagger=2, k_iters=7, n_inc=4),
 
+    # ---- StaggerU x workgroup-cluster shape. The rotation itself is cluster
+    # independent -- it is one shared StaggerUIter, since the cluster stagger is
+    # per cluster-ID -- so what these pin down is that it composes with the
+    # cooperative fan-out: the rotation translates the cluster's *folded*
+    # footprint (mt_tiles macro-tiles as one block) rather than a single WG's, and
+    # every WG in the cluster has to land on the same rotated K start or the
+    # aggregate stops tiling the block. ----
+    # No cluster: the degenerate single-WG fan-out under rotation, where this WG's
+    # threads have to cover the whole footprint on their own. Wrap on stage 3 of
+    # 0..4 (8 - 3 - 2). Mixed layouts so the wrap moves along both K axes.
+    GL2Config("su_nocluster", [_A(True, 256), _B(False, 256)], cluster=(1, 1),
+              stagger=3, k_iters=8, n_inc=4),
+    # Widest fan-out, [4,4]: 16 workgroups and 4096 cooperative threads sharing one
+    # rotation, and the shape the gfx1250 TDM-multicast config now benchmarks with
+    # StaggerU on. Wrap on stage 3 of 0..4 (7 - 2 - 2).
+    GL2Config("su_cluster44", [_A(True, 256), _B(False, 256)], cluster=(4, 4),
+              stagger=2, k_iters=7, n_inc=4),
+    # Non-POT cluster extents on a non-TLU layout with a non-POT MacroTile: both
+    # fan-out remainders (tile-selector and share) take the non-POT
+    # scalarStaticRemainder path while the rotation is live, and the folded tile
+    # dim lands on the perpendicular axis the wrap does not move.
+    GL2Config("su_cluster_nonpot", [_A(False, 384), _B(False, 384)], cluster=(3, 3),
+              stagger=2, k_iters=7, n_inc=4),
+
     # ---- StaggerU x GlobalSplitU. The rotation is per group, wrapping inside
     # that group's chunk, so numIter (and with it the wrap stage) differs group
     # to group. Both chunk layouts are covered because the rotation composes
@@ -580,6 +618,17 @@ CONFIGS = [
     # the whole loop, pinning down that neither perturbs the other.
     GL2Config("su_gsu1", [_A(True, 256), _B(True, 256)], cluster=(2, 2),
               gsu=1, stagger=2, k_iters=8, n_inc=4),
+    # All three at once on the widest cluster: the chunk offset, the rotation and
+    # the [4,4] cooperative fan-out are each derived once and shared across
+    # tensors, so this is where a temporary reused by two of them would collide.
+    # 13 iterations over 2 groups is uneven, so the groups wrap on different
+    # stages (7 - 2 - 2 = 3 and 6 - 2 - 2 = 2) while sharing the rotation.
+    GL2Config("su_gsu2_cluster44", [_A(True, 256), _B(False, 256)], cluster=(4, 4),
+              gsu=2, stagger=2, k_iters=13, n_inc=4),
+    # GSU + rotation without a cluster: the chunk offset is the only thing
+    # separating the two groups, and one WG's threads cover the whole footprint.
+    GL2Config("su_gsu2_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
+              gsu=2, gsuc=True, stagger=2, k_iters=11, n_inc=4),
 ]
 
 

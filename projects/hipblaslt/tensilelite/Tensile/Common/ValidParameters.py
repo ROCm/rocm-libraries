@@ -357,7 +357,7 @@ validParameters = { # we need to make sure this matches develop
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
     # Currently we do not support general batch, or Stream-K other than DP-first
-    # (StreamK==3).GSU and StaggerU are supported.
+    # (StreamK==3). GSU, StaggerU and workgroup clusters are supported.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
