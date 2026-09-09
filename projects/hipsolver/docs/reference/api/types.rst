@@ -92,3 +92,15 @@ hipsolverDeterministicMode_t
 -----------------------------
 .. doxygenenum:: hipsolverDeterministicMode_t
 
+.. _directmode_t:
+
+hipsolverDirectMode_t
+----------------------
+.. doxygenenum:: hipsolverDirectMode_t
+
+.. _storevmode_t:
+
+hipsolverStorevMode_t
+----------------------
+.. doxygenenum:: hipsolverStorevMode_t
+

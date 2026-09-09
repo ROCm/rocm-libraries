@@ -191,7 +191,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsm5x10u2v2b1",                                   {6,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm7x7c3h224w224k64u2v2p3q3f1",                   {7,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvHipDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvHipDirectFwd",                                    {11,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvBinWinograd3x3U",                                 {14,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvBinWinogradRxS",                                  {15,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvAsmBwdWrW3x3",                                    {16,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
@@ -217,8 +216,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvBinWinogradRxSf2x3",                              {53,    true,   true,   "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvHipImplicitGemmV4R4Fwd",                          {54,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmBwdDataV1R1",                      {55,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdDataV4R1",                      {56,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdDataV1R1Xdlops",                {57,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmBwdDataV4R1Xdlops",                {60,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmV4R4WrW",                          {61,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmV4R1DynamicFwd",                   {62,    true,   false,  "miopenConvolutionFwdAlgoImplicitGEMM"}},
@@ -265,7 +262,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",          {107,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC",          {108,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvCkIgemmFwdV6r1DlopsNchw",                         {114,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC",          {127,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupFwdXdlops",                   {137,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemm3DGroupFwdXdlops",                 {138,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
@@ -274,6 +270,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvHipImplicitGemm3DGroupBwdXdlops",                 {141,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupBwdXdlops",                   {155,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupWrwXdlops",                   {156,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
+        {"ConvHipDirectFwd",                                    {218,   false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         // clang-format on
     };
 
@@ -360,7 +357,7 @@ const auto GetTestCases()
 template <class SolverInfo>
 const auto& GetSolverNames()
 {
-    static const auto names = [] {
+    static const auto names = []() -> std::vector<std::string> {
         std::vector<std::string> names_;
         const auto& sinfo = GetSolversInfo<SolverInfo>();
         names_.reserve(sinfo.size());
@@ -372,10 +369,6 @@ const auto& GetSolverNames()
 }
 
 // Context
-template <class Problem>
-auto GetContext(miopen::Handle* handle, const Problem& problem);
-
-template <>
 miopen::ExecutionContext GetContext(miopen::Handle* handle,
                                     const miopen::conv::ProblemDescription& problem)
 {
@@ -385,11 +378,10 @@ miopen::ExecutionContext GetContext(miopen::Handle* handle,
     return tmp;
 }
 
-template <>
-auto GetContext(miopen::Handle* handle, const miopen::batchnorm::ProblemDescription&)
+miopen::ExecutionContext GetContext(miopen::Handle* handle,
+                                    const miopen::batchnorm::ProblemDescription&)
 {
-    auto tmp = miopen::ExecutionContext{handle};
-    return tmp;
+    return miopen::ExecutionContext{handle};
 }
 
 // Checks

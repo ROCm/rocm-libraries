@@ -1,0 +1,50 @@
+---
+include: rocblas_common.yaml
+
+# Standalone canary for the syrk/herk copy-triangular batch-sweep workspace
+# overrun. Aliases A and supplies an exact-sized workspace with a trailing
+# guard, so the case fits pre_checkin rather than stress. Values alone cannot
+# detect this defect: save/restore use the same offset map.
+#
+# batch_count 65536 is intentionally omitted: on the second grid-z pass only
+# blockIdx.z=0 runs, so the pre-fix compounded offset error is zero there.
+#
+# Each function is paired with a precision anchor so rocblas_gentest sets
+# a_type; the C++ dispatcher selects the actual template type from the
+# function name, not from a_type.
+
+Tests:
+- name: syrk_herk_workspace_overrun_worst
+  category: pre_checkin
+  uplo: [ U, L ]
+  arguments:
+    - { N: 2, K: 500, lda: 500, ldc: 2, batch_count: 131070, transA: T }
+  function:
+    - syrk_batched_workspace_canary: *single_precision
+    - syrk_strided_batched_workspace_canary: *single_precision
+    - herk_batched_workspace_canary: *single_precision_complex
+    - herk_strided_batched_workspace_canary: *single_precision_complex
+    - dsyrk_batched_workspace_canary: *double_precision
+    - dsyrk_strided_batched_workspace_canary: *double_precision
+    - zherk_batched_workspace_canary: *double_precision_complex
+    - zherk_strided_batched_workspace_canary: *double_precision_complex
+  os_flags: [ LINUX ]
+  gpu_arch: ['90a','942']
+
+- name: syrk_herk_workspace_overrun_small
+  category: pre_checkin
+  uplo: [ U, L ]
+  arguments:
+    - { N: 2, K: 500, lda: 500, ldc: 2, batch_count: 65539, transA: T }
+  function:
+    - syrk_batched_workspace_canary: *single_precision
+    - syrk_strided_batched_workspace_canary: *single_precision
+    - herk_batched_workspace_canary: *single_precision_complex
+    - herk_strided_batched_workspace_canary: *single_precision_complex
+    - dsyrk_batched_workspace_canary: *double_precision
+    - dsyrk_strided_batched_workspace_canary: *double_precision
+    - zherk_batched_workspace_canary: *double_precision_complex
+    - zherk_strided_batched_workspace_canary: *double_precision_complex
+  os_flags: [ LINUX ]
+  gpu_arch: ['90a','942']
+...

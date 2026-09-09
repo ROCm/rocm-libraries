@@ -55,11 +55,14 @@ rocblas_status rocblas_internal_syr_launcher_64(rocblas_handle handle,
         auto    x_ptr       = adjust_ptr_batch(x, b_base, stride_x);
         auto    A_ptr       = adjust_ptr_batch(A, b_base, stride_A);
         int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
+        auto    alpha_ptr   = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? alpha + b_base * stride_alpha
+                                  : alpha;
 
         rocblas_status status = rocblas_internal_syr_launcher<T>(handle,
                                                                  uplo,
                                                                  (rocblas_int)n_64,
-                                                                 alpha,
+                                                                 alpha_ptr,
                                                                  stride_alpha,
                                                                  x_ptr,
                                                                  offset_x,

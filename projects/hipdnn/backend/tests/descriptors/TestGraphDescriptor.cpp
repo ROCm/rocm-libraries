@@ -16,6 +16,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <nlohmann/json.hpp>
+#include <unordered_map>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -1221,4 +1222,137 @@ TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
         GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
 
     EXPECT_TRUE(fromJson.hasRaggedTensors());
+}
+
+// The ragged-offset aux must be re-emitted into the tensor list when the graph
+// is rebuilt from its operations, carrying its dims/strides/dtype, with X still
+// resolving to it.
+TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnReserialize)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_DIMS;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_X_UID;
+
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    descriptor.buildSerializedGraph();
+
+    const auto serialized = descriptor.getSerializedGraph();
+    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;
+    for(const auto& t : graph->tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_RAGGED_OFFSET_UID), 0u)
+        << "ragged-offset aux must be emitted into the re-serialized tensor list.";
+    const auto* aux = tensorMap.at(K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_EQ(aux->data_type, DataType::INT64);
+    EXPECT_EQ(aux->dims, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS));
+    EXPECT_EQ(aux->strides, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES));
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    const auto* xTensor = tensorMap.at(K_FPROP_TENSOR_X_UID);
+    ASSERT_TRUE(xTensor->ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(xTensor->ragged_offset_tensor_uid.value(), K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_NE(tensorMap.count(xTensor->ragged_offset_tensor_uid.value()), 0u)
+        << "X's ragged_offset_tensor_uid must resolve within the tensor list.";
+}
+
+// The ragged-offset aux must survive a JSON round-trip: deserialize -> JSON ->
+// createFromJsonGraph -> re-serialize must still emit the aux with its
+// dims/strides/dtype and keep X resolving to it. Guards the JSON path (Path C),
+// which HasRaggedTensorsSurvivesJsonRoundTrip cannot (it only checks the link).
+TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnJsonRoundTrip)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_DIMS;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+    using hipdnn_tests::constants::K_FPROP_TENSOR_X_UID;
+
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+    fromJson.buildSerializedGraph();
+
+    const auto serialized = fromJson.getSerializedGraph();
+    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;
+    for(const auto& t : graph->tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_RAGGED_OFFSET_UID), 0u)
+        << "ragged-offset aux must survive the JSON round-trip.";
+    const auto* aux = tensorMap.at(K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_EQ(aux->data_type, DataType::INT64);
+    EXPECT_EQ(aux->dims, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS));
+    EXPECT_EQ(aux->strides, hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES));
+
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    const auto* xTensor = tensorMap.at(K_FPROP_TENSOR_X_UID);
+    ASSERT_TRUE(xTensor->ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(xTensor->ragged_offset_tensor_uid.value(), K_FPROP_TENSOR_RAGGED_OFFSET_UID);
+    EXPECT_NE(tensorMap.count(xTensor->ragged_offset_tensor_uid.value()), 0u)
+        << "X's ragged_offset_tensor_uid must resolve within the tensor list.";
+}
+
+// A tensor whose ragged_offset_tensor_uid names an aux that is absent from the
+// tensor list must be rejected on deserialize.
+TEST_F(TestGraphDescriptor, DeserializeDanglingRaggedOffsetUidThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/false);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A virtual ragged-offset aux has no backing storage and must be rejected.
+TEST_F(TestGraphDescriptor, DeserializeVirtualRaggedAuxThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/true,
+                                                                    /*auxVirtual=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A ragged-offset aux may not itself carry a ragged offset; nesting is rejected.
+TEST_F(TestGraphDescriptor, DeserializeNestedRaggedAuxThrows)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor(/*includeAux=*/true,
+                                                                    /*auxVirtual=*/false,
+                                                                    /*auxNested=*/true);
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_THROW_HIPDNN_STATUS(
+        descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()),
+        HIPDNN_STATUS_BAD_PARAM);
 }

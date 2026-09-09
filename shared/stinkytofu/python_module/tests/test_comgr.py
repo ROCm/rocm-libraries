@@ -255,6 +255,7 @@ class TestArchCaps:
         assert arch["NoSDWA"] == 1
         assert arch["HasEccHalf"] == 1
         assert arch["DeviceLDS"] == 327680
+        assert arch["LdsGranularity"] == 256
         assert arch["CMPXWritesSGPR"] == 0
         assert arch["HasInvWbDevFences"] == 1
         assert arch["MaxSgprPreload"] == 32

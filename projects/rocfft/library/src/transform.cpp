@@ -104,9 +104,10 @@ try
     if(!info)
         return rocfft_status_invalid_arg_value;
 
-    // The specified stream is for the current HIP device
     int deviceid = hipInvalidDeviceId;
-    if(hipGetDevice(&deviceid) != hipSuccess)
+    // Note: hipStreamGetDevice returns the current device
+    // for the default stream, i.e., if stream == nullptr.
+    if(hipStreamGetDevice(static_cast<hipStream_t>(stream), &deviceid) != hipSuccess)
         return rocfft_status_failure;
 
     info->rocfft_streams[deviceid] = (hipStream_t)stream;

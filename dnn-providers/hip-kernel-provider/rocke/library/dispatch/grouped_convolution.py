@@ -455,6 +455,7 @@ class ConvGroupedSpec:
     dtype: str
     arch: str
     split_k: int = 1  # wgrad only
+    lds_k_outer: bool = False  # wgrad only
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -532,6 +533,7 @@ class ConvGroupedSpec:
         return WgradConvSpec(
             problem=problem,
             name=self.name,
+            lds_k_outer=self.lds_k_outer,
             data=ConvDataSpec(
                 dtype_a=self.dtype,
                 dtype_b=self.dtype,
@@ -1038,6 +1040,37 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 # ---------------------------------------------------------------------------
 
 
+def _wgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
+    """Whether the gfx950 wgrad candidate should use the K-outer LDS layout.
+
+    wgrad's stride-1 global axis is the GEMM *free* axis, so an M-outer LDS tile
+    forces a transpose on store: one ``ds_write_b16`` per element, all of them
+    bank-conflicting because the row stride is a multiple of the LDS bank period.
+    The K-outer layout stores the tile in global order (one wide store) and lets
+    ``ds_read_b64_tr_b16`` transpose on the read side instead.
+
+    K-outer lowers the LDS instruction count and removes the row-stride bank
+    conflicts the M-outer transpose-on-store incurs. See the ``lds_k_outer``
+    field docs on ``WgradConvSpec``.
+
+    Gated to exactly what the transpose-read lane mapping is validated for:
+    gfx950 (the instruction does not exist on gfx942), wave64 MFMA, 16-bit A/B
+    operands, and a 16- or 32-wide atom edge.
+
+    Delegates so dispatch and the sweep driver cannot drift: this used to be a
+    second copy of the gate that compared the module constant against a tuple
+    (constant-true regardless of the request) and never checked wave_size.
+    """
+    return WgradConvSpec.default_lds_k_outer(
+        arch=req.arch,
+        dtype_a=req.dtype.lower(),
+        dtype_b=req.dtype.lower(),
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        wave_size=ArchTarget.from_gfx(req.arch).wave_size,
+    )
+
+
 def _make_gfx950_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx950: 64×64×64, 2×2, 32×32×16 MFMA.
 
@@ -1066,6 +1099,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
         return WgradConvSpec(
             problem=_problem(req),
             name=name,
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             data=_data_spec(req),
             tile_m=tm,
             tile_n=tn,
@@ -1116,6 +1150,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_k=wtk,
             pipeline=_PIPELINE,
             epilogue=_ep,
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,

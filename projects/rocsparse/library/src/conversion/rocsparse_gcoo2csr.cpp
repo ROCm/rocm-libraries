@@ -49,7 +49,7 @@ rocsparse_status rocsparse::gcoo2csr(rocsparse_handle     handle_,
         return rocsparse_status_success;                                        \
     } while(false)
 
-    switch(source_row_type_)
+    switch(static_cast<int>(source_row_type_))
     {
     case deprecated_rocsparse_indextype_u16:
     {
@@ -57,7 +57,7 @@ rocsparse_status rocsparse::gcoo2csr(rocsparse_handle     handle_,
     }
     case rocsparse_indextype_i32:
     {
-        switch(target_row_type_)
+        switch(static_cast<int>(target_row_type_))
         {
         case deprecated_rocsparse_indextype_u16:
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -73,7 +73,7 @@ rocsparse_status rocsparse::gcoo2csr(rocsparse_handle     handle_,
 
     case rocsparse_indextype_i64:
     {
-        switch(target_row_type_)
+        switch(static_cast<int>(target_row_type_))
         {
         case deprecated_rocsparse_indextype_u16:
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);

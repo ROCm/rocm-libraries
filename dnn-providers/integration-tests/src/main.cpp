@@ -138,9 +138,10 @@ int main(int argc, char** argv) noexcept
         // parameterized tests (which ref executor is exercised as the SUT).
         parser.add_argument("--vm", "--verification-mode")
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
-                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', 'cpu', or "
-                  "'golden-check' (validate golden data against CPU ref, no engine). "
-                  "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. Validating "
+                  "golden data against a reference (no engine involved) is not a mode "
+                  "here; run the hipdnn_golden_data_tests binary instead. Can also be "
+                  "set via HIPDNN_TEST_VERIFICATION_MODE env var.");
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
@@ -369,6 +370,18 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
+            return 1;
+        }
+
+        // Enforcement checks a sidecar against a named engine. Without one there
+        // is nothing to check, and silently degrading to "enforced nothing, exit 0"
+        // is the exact failure --enforce-support-claims exists to prevent.
+        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
+        {
+            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
+                         "engine to\n"
+                         "       check sidecar claims against.\n";
             return 1;
         }
 

@@ -85,13 +85,6 @@ bool AttnSoftmax::IsApplicable([[maybe_unused]] const ExecutionContext& context,
            (seq_len > 16 || nhs <= 1024);                       // heuristic
 }
 
-std::size_t AttnSoftmax::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution AttnSoftmax::GetSolution(const ExecutionContext& context,
                                       const miopen::softmax::ProblemDescription& problem) const
 {

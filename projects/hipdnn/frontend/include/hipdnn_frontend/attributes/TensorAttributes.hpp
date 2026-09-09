@@ -89,6 +89,10 @@ public:
     /// cuDNN-parity alias for the pass-by-value scalar variant type.
     using pass_by_values_t = ValueVariant; // NOLINT(readability-identifier-naming)
 
+    /// cuDNN-parity alias for the tensor UID type; consumers spell variant-pack
+    /// map keys as `TensorAttributes::uid_t`.
+    using uid_t = int64_t; // NOLINT(readability-identifier-naming)
+
     /// @brief Default constructor
     TensorAttributes() = default;
 

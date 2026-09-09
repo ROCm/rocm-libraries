@@ -19148,6 +19148,22 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheev_strided_batched_64(rocblas_handl
     ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
     reduction and back-transformation steps remain 32-bit, which bounds the supported size.
 
+    \parblock
+    \note
+    A 2-stage tridiagonalization approach is available for SYEVD to improve
+    performance for large matrices, n > 8000.
+    Use \ref rocsolver_set_alg_mode to enable it:
+
+        rocsolver_set_alg_mode( handle, rocsolver_function_sytrd, rocsolver_alg_mode_2stage );
+
+    Available modes are:
+    Mode                       |  Description
+    ---------------------------|-----------------------------------------
+    rocsolver_alg_mode_1stage  |  Use 1-stage tridiagonalization algorithm (current default)
+    rocsolver_alg_mode_2stage  |  Use 2-stage tridiagonalization algorithm
+    rocsolver_alg_mode_auto    |  Automatically select the algorithm based on problem size
+    \endparblock
+
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a
     divide-and-conquer algorithm, depending on the value of ``evect``. The computed eigenvectors
@@ -19242,6 +19258,22 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsyevd_64(rocblas_handle handle,
     The ``_64`` interface accepts ``int64_t`` arguments, but the matrix dimensions ``n`` and
     ``lda`` must still fit within a 32-bit integer (less than 2^31). The internal tridiagonal
     reduction and back-transformation steps remain 32-bit, which bounds the supported size.
+
+    \parblock
+    \note
+    A 2-stage tridiagonalization approach is available for HEEVD to improve
+    performance for large matrices, n > 8000.
+    Use \ref rocsolver_set_alg_mode to enable it:
+
+        rocsolver_set_alg_mode( handle, rocsolver_function_hetrd, rocsolver_alg_mode_2stage );
+
+    Available modes are:
+    Mode                       |  Description
+    ---------------------------|-----------------------------------------
+    rocsolver_alg_mode_1stage  |  Use 1-stage tridiagonalization algorithm (current default)
+    rocsolver_alg_mode_2stage  |  Use 2-stage tridiagonalization algorithm
+    rocsolver_alg_mode_auto    |  Automatically select the algorithm based on problem size
+    \endparblock
 
     \details
     The eigenvalues are returned in ascending order. The eigenvectors are computed using a

@@ -1,0 +1,48 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --RegisterAllocationPass=allocator=legacy,apply --print-output
+#
+# RegisterAllocationPass: the framework gate, using the identity policy.
+#
+# LegacyIdentityAllocator gives every SSA value the register it was lifted from,
+# so driving it through the pass must reproduce the input program exactly. This
+# is what makes the allocator seam trustworthy before a real policy exists: the
+# whole path runs - constraints are recovered, the verifier checks the colouring,
+# destruction writes it back - and any difference in the output would be a defect
+# in that machinery rather than in allocation policy.
+#
+# The shape is chosen to exercise every verifier rule at once. The 4-DWORD load
+# and the 2-DWORD store are tuple runs that must stay consecutive in operand
+# order; both arms writing v4 make the join's block argument an affinity set that
+# must share one colour with its incoming values.
+#
+# CHECK-LABEL: @register_allocation_legacy_identity
+#
+# CHECK: ^entry:
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"(v0)
+# CHECK: ^left:
+# CHECK-NEXT: v4 = "st.v_add_f32"(v20, v21)
+# CHECK: ^right:
+# CHECK-NEXT: v4 = "st.v_add_f32"(v22, v23)
+# CHECK: ^join:
+# CHECK-NEXT: "st.ds_store_b64"(v0, v[4:5])
+#
+# Applying the colouring clears the attached SSA, so nothing symbolic reaches the
+# printer and no copy was inserted to lower the merge.
+# CHECK-NOT: st.PHI
+# CHECK-NOT: %
+
+st.func @register_allocation_legacy_identity() {
+^entry:
+  v[4:7] = "st.ds_load_b128"(v0)
+  SCC0 = "st.v_cmp_eq_u32"(v10, v11)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  v4 = "st.v_add_f32"(v20, v21)
+  "st.s_branch"("join")
+  Successors: ^join
+^right:
+  v4 = "st.v_add_f32"(v22, v23)
+  Successors: ^join
+^join:
+  "st.ds_store_b64"(v0, v[4:5])
+}

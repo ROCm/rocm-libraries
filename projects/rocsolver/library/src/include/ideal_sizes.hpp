@@ -259,7 +259,7 @@
     SYGST/HEGST will directly call the unblocked routines (SYGS2/HEGS2). However, when n is not a
     multiple of xxGST_BLOCKSIZE, the last block reduced in the blocked process is allowed to be smaller than xxGST_BLOCKSIZE.*/
 #ifndef xxGST_BLOCKSIZE
-#define xxGST_BLOCKSIZE 64
+#define xxGST_BLOCKSIZE 256
 #endif
 
 /****************************** stedc ******************************************
@@ -311,6 +311,27 @@
     and eigenvectors will be computed with a single kernel call. */
 #ifndef SYEVJ_BLOCKED_SWITCH
 #define SYEVJ_BLOCKED_SWITCH 58
+#endif
+
+/************************** syevd/heevd 2-stage *******************************
+*******************************************************************************/
+/*! \brief Determines the size threshold above which rocSOLVER uses the 2-stage
+    algorithm (he2hb + hb2st) instead of the 1-stage algorithm (hetrd) when
+    executing SYEVD/HEEVD. */
+// Tuned for single/double with vectors on MI300.
+#ifndef SYEVD_2STAGE_SWITCHSIZE
+#define SYEVD_2STAGE_SWITCHSIZE 11000
+#endif
+
+/*! \brief Bandwidth kd used by the 2-stage algorithm in SYEVD/HEEVD. */
+#ifndef SYEVD_2STAGE_KD
+#define SYEVD_2STAGE_KD 32
+#endif
+
+/*! \brief Block size nb used by he2hb in the 2-stage algorithm in SYEVD/HEEVD.
+    Must satisfy nb >= kd and nb % kd == 0. */
+#ifndef SYEVD_2STAGE_NB
+#define SYEVD_2STAGE_NB SYEVD_2STAGE_KD
 #endif
 
 /*************************** sytf2/sytrf **************************************

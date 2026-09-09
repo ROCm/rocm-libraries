@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <array>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -84,11 +85,14 @@ class LogicalInstruction : public IRBase {
     std::string comment;                ///< Optional comment
 
     // Instruction modifiers (optional, only used by specific instructions)
-    std::optional<DPPModifiers> dpp;      ///< Data parallel processing modifier
-    std::optional<SDWAModifiers> sdwa;    ///< Sub-dword addressing modifier
-    std::optional<DSModifiers> ds;        ///< LDS/GDS modifier
-    std::optional<MUBUFModifiers> mubuf;  ///< MUBUF (buffer load/store) modifier
-    std::optional<VOP3PModifiers> vop3;   ///< VOP3P (op_sel) modifier
+    std::optional<DPPModifiers> dpp;           ///< Data parallel processing modifier
+    std::optional<SDWAModifiers> sdwa;         ///< Sub-dword addressing modifier
+    std::optional<DSModifiers> ds;             ///< LDS/GDS modifier
+    std::optional<MUBUFModifiers> mubuf;       ///< MUBUF (buffer load/store) modifier
+    std::optional<VOP3PModifiers> vop3;        ///< VOP3P (op_sel) modifier
+    std::optional<std::vector<int>> memtoken;  ///< Memory token IDs for LDS dependency tracking
+    std::optional<std::array<int, 5>>
+        swaitcnt;  ///< s_waitcnt values {vlcnt,vscnt,dlcnt,dscnt,kmcnt} for gfx12+ split
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {

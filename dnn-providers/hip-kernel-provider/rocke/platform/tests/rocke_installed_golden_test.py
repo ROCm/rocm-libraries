@@ -53,10 +53,10 @@ def _add_installed_python_paths() -> None:
     if (harness_dir / "rocke_ir_parity_harness.py").is_file():
         if harness_dir not in found:
             found.append(harness_dir)
-    # The harness' attention families build library kernels, so `kernels` and
-    # `builders` must resolve too. They are staged under tests/library/ in an
-    # install (the destination TheRock's test-artifact globs capture) and live in
-    # the sibling library tree in a checkout.
+    # Some harness families (attention and KDA) build library kernels, so
+    # `kernels` and `builders` must resolve too. They are staged under
+    # tests/library/ in an install (the destination TheRock's test-artifact
+    # globs capture) and live in the sibling library tree in a checkout.
     lib_roots = [script.parent / "tests" / "library"]
     if len(script.parents) > 2:
         lib_roots.append(script.parents[2] / "library")

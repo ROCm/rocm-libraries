@@ -171,6 +171,10 @@ if(HIPSPARSELT_ENABLE_HIP)
         "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
     )
+    # hipSPARSELt's corpus has a unified gfx1250 tree. It shares hipBLASLt's
+    # device-library CMake machinery, which can still build a gfx1250v0 target,
+    # but that target must not imply this separate corpus owns a v0 overlay.
+    set(HIPBLASLT_REQUIRE_GFX1250V0_OVERLAY OFF)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )

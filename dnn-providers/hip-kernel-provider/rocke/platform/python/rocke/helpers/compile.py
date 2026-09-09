@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..core.codegen_policy import codegen_policy_for_kernel
 from ..core.ir import KernelDef
 from ..core.ir_print import print_ir
 from ..core.lower_hip import lower_kernel_to_hip
@@ -266,12 +267,21 @@ def compile_kernel_via_hipcc(
       - The HIP debug backend has narrower op coverage than the LLVM
         backend; verify the kernel actually lowers via ``lower_kernel_to_hip``
         before relying on this path.
+      - An explicit scheduler policy is rejected because this path does not
+        carry the LLVM function attribute used by the COMGR path.
 
     Returns the same ``KernelArtifact`` shape as :func:`compile_kernel`;
     ``ir_text`` is the textual MLIR-style IR, ``llvm_text`` is empty
     (this path doesn't go through the LLVM-direct lowering), ``hsaco``
     is the hipcc output, and ``timings`` records the lower + hipcc steps.
     """
+    policy = codegen_policy_for_kernel(kernel)
+    if policy.scheduler_strategy is not None:
+        raise ValueError(
+            "compile_kernel_via_hipcc does not support scheduler_strategy; "
+            "use compile_kernel so the policy is emitted as an LLVM function attribute"
+        )
+
     timings: Dict[str, float] = {}
     t0 = time.perf_counter()
     ir_text = print_ir(kernel)

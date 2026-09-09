@@ -6,6 +6,7 @@
 #   - TileConfig dataclass for parameterized tile configurations
 #   - Mock/kernel creation helpers (_mock_dtype, _create_kernel, create_writer)
 #   - rocIsa initialization (init_rocisa)
+#   - Scoped rocIsa state preservation (preserve_rocisa_kernel_state)
 #   - Unified kernel asm generator (generate_kernel_asm)
 #   - Prologue builder (generate_load_params) and export epilogue (generate_export_epilogue)
 #   - Assembly & GPU execution (assemble_kernel, assemble_and_run)
@@ -49,6 +50,7 @@ from rocisa.enum import RegisterType
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- GPU target detection ----
 def _detect_gfx_target():
@@ -198,6 +200,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
             "DataTypeA": dtype,
             "DataTypeB": dtype,
             "ComputeDataType": _mock_dtype(4),
+            # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
+            "FusedGemmA2A": False,
         },
     }
 

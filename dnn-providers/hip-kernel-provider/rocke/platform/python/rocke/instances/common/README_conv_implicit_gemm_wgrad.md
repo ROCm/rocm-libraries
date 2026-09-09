@@ -31,13 +31,19 @@ The B descriptor for X reuses `make_a_descriptor` from `_conv_implicit_gemm_comm
 
 ### Epilogues
 
-Three epilogue paths are supported, selected automatically based on `spec.epilogue` and `spec.split_k`:
+Four epilogue paths are supported, selected automatically based on `spec.epilogue` and `spec.split_k`:
 
 | Path | Condition | Output |
 |------|-----------|--------|
 | Direct store | `epilogue="default"`, `split_k=1` | Per-lane scalar write to dW via the KYXC descriptor |
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
-| Split-K atomic epilogue | `split_k > 1` | `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` |
+| Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
+| Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
+
+For bf16/fp16 output `epilogue="cshuffle"` is **required** when `split_k > 1`.
+The direct-atomic path emits zero-filled packed atomics at the scattered MFMA
+layout; the cshuffle path produces genuinely contiguous adjacent pairs after the
+LDS shuffle, which is necessary for correct `<2 x dtype>` packed atomics.
 
 ---
 
@@ -87,6 +93,42 @@ parameters are required.
 **Auto mode (`split_k=-1`):** The split degree can be chosen automatically at
 build time using `select_split_k_wgrad` (the CK formula:
 `floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
+
+### Split-K cshuffle atomic epilogue
+
+Added `CShuffleEpilogue.atomic_store` and `_emit_wgrad_split_k_cshuffle_epilogue`
+to support split-K for bf16/fp16 output dtypes without the zero-fill artefact of
+the direct-atomic path.
+
+**Motivation:** The existing split-K epilogue (`_emit_wgrad_split_k_epilogue`)
+emits one `global_atomic_add_pk_f16/bf16` per MFMA accumulator slot. Because
+each slot's column index may be odd or even, the code resolves the column parity
+at runtime and fills the unused half of the `<2 x dtype>` pair with zero. This
+avoids touching a neighbour's data but produces two overlapping atomics for each
+adjacent pair of lanes — one with `(val, 0)` and one with `(0, val)` — which
+serialise on the same address and are wasteful.
+
+The cshuffle path avoids this entirely:
+1. MFMA accumulators are scattered to an LDS staging buffer in row-major order
+   (identical to the non-atomic `CShuffleEpilogue.store` path).
+2. After a barrier, each thread reads back an `sv`-wide chunk of consecutive
+   N-position elements in one row.  Because the cshuffle guarantees row-major
+   order, adjacent elements `(col, col+1)` are always in the same row and
+   consecutive in N, forming a genuine `<2 x dtype>` pair — no zero-fill needed.
+3. Paired `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` are issued,
+   one per pair.
+
+**Constraints:**
+- `epilogue="cshuffle"` is now **required** for bf16/fp16 split-K (enforced by
+  `WgradConvSpec.validate()` and `is_valid_wgrad_spec`).
+- `store_vec` (`sv`) must be even for bf16/fp16 (guaranteed by `from_grid` via
+  the existing `cpg % 2 == 0` constraint).
+- The caller must zero-initialise `dW` before launch (atomic-adds only).
+
+The benchmark driver (`benchmark_implicit_gemm_conv.py`) was updated to generate
+only `split_k=0` (runtime-atomic) combos by default instead of `(1, 0)`, so the
+`epilogue="cshuffle"` requirement is respected without filtering cshuffle combos
+out of the sweep.
 
 ### Pointwise explicit-GEMM fast path
 

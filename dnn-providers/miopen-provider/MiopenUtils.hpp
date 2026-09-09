@@ -18,8 +18,8 @@
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
-#include <miopen/miopen.h>
 
+#include "MiopenApi.hpp"
 #include "MiopenTensor.hpp"
 
 #define LOG_ON_MIOPEN_FAILURE(status)                                                           \

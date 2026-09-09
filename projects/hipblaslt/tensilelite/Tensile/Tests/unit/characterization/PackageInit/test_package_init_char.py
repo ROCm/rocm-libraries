@@ -4,7 +4,7 @@
 ################################################################################
 
 """Characterization tests for the ``Tensile`` package ``__init__``: the version
-constant, the derived ROOT/SOURCE/CUSTOM_KERNEL paths, and ``PrintTensileRoot``."""
+constant, ``ROOT_PATH``, and ``PrintTensileRoot``."""
 
 import os
 
@@ -19,11 +19,9 @@ def test_version(snapshot):
     assert Tensile.__version__ == snapshot
 
 
-def test_derived_paths():
-    # Absolute paths are env-specific; pin their structure, not the prefix.
+def test_root_path():
+    # The absolute path is env-specific, so only pin that it is absolute.
     assert os.path.isabs(Tensile.ROOT_PATH)
-    assert Tensile.SOURCE_PATH == os.path.join(Tensile.ROOT_PATH, "Source")
-    assert Tensile.CUSTOM_KERNEL_PATH == os.path.join(Tensile.ROOT_PATH, "CustomKernels")
 
 
 def test_print_tensile_root(capsys):

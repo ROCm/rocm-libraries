@@ -45,6 +45,8 @@ import tempfile
 
 import pytest
 
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalize/warm-state emit, global-state isolation, and per-kernel rocisa
 # init. Everything below only adds the *config -> solutions* front end.
@@ -97,15 +99,16 @@ def _isolated_globals_with_isa(isaInfoMap):
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
-    try:
-        # Populates validParameters["ISA"] and ROCm paths for this map.
-        assignGlobalParameters({}, isaInfoMap)
-        yield
-    finally:
-        globalParameters.clear()
-        globalParameters.update(saved_gp)
-        validParameters.clear()
-        validParameters.update(saved_vp)
+    with preserve_rocisa_kernel_state():
+        try:
+            # Populates validParameters["ISA"] and ROCm paths for this map.
+            assignGlobalParameters({}, isaInfoMap)
+            yield
+        finally:
+            globalParameters.clear()
+            globalParameters.update(saved_gp)
+            validParameters.clear()
+            validParameters.update(saved_vp)
 
 
 def _load_config(config_path):

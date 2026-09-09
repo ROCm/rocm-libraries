@@ -90,6 +90,10 @@ hipDataType
         return HIP_R_8F_E5M2;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
         return HIP_R_4F_E2M1;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        return HIP_R_6F_E2M3;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        return HIP_R_6F_E3M2;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -121,9 +125,15 @@ bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
 }
 
+bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
+}
+
 bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
-    return isTypeFp8Ocp(dataType)
+    return isTypeFp8Ocp(dataType) || isTypeFp6Ocp(dataType)
            || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1;
 }
 

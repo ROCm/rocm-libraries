@@ -27,6 +27,8 @@ from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
+BUNDLED_KNOWN_BUGS = object()
+
 
 def parseArguments():
     """
@@ -72,6 +74,18 @@ def parseArguments():
         help="semicolon-separated list of gfx architectures to validate "
         "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
     )
+    argParser.add_argument(
+        "--require-gfx1250v0-overlay",
+        dest="RequireGfx1250v0Overlay",
+        action="store_true",
+        help="with --check-all, fail if the gfx1250v0 overlay directory is "
+        "missing. Opt-in for the caller that actually owns the gfx1250/"
+        "gfx1250v0 split (hipBLASLt's dedicated gfx1250v0 device-library "
+        "build); not implied by --architecture=gfx1250v0 alone, since a "
+        "shared invocation can request that architecture against a corpus "
+        "that never did a v0/v1 split for gfx1250 in the first place (e.g. "
+        "hipSPARSELt's)",
+    )
 
     group = argParser.add_mutually_exclusive_group()
     group.add_argument(
@@ -83,15 +97,24 @@ def parseArguments():
         action="store_true",
         help="run logic file checks only on custom kernels",
     )
-    argParser.add_argument(
+
+    knownBugsGroup = argParser.add_mutually_exclusive_group()
+    knownBugsGroup.add_argument(
         "--known-bugs",
         dest="KnownBugs",
         type=Path,
         default=None,
         metavar="FILE",
-        help="YAML file listing (path, solution_name) pairs to skip validation for "
+        help="YAML file containing (path, solution_name) pairs to skip validation for "
         "(documented exceptions; paths relative to LogicPath). solution_name is the "
         "solution's SolutionNameMin, which is stable across library re-tuning",
+    )
+    knownBugsGroup.add_argument(
+        "--use-bundled-known-bugs",
+        dest="KnownBugs",
+        action="store_const",
+        const=BUNDLED_KNOWN_BUGS,
+        help="use the known-bugs YAML bundled with TensileLogic",
     )
     argParser.add_argument(
         "--strict-known-bugs",

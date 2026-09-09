@@ -20,7 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from gpu_test_helpers import init_rocisa
+from gpu_test_helpers import init_rocisa, preserve_rocisa_kernel_state
 
 
 GFX1250_ISA = (12, 5, 0)
@@ -30,10 +30,11 @@ WAVESIZE_32 = 32
 def _gfx1250_asm_supported():
     """Return True if the host assembler supports gfx1250 instructions."""
     try:
-        init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
-        from rocisa import rocIsa
-        caps = rocIsa.getInstance().getAsmCaps()
-        return bool(caps.get("s_add_u64", 0))
+        with preserve_rocisa_kernel_state():
+            init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+            from rocisa import rocIsa
+            caps = rocIsa.getInstance().getAsmCaps()
+            return bool(caps.get("s_add_u64", 0))
     except Exception:
         return False
 
@@ -46,7 +47,32 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module", autouse=True)
 def _rocisa_once():
-    init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+    with preserve_rocisa_kernel_state():
+        init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+        yield
+
+
+def test_preserve_rocisa_kernel_state_restores_active_isa():
+    """The gfx1250 module must not leak its pinned ISA to later test modules."""
+    from rocisa import rocIsa
+
+    ri = rocIsa.getInstance()
+    with preserve_rocisa_kernel_state():
+        ri.setKernel((9, 5, 0), 64)
+        ri.setVgprIdx("state_guard", 7)
+        ri.setVgprMsb(5)
+        expected_vgpr_idx = dict(ri.getVgprIdx())
+
+        with preserve_rocisa_kernel_state():
+            init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+            ri.setVgprIdx("leaked_state", 9)
+            ri.setVgprMsb(11)
+
+        restored_kernel = ri.getKernel()
+        assert tuple(restored_kernel.isa) == (9, 5, 0)
+        assert restored_kernel.wavefrontSize == 64
+        assert dict(ri.getVgprIdx()) == expected_vgpr_idx
+        assert ri.getVgprMsb() == 5
 
 
 def _mock_dtype(num_bytes=2):

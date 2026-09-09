@@ -98,7 +98,7 @@ def test_handle_non_custom_returns_false(snapshot):
 def test_handle_custom_mi_length_4(monkeypatch, snapshot):
     # MI length 4 -> normal path, no hint, returns (sol, True).
     config = {"MatrixInstruction": [16, 16, 16, 1], "WorkGroup": [16, 16, 1]}
-    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d, dir: dict(config))
+    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d: dict(config))
     sol = {"CustomKernelName": "DummyKernel", "SolutionIndex": 0}
     out, is_custom = handleCustomKernel(sol, {})
     assert {"is_custom": is_custom, "sol": out} == snapshot
@@ -108,7 +108,7 @@ def test_handle_custom_mi_wrong_length_runs_hint(monkeypatch, isa_info_map, snap
     # MI length 9 (not 4 or 0) -> hint branch: matrixInstructionToMIParameters
     # + prepareCustomKernelConfig run (stdout incidental). Returns (sol, True).
     config = {"MatrixInstruction": [16, 16, 16, 1, 1, 2, 2, 2, 2]}
-    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d, dir: dict(config))
+    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d: dict(config))
     sol = {
         "CustomKernelName": "DummyKernel", "SolutionIndex": 0,
         "WavefrontSize": 64, "ProblemType": {"DataType": "h"},

@@ -2135,6 +2135,27 @@ const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_
     return rocke_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
 
+static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_attr_value_t* v)
+{
+    if(!v || v->kind != ROCKE_ATTR_STR || !v->u.s)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
+    }
+    const char* strategy = v->u.s;
+    if(strcmp(strategy, "max-ilp") != 0 && strcmp(strategy, "max-memory-clause") != 0
+       && strcmp(strategy, "iterative-ilp") != 0 && strcmp(strategy, "iterative-minreg") != 0
+       && strcmp(strategy, "iterative-maxocc") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "unsupported scheduler_strategy '%s'; expected one of: "
+                      "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
+                      "max-memory-clause, or None",
+                      strategy);
+    }
+    return strategy;
+}
+
 /* ====================================================================== */
 /* finalize (Python finalize)                                             */
 /* ====================================================================== */
@@ -2276,6 +2297,14 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 
     if(L->kernel)
     {
+        const rocke_attr_value_t* scheduler
+            = rocke_attr_get(&L->kernel->attrs, "scheduler_strategy");
+        if(scheduler)
+        {
+            rocke_strbuf_appendf(out,
+                                 " \"amdgpu-sched-strategy\"=\"%s\"",
+                                 rocke_ll_scheduler_strategy(L, scheduler));
+        }
         /* waves_per_eu mirrors the Python lowerer: a bare int N emits "N,N",
          * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
          * -- emits "lo,hi". */

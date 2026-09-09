@@ -318,4 +318,21 @@ Tests:
   alpha_beta_stride: true
   stride_c: [ 1, 2 ] # alpha stride: densely packed (1) and non-unit (2)
   pointer_mode_host: false
+
+- name: syr_stride_alpha_ILP64
+  category: pre_checkin
+  function:
+    - syr_batched
+    - syr_strided_batched
+  precision: *single_precision
+  uplo: [ U ]
+  arguments:
+    - { N: 2, lda: 2, stride_a: 2, incx: 1, batch_count: *c_grid_yz_require_passes }
+  alpha_beta: *alpha_range_small
+  stride_scale: [ 1 ]
+  alpha_beta_stride: true
+  stride_c: [ 2 ] # alpha stride
+  pointer_mode_host: false
+  api: [ C_64 ]
+  os_flags: [ LINUX ]
 ...

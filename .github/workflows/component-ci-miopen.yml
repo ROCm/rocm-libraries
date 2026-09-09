@@ -9,7 +9,7 @@
 # no-CK UBSan debug build, and gtest binary naming convention validation.
 #
 # The HIP package job additionally carries the two gates on the public/private
-# split: a source-only cross-check of its four hand-maintained files, and the
+# split: a source-only cross-check of its five hand-maintained files, and the
 # public-ABI gate requiring libMIOpen.so's exported public C API to stay
 # identical to the committed baseline.
 
@@ -111,12 +111,16 @@ jobs:
             .dvc
             .github
             cmake
+            dnn-providers/miopen-provider
             projects/miopen
             shared/ctest
 
-      # The public/private split keeps four files in lockstep by hand: the
-      # public header, the private _impl declarations, the compile-time rename
-      # and the forwarding stubs. This cross-checks them from source alone, so
+      # The public/private split keeps five files in lockstep by hand: the
+      # public header, the private _impl declarations, the compile-time rename,
+      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
+      # The fifth lives outside projects/miopen, which is why the sparse
+      # checkout above includes the provider directory: the check can only
+      # compare files it can read. This cross-checks them from source alone, so
       # unlike the ABI gate below it needs no build and runs in seconds -- hence
       # its placement before the configure step, where it fails fast. It is the
       # only check that can see signature drift; the symbol-set gate cannot,
@@ -124,7 +128,9 @@ jobs:
       # rides the same job as that gate to keep both split checks in one place.
       - name: Public/private header consistency check
         if: matrix.job_id == 'hip-package-build'
-        run: python3 projects/miopen/script/check_public_abi.py check-headers
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-headers \
+            --require-provider
 
       - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
         run: |

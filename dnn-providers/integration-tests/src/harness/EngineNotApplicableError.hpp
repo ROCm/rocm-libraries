@@ -13,9 +13,9 @@ namespace hipdnn_integration_tests
 // Distinct from ReferenceCapabilityError (reference executor can't run an op)
 // and from a generic std::exception (unexpected crash).
 //
-// runEngineCapturingOutputs catches this specifically so that an unsupported
-// graph becomes a GTEST_SKIP, while genuine engine crashes propagate as
-// uncaught exceptions (reported as test failures by GTest).
+// runEngine() catches this specifically so that an unsupported graph becomes a
+// skip outcome, while genuine engine crashes propagate as uncaught exceptions
+// (reported as test failures by GTest).
 class EngineNotApplicableError : public std::runtime_error
 {
 public:

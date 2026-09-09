@@ -26,6 +26,8 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResamplePlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleBwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/ApplicabilityChecks.cpp
 )
 

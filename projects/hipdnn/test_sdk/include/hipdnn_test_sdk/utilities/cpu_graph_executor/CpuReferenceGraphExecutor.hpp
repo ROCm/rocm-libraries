@@ -182,6 +182,8 @@ private:
             return detail::RMSNormBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
             return detail::ResampleFwdSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes:
+            return detail::ResampleBwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return detail::BlockScaleDequantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:

@@ -394,6 +394,41 @@ typedef enum rocsparse_fill_mode_
 } rocsparse_fill_mode;
 
 /*! \ingroup types_module
+ *  \brief Select whether a solve stage performs a triangular or diagonal-only solve.
+ *
+ *  \details
+ *  The \ref rocsparse_solve_mode selects, for \ref rocsparse_sptrsv and
+ *  \ref rocsparse_sptrsm, whether the compute stage performs the regular triangular
+ *  solve or a diagonal-only solve that reuses the diagonal positions collected during
+ *  the analysis stage. The diagonal-only mode is intended for the diagonal step of a
+ *  factored solve such as \f$L D L^H\f$; how the diagonal values are treated is then
+ *  selected separately by \ref rocsparse_diagonal_modifier.
+ */
+typedef enum rocsparse_solve_mode_
+{
+    rocsparse_solve_mode_triangular
+    = 0, /**< Regular triangular solve \f$op(A) \, y = \alpha \, x\f$ (default). */
+    rocsparse_solve_mode_diagonal = 1 /**< Diagonal solve \f$D \, y = \alpha \, x\f$. */
+} rocsparse_solve_mode;
+
+/*! \ingroup types_module
+ *  \brief Select the function applied to each diagonal value in a diagonal solve.
+ *
+ *  \details
+ *  When \ref rocsparse_solve_mode is \ref rocsparse_solve_mode_diagonal, the
+ *  \ref rocsparse_diagonal_modifier selects the element-wise function \f$f\f$ applied to
+ *  each diagonal entry \f$d\f$ before the solve: \ref rocsparse_diagonal_modifier_none uses
+ *  \f$d\f$, while \ref rocsparse_diagonal_modifier_absolute uses \f$|d|\f$, which turns
+ *  \f$L |D| L^H\f$ into an HPD operator (a valid inner product for Hermitian Krylov methods
+ *  even when \f$D\f$ is indefinite). It has no effect for a triangular solve.
+ */
+typedef enum rocsparse_diagonal_modifier_
+{
+    rocsparse_diagonal_modifier_none     = 0, /**< Use \f$d\f$ (default). */
+    rocsparse_diagonal_modifier_absolute = 1 /**< Use \f$|d|\f$. */
+} rocsparse_diagonal_modifier;
+
+/*! \ingroup types_module
  *  \brief Specify whether the matrix is stored sorted or not.
  *
  *  \details
@@ -1051,7 +1086,11 @@ typedef enum rocsparse_sptrsv_input_
     rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSV descriptor. */
     rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSV descriptor. */
-    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSV descriptor. */
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_sptrsv_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSV descriptor. */
+    rocsparse_sptrsv_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSV descriptor. */
+#endif
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1105,7 +1144,11 @@ typedef enum rocsparse_sptrsm_input_
     rocsparse_sptrsm_input_compute_datatype, /**< Select compute datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on a SpTRSM descriptor. */
     rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on a SpTRSM descriptor. This datatype is used as the compute type. */
-    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_analysis_policy, /**< Select the analysis policy \ref rocsparse_analysis_policy for input on a SpTRSM descriptor. */
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_sptrsm_input_solve_mode, /**< Select the solve mode \ref rocsparse_solve_mode for input on a SpTRSM descriptor. */
+    rocsparse_sptrsm_input_diagonal_modifier /**< Select the diagonal modifier \ref rocsparse_diagonal_modifier for input on a SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module

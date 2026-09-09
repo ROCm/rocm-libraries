@@ -250,6 +250,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
         "enable_asan": "Enable AddressSanitizer.",
         "enable_tsan": "Enable ThreadSanitizer.",
+        "enable_sdma": "Build the GPU-initiated SDMA transport path; needs hsakmt and hsa-runtime64.",
     }
 )
 def build_client(
@@ -268,6 +269,7 @@ def build_client(
     rebuild_rocisa=True,
     enable_asan=False,
     enable_tsan=False,
+    enable_sdma=False,
 ):
     """Build the tensilelite-client C++ executable.
 
@@ -338,6 +340,8 @@ def build_client(
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
         if enable_tsan:
             cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
+        if enable_sdma:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_SDMA=ON")
         cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))

@@ -33,7 +33,7 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, vector<printable_char>> syevd_heevd_tuple;
+typedef std::tuple<vector<int>, vector<printable_char>, int> syevd_heevd_tuple;
 
 // each size_range vector is a {n, lda}
 
@@ -43,6 +43,9 @@ typedef std::tuple<vector<int>, vector<printable_char>> syevd_heevd_tuple;
 // (null handle, null pointers and invalid values)
 
 const vector<vector<printable_char>> op_range = {{'N', 'L'}, {'N', 'U'}, {'V', 'L'}, {'V', 'U'}};
+
+// each hetrd_stage_range value is a hetrd_alg_mode: 1 = 1-stage, 2 = 2-stage
+const vector<int> hetrd_stage_range = {1, 2};
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
@@ -65,6 +68,7 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
 {
     vector<int> size = std::get<0>(tup);
     vector<printable_char> op = std::get<1>(tup);
+    int hetrd_stage = std::get<2>(tup);
 
     Arguments arg;
 
@@ -73,6 +77,8 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
 
     arg.set<char>("evect", op[0]);
     arg.set<char>("uplo", op[1]);
+
+    arg.hetrd_alg_mode = hetrd_stage;
 
     // only testing standard use case/defaults for strides
 
@@ -390,56 +396,100 @@ TEST_P(HEEVD_HYBRID_64, strided_batched__double_complex)
 }
 
 // daily_lapack tests normal execution with medium to large sizes
-INSTANTIATE_TEST_SUITE_P(daily_lapack, SYEVD, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SYEVD,
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, HEEVD, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         HEEVD,
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYEVD_HYBRID,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEEVD_HYBRID,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYEVD_64,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEEVD_64,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYEVD_HYBRID_64,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEEVD_HYBRID_64,
-                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 // checkin_lapack tests normal execution with small sizes, invalid sizes,
 // quick returns, and corner cases
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVD, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYEVD,
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVD, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEVD,
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYEVD_HYBRID,
-                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEVD_HYBRID,
-                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVD_64, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYEVD_64,
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVD_64, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEVD_64,
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYEVD_HYBRID_64,
-                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEEVD_HYBRID_64,
-                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+                         Combine(ValuesIn(size_range),
+                                 ValuesIn(op_range),
+                                 ValuesIn(hetrd_stage_range)));

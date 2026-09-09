@@ -4,6 +4,9 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <variant>
 
 using namespace hipdnn_frontend;
@@ -32,6 +35,22 @@ TEST(TestTensorAttributes, SetAndGetUid)
     tensor.clear_uid();
     EXPECT_EQ(tensor.get_uid(), 0);
     EXPECT_FALSE(tensor.has_uid());
+}
+
+// cuDNN-parity nested alias: consumer source spells variant-pack map keys as
+// TensorAttributes::uid_t, and it must be the same type get_uid() returns.
+TEST(TestTensorAttributes, UidTypeAliasMatchesUidAccessors)
+{
+    static_assert(std::is_same_v<TensorAttributes::uid_t, int64_t>);
+    static_assert(std::is_same_v<TensorAttributes::uid_t,
+                                 decltype(std::declval<TensorAttributes>().get_uid())>);
+
+    std::unordered_map<TensorAttributes::uid_t, void*> variantPack;
+    TensorAttributes tensor;
+    tensor.set_uid(7);
+    variantPack.emplace(tensor.get_uid(), nullptr);
+
+    EXPECT_EQ(variantPack.count(7), 1U);
 }
 
 TEST(TestTensorAttributes, SetAndGetName)

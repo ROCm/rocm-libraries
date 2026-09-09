@@ -24,6 +24,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
@@ -59,6 +60,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               RMSNormFwdSignatureKey,
                                               RMSNormBwdSignatureKey,
                                               ResampleFwdSignatureKey,
+                                              ResampleBwdSignatureKey,
                                               SdpaBwdSignatureKey,
                                               SdpaFwdSignatureKey,
                                               ReductionSignatureKey>;

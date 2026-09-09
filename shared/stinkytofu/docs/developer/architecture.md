@@ -2,11 +2,11 @@
 
 StinkyTofu is an LLVM-inspired pass-based IR optimizer for AMD GPU assembly kernels, used by hipBLASLt/TensileLite via Python bindings.
 
-## Two IR Levels
+## IR Levels
 
 **Logical IR** (`include/stinkytofu/ir/logical/`, `src/ir/logical/`) -- architecture-agnostic, high-level. Used before lowering to assembly.
 
-**Asm IR** (`include/stinkytofu/ir/asm/`, `src/ir/asm/`) -- concrete, architecture-specific. Core types: `StinkyInstruction`, `Function`, `BasicBlock`. This is what passes operate on. The text format (used by `stinkytofu-opt` and FileCheck tests):
+**Asm IR** (`include/stinkytofu/ir/asm/`, `src/ir/asm/`) -- concrete, architecture-specific. Core types: `StinkyInstruction`, `StinkyRegister`. This is what most passes operate on. The text format (used by `stinkytofu-opt` and FileCheck tests):
 
 ```
 st.func @name() {
@@ -14,6 +14,8 @@ st.func @name() {
   v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
 }
 ```
+
+**Attached SSA** (`include/stinkytofu/ir/asm/ssa/`, `src/ir/asm/ssa/`) -- SSA identity overlay on Asm IR (`StinkySSAValue`, `StinkyOpOperand`). Owned by `Function` / `BasicBlock` in `core/`. Not a cached analysis; see [Lift Asm Registers to SSA](lift-asm-registers-to-ssa-pass.md).
 
 ## Build Dependency Chain
 

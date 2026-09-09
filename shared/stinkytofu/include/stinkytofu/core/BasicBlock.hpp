@@ -24,14 +24,29 @@
 
 #include <algorithm>
 #include <iosfwd>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 
 namespace stinkytofu {
 // Forward declarations for BasicBlock and Function
 class Function;
+class StinkySSAValue;
+
+/// One PHI-edge incoming value for a block argument.
+struct SSABlockIncoming {
+    const BasicBlock* predecessor = nullptr;
+    std::unique_ptr<StinkyOpOperand> use;
+};
+
+/// Block argument: live-in (no incoming) or PHI (incoming per predecessor).
+struct SSABlockArgument {
+    StinkySSAValue* value = nullptr;
+    std::vector<SSABlockIncoming> incoming;
+};
 
 // BasicBlock is in an IntrusiveList<BasicBlock, Function>; getParent() comes from IntrusiveListNode
 // and returns the owning Function. BasicBlock holds a list of IR and CFG edges.
@@ -41,6 +56,7 @@ class BasicBlock : public IntrusiveListNode<BasicBlock, Function> {
     IRList ir;          // List owns IR; parent is this block so IRBase::getParent() works
     std::vector<BasicBlock*> predecessors;
     std::vector<BasicBlock*> successors;
+    std::vector<SSABlockArgument> ssaArgs_;
 
    public:
     explicit BasicBlock(const std::string& label = "")
@@ -172,6 +188,18 @@ class BasicBlock : public IntrusiveListNode<BasicBlock, Function> {
     /// Clear all IR in this BasicBlock (removes and deletes via list traits).
     void clear() {
         ir.clear();
+    }
+
+    const std::vector<SSABlockArgument>& ssaArguments() const {
+        return ssaArgs_;
+    }
+
+    SSABlockArgument& addSSAArgument(StinkySSAValue* value);
+    void setSSAArgumentIncoming(size_t argIndex, const BasicBlock* predecessor,
+                                StinkySSAValue* value);
+    void clearSSAArguments();
+    bool hasSSAArguments() const {
+        return !ssaArgs_.empty();
     }
 
     void dump() const;

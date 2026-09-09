@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,8 @@
 #include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
+class SSAArena;
+
 // Function holds a list of BasicBlocks.
 //
 // This represents a function/kernel in the StinkyTofu IR.
@@ -41,18 +44,21 @@ namespace stinkytofu {
 class STINKYTOFU_EXPORT Function {
    private:
     std::string name;
+    // Arena is declared before the block list so blocks (and their SSA
+    // operands) are destroyed first, then values.
+    std::unique_ptr<SSAArena> ssaArena_;
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works
     GemmTileConfig gemmConfig;
     std::unordered_map<std::string, uint64_t> metadata_;
     bool isCallable = false;
 
    public:
-    explicit Function(const std::string& name = "") : name(name), basicBlocks(this) {}
+    explicit Function(const std::string& name = "");
 
     Function(const Function&) = delete;
     Function& operator=(const Function&) = delete;
 
-    ~Function() = default;
+    ~Function();
 
     const std::string& getName() const {
         return name;
@@ -180,9 +186,17 @@ class STINKYTOFU_EXPORT Function {
     }
 
     /// Delete all BasicBlocks and their IR (list traits delete each block and its IR).
-    void clear() {
-        basicBlocks.clear();
-    }
+    void clear();
+
+    SSAArena& ssaArena();
+    const SSAArena& ssaArena() const;
+
+    /// True when any instruction or block in this function has attached SSA.
+    bool hasAttachedSSA() const;
+
+    /// Drop instruction/block SSA metadata and arena values. Physical operands
+    /// are left unchanged.
+    void clearAttachedSSA();
 
     void dump(std::ostream& out) const;
 

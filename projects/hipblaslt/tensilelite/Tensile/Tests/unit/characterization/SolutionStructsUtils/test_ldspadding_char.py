@@ -23,21 +23,29 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.SolutionStructs.LdsPadding`` — the pure
+"""Characterization tests for ``Tensile.SolutionStructs.LdsPadding`` -- the pure
 numeric LDS-padding solvers (``get_fp4/fp8/fp16/fp32/mxs_mt_config`` and their
 ``_compute_*`` / bank-conflict-check helpers). Each public selector is exercised
 over a grid of (macro-tile, wave, vector-width) inputs and the full result
-config (``perBlock`` / ``pad`` / ``shift``) is snapshotted, so the padding
-tables are pinned and the tier-search branches are walked.
+config (``perBlock`` / ``pad``) is snapshotted, so the padding
+tables are pinned and the candidate ranking is walked.
 """
 
 import pytest
+
+# MatrixInstK per read path, and the TDM flag: these sweeps are TDM, where the
+# hardware writes LDS and no per-thread ds_write bounds the block from below.
+_K_B64  = 128
+_K_B128 = 32
+_K_B32  = 4
+_TDM    = True
+
 
 import Tensile.SolutionStructs.LdsPadding as L
 
 pytestmark = pytest.mark.unit
 
-_B64_KEYS = ("perBlock", "pad", "shift")
+_B64_KEYS = ("perBlock", "pad")
 _B128_KEYS = ("perBlock", "pad")
 
 _MTS = [64, 96, 128, 192, 256, 384, 512]
@@ -51,7 +59,7 @@ _WAVES = [(1, 1), (2, 1), (2, 2), (4, 2)]
 @pytest.mark.parametrize("wt,wg", _WAVES, ids=[f"wt{a}_wg{b}" for a, b in _WAVES])
 def test_get_fp4_mt_config(wt, wg, snapshot):
     result = {
-        mt: {k: L.get_fp4_mt_config(mt, k, wt, wg) for k in _B64_KEYS}
+        mt: {k: L.get_fp4_mt_config(mt, k, wt, wg, _K_B64, _TDM) for k in _B64_KEYS}
         for mt in _MTS
     }
     assert result == snapshot
@@ -60,7 +68,7 @@ def test_get_fp4_mt_config(wt, wg, snapshot):
 @pytest.mark.parametrize("wt,wg", _WAVES, ids=[f"wt{a}_wg{b}" for a, b in _WAVES])
 def test_get_fp8_mt_config(wt, wg, snapshot):
     result = {
-        mt: {k: L.get_fp8_mt_config(mt, k, wt, wg) for k in _B64_KEYS}
+        mt: {k: L.get_fp8_mt_config(mt, k, wt, wg, _K_B64, _TDM) for k in _B64_KEYS}
         for mt in _MTS
     }
     assert result == snapshot
@@ -83,7 +91,7 @@ _FP16_PARAMS = [
 def test_get_fp16_mt_config(params, snapshot):
     wg, ipt, lrvw, wt, vw = params
     result = {
-        mt: {k: L.get_fp16_mt_config(mt, k, wg, ipt, lrvw, wt, vw) for k in _B128_KEYS}
+        mt: {k: L.get_fp16_mt_config(mt, k, wg, ipt, lrvw, wt, vw, _K_B128, _TDM) for k in _B128_KEYS}
         for mt in _MTS
     }
     assert result == snapshot
@@ -106,7 +114,7 @@ _FP32_PARAMS = [
 def test_get_fp32_mt_config(params, snapshot):
     vw, lrvw, wg, ipt, wt, emu = params
     result = {
-        mt: {k: L.get_fp32_mt_config(mt, k, vw, lrvw, wg, ipt, wt, emu) for k in _B128_KEYS}
+        mt: {k: L.get_fp32_mt_config(mt, k, vw, lrvw, wg, ipt, wt, _K_B32, _TDM, emu) for k in _B128_KEYS}
         for mt in _MTS
     }
     assert result == snapshot
@@ -134,52 +142,67 @@ def test_get_mxs_mt_config(k, mxBlock, vw, snapshot):
 
 
 # ===========================================================================
-# Private bank-conflict helpers — reject branches that the public selectors
-# never reach for the real b64/b128 access patterns (the closed-form / tiered
-# search always picks a passing config). Exercised directly to pin the
-# contract; see resistance.md.
+# Private bank-conflict helpers -- reject branches that the public selectors
+# never reach for the real b64/b128 access patterns (the candidate ranking
+# always picks a passing config). Exercised directly to pin the contract.
 # ===========================================================================
 
 def test_fp16_odd_n_no_padding(snapshot):
-    # n = mt//16 odd -> closed-form returns {0, 0} with no search (line 286).
-    result = {k: L.get_fp16_mt_config(80, k, 1, 16, 8, 1, 1) for k in _B128_KEYS}
+    # For mt=80, every block-padding candidate ranks worse than the
+    # no-padding candidate, so the search settles on {0, 0}.
+    result = {k: L.get_fp16_mt_config(80, k, 1, 16, 8, 1, 1, _K_B128, _TDM) for k in _B128_KEYS}
     assert result == snapshot
 
 
-def test_b128_check_not_16_aligned_false():
-    # A non-16-byte-aligned address -> reject (line 243).
-    assert L._b128_check([4], 1024, 0, (0,), (0,)) is False
+def test_b128_wave_costs_not_16_aligned_none():
+    # A non-16-byte-aligned address -> illegal candidate -> None.
+    assert L._b128_wave_costs([4], 1024, 0, (0,), (0,)) is None
 
 
-def test_b128_check_bank_conflict_false():
-    # Two threads at the same base address collide in banks (line 250).
-    assert L._b128_check([0, 0], 1024, 0, (0,), (0,)) is False
+def test_b128_wave_costs_bank_conflict():
+    # Two threads at the same base address collide in banks -> a nonzero
+    # per-wave cost instead of the ideal one-thread-per-bank cost.
+    assert L._b128_wave_costs([0, 0], 1024, 0, (0,), (0,)) == [2]
 
 
-def test_b64_check_not_dword_aligned_false():
-    # A per-thread address not 4-byte aligned -> reject (line 113).
-    assert L._b64_check([2], [0], 1024, 0, (0,), (0,), 0) is False
+def test_b64_wave_costs_not_8_byte_aligned_none():
+    # A per-thread address not 8-byte aligned -> illegal candidate -> None.
+    assert L._b64_wave_costs([4], 1024, 0, (0,), (0,)) is None
 
 
 def test_b64_compute_config_no_valid_block_returns_zero(snapshot):
-    # minB larger than every valid block size -> empty candidate set -> no
-    # config in any tier -> all-zero result (line 169).
-    cfg = L._b64_compute_config(128, 0.5, L._b64_base_addrs_fp4, 2048, (0,), (0,))
+    # minBlockBytes larger than every valid block size -> _valid_blocks_for is
+    # empty, but the candidate list always starts with the no-padding pair
+    # (B=0, P=0). That one is legal here, so the ranking picks it on
+    # cost/overhead/pad, not through the "no legal candidate" branch.
+    shape = L._Shape(rawAddrs=L._b64_base_addrs_fp4(128),
+                     instOffs=(0,),
+                     wOffsets=(0,),
+                     incBytes=64 * _K_B64,
+                     minBlockBytes=2048,
+                     writeRowBytes=0)
+    assert L._valid_blocks_for(shape) == []
+    cfg = L._b64_compute_config(shape)
     assert cfg == snapshot
 
 
 def test_fp16_search_fallback_finds_config(monkeypatch, snapshot):
-    # The closed-form check never fails for real inputs, so the search fallback
-    # (lines 301-313) is unreachable via the public selector. Force it by
-    # making the bank check reject the closed-form pick and accept only
-    # (B=16, P=4); the search then settles on that.
-    monkeypatch.setattr(L, "_b128_check", lambda half, B, P, wOffsets, instOffs=(0,): B == 16 and P == 4)
-    cfg = L._compute_fp16_config(20000, 1, miInputPerThUnroll=16, lrvw=8, miWaveTile=1, vw=1)
+    # The unpadded candidate never fails for real inputs, so this branch of
+    # the ranking is unreachable via the public selector. Force it by making
+    # the cost function reject every candidate except one. The b128 path
+    # steps P by 16, so the forced pad has to be a multiple of 16 to be in
+    # the candidate list at all.
+    monkeypatch.setattr(
+        L, "_b128_wave_costs",
+        lambda half, B, P, wOffsets, instOffs=(0,): [1] * len(wOffsets) if (B == 16 and P == 16) else None)
+    cfg = L._compute_fp16_config(20000, 1, miInputPerThUnroll=16, lrvw=8, miWaveTile=1, vw=1,
+                           matrixInstK=_K_B128, usesTDM=_TDM)
     assert cfg == snapshot
 
 
 def test_fp16_search_fallback_no_config(monkeypatch, snapshot):
-    # Same forced search, but nothing passes -> the all-zero return (line 314).
-    monkeypatch.setattr(L, "_b128_check", lambda half, B, P, wOffsets, instOffs=(0,): False)
-    cfg = L._compute_fp16_config(20032, 1, miInputPerThUnroll=16, lrvw=8, miWaveTile=1, vw=1)
+    # Same forced ranking, but nothing passes -> the all-zero return.
+    monkeypatch.setattr(L, "_b128_wave_costs", lambda half, B, P, wOffsets, instOffs=(0,): None)
+    cfg = L._compute_fp16_config(20032, 1, miInputPerThUnroll=16, lrvw=8, miWaveTile=1, vw=1,
+                           matrixInstK=_K_B128, usesTDM=_TDM)
     assert cfg == snapshot

@@ -107,6 +107,16 @@ from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
     make_dgrad_w_descriptor,
     pack_sub_gemm_buffer,
 )
+from .common.conv_wgrad_workspace_reduce import (  # noqa: F401
+    WgradReduceSpec,
+    build_conv_wgrad_workspace_reduce,
+    wgrad_reduce_grid,
+    wgrad_reduce_signature,
+)
+from .common.conv_implicit_gemm_wgrad_two_stage import (  # noqa: F401
+    build_implicit_gemm_conv_wgrad_two_stage,
+    wgrad_two_stage_workspace_nbytes,
+)
 from .common.gemm_universal import (  # noqa: F401
     DataSpec,
     Epilogue,

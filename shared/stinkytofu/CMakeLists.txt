@@ -152,6 +152,25 @@ if(STINKYTOFU_CODE_COVERAGE)
 endif()
 
 ##===----------------------------------------------------------------------===##
+# AddressSanitizer
+##===----------------------------------------------------------------------===##
+# Applied globally (before any targets are defined) so the library, tools, and
+# tests are all instrumented — the FileCheck and Python tests exercise library
+# code via separate processes, so the library itself must carry the
+# instrumentation. Drive it with `invoke asan`.
+option(STINKYTOFU_ENABLE_ASAN "Build with AddressSanitizer instrumentation" OFF)
+if(STINKYTOFU_ENABLE_ASAN)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    else()
+        message(FATAL_ERROR
+            "STINKYTOFU_ENABLE_ASAN is not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+    message(STATUS "StinkyTofu: AddressSanitizer instrumentation enabled")
+endif()
+
+##===----------------------------------------------------------------------===##
 # Hardware library and tablegen tools
 ##===----------------------------------------------------------------------===##
 # Add subdirectories first to define gfxisa, tablegen, and tablegen_generated targets

@@ -314,6 +314,7 @@ def benchmark(
     aux: bool = False,
     device: int = 0,
     bench_freq: bool = False,
+    custom_lib_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Run benchmark from log file configuration.
 
@@ -341,6 +342,8 @@ def benchmark(
             Defaults to 0.
         bench_freq (bool, optional): Forwarded to bench.run (controls
             HIPBLASLT_BENCH_FREQ). Defaults to False.
+        custom_lib_dir (str | Path | None, optional): Optional built custom
+            library directory. If provided, forwarded to bench.run.
 
     Returns:
         pd.DataFrame: DataFrame with benchmark results.
@@ -366,6 +369,7 @@ def benchmark(
     output_file = bench_file.with_suffix(".out")
     df = bench.run(
         hipblaslt_path, bench_file, output_file,
+        custom_lib_dir=custom_lib_dir,
         devices=[device], cache=False, bench_freq=bench_freq,
     )
     return df
@@ -382,6 +386,7 @@ def summarize(
     benchmark_duration: float = 0.5,
     bench_freq: bool = False,
     device: int | None = None,
+    custom_lib_dir: str | Path | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Analyze and summarize GEMM operations from hipBLASLt log file.
 
@@ -411,6 +416,8 @@ def summarize(
             benchmarking entirely. Defaults to False.
         device (int, optional): Backward-compatible single-device alias.
             If set, overrides devices.
+        custom_lib_dir (str | Path | None, optional): Optional built custom
+            library directory used for benchmark-based summarize paths.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: DataFrames with summarized and unique GEMM operations, filtered by threshold
@@ -450,6 +457,7 @@ def summarize(
                 hipblaslt_path,
                 log_file,
                 output_file,
+                custom_lib_dir=custom_lib_dir,
                 devices=devices,
                 duration=benchmark_duration,
                 bench_freq=bench_freq,
@@ -457,12 +465,13 @@ def summarize(
         else:
             summary_df = bench.run(
                 hipblaslt_path, log_file, output_file,
+                custom_lib_dir=custom_lib_dir,
                 devices=devices, cache=cache, bench_freq=bench_freq,
             )
 
         # add lib_source column
-        matchtable_path = Path(hipblaslt_path / "build/release/device-library/MatchTable.yaml")
-        summary_df = update_lib_source(summary_df, matchtable_path)
+        match_table_path = Path(hipblaslt_path / "build/release/device-library/MatchTable.yaml")
+        summary_df = update_lib_source(summary_df, match_table_path)
 
         summary_df["call_count"] = pd.DataFrame(data)["call_count"] if "call_count" in data[0] else 1
         summary_df["total (us)"] = summary_df["call_count"] * summary_df["us"]

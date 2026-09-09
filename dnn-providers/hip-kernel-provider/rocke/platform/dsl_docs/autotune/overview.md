@@ -4,11 +4,15 @@
 
 ## Concepts
 
-- **Config**: one `AutotuneConfig(spec=..., name=..., extra={})` per point in the search space. `spec` is a kernel spec dataclass (e.g. `UniversalGemmSpec`, `ImplicitGemmConvSpec`).
+- **Config**: one `AutotuneConfig(spec=..., name=..., extra={})` per point in the search space. `spec` is a kernel spec dataclass (e.g. `UniversalGemmSpec`, `ImplicitGemmConvSpec`). Compiler-tuning experiments can carry a typed `CodegenPolicy` in `extra["codegen_policy"]`; the caller applies it to the built kernel.
 - **Key**: a tuple of runtime shape / dtype / layout values, produced by the user-supplied `key_fn`. The autotuner caches the per-key winner.
 - **Bench callable**: user-supplied `bench_fn(config, **runtime_args) -> ms`. The caller builds the kernel from `config.spec`, runs warmups, and returns a HIP-event-timed average (typically via `time_launches`).
 - **Launch callable**: user-supplied `launch_fn(config, **runtime_args) -> None`, invoked once per real launch with the winning config.
 - **Cache**: in-memory dict, plus an optional JSON file on disk keyed by the `key_fn` tuple.
+
+When sweeping scheduler policies, give every policy variant a distinct config
+name and compiled-artifact location. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
 
 ## Top-Level API
 
