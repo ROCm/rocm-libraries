@@ -681,35 +681,6 @@ static inline float unpackF8(uint8_t b)
     return static_cast<float>(v);
 }
 
-static inline uint8_t packBf8(float f)
-{
-    hipblaslt_bf8 v(f);
-    uint8_t       b;
-    std::memcpy(&b, &v, 1);
-    return b;
-}
-
-static inline float unpackBf8(uint8_t b)
-{
-    hipblaslt_bf8 v;
-    std::memcpy(&v, &b, 1);
-    return static_cast<float>(v);
-}
-
-static inline uint16_t packF16(float f)
-{
-    _Float16 v = static_cast<_Float16>(f);
-    uint16_t b;
-    std::memcpy(&b, &v, 2);
-    return b;
-}
-
-static inline float unpackF16(uint16_t b)
-{
-    _Float16 v;
-    std::memcpy(&v, &b, 2);
-    return static_cast<float>(v);
-}
 
 static bool deviceIsGfx950()
 {
@@ -736,6 +707,35 @@ static void fillRandomF8(std::vector<uint8_t>&                  values,
 {
     for(uint8_t& x : values)
         x = packF8(dist(rng));
+}
+
+
+// Build a RESIDUAL_ADD + PARTIAL_RMSNORM_STATS producer descriptor with the given
+// gamma, eps, and handoff descriptor. Used by decomposedHandoffBufferIsValidated.
+static void createPartialStatsDescriptor(hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
+                                         void*                                     dResidual,
+                                         void*                                     dGamma,
+                                         float                                     eps,
+                                         hipblasLtFusedEpilogueDescriptor_t*       prod)
+{
+    ASSERT_EQ(hipblasLtFusedEpilogueCreate(prod), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueAdd(*prod, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(
+        hipblasLtFusedEpilogueSetAttribute(
+            *prod, HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER, &dResidual, sizeof(dResidual)),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueAdd(*prod, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                  *prod, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA, &dGamma, sizeof(dGamma)),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                  *prod, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS, &eps, sizeof(eps)),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
+                  *prod, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS, &stats, sizeof(stats)),
+              HIPBLAS_STATUS_SUCCESS);
 }
 
 struct FusedMatmulLayout
@@ -868,38 +868,6 @@ static hipblasStatus_t runBf16TnFusedMatmul(hipblasLtHandle_t                  h
                             algoCount);
 }
 
-// TN bf16 A × bf16 B → fp8-e4m3 D with a fused epilogue (MXfp8-quant producer path).
-static hipblasStatus_t runBf16TnFusedMatmulFp8D(hipblasLtHandle_t                  handle,
-                                                int64_t                            m,
-                                                int64_t                            n,
-                                                int64_t                            k,
-                                                void*                              dA,
-                                                int64_t                            lda,
-                                                void*                              dB,
-                                                void*                              dC,
-                                                void*                              dD,
-                                                hipblasLtFusedEpilogueDescriptor_t fused,
-                                                void*                              dWorkspace,
-                                                size_t                             workspaceSize,
-                                                int&                               algoCount)
-{
-    return runTnFusedMatmul(handle,
-                            {HIP_R_16BF, HIP_R_16BF, HIP_R_8F_E4M3},
-                            m,
-                            n,
-                            k,
-                            dA,
-                            lda,
-                            nullptr,
-                            dB,
-                            nullptr,
-                            dC,
-                            dD,
-                            fused,
-                            dWorkspace,
-                            workspaceSize,
-                            algoCount);
-}
 
 // TN fp8-e4m3 A × fp8-e4m3 B → bf16 D with pre-swizzled MX block-32 UE8M0 scales on both
 // A and B, and a fused epilogue. A is (k × m) col-major fp8 with scale dMxScaleA, B is
@@ -1109,6 +1077,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
     ASSERT_EQ(hipMemcpy(dW0, hW0.data(), hW0.size() * 2, hipMemcpyHostToDevice), hipSuccess);
@@ -1253,7 +1222,7 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     fillRandomBf16(hW1, rng, dist);
 
     void *dX = nullptr, *dW0 = nullptr, *dGamma = nullptr, *dH2 = nullptr, *dW1 = nullptr,
-         *dD2 = nullptr, *dRstd = nullptr, *dWs = nullptr;
+         *dD2 = nullptr, *dRstd = nullptr, *dResidual = nullptr, *dWs = nullptr;
     const size_t wsSize = size_t(256) * 1024 * 1024;
     ASSERT_EQ(hipMalloc(&dX, hX.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW0, hW0.size() * 2), hipSuccess);
@@ -1262,6 +1231,8 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidual, size_t(M) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMemset(dResidual, 0, size_t(M) * Nhidden * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
     ASSERT_EQ(hipMemcpy(dW0, hW0.data(), hW0.size() * 2, hipMemcpyHostToDevice), hipSuccess);
@@ -1277,7 +1248,7 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
 
     hipblasLtFusedEpilogueDescriptor_t prod = nullptr;
-    ASSERT_NO_FATAL_FAILURE(createPartialStatsDescriptor(stats, dGamma, eps, &prod));
+    ASSERT_NO_FATAL_FAILURE(createPartialStatsDescriptor(stats, dResidual, dGamma, eps, &prod));
 
     const size_t requiredBytes = size_t(M) * sizeof(float);
     int          algoCount     = 0;
@@ -1336,6 +1307,7 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     static_cast<void>(hipFree(dH2));
     static_cast<void>(hipFree(dW1));
     static_cast<void>(hipFree(dD2));
+    static_cast<void>(hipFree(dResidual));
     static_cast<void>(hipFree(dRstd));
     static_cast<void>(hipFree(dWs));
 }
@@ -1402,93 +1374,6 @@ namespace
     };
 }
 
-// Standard MX-fp8 block quant of a col-major [m, n] f32 matrix: free0=m (q0=1),
-// free1=n (q1=blockSize). Returns swizzled UE8M0 scale bytes and fp8 e4m3 D bytes.
-// Tensile always lays the scale grid out with rows = free1 tiles and cols = free0
-// tiles, whichever axis carries the block; see mxScaleSwizzleOffset(tj, ti) and the
-// padding of nTiles/mTiles in the tensilelite client's Reference.cpp. Here that is
-// rows = n/blockSize and cols = m.
-static MxFp8Ref
-    quantizeMxfp8Standard(const std::vector<float>& dF32, int64_t m, int64_t n, int32_t blockSize)
-{
-    const int64_t nTiles     = (n + blockSize - 1) / blockSize;
-    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((m + 7) / 8) * 8;
-
-    std::vector<uint8_t> scalePlain(static_cast<size_t>(paddedRows) * paddedCols, 0);
-    std::vector<float>   dQuantF32(static_cast<size_t>(m) * n, 0.0f);
-    for(int64_t ti = 0; ti < m; ++ti)
-        for(int64_t tj = 0; tj < nTiles; ++tj)
-        {
-            float amax = 0.0f;
-            for(int64_t dj = 0; dj < blockSize; ++dj)
-            {
-                const int64_t col = tj * blockSize + dj;
-                if(col >= n)
-                    break;
-                amax = std::max(amax, std::abs(dF32[ti + col * m]));
-            }
-            uint8_t     sb;
-            const float mult                 = e8m0QuantMult(amax, sb);
-            scalePlain[tj * paddedCols + ti] = sb;
-            for(int64_t dj = 0; dj < blockSize; ++dj)
-            {
-                const int64_t col = tj * blockSize + dj;
-                if(col >= n)
-                    break;
-                dQuantF32[ti + col * m] = dF32[ti + col * m] * mult;
-            }
-        }
-
-    std::vector<uint8_t> dFp8(static_cast<size_t>(m) * n);
-    for(size_t idx = 0; idx < dFp8.size(); ++idx)
-        dFp8[idx] = packF8(dQuantF32[idx]);
-
-    MxFp8Ref ref;
-    ref.mxScale    = swizzleGfx950(scalePlain, paddedRows, paddedCols);
-    ref.dFp8       = dFp8;
-    ref.paddedRows = paddedRows;
-    ref.paddedCols = paddedCols;
-    return ref;
-}
-
-// CPU MX fp8 quant reference. aF32 is (k × m) col-major float, bF32 is (k × n) col-major
-// float. The caller converts host input values through the actual GPU type (f16/fp8/bf8) before
-// calling this function so the reference matches what the GPU sees.
-static MxFp8Ref referenceMxfp8QuantF32(const std::vector<float>& aF32,
-                                       const std::vector<float>& bF32,
-                                       int64_t                   m,
-                                       int64_t                   n,
-                                       int64_t                   k,
-                                       int32_t                   blockSize)
-{
-    std::vector<float> dF32(static_cast<size_t>(m) * n, 0.0f);
-    for(int64_t i = 0; i < m; ++i)
-        for(int64_t j = 0; j < n; ++j)
-        {
-            float acc = 0.0f;
-            for(int64_t kk = 0; kk < k; ++kk)
-                acc += aF32[kk + i * k] * bF32[kk + j * k];
-            dF32[i + j * m] = acc;
-        }
-    return quantizeMxfp8Standard(dF32, m, n, blockSize);
-}
-
-// CPU MX fp8 quant reference for bf16 A/B inputs; delegates to the f32 path.
-static MxFp8Ref referenceMxfp8Quant(const std::vector<uint16_t>& hA,
-                                    const std::vector<uint16_t>& hB,
-                                    int64_t                      m,
-                                    int64_t                      n,
-                                    int64_t                      k,
-                                    int32_t                      blockSize)
-{
-    std::vector<float> aF32(hA.size()), bF32(hB.size());
-    for(size_t i = 0; i < hA.size(); ++i)
-        aF32[i] = bf16_to_f32(hA[i]);
-    for(size_t i = 0; i < hB.size(); ++i)
-        bF32[i] = bf16_to_f32(hB[i]);
-    return referenceMxfp8QuantF32(aF32, bF32, m, n, k, blockSize);
-}
 
 // Count fp8-e4m3 byte positions whose decoded value differs from the reference.
 static size_t countFp8Mismatches(const std::vector<uint8_t>& got, const std::vector<uint8_t>& ref)
@@ -1506,6 +1391,7 @@ static void expectMxScaleEqual(const std::vector<uint8_t>& got, const std::vecto
     ASSERT_EQ(got.size(), ref.size());
     EXPECT_EQ(got, ref) << "MX UE8M0 scale buffer mismatch";
 }
+
 
 // CPU reference for the producer's transposed MX-fp8 quant: dOutT[nh, mt] = gamma[nh]*h1[mt, nh],
 // block along the N_hidden (free0) axis with q1=1 over M_tokens. Scale grid is
@@ -1594,391 +1480,6 @@ static hipblasStatus_t runTypedTnFusedMatmulFp8D(hipblasLtHandle_t              
                             algoCount);
 }
 
-// ---- End-to-end test: standalone MX fp8 quant ----
-//
-// TN bf16 GEMM → e4m3 D with per-1×32-block UE8M0 scale output. No RMSNorm.
-// m = N_hidden (free0), n = M_tokens (free1), block along free1 axis.
-
-TEST(FusedEpilogueE2E, mxfp8QuantMatchesReference)
-{
-    if(!deviceIsGfx950())
-        GTEST_SKIP() << "MX fp8 quant epilogue is wired for gfx950 only";
-
-    const int64_t M = 128, N = 512, K = 64;
-    const int32_t blockSize  = 32;
-    const int64_t mTiles     = M; // q0=1
-    const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
-    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
-    const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
-
-    std::vector<uint16_t>                 hA(static_cast<size_t>(K) * M);
-    std::vector<uint16_t>                 hB(static_cast<size_t>(K) * N);
-    std::mt19937                          rng(42);
-    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
-    fillRandomBf16(hA, rng, dist);
-    fillRandomBf16(hB, rng, dist);
-
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dMxScale = nullptr,
-         *dWs           = nullptr;
-    const size_t wsSize = size_t(64) * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dA, hA.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, hB.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), hA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), hB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
-
-    hipblasLtHandle_t handle = nullptr;
-    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtRequantScaleGranularity_t gran = HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY, &gran, sizeof(gran)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER, &dMxScale, sizeof(dMxScale)),
-        HIPBLAS_STATUS_SUCCESS);
-    int32_t bs = blockSize;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE, &bs, sizeof(bs)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipDataType outType = HIP_R_8F_E4M3;
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
-        HIPBLAS_STATUS_SUCCESS);
-
-    int algoCount = 0;
-    ASSERT_EQ(
-        runBf16TnFusedMatmulFp8D(handle, M, N, K, dA, K, dB, dC, dD, fused, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no standalone MX fp8 quant solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    std::vector<uint8_t> hD(static_cast<size_t>(M) * N);
-    std::vector<uint8_t> hMxScale(scaleBufSz);
-    ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size(), hipMemcpyDeviceToHost), hipSuccess);
-    ASSERT_EQ(hipMemcpy(hMxScale.data(), dMxScale, scaleBufSz, hipMemcpyDeviceToHost), hipSuccess);
-
-    const MxFp8Ref ref = referenceMxfp8Quant(hA, hB, M, N, K, blockSize);
-    expectMxfp8Near(hD, hMxScale, ref);
-
-    hipblasLtFusedEpilogueDestroy(fused);
-    hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
-    static_cast<void>(hipFree(dD));
-    static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dWs));
-}
-
-// ---- End-to-end test: standalone MX fp8 quant, f16 inputs ----
-//
-// TN f16 GEMM → e4m3 D with per-1×32-block UE8M0 scale output. Uses the HF8S logic.
-TEST(FusedEpilogueE2E, mxfp8QuantF16MatchesReference)
-{
-    if(!deviceIsGfx950())
-        GTEST_SKIP() << "MX fp8 quant epilogue is wired for gfx950 only";
-
-    const int64_t M = 128, N = 512, K = 64;
-    const int32_t blockSize  = 32;
-    const int64_t mTiles     = M;
-    const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
-    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
-    const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
-    const size_t  szA        = static_cast<size_t>(K) * M;
-    const size_t  szB        = static_cast<size_t>(K) * N;
-
-    std::mt19937                          rng(44);
-    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
-
-    // Quantise host values through f16 so the reference matches what the GPU sees.
-    std::vector<uint16_t> hA(szA), hB(szB);
-    fillRandomF16(hA, rng, dist);
-    fillRandomF16(hB, rng, dist);
-    std::vector<float> aF32(szA), bF32(szB);
-    for(size_t i = 0; i < szA; ++i)
-        aF32[i] = unpackF16(hA[i]);
-    for(size_t i = 0; i < szB; ++i)
-        bF32[i] = unpackF16(hB[i]);
-
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dMxScale = nullptr,
-         *dWs           = nullptr;
-    const size_t wsSize = size_t(64) * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dA, szA * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, szB * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), szA * sizeof(uint16_t), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), szB * sizeof(uint16_t), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
-
-    hipblasLtHandle_t handle = nullptr;
-    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtRequantScaleGranularity_t gran = HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY, &gran, sizeof(gran)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER, &dMxScale, sizeof(dMxScale)),
-        HIPBLAS_STATUS_SUCCESS);
-    int32_t bs = blockSize;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE, &bs, sizeof(bs)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipDataType outType = HIP_R_8F_E4M3;
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
-        HIPBLAS_STATUS_SUCCESS);
-
-    int algoCount = 0;
-    ASSERT_EQ(runTypedTnFusedMatmulFp8D(
-                  handle, M, N, K, dA, K, dB, dC, dD, HIP_R_16F, fused, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no standalone MX fp8 quant (f16 input) solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    std::vector<uint8_t> hD(static_cast<size_t>(M) * N);
-    std::vector<uint8_t> hMxScale(scaleBufSz);
-    ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size(), hipMemcpyDeviceToHost), hipSuccess);
-    ASSERT_EQ(hipMemcpy(hMxScale.data(), dMxScale, scaleBufSz, hipMemcpyDeviceToHost), hipSuccess);
-
-    const MxFp8Ref ref = referenceMxfp8QuantF32(aF32, bF32, M, N, K, blockSize);
-    expectMxfp8Near(hD, hMxScale, ref);
-
-    hipblasLtFusedEpilogueDestroy(fused);
-    hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
-    static_cast<void>(hipFree(dD));
-    static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dWs));
-}
-
-// ---- End-to-end test: standalone MX fp8 quant, fp8 e4m3 inputs ----
-//
-// TN fp8-e4m3 GEMM → e4m3 D with per-1×32-block UE8M0 scale output. Uses the F8F8S logic.
-TEST(FusedEpilogueE2E, mxfp8QuantFp8MatchesReference)
-{
-    if(!deviceIsGfx950())
-        GTEST_SKIP() << "MX fp8 quant epilogue is wired for gfx950 only";
-
-    const int64_t M = 128, N = 512, K = 128;
-    const int32_t blockSize  = 32;
-    const int64_t mTiles     = M;
-    const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
-    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
-    const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
-    const size_t  szA        = static_cast<size_t>(K) * M;
-    const size_t  szB        = static_cast<size_t>(K) * N;
-
-    std::mt19937                          rng(45);
-    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
-
-    // Quantise through fp8 e4m3 so the reference matches what the GPU accumulates.
-    std::vector<uint8_t> hA(szA), hB(szB);
-    fillRandomF8(hA, rng, dist);
-    fillRandomF8(hB, rng, dist);
-    std::vector<float> aF32(szA), bF32(szB);
-    for(size_t i = 0; i < szA; ++i)
-        aF32[i] = unpackF8(hA[i]);
-    for(size_t i = 0; i < szB; ++i)
-        bF32[i] = unpackF8(hB[i]);
-
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dMxScale = nullptr,
-         *dWs           = nullptr;
-    const size_t wsSize = size_t(64) * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dA, szA), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, szB), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), szA, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), szB, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
-
-    hipblasLtHandle_t handle = nullptr;
-    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtRequantScaleGranularity_t gran = HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY, &gran, sizeof(gran)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER, &dMxScale, sizeof(dMxScale)),
-        HIPBLAS_STATUS_SUCCESS);
-    int32_t bs = blockSize;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE, &bs, sizeof(bs)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipDataType outType = HIP_R_8F_E4M3;
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
-        HIPBLAS_STATUS_SUCCESS);
-
-    int algoCount = 0;
-    ASSERT_EQ(runTypedTnFusedMatmulFp8D(
-                  handle, M, N, K, dA, K, dB, dC, dD, HIP_R_8F_E4M3, fused, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no standalone MX fp8 quant (fp8 e4m3 input) solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    std::vector<uint8_t> hD(static_cast<size_t>(M) * N);
-    std::vector<uint8_t> hMxScale(scaleBufSz);
-    ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size(), hipMemcpyDeviceToHost), hipSuccess);
-    ASSERT_EQ(hipMemcpy(hMxScale.data(), dMxScale, scaleBufSz, hipMemcpyDeviceToHost), hipSuccess);
-
-    const MxFp8Ref ref = referenceMxfp8QuantF32(aF32, bF32, M, N, K, blockSize);
-    expectMxfp8Near(hD, hMxScale, ref);
-
-    hipblasLtFusedEpilogueDestroy(fused);
-    hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
-    static_cast<void>(hipFree(dD));
-    static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dWs));
-}
-
-// ---- End-to-end test: standalone MX fp8 quant, bf8 e5m2 inputs ----
-//
-// TN bf8-e5m2 GEMM → e4m3 D with per-1×32-block UE8M0 scale output. Uses the B8F8S logic.
-TEST(FusedEpilogueE2E, mxfp8QuantBf8MatchesReference)
-{
-    if(!deviceIsGfx950())
-        GTEST_SKIP() << "MX fp8 quant epilogue is wired for gfx950 only";
-
-    const int64_t M = 128, N = 512, K = 128;
-    const int32_t blockSize  = 32;
-    const int64_t mTiles     = M;
-    const int64_t nTiles     = (N + blockSize - 1) / blockSize;
-    // Tensile scale grid: rows = free1 tiles (the blocked axis), cols = free0 tiles.
-    const int64_t paddedRows = ((nTiles + 31) / 32) * 32;
-    const int64_t paddedCols = ((mTiles + 7) / 8) * 8;
-    const size_t  scaleBufSz = static_cast<size_t>(paddedRows) * paddedCols;
-    const size_t  szA        = static_cast<size_t>(K) * M;
-    const size_t  szB        = static_cast<size_t>(K) * N;
-
-    std::mt19937                          rng(46);
-    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
-
-    // Quantise through bf8 e5m2 so the reference matches what the GPU accumulates.
-    std::vector<uint8_t> hA(szA), hB(szB);
-    fillRandomBf8(hA, rng, dist);
-    fillRandomBf8(hB, rng, dist);
-    std::vector<float> aF32(szA), bF32(szB);
-    for(size_t i = 0; i < szA; ++i)
-        aF32[i] = unpackBf8(hA[i]);
-    for(size_t i = 0; i < szB; ++i)
-        bF32[i] = unpackBf8(hB[i]);
-
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dMxScale = nullptr,
-         *dWs           = nullptr;
-    const size_t wsSize = size_t(64) * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dA, szA), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, szB), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), szA, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), szB, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
-
-    hipblasLtHandle_t handle = nullptr;
-    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtRequantScaleGranularity_t gran = HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY, &gran, sizeof(gran)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER, &dMxScale, sizeof(dMxScale)),
-        HIPBLAS_STATUS_SUCCESS);
-    int32_t bs = blockSize;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE, &bs, sizeof(bs)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipDataType outType = HIP_R_8F_E4M3;
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
-        HIPBLAS_STATUS_SUCCESS);
-
-    int algoCount = 0;
-    ASSERT_EQ(runTypedTnFusedMatmulFp8D(
-                  handle, M, N, K, dA, K, dB, dC, dD, HIP_R_8F_E5M2, fused, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no standalone MX fp8 quant (bf8 e5m2 input) solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    std::vector<uint8_t> hD(static_cast<size_t>(M) * N);
-    std::vector<uint8_t> hMxScale(scaleBufSz);
-    ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size(), hipMemcpyDeviceToHost), hipSuccess);
-    ASSERT_EQ(hipMemcpy(hMxScale.data(), dMxScale, scaleBufSz, hipMemcpyDeviceToHost), hipSuccess);
-
-    const MxFp8Ref ref = referenceMxfp8QuantF32(aF32, bF32, M, N, K, blockSize);
-    expectMxScaleEqual(hMxScale, ref.mxScale);
-    // For E5M2 inputs the gfx950 MFMA accumulates in a different order than the sequential
-    // CPU reference, so a handful of D fp8 output values near a quantization boundary can
-    // differ by 1 fp8 ULP. Allow up to 50 such mismatches (<<0.1% of 65536 elements).
-    ASSERT_EQ(hD.size(), ref.dFp8.size());
-    const size_t mismatches = countFp8Mismatches(hD, ref.dFp8);
-    EXPECT_LE(mismatches, 50u) << "D e4m3 output has " << mismatches << " mismatches";
-
-    hipblasLtFusedEpilogueDestroy(fused);
-    hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
-    static_cast<void>(hipFree(dD));
-    static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dWs));
-}
 
 // ---- Typed helper: chained MXfp8 RMSNorm producer/consumer for f16/fp8/bf8 inputs ----
 //
@@ -2467,160 +1968,6 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
     static_cast<void>(hipFree(dConsScaleB));
 }
 
-// ---- End-to-end: PartialRMS MXFP8 with dual bf16 residual output ----
-//
-// Exercises the HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER attribute.
-// The K1 kernel runs the RESIDUAL_ADD -> RMSNORM -> REQUANT chain (PartialRMSStoreBf16D=true),
-// writing the MXFP8-quantised fp8 D + UE8M0 block scale AND additionally storing the
-// pre-quantisation value H+residual as bf16 in a separate buffer. The test verifies that
-// the bf16 residualOut matches the CPU reference: dot(A,B) + residual (no gamma, no invRms).
-
-TEST(FusedEpilogueE2E, partialRmsMxfp8ResidualOutBf16MatchesReference)
-{
-    if(!deviceIsGfx950())
-        GTEST_SKIP() << "partialRMSStoreBf16D MXFP8 epilogue is wired for gfx950 only";
-
-    // M_tokens=256 (multiple of MacroTile1=128), N_hidden=512 (multiple of MacroTile0=64).
-    const int64_t M         = 256;
-    const int64_t N         = 512;
-    const int64_t K         = 64;
-    const int32_t blockSize = 32;
-    const float   eps       = 1e-5f;
-
-    // MX scale tensor dimensions after the PartialRMS transpose (free0=N_hidden, free1=M_tokens).
-    const int64_t kBlockTiles = (N + blockSize - 1) / blockSize;
-    const int64_t freeTiles   = M;
-    const int64_t paddedRows  = ((freeTiles + 31) / 32) * 32;
-    const int64_t paddedCols  = ((kBlockTiles + 7) / 8) * 8;
-    const size_t  scaleBufSz  = static_cast<size_t>(paddedRows) * paddedCols;
-
-    std::vector<uint16_t> hA(static_cast<size_t>(K) * M);
-    std::vector<uint16_t> hB(static_cast<size_t>(K) * N);
-    std::vector<uint16_t> hGamma(N);
-    std::vector<uint16_t> hResidual(static_cast<size_t>(M) * N);
-
-    std::mt19937                          rng(2027);
-    std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
-    std::uniform_real_distribution<float> gdist(0.5f, 1.5f);
-    fillRandomBf16(hA, rng, dist);
-    fillRandomBf16(hB, rng, dist);
-    fillRandomBf16(hGamma, rng, gdist);
-    fillRandomBf16(hResidual, rng, dist);
-
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dGamma = nullptr,
-         *dResidual = nullptr, *dMxScale = nullptr, *dResidualOut = nullptr, *dWs = nullptr;
-    const size_t wsSize      = size_t(256) * 1024 * 1024;
-    const size_t residualOutSz = static_cast<size_t>(M) * N * sizeof(uint16_t);
-    ASSERT_EQ(hipMalloc(&dA, hA.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, hB.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dResidualOut, residualOutSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD; // beta = 0, C unused numerically but must be a valid pointer.
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), hA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), hB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(
-        hipMemcpy(dGamma, hGamma.data(), hGamma.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-        hipSuccess);
-    ASSERT_EQ(hipMemcpy(dResidual,
-                        hResidual.data(),
-                        hResidual.size() * sizeof(uint16_t),
-                        hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
-    ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMemset(dResidualOut, 0, residualOutSz), hipSuccess);
-
-    hipblasLtHandle_t handle = nullptr;
-    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-    ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER, &dResidual, sizeof(dResidual)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA, &dGamma, sizeof(dGamma)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS, &eps, sizeof(eps)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipblasLtRequantScaleGranularity_t gran = HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY, &gran, sizeof(gran)),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER, &dMxScale, sizeof(dMxScale)),
-        HIPBLAS_STATUS_SUCCESS);
-    int32_t bs = blockSize;
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                  fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE, &bs, sizeof(bs)),
-              HIPBLAS_STATUS_SUCCESS);
-    hipDataType outType = HIP_R_8F_E4M3;
-    ASSERT_EQ(
-        hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
-        HIPBLAS_STATUS_SUCCESS);
-    // Request the bf16 pre-quantisation dual-store output (PartialRMSStoreBf16D path).
-    ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(fused,
-                                                 HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER,
-                                                 &dResidualOut,
-                                                 sizeof(dResidualOut)),
-              HIPBLAS_STATUS_SUCCESS);
-
-    int algoCount = 0;
-    ASSERT_EQ(
-        runBf16TnFusedMatmulFp8D(handle, M, N, K, dA, K, dB, dC, dD, fused, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no PartialRMSStoreBf16D MXFP8 solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-    // Copy back the bf16 residual-out buffer produced by the kernel.
-    std::vector<uint16_t> hResidualOut(static_cast<size_t>(M) * N);
-    ASSERT_EQ(hipMemcpy(hResidualOut.data(), dResidualOut, residualOutSz, hipMemcpyDeviceToHost),
-              hipSuccess);
-
-    // CPU reference: residualOut[row][col] = dot(A_row, B_col) + residual[row][col].
-    // This is the pre-gamma, pre-invRms value H that the kernel stores as bf16.
-    std::vector<float> refResidualOut(static_cast<size_t>(M) * N, 0.0f);
-    for(int64_t row = 0; row < M; ++row)
-        for(int64_t col = 0; col < N; ++col)
-        {
-            float acc = 0.0f;
-            for(int64_t kk = 0; kk < K; ++kk)
-                acc += bf16_to_f32(hA[kk + row * K]) * bf16_to_f32(hB[kk + col * K]);
-            acc += bf16_to_f32(hResidual[row * N + col]);
-            refResidualOut[row * N + col] = acc;
-        }
-
-    // Use relaxed tolerances: bf16 rounding introduces up to 0.5 ULP, and parallel GPU
-    // accumulation can differ from sequential CPU by a few fp32 ULPs.
-    expectBf16Near(hResidualOut, refResidualOut, 1e-2f, 0.10f);
-
-    hipblasLtFusedEpilogueDestroy(fused);
-    hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
-    static_cast<void>(hipFree(dD));
-    static_cast<void>(hipFree(dGamma));
-    static_cast<void>(hipFree(dResidual));
-    static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dResidualOut));
-    static_cast<void>(hipFree(dWs));
-}
 
 // ---- End-to-end: PartialRMS bf16 with dual bf16 residual output ----
 //
@@ -2656,7 +2003,7 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     fillRandomBf16(hResidual, rng, dist);
 
     void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dGamma = nullptr,
-         *dResidual = nullptr, *dResidualOut = nullptr, *dWs = nullptr;
+         *dResidual = nullptr, *dResidualOut = nullptr, *dRstd = nullptr, *dWs = nullptr;
     const size_t wsSize        = size_t(256) * 1024 * 1024;
     const size_t dSz           = static_cast<size_t>(M) * N * sizeof(uint16_t);
     const size_t residualOutSz = static_cast<size_t>(M) * N * sizeof(uint16_t);
@@ -2666,6 +2013,7 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidualOut, residualOutSz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     dC = dD; // beta = 0, C unused numerically but must be a valid pointer.
 
@@ -2690,6 +2038,9 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     // Library-populated handoff for the partial-stats producer.
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                  stats, dRstd, size_t(M) * sizeof(float)),
+              HIPBLAS_STATUS_SUCCESS);
 
     // Producer chain: residual-add + partial RMSNorm stats + gamma + eps + handoff + residual-out.
     hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
@@ -2755,6 +2106,7 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     static_cast<void>(hipFree(dGamma));
     static_cast<void>(hipFree(dResidual));
     static_cast<void>(hipFree(dResidualOut));
+    static_cast<void>(hipFree(dRstd));
     static_cast<void>(hipFree(dWs));
 }
 
