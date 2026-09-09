@@ -150,7 +150,7 @@ def _make_params(gfx1250_iim, **overrides):
         "PrefetchLocalRead": 1,
         "ScheduleIterAlg": 0,
         "StaggerU": 0,
-        "GlobalSplitU": 0,             # PrefetchGL2 rejects GSU > 1 / GSU == -1.
+        "GlobalSplitU": 0,
         "InnerUnroll": 1,
         "TransposeLDS": -1,
         "LdsPadA": -1,
@@ -228,8 +228,7 @@ def test_prefetchgl2_streamk3_non_dp_only_accepted(_gp_gfx1250, gfx1250_iim, ass
 
 # ---------------------------------------------------------------------------
 # Baseline (unchanged by AIHPBLAS-4142): PrefetchGL2 + StreamK==0 is still
-# allowed. GlobalSplitU=1 satisfies the "GSU or StreamK must be enabled" gate
-# without tripping the PrefetchGL2 GSU>1 guard.
+# allowed. GlobalSplitU=1 satisfies the "GSU or StreamK must be enabled" gate.
 # ---------------------------------------------------------------------------
 def test_prefetchgl2_streamk0_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys):
     sol, out = _derive(
