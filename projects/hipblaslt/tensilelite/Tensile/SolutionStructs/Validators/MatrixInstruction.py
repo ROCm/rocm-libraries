@@ -307,10 +307,12 @@ def validateMIParameters(
         return True
 
     # With SourceSwap the MatrixInstruction's M/N are transposed relative to
-    # MatrixInstM/MatrixInstN (e.g. F4 32x16 WMMA), so assert the swapped order.
+    # MatrixInstM/MatrixInstN (e.g. F4 32x16 WMMA). This validator is dual-use:
+    # solution generation keeps the instruction order (M=mi4[0], N=mi4[1]) while
+    # the serialized logic yaml stores the swapped order, so accept either
+    # orientation when SourceSwap is set.
     if solution.get("SourceSwap", False):
-        assert solution["MatrixInstM"] == mi4[1], elineno()
-        assert solution["MatrixInstN"] == mi4[0], elineno()
+        assert {solution["MatrixInstM"], solution["MatrixInstN"]} == {mi4[0], mi4[1]}, elineno()
     else:
         assert solution["MatrixInstM"] == mi4[0], elineno()
         assert solution["MatrixInstN"] == mi4[1], elineno()
