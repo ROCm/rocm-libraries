@@ -11,13 +11,12 @@ from rocke import runtime
 from rocke.runtime import device_info, hip_module
 
 
-def _props(target_id: str | None) -> bytes:
-    raw = bytearray(4096)
-    raw[:14] = b"Marketing Name"
+def _props(target_id: str | None) -> hip_module.HipDevicePropR0600:
+    props = hip_module.HipDevicePropR0600()
+    props.name = b"Marketing Name"
     if target_id is not None:
-        encoded = target_id.encode("ascii")
-        raw[256 : 256 + len(encoded)] = encoded
-    return bytes(raw)
+        props.gcnArchName = target_id.encode("ascii")
+    return props
 
 
 @pytest.mark.parametrize(
@@ -78,7 +77,7 @@ def test_device_properties_retry_after_hip_library_becomes_available(
 
     def available(buffer, queried_device):
         assert queried_device == device
-        buffer[0] = ord("x")
+        buffer._obj.name = b"x"
         return 0
 
     resolved = mock.Mock(side_effect=available)
@@ -86,7 +85,7 @@ def test_device_properties_retry_after_hip_library_becomes_available(
         props = hip_module._device_props(device)
 
     assert props is not None
-    assert props.startswith(b"x")
+    assert props.name == b"x"
     assert resolved.call_count == 1
 
 
@@ -126,3 +125,21 @@ def test_runtime_exports_device_info_api() -> None:
     assert runtime.get_device_info is device_info.get_device_info
     assert "DeviceInfo" in runtime.__all__
     assert "get_device_info" in runtime.__all__
+
+
+def test_device_properties_require_matching_function_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hip_module, "_device_props_cache", {})
+    unavailable = mock.Mock(side_effect=AttributeError("R0600 unavailable"))
+    with mock.patch.object(hip_module, "_b", return_value=unavailable) as bind:
+        assert hip_module._device_props(0) is None
+    assert bind.call_count == 1
+    assert bind.call_args.args[0] == "hipGetDevicePropertiesR0600"
+
+
+def test_target_id_is_read_from_its_field() -> None:
+    props = _props("gfx90a:sramecc+:xnack-")
+    props.name = b"gfx942"
+    with mock.patch.object(hip_module, "_device_props", return_value=props):
+        assert hip_module.get_device_target_id() == "gfx90a:sramecc+:xnack-"

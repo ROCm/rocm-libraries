@@ -20,12 +20,12 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
 from ._ctypes_bind import _LazyFn
+from ._hip_device_properties import HipDevicePropR0600
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
@@ -150,11 +150,8 @@ def _check(s: int, where: str) -> None:
 
 
 _hip_inited = False
-# Raw hipDeviceProp_t buffers, cached per device. The struct layout varies across
-# ROCm releases (and the props symbol was versioned to ``...R0600`` in ROCm 6.x), so
-# we keep the raw bytes and let each query read the field it needs rather than mirror
-# the struct. See get_device_target_id (gcnArchName) and get_device_name (name).
-_device_props_cache: Dict[int, bytes] = {}
+# Successful R0600 property queries, cached per device.
+_device_props_cache: dict[int, HipDevicePropR0600] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -180,13 +177,12 @@ def _ensure_hip_init() -> None:
     _hip_inited = True
 
 
-def _device_props(device: int = 0) -> Optional[bytes]:
-    """Read ``hipDeviceProp_t`` bytes, or return ``None`` if the query fails.
+def _device_props(device: int = 0) -> HipDevicePropR0600 | None:
+    """Read HIP R0600 properties, or return ``None`` if unavailable.
 
-    Tries ``hipGetDevicePropertiesR0600`` first, then the legacy symbol.
-    The struct layout varies across ROCm versions, so callers extract the
-    fields they need from a zeroed buffer. Successful results are cached
-    per device; failures are retried on the next call.
+    The function version must match the structure layout. Runtimes without
+    ``hipGetDevicePropertiesR0600`` are unsupported by this query. Successful
+    results are cached per device; failures are retried on the next call.
 
     This does not call ``_ensure_hip_init()`` or select a device. HIP may
     initialize its runtime internally when handling the query.
@@ -195,41 +191,33 @@ def _device_props(device: int = 0) -> Optional[bytes]:
     if device in _device_props_cache:
         return _device_props_cache[device]
 
-    buf = ctypes.create_string_buffer(4096)
-    for sym in ("hipGetDevicePropertiesR0600", "hipGetDeviceProperties"):
-        fn = _b(sym, ctypes.c_void_p, ctypes.c_int)
-        try:
-            rc = fn(buf, device)
-        except (AttributeError, HipError, OSError):
-            continue
-        if rc == 0:
-            _device_props_cache[device] = buf.raw
-            return buf.raw
-    return None
+    props = HipDevicePropR0600()
+    fn = _b(
+        "hipGetDevicePropertiesR0600",
+        ctypes.POINTER(HipDevicePropR0600),
+        ctypes.c_int,
+    )
+    try:
+        rc = fn(ctypes.byref(props), device)
+    except (AttributeError, HipError, OSError):
+        return None
+    if rc != 0:
+        return None
+    _device_props_cache[device] = props
+    return props
 
 
 def get_device_target_id(device: int = 0) -> Optional[str]:
     """Read the target ID from HIP device properties, or return ``None``.
 
-    Calls :func:`_device_props` and extracts the ``gcnArchName`` string,
-    preserving suffixes such as ``-strict`` and ``:sramecc+:xnack-``.
-    This is a target ID such as ``gfx1250-strict``, without a COMGR ISA prefix.
-
-    To avoid depending on the struct layout, this scans for the first
-    ``gfx`` token and reads through the next NUL byte. It assumes that token
-    belongs to ``gcnArchName``. Returns ``None`` if no token is found.
+    Reads ``gcnArchName`` from :func:`_device_props`, preserving suffixes such
+    as ``-strict`` and ``:sramecc+:xnack-``. HIP supplies this string from the
+    device's ISA target ID; it does not include a COMGR ISA prefix.
     """
-    raw = _device_props(device)
-    if raw is None:
+    props = _device_props(device)
+    if props is None:
         return None
-    match = re.search(rb"gfx[0-9a-z]", raw)
-    if match is None:
-        return None
-    end = raw.find(b"\0", match.start())
-    if end < 0:
-        end = len(raw)
-    target_id = raw[match.start() : end].decode("ascii", "replace")
-    return target_id or None
+    return props.gcnArchName.decode("ascii", "replace") or None
 
 
 def get_device_arch(device: int = 0) -> Optional[str]:
@@ -245,19 +233,15 @@ def get_device_arch(device: int = 0) -> Optional[str]:
 
 
 def get_device_name(device: int = 0) -> Optional[str]:
-    """Marketing name of a HIP device — the string ``rocminfo`` labels "Marketing Name".
+    """Read the HIP device name, or return ``None`` if unavailable.
 
-    Reads ``hipDeviceProp_t.name`` — the ``char name[256]`` at struct offset 0, which
-    is stable across ROCm releases (unlike the churny ``gcnArchName`` offset). This is
-    the same string ``rocminfo`` prints as "Marketing Name" and torch surfaces via
-    ``torch.cuda.get_device_name``; reading it straight from HIP lets detection report
-    the device without a torch dependency. Returns ``None`` when unavailable.
+    Reads ``name`` from :func:`_device_props`, the same field used by
+    ``torch.cuda.get_device_name``, without importing torch.
     """
-    raw = _device_props(device)
-    if raw is None:
+    props = _device_props(device)
+    if props is None:
         return None
-    name = raw[:256].split(b"\0", 1)[0].decode("ascii", "replace")
-    return name or None
+    return props.name.decode("ascii", "replace") or None
 
 
 def get_device_count() -> int:
