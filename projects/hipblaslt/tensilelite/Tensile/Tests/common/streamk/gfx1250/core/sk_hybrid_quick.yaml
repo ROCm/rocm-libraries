@@ -42,7 +42,7 @@ BenchmarkProblems:
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 64 ]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
@@ -94,7 +94,7 @@ BenchmarkProblems:
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
         - DepthU: [ 32 ]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - ExpandPointerSwap: [False]
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1,1, 1, 2]
