@@ -50,7 +50,8 @@ inline Rpp64s size_out_buf(Rpp64s n) {
 
 // Compute hanning window
 inline void hann_window(Rpp32f* output, Rpp32s windowSize) {
-    Rpp64f a = (2.0 * M_PI) / windowSize;
+    constexpr Rpp64f PI = 3.14159265358979323846;
+    Rpp64f a = (2.0 * PI) / windowSize;
     for (Rpp32s t = 0; t < windowSize; t++) {
         Rpp64f phase = a * (t + 0.5);
         output[t] = (0.5 * (1.0 - std::cos(phase)));

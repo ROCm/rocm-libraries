@@ -66,7 +66,8 @@ nfft/2 + 1)
 
 // Compute hanning window
 inline RPP_HOST_DEVICE void hann_window(Rpp32f* output, Rpp32s windowSize) {
-    Rpp64f a = (2.0 * M_PI) / windowSize;
+    constexpr Rpp64f PI = 3.14159265358979323846;
+    Rpp64f a = (2.0 * PI) / windowSize;
     for (Rpp32s t = 0; t < windowSize; t++) {
         Rpp64f phase = a * (t + 0.5);
         output[t] = (0.5 * (1.0 - std::cos(phase)));
@@ -291,9 +292,11 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     Rpp32u windowOutputStride = maxNumWindows * nfft;
     Rpp32u fftOutputStride = maxNumWindows * numBins;
     size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
-    // Align fftOutput to 8 bytes accounting for windowLength offset from d_windowFn
-    size_t alignedOffset = ((((static_cast<size_t>(windowLength) + windowOutputFloats) + 1) & ~1) -
-                            static_cast<size_t>(windowLength));
+    // Align fftOutput to 8 bytes (float2) accounting for total offset from base pointer.
+    // fftOutput is placed after windowOutput, and we need (windowLength + alignedOffset) to be
+    // even.
+    size_t totalBaseOffset = static_cast<size_t>(windowLength) + windowOutputFloats;
+    size_t alignedOffset = windowOutputFloats + (totalBaseOffset & 1);  // add 1 if odd
     uint rocfftScratchSize = static_cast<uint>(windowLength) + static_cast<uint>(alignedOffset) +
                              static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
     bool useRocFFT = (rocfftScratchSize <= SPECTROGRAM_MAX_SCRATCH_MEMORY);
@@ -453,7 +456,6 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                 get_num_windows(srcLengthTensor[i], windowLength, windowStep, centerWindows);
 
         Rpp32s windowCenterOffset = (centerWindows) ? (windowLength / 2) : 0;
-        if (!nfft) nfft = windowLength;
         Rpp32u windowOutputStride = maxNumWindows * nfft;
 
         Rpp32f* windowOutput = d_windowFn + windowLength;

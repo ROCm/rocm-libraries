@@ -10,7 +10,6 @@ find_path(ROCFFT_INCLUDE_DIR
     PATHS
         ${ROCM_PATH}/include
         /opt/rocm/include
-        ${ROCM_PATH}/lib/python*/site-packages/_rocm_sdk_devel/include
         /usr/local/include
         /usr/include
 )
@@ -20,12 +19,11 @@ find_library(ROCFFT_LIBRARY
     PATHS
         ${ROCM_PATH}/lib
         /opt/rocm/lib
-        ${ROCM_PATH}/lib/rocm_sysdeps/lib
         /usr/local/lib
         /usr/lib
         /usr/local/lib64
         /usr/lib64
-    PATH_SUFFIXES lib64 lib
+    PATH_SUFFIXES lib64 lib rocm_sysdeps/lib
 )
 
 # Mark the variables as advanced
