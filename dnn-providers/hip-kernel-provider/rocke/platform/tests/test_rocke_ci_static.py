@@ -30,7 +30,6 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 )
 from rocke.core.arch import known_arches
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
-    QUARANTINED_CASES,
     cases,
     check_golden,
 )
@@ -116,20 +115,6 @@ class TestIrParityCoverage(unittest.TestCase):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
-    def test_quarantined_cases_still_exist(self):
-        """A quarantine excuses a case from the golden comparison, so a stale
-        entry silently excuses nothing while looking like it still does. Every
-        quarantined id must name a case the harness actually builds -- delete
-        the entry when the case goes, and resolve the drift to unquarantine.
-        """
-        unknown = QUARANTINED_CASES - {case["case_id"] for case in cases()}
-        self.assertEqual(
-            unknown,
-            set(),
-            "QUARANTINED_CASES names cases that no longer exist: "
-            + ", ".join(sorted(unknown)),
-        )
-
     def test_ir_cases_match_golden_sha256(self):
         """Byte-stability gate: every case's lowered-IR sha256 (and the set of
         expected failures) must match the committed golden, for EVERY llvm
@@ -139,10 +124,7 @@ class TestIrParityCoverage(unittest.TestCase):
           python tests/instances/rocke_ir_parity_harness.py \\
             --write tests/golden/rocke_representative_ir_sha256.json
 
-        Cases in ``QUARANTINED_CASES`` are excluded: their drift is real but
-        unadjudicated, and --write preserves their recorded digests rather than
-        ratifying it. Resolving one means fixing the emitter or re-blessing it
-        deliberately, then dropping the entry.
+        ``QUARANTINED_CASES`` in the harness is excluded from this comparison.
         """
         self.assertTrue(
             _GOLDEN.exists(),

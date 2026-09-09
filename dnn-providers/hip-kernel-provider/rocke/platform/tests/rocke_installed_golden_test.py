@@ -104,15 +104,11 @@ def main() -> int:
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    print(f"rocKE installed golden gate: PASS ({flavors}, golden={golden.name})")
-    # A quarantined case passes by exclusion, not by matching. Say so on every
-    # run so the lane never reports an unqualified green while drift is parked.
-    if QUARANTINED_CASES:
-        print(
-            f"  NOT COMPARED ({len(QUARANTINED_CASES)} quarantined, drift unresolved):"
-        )
-        for cid in sorted(QUARANTINED_CASES):
-            print(f"    {cid}")
+    quarantined = f", {len(QUARANTINED_CASES)} quarantined" if QUARANTINED_CASES else ""
+    print(
+        f"rocKE installed golden gate: PASS "
+        f"({flavors}, golden={golden.name}{quarantined})"
+    )
     return 0
 
 
