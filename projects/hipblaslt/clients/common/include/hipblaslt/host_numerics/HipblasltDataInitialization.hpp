@@ -3,7 +3,9 @@
 
 #pragma once
 
-// Product-private hipBLASLt adapter.
+// Product-private translation from hipBLASLt initialization modes, data types,
+// and architecture selection to host-numerics recipes and tensors. Storage,
+// random generation, and physical-layout loops remain in host-numerics.
 
 #include <cstddef>
 #include <cstdint>
@@ -33,7 +35,10 @@ namespace hipblaslt::host_numerics
         NaN,
     };
 
-    inline constexpr uint64_t mxDefaultSeed = 1713573849U;
+    // Preserve the seed used by the former mxDataGenerator implementation.
+    // Callers derive explicit operand and batch seeds from this compatibility
+    // base; generateMxData does not advance or hide seed state.
+    inline constexpr uint64_t mxDefaultSeed = 1'713'573'849U;
 
     ::roc::host_numerics::MxTensor generateMxData(hipDataType                 dataType,
                                                   hipDataType                 scaleType,
