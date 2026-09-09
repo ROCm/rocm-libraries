@@ -229,28 +229,15 @@ _SUBTILE_STACK_SIZES = (16, 8, 4, 2)
 _SUBTILE_STACK_MIN = 2
 _SUBTILE_STACK_FULL_LINE = 16
 
-# Rounding a tile up to a taller stack pads it with tiles that are fetched and
-# written to LDS but never read, so the operand's global traffic and its LDS
-# footprint both grow by exactly the rounding ratio.  What that buys is bounded:
-# utilization is stack/_SUBTILE_STACK_FULL_LINE and stops improving once the
-# strip covers a whole line, and much of the gap it closes is served from cache
-# anyway, since the lines a narrow strip half-uses are finished by other lanes
-# and waves.  So the padding is a certain cost against a capped, partly-redundant
-# benefit; admit it only while it stays a small fraction of the operand.
-#
-# 4/3 is the smallest cap that admits a 12-tile operand (MT192 on a 16-row MFMA)
-# into the full-line 16-tile stack; 5/4 leaves it on a 4-tile stack and an exact
-# footprint.  Held as a rational because that case sits exactly on the boundary,
-# where a binary float cap decides it on rounding rather than on the ratio.
-_SUBTILE_STACK_MAX_PAD_NUM = 4
-_SUBTILE_STACK_MAX_PAD_DEN = 3
-
 
 def _subtileStackForTile(mtTiles):
   """Free-dim MFMA-M tiles per LDS strip for one TLU=1 fp4 operand.
 
-  Prefers the tallest stack that divides the tile exactly, then takes a taller
-  power-of-two stack instead when its padding stays within the ratio cap.
+  Tallest power-of-two stack that still holds the tile in one strip, else the
+  tallest exact divisor.  The pad tiles rounding adds are written to LDS but
+  never read, and not fetched at all since the pad lanes go to BufferOOB, so
+  they cost footprint rather than traffic.  Rounding past the tile would need a
+  partial trailing strip that the subtile grids do not count.
   """
   mtTiles = int(mtTiles)
   exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0),
@@ -258,9 +245,7 @@ def _subtileStackForTile(mtTiles):
   if mtTiles <= 1:
     return exact
   roundedUp = min(_SUBTILE_STACK_FULL_LINE, 1 << (mtTiles - 1).bit_length())
-  withinPadCap = (roundedUp * _SUBTILE_STACK_MAX_PAD_DEN
-                  <= mtTiles * _SUBTILE_STACK_MAX_PAD_NUM)
-  if roundedUp > exact and withinPadCap:
+  if roundedUp > exact and roundedUp >= mtTiles:
     return roundedUp
   return exact
 
