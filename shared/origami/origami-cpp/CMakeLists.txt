@@ -1,9 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")
+include(dependencies)
+rocm_setup_version(VERSION ${PROJECT_VERSION})
+
 find_package(hip REQUIRED)
 
-if(ORIGAMI_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
+if(ORIGAMI_BUILD_SHARED_LIBS)
     set(ORIGAMI_LIBRARY_TYPE SHARED)
 else()
     set(ORIGAMI_LIBRARY_TYPE STATIC)
