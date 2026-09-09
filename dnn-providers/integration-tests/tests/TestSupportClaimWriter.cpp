@@ -23,7 +23,6 @@
 #include "ScratchDirectory.hpp"
 #include "SupportClaimTestUtils.hpp"
 
-using hipdnn_integration_tests::bundle::AuthoringResult;
 using hipdnn_integration_tests::bundle::authorSupportClaims;
 using hipdnn_integration_tests::bundle::dumpCanonical;
 using hipdnn_integration_tests::bundle::ObservedGraphSupport;
@@ -682,7 +681,7 @@ TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
                                          std::filesystem::perm_options::replace,
                                          ec);
         }
-    } restorePerms{subdir};
+    } const restorePerms{subdir};
 
     const auto summary = writeObservedSupportClaims(observations);
 
