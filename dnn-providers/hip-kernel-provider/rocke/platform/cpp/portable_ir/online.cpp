@@ -4,23 +4,19 @@
  * rocke/online.c -- see rocke/online.h. Thin wrappers: (recipe VM | IR import) +
  * lower, with optional phase timing, returning a malloc'd .ll string.
  */
-#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 199309L
-#define _POSIX_C_SOURCE 199309L /* clock_gettime / CLOCK_MONOTONIC */
-#endif
-
 #include "rocke/online.h"
 
+#include <chrono>
 #include <stdlib.h>
-#include <time.h>
 
 #include "rocke/ir_import.h"
 #include "rocke/lower_llvm.h"
 
 static double now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
 }
 
 /* Lower an already-built kernel (owned by `b`) to .ll, time it, free the
