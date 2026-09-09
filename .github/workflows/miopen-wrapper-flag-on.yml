@@ -9,27 +9,26 @@
 # while MIOpen CI moves to TheRock, and this lane is scaffolding that exists only
 # until the flag defaults on, so a separate file is removed in one move.
 #
-# This lane only checks that the parity harness is registered. Executing it needs
-# a GPU, which no runner here has, so the doubled runs happen wherever MIOpen's
-# ctest suite is run on hardware rather than being duplicated as a bespoke step.
+# Manual dispatch only. Automated flag-on coverage belongs to TheRock, which builds
+# the wrapper when a run sets THEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON and then
+# runs the parity harness and the wrapper ABI check against the resulting artifact.
+# This lane remains the home of the one check that cannot move there: the installed
+# header rename check needs a staged include tree, which the test job never fetches.
+#
+# The parity harness is only checked for registration here. Executing it needs a GPU,
+# which no runner here has, so the doubled runs happen wherever MIOpen's ctest suite
+# is run on hardware rather than being duplicated as a bespoke step.
 
 name: "MIOpen: hipDNN wrapper flag-on"
 
 on:
   workflow_dispatch:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
-    # The lane builds MIOpen and nothing else, so a PR that does not touch it has
-    # nothing here to learn -- and this is an expensive build to spend on that.
-    paths:
-      - 'projects/miopen/**'
-      - '.github/workflows/miopen-wrapper-flag-on.yml'
 
 permissions:
   contents: read
 
-# A push supersedes the build already running for the same PR; that build can only
-# report on code that no longer exists.
+# A second dispatch of the same ref supersedes the first; this is an expensive build
+# to leave running for an answer nobody is waiting on.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -37,11 +36,6 @@ concurrency:
 jobs:
   flag-on:
     name: MIOpen wrapper flag-on checks
-    # `labeled` is in the trigger above so applying the label starts a run
-    # immediately instead of waiting for the next push.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.labels.*.name, 'ci:wrapper-flag-on')
     runs-on: azure-linux-scale-rocm
     container:
       image: rocm/miopen-dev:latest

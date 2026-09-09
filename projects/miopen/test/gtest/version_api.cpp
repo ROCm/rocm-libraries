@@ -6,8 +6,8 @@
 #include <miopen/version.h>
 #include <gtest/gtest.h>
 
-// miopenGetVersion is served through the wrapper but its value is compiled into the
-// implementation library; a mismatch means the two were built from different sources.
+// The reported version comes from the loaded library, the expected one from the headers
+// this test compiled against; a mismatch means the two were not built together.
 TEST(CPU_VersionApi_NONE, ReportedVersionMatchesHeader)
 {
     std::size_t major = 0, minor = 0, patch = 0;

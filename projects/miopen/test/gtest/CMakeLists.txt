@@ -298,48 +298,40 @@ function(add_gtest TEST_NAME TEST_CPP)
     # implementation serves each entry point, and require the two runs to agree test for
     # test.
     #
-    # The replays are a fixture rather than a DEPENDS: DEPENDS only orders, so a failed replay
-    # would still let the comparison run and report a stale or missing XML instead of the
-    # failure that caused it. A fixture short-circuits, so the comparison is skipped and
-    # marked failed and the replay stays the thing you read.
+    # One entry rather than a replay-replay-compare fixture: a sharded ctest run distributes
+    # whole entries, so a fixture's members can land in different shards and fail there as
+    # unsatisfied. run_forwarding_parity.py sequences the replays, the comparison and the
+    # wrapper ABI check in one process, which also keeps the fixture's short-circuit -- a
+    # replay that dies never reaches the comparison.
     #
     # Not registered in the discrete branch, where each test would need its own doubled
-    # replay for the same signal. Deliberately unsharded: sharding would split each run
-    # across GTEST_PARALLEL_LEVEL files that would have to be stitched back together
-    # before the two could be compared.
+    # replay for the same signal.
     #
     # Skipped when there is no GPU: the shim surface is all *GPU* tests, which the shard
     # filter drops in that configuration and this filter does not.
     if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU)
-      foreach(FORWARDING_MODE disabled enabled)
-        add_test(NAME ${TEST_NAME}_forwarding_${FORWARDING_MODE}
-          COMMAND ${TEST_NAME}
-            --gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}
-            --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_${FORWARDING_MODE}.xml
-          WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
-        )
-        # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
-        # GPU tests registered outside the shards, so without it ctest -j would run them
-        # against a GPU the shards are already using.
-        set_tests_properties(${TEST_NAME}_forwarding_${FORWARDING_MODE} PROPERTIES
-          RUN_SERIAL TRUE
-          LABELS "forwarding_parity"
-          FIXTURES_SETUP "${TEST_NAME}_forwarding_replays"
-          ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}"
-        )
-      endforeach()
-
-      # --newer-than: two XML files left over from an earlier build compare just as cleanly
-      # as two fresh ones, so without it a run whose replays never executed would pass.
       add_test(NAME ${TEST_NAME}_forwarding_parity
-        COMMAND ${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py
-          ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_disabled.xml
-          ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_forwarding_enabled.xml
-          --newer-than $<TARGET_FILE:${TEST_NAME}>
+        COMMAND ${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py
+          --gtest $<TARGET_FILE:${TEST_NAME}>
+          --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
+          --output-dir ${PROJECT_BINARY_DIR}/test_results
+          --lib-dir $<TARGET_FILE_DIR:MIOpen>
+          --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
+          --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
+      # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
+      # GPU tests registered outside the shards, so without it ctest -j would run them
+      # against a GPU the shards are already using.
+      #
+      # The gtest shard variables are pinned rather than left inherited: a sharded CI run
+      # exports them for the whole run, and a replay that honoured them would compare one
+      # shard's worth of the shim surface while no other entry covered the remainder.
       set_tests_properties(${TEST_NAME}_forwarding_parity PROPERTIES
-        LABELS "forwarding_parity"
-        FIXTURES_REQUIRED "${TEST_NAME}_forwarding_replays"
+        RUN_SERIAL TRUE
+        LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}"
+        TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT}
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=1;GTEST_SHARD_INDEX=0"
       )
     endif()
 
@@ -400,6 +392,33 @@ endif()
 if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
   set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
 endif()
+
+# Two full replays of the shim surface plus a comparison and an ABI check, so the harness is
+# given its own budget rather than a tier's: the tiers size their timeouts for one run of a
+# slice of the suite.
+set(MIOPEN_FORWARDING_PARITY_TIMEOUT 3600)
+
+# Labels the harness carries so an ordinary MIOpen test run selects it. The runner ANDs a tier
+# label with an architecture filter, and keeping `forwarding_parity` alongside leaves the
+# harness selectable by name for a hand-run. Every tier is listed because the harness is not a
+# slice of the suite that some tiers can afford to skip -- it either runs or the wrapper build
+# has no parity coverage at all.
+set(MIOPEN_FORWARDING_PARITY_LABELS "forwarding_parity;quick;standard;comprehensive;full")
+
+# That architecture filter takes one of two forms: on an architecture test_categories.yaml
+# declares an exclusion set for, the runner requires `-L ^ex_gpu_<arch>$`; on any other it
+# excludes everything matching `ex_gpu`. No single entry satisfies both, so the harness is
+# registered once bare, for the architectures with no exclusion set, and once per declared
+# architecture carrying that architecture's label -- exactly one of which is ever selected.
+# Read back out of the YAML rather than repeated here, so adding an exclusion set does not
+# silently drop parity coverage on that architecture.
+set(MIOPEN_FORWARDING_PARITY_GPU_LABELS "")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" MIOPEN_EXCLUDE_GPU_KEYS
+  REGEX "^  exclude_gpu_[A-Za-z0-9]+:")
+foreach(EXCLUDE_GPU_KEY IN LISTS MIOPEN_EXCLUDE_GPU_KEYS)
+  string(REGEX REPLACE "^  exclude_gpu_([A-Za-z0-9]+):.*$" "ex_gpu_\\1" GPU_LABEL "${EXCLUDE_GPU_KEY}")
+  list(APPEND MIOPEN_FORWARDING_PARITY_GPU_LABELS "${GPU_LABEL}")
+endforeach()
 
 if( MIOPEN_TEST_DISCRETE )
   foreach(TEST ${TESTS})
@@ -470,23 +489,27 @@ endif()
 # Paths are relative to the installed CTestTestfile.cmake, which lands one directory below
 # the test binary and the comparison script.
 #
-# Nothing consumes these entries yet -- packaged artifacts are built with the wrapper off.
-# They are here so artifacts built with it on need no further change on either side. Only
-# the single-binary build packages a test executable and registers the harness mirrored
-# here.
+# These are what a wrapper-on artifact is tested through: the harness runs where the shipping
+# libraries are, not against a build tree. A default artifact is built with the wrapper off and
+# carries none of them. Only the single-binary build packages a test executable and so only it
+# registers the harness mirrored here.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
-  foreach(FORWARDING_MODE disabled enabled)
+  # One bare entry plus one per declared architecture, for the reason recorded with
+  # MIOPEN_FORWARDING_PARITY_GPU_LABELS above. They are identical apart from the label and the
+  # name, so whichever the runner selects does the same work.
+  set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}")
+  set(PARITY_ENTRY_NAME "miopen_gtest_forwarding_parity")
+  foreach(GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
+    if(GPU_LABEL)
+      set(PARITY_ENTRY_NAME "miopen_gtest_forwarding_parity_${GPU_LABEL}")
+      set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS};${GPU_LABEL}")
+    endif()
     file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(miopen_gtest_forwarding_${FORWARDING_MODE} \"../miopen_gtest\" \"--gtest_filter=${MIOPEN_FORWARDING_PARITY_FILTER}\" \"--gtest_output=xml:miopen_gtest_forwarding_${FORWARDING_MODE}.xml\")
-set_tests_properties(miopen_gtest_forwarding_${FORWARDING_MODE} PROPERTIES RUN_SERIAL TRUE LABELS \"forwarding_parity\" FIXTURES_SETUP \"miopen_gtest_forwarding_replays\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;MIOPEN_HIPDNN_FORWARDING=${FORWARDING_MODE}\")
+"add_test(${PARITY_ENTRY_NAME} \"../run_forwarding_parity.py\" \"--gtest\" \"../miopen_gtest\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
+set_tests_properties(${PARITY_ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${PARITY_ENTRY_LABELS}\" ENVIRONMENT \"MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=1;GTEST_SHARD_INDEX=0\")
 
 ")
   endforeach()
-  file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(miopen_gtest_forwarding_parity \"../compare_forwarding_runs.py\" \"miopen_gtest_forwarding_disabled.xml\" \"miopen_gtest_forwarding_enabled.xml\" \"--newer-than\" \"../miopen_gtest\")
-set_tests_properties(miopen_gtest_forwarding_parity PROPERTIES LABELS \"forwarding_parity\" FIXTURES_REQUIRED \"miopen_gtest_forwarding_replays\")
-
-")
 endif()
 
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
@@ -498,11 +521,26 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 
-  # The mirrored parity entries invoke this script from the installed tree, so this gate has
-  # to match theirs exactly -- a wider one ships a script nothing calls.
+  # Everything the mirrored parity entry reaches for, under the entry's own gate: it is the
+  # only caller, so a wider gate would ship files nothing invokes, and with the flag off none
+  # of this is installed at all. run_forwarding_parity.py is the entry's command; it runs the
+  # other two and reads the baseline and exclusion list. The ABI check ships here rather than
+  # staying a build-time step so it inspects the libraries that actually ship, and its data
+  # files sit alongside it rather than in a data directory so both land in the one artifact
+  # component a test job fetches.
   if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
     install(
-        PROGRAMS "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
+        PROGRAMS
+          "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
+          "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
+          "${PROJECT_SOURCE_DIR}/script/check_public_abi.py"
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tests
+    )
+    install(
+        FILES
+          "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
