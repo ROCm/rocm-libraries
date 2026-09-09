@@ -43,6 +43,14 @@ struct EstimateAsmCyclesAnalysis {
     static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
 };
 
+/// Analysis result type for the per-instruction estimated cumulative cycle map
+/// (see computeEstimatedCyclesPerInstruction).
+struct EstimateAsmCyclesPerInstructionAnalysis {
+    STINKYTOFU_ANALYSIS_KEY("EstimateAsmCyclesPerInstructionAnalysis")
+    using Result = std::unordered_map<const StinkyInstruction*, uint32_t>;
+    static STINKYTOFU_EXPORT Result run(Function& F, AnalysisManager& AM);
+};
+
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createEstimateAsmCyclesPass();
 
 /// Calculate estimate asm cycles for a function

@@ -1037,6 +1037,15 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
+    Function& func, AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return computeEstimatedCyclesPerInstruction(func, passCtx);
+}
+
 unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
     AnalysisManager AM;
