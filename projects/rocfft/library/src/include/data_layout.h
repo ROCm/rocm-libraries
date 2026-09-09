@@ -347,6 +347,9 @@ struct data_layout_t
      * @note This function does not verify if either layout is self-aliasing and
      * ignores offsets as `data_layout_t` objects do not capture them.
      * 
+     * @warning Should not be used for distributed layouts, unless length axes are
+     * all undistributed.
+     * 
      * @throw An `std::logic_error` is thrown if the current object is an empty
      * layout or has any non-zero lower bound for a length axis.
      * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
