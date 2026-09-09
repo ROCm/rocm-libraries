@@ -28,39 +28,6 @@ if(BUILD_TEST)
   include(dependencies/googletest)
 endif()
 
-# TODO: remove when swapping to primbench!
-if(BUILD_BENCHMARK)
-  filter_cxx_flags_for_deps(${CMAKE_CXX_FLAGS} filtered_cmake_cxx_flags)
-  override_variable(ROCM_DISABLE_CHECKS ON)
-  override_variable(CMAKE_CXX_FLAGS ${filtered_cmake_cxx_flags})
-
-  set(BENCHMARK_VERSION 1.8.0)
-  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-    find_package(benchmark CONFIG QUIET)
-  endif()
-  if(NOT TARGET benchmark::benchmark)
-    message(STATUS "Google Benchmark not found. Fetching...")
-    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
-    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
-    FetchContent_Declare(
-      googlebench
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v${BENCHMARK_VERSION}
-    )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-    FetchContent_MakeAvailable(googlebench)
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
-  else()
-    find_package(benchmark CONFIG REQUIRED)
-  endif()
-
-  restore_variable(CMAKE_CXX_FLAGS)
-  restore_variable(ROCM_DISABLE_CHECKS)
-endif()
-
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
   set(CCCL_MINIMUM_VERSION 2.8.2)
