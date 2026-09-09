@@ -66,8 +66,8 @@ nfft/2 + 1)
 
 // Compute hanning window
 inline RPP_HOST_DEVICE void hann_window(Rpp32f* output, Rpp32s windowSize) {
-    constexpr Rpp64f PI = 3.14159265358979323846;
-    Rpp64f a = (2.0 * PI) / windowSize;
+    constexpr Rpp64f TWO_PI_VAL = 6.28318530717958647692;
+    Rpp64f a = TWO_PI_VAL / windowSize;
     for (Rpp32s t = 0; t < windowSize; t++) {
         Rpp64f phase = a * (t + 0.5);
         output[t] = (0.5 * (1.0 - std::cos(phase)));
