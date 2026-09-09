@@ -32,6 +32,7 @@ import argparse
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pandas as pd
 
@@ -263,6 +264,143 @@ def _variant_curve(df, group, target, objective, oracle) -> list[dict]:
     return curve
 
 
+#: Pinning costs below this read as measurement noise, not a real loss. A knob this
+#: cheap buys nothing that survives a re-run, so its kernels are not earning their
+#: build.
+FREE_THRESHOLD = 0.005
+
+#: Above noise but small. Whether it is worth kernels is the author's call, not the
+#: tool's: it depends on how much build budget the engine has, which this tool cannot
+#: see.
+CHEAP_THRESHOLD = 0.02
+
+
+def load_importance(manifest_path: str | Path) -> dict[str, dict]:
+    """Read `feature_importance` from a training manifest, if it carries one.
+
+    Absent is normal -- a manifest written before the field existed, or a report run
+    without a model. The ranking never depends on it; it is a second opinion.
+    """
+    try:
+        with open(manifest_path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError) as error:
+        logger.warning("no feature importance (%s): %s", manifest_path, error)
+        return {}
+    return manifest.get("feature_importance") or {}
+
+
+def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[dict]:
+    """Every knob, most consequential first, with the decision it implies.
+
+    Ordering is by what pinning the knob would cost, descending, because that is the
+    question an AOT build asks: the knob at the top is the one whose kernels are
+    buying the most, and the knob at the bottom is the one to delete first.
+
+    A constant sorts last and is reported as a defect rather than a saving. It costs
+    no kernels -- there is only one value to build -- but it is not harmless: training
+    drops a column that cannot separate candidates, and RFC 0019 §6.3 then refuses a
+    model whose features no longer match the knobs the engine exposes. A declared
+    constant is how a UHD silently stops being used.
+    """
+    importance = importance or {}
+    ranked = []
+    for knob in report["knobs"]:
+        short = knob["name"].removeprefix(_KERNEL_PREFIX)
+        imp = importance.get(knob["name"]) or importance.get(short) or {}
+        row = {
+            "name": knob["name"],
+            "short_name": short,
+            "distinct_values": knob["distinct_values"],
+            "best_value": knob["best_value"],
+            "cost": knob["cost_of_pinning"],
+            "problems_lost": knob["problems_lost_by_pinning"],
+            "gain": imp.get("gain"),
+            "split": imp.get("split"),
+        }
+        if knob["constant"]:
+            row["verdict"] = "CONSTANT"
+            only = knob["values"][0] if knob["values"] else "<none>"
+            row["advice"] = (
+                f"never varies (always {only}); remove from the KMD -- it also blocks "
+                f"the model, see RFC 0019 6.3"
+            )
+        elif row["cost"] is None:
+            row["verdict"] = "UNMEASURED"
+            row["advice"] = "no measurement covered this knob"
+        elif row["cost"] <= FREE_THRESHOLD:
+            row["verdict"] = "DROP"
+            row["advice"] = (
+                f"pinning to {row['best_value']} costs {row['cost']:.2%} -- inside noise, "
+                f"so its kernels are not earning their build"
+            )
+        elif row["cost"] <= CHEAP_THRESHOLD:
+            row["verdict"] = "CHEAP"
+            row["advice"] = (
+                f"pinning to {row['best_value']} costs {row['cost']:.2%}; worth kernels "
+                f"only if the build budget allows"
+            )
+        else:
+            row["verdict"] = "KEEP"
+            row["advice"] = (
+                f"decides the winner -- pinning to {row['best_value']} costs "
+                f"{row['cost']:.2%}"
+            )
+        ranked.append(row)
+
+    # Constants last: they carry no cost to sort on, and a defect reported above the
+    # knob that actually decides the winner would bury the ranking it exists to give.
+    return sorted(
+        ranked,
+        key=lambda r: (r["verdict"] == "CONSTANT", -(r["cost"] or 0.0), r["name"]),
+    )
+
+
+def format_author_report(report: dict, ranked: list[dict], engine: str | None = None) -> str:
+    """The ranking as something a kernel author can act on without reading JSON."""
+    lines = [
+        f"# Knob value report{f' -- {engine}' if engine else ''}",
+        "",
+        f"- problems: {report['problems']}",
+        f"- measurements: {report['measurements']}",
+        f"- target: `{report['target']}` ({report['objective']})",
+        f"- grouped by: {', '.join(f'`{c}`' for c in report['grouped_by'])}",
+        "",
+        "Cost is what pinning the knob to its best single value would lose, p95 across",
+        "problems. Gain and splits are what the trained trees did with it -- a second",
+        "opinion only: a feature can be split on heavily and still be free to pin,",
+        "because predicting time is not the same as changing which candidate wins.",
+        "",
+        "| knob | values | verdict | cost of pinning | best value | tree gain | splits |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for row in ranked:
+        cost = "--" if row["cost"] is None else f"{row['cost']:.2%}"
+        gain = "--" if row["gain"] is None else f"{row['gain']:,.0f}"
+        split = "--" if row["split"] is None else f"{row['split']:,}"
+        lines.append(
+            f"| `{row['short_name']}` | {row['distinct_values']} | **{row['verdict']}** "
+            f"| {cost} | {row['best_value']} | {gain} | {split} |"
+        )
+
+    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP")]
+    lines += ["", "## What to change", ""]
+    if actionable:
+        for row in actionable:
+            lines.append(f"- `{row['short_name']}`: {row['advice']}")
+    else:
+        lines.append("- Nothing: every declared knob varies and earns its kernels.")
+
+    curve = report.get("variant_curve") or []
+    if curve:
+        lines += ["", "## How few variants per geometry would do", "", "| variants | mean regret | p95 |", "|---|---|---|"]
+        for row in curve[:5]:
+            lines.append(
+                f"| {row['variants']} | {row['mean_regret']:.2%} | {row['p95_regret']:.2%} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--input", required=True, help="benchmark corpus CSV")
     parser.add_argument("--target", default="robustMeanMs", help="timing column to rank on")
@@ -275,6 +413,24 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
         help="column naming the device; joins the problem key so one corpus may span GPUs",
     )
     parser.add_argument("--output", default=None, help="write the full report as JSON here")
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="train_manifest.json, to add what the trees split on as a second opinion",
+    )
+    parser.add_argument(
+        "--author-report",
+        default=None,
+        help="write the ranking as markdown for the kernel author",
+    )
+    parser.add_argument("--engine", default=None, help="engine name, for the report title")
+    parser.add_argument(
+        "--curve-rows",
+        type=int,
+        default=12,
+        help="how many rows of the variant curve to print; the tail is flat and long, "
+             "and printing all of it has already pushed the ranking out of a log",
+    )
 
 
 def run_knobs(args: argparse.Namespace) -> int:
@@ -285,43 +441,62 @@ def run_knobs(args: argparse.Namespace) -> int:
         logger.error("%s", error)
         return 1
 
+    importance = load_importance(args.manifest) if args.manifest else {}
+    ranked = rank_knobs(report, importance)
+    report["ranked"] = ranked
+
     print(f"\nKnob value over {report['problems']} problem(s), "
           f"{report['measurements']} measurement(s)")
     print(f"  grouped by: {', '.join(report['grouped_by'])}")
     print(f"  target:     {report['target']} ({report['objective']})\n")
 
-    constant = [k for k in report["knobs"] if k["constant"]]
-    varying = [k for k in report["knobs"] if not k["constant"]]
+    # The ranking first and unconditionally: it is the answer, and everything below is
+    # its supporting detail.
+    print("  Knobs, most consequential first:")
+    header = f"    {'knob':22} {'values':>6} {'verdict':>9} {'cost':>8} {'best':>8}"
+    if importance:
+        header += f" {'gain':>12} {'splits':>7}"
+    print(header)
+    for row in ranked:
+        cost = "     --" if row["cost"] is None else f"{row['cost']:7.2%}"
+        line = (f"    {row['short_name']:22} {row['distinct_values']:>6} "
+                f"{row['verdict']:>9} {cost} {str(row['best_value']):>8}")
+        if importance:
+            gain = "          --" if row["gain"] is None else f"{row['gain']:12,.0f}"
+            split = "     --" if row["split"] is None else f"{row['split']:7,}"
+            line += f" {gain} {split}"
+        print(line)
 
-    if constant:
-        print("  Declared but never varied -- no kernels to save, and nothing to rank on:")
-        for k in constant:
-            only = k["values"][0] if k["values"] else "<none>"
-            print(f"    {k['name']:28} always {only}")
-        print()
-
-    print("  Cost of pinning each knob to its best single value:")
-    print(f"    {'knob':28} {'values':>6} {'best':>10} {'lost':>6} {'mean':>9} {'p95':>9} {'max':>9}")
-    for k in varying:
-        best = next((v for v in k["per_value"] if v["value"] == k["best_value"]), None)
-        if best is None:
-            continue
-        print(f"    {k['name']:28} {k['distinct_values']:>6} {str(k['best_value']):>10} "
-              f"{best['uncovered']:>6} {best['mean_regret']:>8.2%} "
-              f"{best['p95_regret']:>8.2%} {best['max_regret']:>8.2%}")
+    print("\n  What to change:")
+    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP")]
+    if actionable:
+        for row in actionable:
+            print(f"    {row['short_name']:22} {row['advice']}")
+    else:
+        print("    nothing -- every declared knob varies and earns its kernels")
 
     curve = report["variant_curve"]
     if curve:
+        shown = curve[: max(1, args.curve_rows)]
         print("\n  Variants per geometry, added greedily:")
         print(f"    {'#':>3} {'covered':>8} {'uncovered':>10} {'mean':>9} {'p95':>9}  combination")
-        for row in curve:
+        for row in shown:
             print(f"    {row['variants']:>3} {row['problems_covered']:>8} "
                   f"{row['problems_uncovered']:>10} {row['mean_regret']:>8.2%} "
                   f"{row['p95_regret']:>8.2%}  {row['added']}")
+        if len(curve) > len(shown):
+            last = curve[-1]
+            print(f"    ... {len(curve) - len(shown)} more, to "
+                  f"{last['variants']} variants at {last['mean_regret']:.2%} mean")
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2, default=str)
             handle.write("\n")
         print(f"\n  report: {args.output}")
+
+    if args.author_report:
+        with open(args.author_report, "w", encoding="utf-8") as handle:
+            handle.write(format_author_report(report, ranked, args.engine))
+        print(f"  author report: {args.author_report}")
     return 0
