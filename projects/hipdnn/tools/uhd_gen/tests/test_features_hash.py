@@ -279,3 +279,52 @@ def test_adding_a_field_to_the_encoding_changes_the_hash():
         signature, {"$kernel.dtype": {"fp16": 0}, "$kernel.pipeline": {"intrawave": 0}}
     )
     assert one != two
+
+
+# ---- derived values in the fingerprint (RFC 0019 6.4, 6.3) ----------------------
+
+DERIVED = [("intensity", '{"/":["$q.flops","$q.bytes"]}')]
+
+
+def test_a_signature_without_derived_hashes_exactly_as_before():
+    """Every shipped UHD declares none, and their contracts are intact."""
+    assert compute_features_hash(['$q.batch'], None, None) == "sha256:611513da8e8614b2"
+    assert compute_features_hash(['$q.batch'], None, []) == "sha256:611513da8e8614b2"
+
+
+def test_declaring_a_derived_value_changes_the_fingerprint():
+    assert compute_features_hash(['$derived.intensity'], None, DERIVED) != \
+           compute_features_hash(['$derived.intensity'])
+
+
+def test_changing_only_the_expression_changes_the_fingerprint():
+    """The reason derived belongs in the hash at all.
+
+    The signature entry is `$derived.intensity` either way -- the name is all it carries --
+    so a reciprocal expression reads identically and leaves the model consuming something
+    other than what it was trained on. This is the same hole 6.5 describes for the
+    categorical encoding, and it closes the same way.
+    """
+    flipped = [("intensity", '{"/":["$q.bytes","$q.flops"]}')]
+    assert compute_features_hash(['$derived.intensity'], None, DERIVED) != \
+           compute_features_hash(['$derived.intensity'], None, flipped)
+
+
+def test_reordering_derived_values_changes_the_fingerprint():
+    """6.4 evaluates them in order and a later one may read an earlier one, so the order
+    is part of the computation rather than a presentation detail."""
+    pair = [("a", '{"*":["$q.batch",2]}'), ("b", '{"+":["$derived.a",1]}')]
+    assert compute_features_hash(['$derived.b'], None, pair) != \
+           compute_features_hash(['$derived.b'], None, list(reversed(pair)))
+
+
+def test_derived_fingerprint_is_pinned_across_languages():
+    """Pinned so a change to either canonicalization fails here rather than at load.
+
+    The C++ mirror asserts this same literal in TestFeatureExtractor.cpp; if the two
+    renderings drift, every descriptor carrying a derived value stops validating.
+    """
+    assert compute_features_hash(['$derived.intensity'], None, DERIVED) == \
+           "sha256:" + __import__("hashlib").sha256(
+               ('["$derived.intensity"]|[["intensity",{"/":["$q.flops","$q.bytes"]}]]'
+                ).encode()).hexdigest()[:16]

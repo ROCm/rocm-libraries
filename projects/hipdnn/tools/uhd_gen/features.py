@@ -53,10 +53,13 @@ __all__ = [
 ]
 
 
-#: Namespaces the runtime binds, per RFC 0019 7.1. A reference outside these resolves
-#: to nothing at selection time (FeatureExtractionContext binds exactly device/kernel/q
-#: in backend/src/heuristics/uhd/FeatureExtractor.cpp).
-FEATURE_NAMESPACES = ("device", "kernel", "q")
+#: Namespaces the runtime binds, per RFC 0019 7.1. A reference outside these resolves to
+#: nothing at selection time -- see FeatureExtractor::extract and evaluateDerived in
+#: plugin_sdk/include/hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp.
+#:
+#: `derived` is recomputed by the runtime from the descriptor's expressions (6.4), not read
+#: from the corpus, though training still needs a column of that name to fit on.
+FEATURE_NAMESPACES = ("derived", "device", "kernel", "q")
 
 
 # ---- Categorical encoding (RFC 0019 6.5) ---------------------------------------
@@ -355,6 +358,7 @@ def canonicalize_signature(signature: list[str]) -> str:
 def compute_features_hash(
     signature: list[str],
     categorical_encoding: dict[str, dict[str, int]] | None = None,
+    derived: list[tuple[str, str]] | None = None,
 ) -> str:
     """Compute the SHA-256 fingerprint of the resolved feature contract.
 
@@ -382,5 +386,15 @@ def compute_features_hash(
         serialized += "|" + json.dumps(
             categorical_encoding, separators=(",", ":"), sort_keys=True, ensure_ascii=False
         )
+
+    # Appended only when present, so a UHD declaring none hashes as before. Order is
+    # significant for the same reason it is in the signature; see FeatureExtractor::computeHash,
+    # which must render these bytes identically.
+    if derived:
+        serialized += "|" + json.dumps(
+            [[name, parse_signature_entry(expression)] for name, expression in derived],
+            separators=(",", ":"), sort_keys=True, ensure_ascii=False,
+        )
+
     digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
     return f"sha256:{digest}"

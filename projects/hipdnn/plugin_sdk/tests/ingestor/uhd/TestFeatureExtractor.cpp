@@ -543,6 +543,44 @@ TEST_F(TestFeatureExtractor, AnAbsentEncodingHashesExactlyAsBefore)
     EXPECT_EQ(FeatureExtractor::computeHash({"\"$q.batch\""}, {}), "sha256:611513da8e8614b2");
 }
 
+TEST_F(TestFeatureExtractor, DerivedExpressionsAreInTheFingerprint)
+{
+    // The signature carries only `$derived.intensity`, so a reciprocal expression reads
+    // identically there while the model consumes something else entirely.
+    const std::vector<std::pair<std::string, std::string>> intensity = {
+        {"intensity", R"({"/":["$q.flops","$q.bytes"]})"}};
+    const std::vector<std::pair<std::string, std::string>> flipped = {
+        {"intensity", R"({"/":["$q.bytes","$q.flops"]})"}};
+
+    EXPECT_NE(FeatureExtractor::computeHash({"$derived.intensity"}, {}, intensity),
+              FeatureExtractor::computeHash({"$derived.intensity"}, {}, flipped));
+
+    // Pinned against tools/uhd_gen's test_features_hash.py. A drift in either
+    // canonicalization stops every derived-carrying descriptor validating at load.
+    EXPECT_EQ(FeatureExtractor::computeHash({"$derived.intensity"}, {}, intensity),
+              "sha256:30d27cb335b662e7");
+}
+
+TEST_F(TestFeatureExtractor, DeclaringNoDerivedHashesExactlyAsBefore)
+{
+    EXPECT_EQ(FeatureExtractor::computeHash({"$derived.intensity"}, {}, {}),
+              FeatureExtractor::computeHash({"$derived.intensity"}));
+    EXPECT_EQ(FeatureExtractor::computeHash({"$derived.intensity"}),
+              "sha256:9c71217e2dc16bfd");
+}
+
+TEST_F(TestFeatureExtractor, ReorderingDerivedValuesBreaksTheContract)
+{
+    // 6.4 evaluates in order and a later value may read an earlier one, so the order is
+    // part of the computation.
+    const std::vector<std::pair<std::string, std::string>> pair = {
+        {"a", R"({"*":["$q.batch",2]})"}, {"b", R"({"+":["$derived.a",1]})"}};
+    const std::vector<std::pair<std::string, std::string>> swapped = {pair[1], pair[0]};
+
+    EXPECT_NE(FeatureExtractor::computeHash({"$derived.b"}, {}, pair),
+              FeatureExtractor::computeHash({"$derived.b"}, {}, swapped));
+}
+
 TEST_F(TestFeatureExtractor, SwappingTwoCodesBreaksTheContract)
 {
     // The case the signature text cannot express: same features, different meaning.
