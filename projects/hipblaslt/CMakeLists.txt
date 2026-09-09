@@ -602,6 +602,28 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
             set(_tw_any TRUE)
         endif()
     endforeach()
+    # The gfx1250 v0 GEMM tree builds into its OWN library directory (see
+    # device-library/CMakeLists.txt), which is NOT under Tensile/library/, so the
+    # loop above -- which iterates GPU_TARGETS and writes under _tw_lib_root --
+    # never reaches it. Weight discovery looks ONLY in the directory the logic
+    # file (.dat) was loaded from, so without this the v0 library silently falls
+    # back to the analytical path and the deployed model is dead weight. That is
+    # invisible at runtime: no error, just worse picks.
+    get_property(_tw_v0_lib_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
+    if(_tw_v0_lib_dir)
+        set(_tw_v0_src "${_tw_weights_dir}/gfx1250v0/gfx1250v0")
+        if(EXISTS "${_tw_v0_src}/tilewright_index")
+            file(GLOB _tw_v0_bins "${_tw_v0_src}/*.tilewright.bin")
+            list(APPEND _tw_cmds
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_v0_lib_dir}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_tw_v0_src}/tilewright_index" "${_tw_v0_lib_dir}/")
+            if(_tw_v0_bins)
+                list(APPEND _tw_cmds
+                    COMMAND ${CMAKE_COMMAND} -E copy ${_tw_v0_bins} "${_tw_v0_lib_dir}/")
+            endif()
+            set(_tw_any TRUE)
+        endif()
+    endif()
     if(_tw_any)
         add_custom_target(tilewright_colocate ALL ${_tw_cmds}
             COMMENT "Co-locating tilewright weights with the Tensile library")
