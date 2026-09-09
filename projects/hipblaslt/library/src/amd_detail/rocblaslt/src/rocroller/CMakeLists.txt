@@ -39,6 +39,10 @@ target_include_directories(hipblaslt-rocroller
         "${PROJECT_BINARY_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/tensilelite/include"
+        # solution_selection.cpp includes <Tensile/Debug.hpp> directly, and
+        # Debug.hpp includes the GENERATED <tensilelitehost/export.h>, which
+        # lands in the binary tree -- the source include dir alone is not enough.
+        "${PROJECT_BINARY_DIR}/tensilelite/include"
 )
 target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
 
