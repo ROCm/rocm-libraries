@@ -41,11 +41,19 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
+        throttleTime_ += cycles;
     }
 
-    // Configure saturated-queue pacing. When transitionEntries is positive, the first
-    // transitionEntries issued beyond depth use issueInterval * transitionFactor; later
-    // entries use the full interval.
+    // Advance saturated-queue pacing without aging real in-flight entries.
+    // Used when a scheduler charges throttle latency to a policy budget rather
+    // than treating it as elapsed execution time.
+    void advanceThrottle(int cycles) {
+        throttleTime_ += cycles;
+    }
+
+    // Configure saturated-queue pacing. When transitionEntries is positive, the
+    // first transitionEntries issued beyond depth use issueInterval *
+    // transitionFactor; later entries use the full interval.
     void setThrottleInterval(double issueInterval, double transitionFactor = 1.0,
                              int transitionEntries = 0) {
         throttleInterval_ = issueInterval;
@@ -80,6 +88,7 @@ class InFlightQueue {
     void clear() {
         expiries_.clear();
         currentTime_ = 0;
+        throttleTime_ = 0;
         nextIssueTick_ = -1.0;
     }
 
@@ -95,7 +104,7 @@ class InFlightQueue {
     int throttleWait() const {
         evict();
         if (activeThrottleInterval() <= 0.0) return 0;
-        const double now = (double)currentTime_;
+        const double now = (double)throttleTime_;
         const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
         return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
     }
@@ -103,7 +112,7 @@ class InFlightQueue {
     // Push one entry and update saturation pacing state.
     void pushWithThrottle(int drainLatency) {
         push(drainLatency);
-        const double now = (double)currentTime_;
+        const double now = (double)throttleTime_;
         const double issueInterval = activeThrottleInterval();
         if (issueInterval > 0.0)
             nextIssueTick_ = std::max(nextIssueTick_, now) + issueInterval;
@@ -140,6 +149,7 @@ class InFlightQueue {
 
     int depth_ = 0;
     int currentTime_ = 0;
+    int throttleTime_ = 0;
     double throttleInterval_ = 0.0;
     double transitionFactor_ = 1.0;
     int transitionEntries_ = 0;
