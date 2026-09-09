@@ -99,6 +99,49 @@ inline void registerFailedBundleLoad(const std::string& suiteName,
         [message]() -> ::testing::Test* { return new FailedBundleLoadTest(message); });
 }
 
+// A GTest test body that immediately skips with a stored diagnostic message.
+//
+// Used for a bundle the cost gate excluded on a run where no other reference
+// lane will cover it. Running it is not an option -- these are the shapes the
+// scalar CPU reference needs tens of minutes for, which is what the gate exists
+// to avoid -- but dropping it silently is what this whole binary is about not
+// doing. A skip carrying the reason lands in the GTest and ctest reports under
+// the bundle's own name, so "nothing validated this today" is a line someone can
+// read, at no runtime cost.
+class UncoveredBundleTest : public ::testing::Test
+{
+public:
+    explicit UncoveredBundleTest(std::string message)
+        : _message(std::move(message))
+    {
+    }
+
+    void TestBody() override
+    {
+        GTEST_SKIP() << _message;
+    }
+
+private:
+    std::string _message;
+};
+
+// Registers a synthetic skipping test for a bundle no reference validated this
+// run. Same shape as registerFailedBundleLoad(), different verdict: this is a
+// declared coverage gap, not a broken bundle.
+inline void registerUncoveredBundle(const std::string& suiteName,
+                                    const std::string& testName,
+                                    const std::string& message)
+{
+    ::testing::RegisterTest(
+        suiteName.c_str(),
+        testName.c_str(),
+        nullptr,
+        nullptr,
+        __FILE__,
+        __LINE__,
+        [message]() -> ::testing::Test* { return new UncoveredBundleTest(message); });
+}
+
 // A bundle that failed to load, carrying enough information to register a
 // FailedBundleLoadTest in its place: the suite/test name it would have used
 // had it loaded, plus a diagnostic message describing why it didn't.
@@ -228,10 +271,11 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 // verified nothing" apart from "this whole run had nothing to verify".
 //
 // `gpuLaneWillRun` says whether a GPU reference lane will actually execute in this
-// process -- selected by --reference *and* backed by a device. The CPU lane's cost
-// exclusion is only a cost trade while some other lane still validates the excluded
-// bundle, so without that lane the exclusion is switched off rather than left to
-// drop bundles nobody checks.
+// process -- selected by --reference *and* backed by a device. It does not change
+// *whether* the cost gate excludes a shape, only what the exclusion means: with
+// that lane running the bundle is still validated and the exclusion is a pure cost
+// trade; without it nothing validates the bundle, so a skipping test is registered
+// in its place to say so.
 inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
                                                ReferenceExecutorType referenceType,
                                                bool gpuLaneWillRun)
@@ -243,6 +287,7 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     size_t uncovered = 0;
     size_t knownGaps = 0;
     size_t tooCostly = 0;
+    size_t uncoveredOnCost = 0;
     std::set<std::string> uncoveredOps;
 
     for(const auto& bundle : bundles)
@@ -271,21 +316,36 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
 
         const std::string bundleId = bundle.suiteName + "." + bundle.testName;
 
-        // Deliberate cost exclusion, counted and printed rather than silent. Unlike
-        // an op-set miss this bundle IS validated -- by the GPU reference lane,
-        // which is why the exclusion only applies when that lane is really going to
-        // run. On a device-less runner the GPU harness SKIP_IF_NO_DEVICES()s in
-        // SetUp(), and --reference cpu removes the lane outright; excluding here in
-        // either case would leave the bundle validated by nobody and reported as
-        // neither a failure nor a skip. It would also zero `tooCostly` out of the
-        // guard below, disarming the check that is supposed to notice exactly that.
-        if(gpuLaneWillRun
-           && !referenceShapeIsAffordable(referenceType,
-                                          bundleId,
-                                          bundle.bundle->graphBuffer.data(),
-                                          bundle.bundle->graphBuffer.size()))
+        // Deliberate cost exclusion, counted and printed rather than silent. It
+        // applies unconditionally: these are the shapes the scalar CPU reference
+        // needs tens of minutes for -- a 4096-token GQA bundle measured 19.6 min on
+        // a CI runner and blew the ctest timeout -- so running them is never the
+        // right answer, whatever else is or isn't covering them.
+        //
+        // What the GPU lane changes is the verdict, not the exclusion. With that
+        // lane running the bundle IS validated, just not here, and the tally below
+        // is the whole story. Without it -- `--reference cpu`, or a device-less
+        // runner where the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() -- nothing
+        // validates this bundle, so it gets a skipping test under its own name
+        // rather than vanishing into a counter.
+        if(!referenceShapeIsAffordable(referenceType,
+                                       bundleId,
+                                       bundle.bundle->graphBuffer.data(),
+                                       bundle.bundle->graphBuffer.size()))
         {
             tooCostly++;
+            if(!gpuLaneWillRun)
+            {
+                uncoveredOnCost++;
+                registerUncoveredBundle(
+                    bundle.suiteName + "_" + label,
+                    bundle.testName,
+                    std::string("Excluded from the ") + label
+                        + " lane on cost (see referenceShapeIsAffordable), and no GpuRef lane "
+                          "runs this session to cover it -- so nothing validated this bundle "
+                          "against its golden data.\n  bundle: "
+                        + bundle.jsonPath.string());
+            }
             continue;
         }
 
@@ -326,14 +386,17 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     {
         std::cerr << "\n       " << tooCostly
                   << " excluded as too costly for this reference (see "
-                     "referenceShapeIsAffordable); the GpuRef lane runs this session and "
-                     "covers them";
-    }
-    else if(referenceType == ReferenceExecutorType::CPU && !gpuLaneWillRun)
-    {
-        std::cerr << "\n       cost exclusion disabled: no GpuRef lane runs this session "
-                     "(--reference, or no device), so the expensive shapes it would cover "
-                     "are registered here instead of going unvalidated";
+                     "referenceShapeIsAffordable); ";
+        if(uncoveredOnCost > 0)
+        {
+            std::cerr << uncoveredOnCost
+                      << " of those are covered by NO reference this session (no GpuRef lane) "
+                         "and are registered as skipping tests naming the gap";
+        }
+        else
+        {
+            std::cerr << "the GpuRef lane runs this session and covers them";
+        }
     }
     if(knownGaps > 0)
     {
