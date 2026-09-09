@@ -75,9 +75,13 @@ This RFC defines:
 | **Engine selection** | Which engine handles this graph? | [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) |
 | **Kernel selection** | Which kernel within the engine? | **UHD** (this RFC) |
 
-A UHD is the kernel-selection heuristic. It is part of the generic provider that
+The UHD's central role, `sort_kernel_catalog`, is the kernel-selection heuristic, and it is what this
+RFC is mostly about. The other two roles sit either side of it: `predict_engine_tflops` supplies an
+input to engine selection, and `predict_applicable_kernels` produces the candidate set
+([Section 3.1](#31-descriptor-relationships)). All three are part of the generic provider that
 [RFC 0017](0017_UniversalKernelDescriptor.md) introduces — not a new host interface, not a policy
-plugin. The two levels are not cleanly one-after-the-other, but the interleaving is specifically between
+plugin. Supplying an input to engine selection does not move ownership of it: the policies remain
+[RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s. The two levels are not cleanly one-after-the-other, but the interleaving is specifically between
 the **matcher** and engine selection — *not* between the UHD and engine selection
 ([Section 10](#10-applicability-flow)).
 
@@ -233,8 +237,10 @@ The consequences:
   identically and the deterministic `priority`-then-`id` tie-break decides
   ([Section 5](#5-selection-flow)). The loader emits a **warning** in this case: a pack carrying kernels
   the heuristic cannot choose between indicates either a missing feature or a redundant variant. Which of
-  the three remedies applies — expose the distinguishing field as a knob, split the variants into a
-  separate pack, or drop them — is the kernel author's judgement, and this RFC sets no rule for it. The
+  the three remedies applies — expose the distinguishing field as a knob, move the variants to a separate
+  **engine**, or drop them — is the kernel author's judgement, and this RFC sets no rule for it. A
+  separate *pack* is not among them: the catalog is engine-scoped, so a new KDP joining the same engine
+  contributes to the same catalog under the same heuristic and separates nothing. The
   considerations that bear on it: **variant explosion**, since every added knob multiplies the space the
   generation pipeline must cover ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)); whether the
   variants differ in **function** rather than only in performance, which argues for a separate engine
@@ -644,8 +650,8 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
 3. **Score each candidate.** Invoke the UHD's scorer per candidate — for a model adapter, one inference
    call per candidate over its feature row.
 4. **Choose by objective.** `max` (or `min`) over the scores; the winner is the selected kernel.
-5. **Tie-break deterministically.** On equal scores (or when the UHD declines), fall through to explicit
-   UKD `priority`, then stable `id` — the same deterministic arbitration
+5. **Tie-break deterministically.** On equal scores — or when no model ranks at all (steps 6 and 8) —
+   fall through to explicit UKD `priority`, then stable `id` — the same deterministic arbitration
    [RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria) defines. Declaration order
    is never used.
 6. **A UHD is optional.** An engine that names no heuristic is valid; it is the starting state
@@ -673,10 +679,13 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    re-dispatching, because a kernel that reached execution was already judged applicable, and quietly
    substituting another would mask the applicability defect that let it through.
 
-8. **A failure degrades the result; it never fails the request.** Descriptor sets are drop-in data from
-   potentially third-party authors. A malformed one must not take down the system, and must not fail
-   after the engine has already claimed applicability. Each failure mode resolves to a usable answer plus
-   a diagnostic:
+8. **A broken *heuristic* degrades the result; it never fails the request.** This rule is about the
+   heuristic specifically, and it differs from step 7 deliberately. Ranking is optional — an engine with
+   no usable model still has a valid answer in `priority`-then-`id` order — so a heuristic that cannot be
+   trusted is switched off rather than raised. A malformed *kernel or dispatch* descriptor has no such
+   fallback: nothing else can build that plan, and substituting a different kernel silently would serve
+   something other than what was authored, which is why step 7 rethrows it. **What is optional degrades;
+   what is required raises.** Each heuristic failure mode resolves to a usable answer plus a diagnostic:
    - **No model, or the scorer errors** → rank by `static_order` (priority + id). No ranking information
      is available, and priority order is a valid answer.
    - **Broken feature contract** — `features_hash` disagrees, a `$kernel.*` reference is dangling, or the
@@ -1605,6 +1614,12 @@ policy therefore has to treat a missing estimate as a normal outcome rather than
 | A only (opaque) | Rank by A; engine does its own kernel selection | Compare A against others' B |
 | Neither | Falls back to static ordering; contributes no score | Same |
 
+**A missing estimate and a distrusted one are different signals.** An engine that supplies no estimate
+reports nothing and is ordered by the existing static rules; an engine whose heuristic failed its
+contract reports an estimated throughput of **0** ([Section 5](#5-selection-flow) step 8), which is a
+claim rather than a silence — it says *do not pick me* and lets any engine with a real estimate outrank
+it. Absence means "I do not answer this question"; zero means "I answer, and the answer is bad."
+
 An engine that supplies no estimate is ordered by the existing static rules and simply does not
 participate in performance-based comparison — the mixed case has to work, since it is the near-term
 reality for every non-descriptor engine.
@@ -2225,7 +2240,7 @@ dependency-gated and land only when a concrete need appears.
 
 | Risk | Description | Mitigation |
 |------|-------------|------------|
-| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
+| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; four-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
 | **Catalog not enumerable** | Knobs are reported independently, so the valid set is a sparse subset of the cross-product; a large knob space cannot be swept, so no training data can be gathered | Generation exposes every KMD field, so every kernel is addressable; **needs an API to enumerate the valid catalog directly** — tracked as [Open Question 12](#operational). Pipeline is viable today only for small/dense knob spaces |
 | **Knob-set churn** | A retrain that drops a feature also drops a knob, breaking a caller that was setting it | Knob removal is a **major** UED version bump; exact UED↔UHD knob-set equality checked at load so the two cannot drift; a "sticky" superset held open as an escape hatch ([Open Question 18](#operational)) |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
@@ -2233,7 +2248,7 @@ dependency-gated and land only when a concrete need appears.
 | **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | Arch check against training metadata; degrade to `static_order` and log; per-feature coverage metadata kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Degrade to `static_order`; parity gate against the `native` baseline; model provenance in trace |
-| **Malformed drop-in pack** | Third-party descriptor set with a broken contract reaches a customer | Never fails the request — model disabled, error logged, estimate reported as 0; CI validation over shipped packs is the primary gate ([Open Question 14](#operational)) |
+| **Malformed drop-in heuristic** | Third-party UHD with a broken feature contract reaches a customer | Never fails the request — model disabled, error logged, estimate reported as 0 ([Section 5](#5-selection-flow) step 8); CI validation over shipped packs is the primary gate ([Open Question 14](#operational)) |
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
 | **Selection CPU overhead** | Per-candidate scoring on the plan-build path costs more than it saves | Wall-clock load / extract / score separately against the `native` baseline; shared-prefix split; single-candidate short-circuit ([Section 9.4](#94-latency-target)) |
 | **Cache key incompleteness** | Result cache returns wrong kernel | Fingerprint must include problem + candidate set + device |
@@ -2387,7 +2402,11 @@ dependency-gated and land only when a concrete need appears.
     resolved row at runtime, or manage it purely by versioning discipline
     ([Section 8.3](#83-out-of-distribution-inputs))? Recommendation: versioning plus the cheap discrete
     arch check for v1, with the artifact format leaving coverage metadata additive. Decide before the
-    `tree_data` format freezes, since retrofitting it later is a format change.
+    `tree_data` format freezes, since retrofitting it later is a format change. A second axis rides on
+    the same decision: whether an out-of-distribution verdict applies **per candidate**, distrusting one
+    row whose features fall outside the trained range, or **per model**, disabling the whole heuristic.
+    Per-candidate is the finer answer and the one [Section 5](#5-selection-flow) assumes when it routes a
+    low-confidence candidate here rather than to a scorer sentinel.
     *(Impacts [Section 8.3](#83-out-of-distribution-inputs), [Section 7.2](#72-default-tree_data).)*
 
 17. **Categorical ordering semantics.** Integer codes imply an order a tree model will split on
