@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipBuffer.hpp>
+#include <hipblaslt/client/MatmulProblem.hpp>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime.h>
+#include <roc/host_numerics/backends/blas.hpp>
+#include <roc/host_numerics/epilogue.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 
 #include <algorithm>
 #include <array>
@@ -83,7 +87,7 @@ namespace
     }
 
     template <typename Compute>
-    void testHipblasltReferenceGemm(hipblasOperation_t transA,
+    void testTensorMatmulOperations(hipblasOperation_t transA,
                                     hipblasOperation_t transB,
                                     int64_t            m,
                                     int64_t            n,
@@ -128,104 +132,100 @@ namespace
             else
                 return HIP_C_64F;
         }();
-        const auto scaleCValue = computeInterfaceValue(scaleC);
-        const auto scaleDValue = computeInterfaceValue(scaleD);
-        const auto matrixLayout = [](size_t               rows,
-                                     size_t               columns,
-                                     int64_t              leadingDimension,
-                                     hipblasOperation_t   operation) {
-            return roc::host_numerics::Layout(
-                roc::host_numerics::Shape{rows, columns},
-                {operation == HIPBLAS_OP_N ? 1 : leadingDimension,
-                 operation == HIPBLAS_OP_N ? leadingDimension : 1});
+        const auto scaleCValue  = computeInterfaceValue(scaleC);
+        const auto scaleDValue  = computeInterfaceValue(scaleD);
+        const auto matrixLayout = [](size_t             rows,
+                                     size_t             columns,
+                                     int64_t            leadingDimension,
+                                     hipblasOperation_t operation) {
+            return roc::host_numerics::Layout(roc::host_numerics::Shape{rows, columns},
+                                              {operation == HIPBLAS_OP_N ? 1 : leadingDimension,
+                                               operation == HIPBLAS_OP_N ? leadingDimension : 1});
         };
         const auto layoutA = matrixLayout(m, k, lda, transA);
         const auto layoutB = matrixLayout(k, n, ldb, transB);
         const auto layoutC = matrixLayout(m, n, ldc, HIPBLAS_OP_N);
         const auto layoutD = matrixLayout(m, n, ldd, HIPBLAS_OP_N);
-        const auto matrix  = [](hipDataType type, const roc::host_numerics::Layout& layout) {
-            return hipblaslt::client::MatmulMatrix{
-                type,
-                roc::host_numerics::Layout(
-                    roc::host_numerics::Shape{layout.shape()[0], layout.shape()[1], 1},
-                    {layout.stride(0), layout.stride(1), 0}),
-                layout.shape()[1] * static_cast<size_t>(layout.stride(1)),
-            };
-        };
-        const hipblaslt::client::MatmulProblem problem{
-            .m          = m,
-            .n          = n,
-            .k          = k,
-            .operationA = transA,
-            .operationB = transB,
-            .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
-            .batchCount = 1,
-            .a          = matrix(typeA, layoutA),
-            .b          = matrix(typeB, layoutB),
-            .c          = matrix(typeC, layoutC),
-            .d          = matrix(typeD, layoutD),
-            .auxiliary  = std::nullopt,
-            .cEqualsD   = false,
-        };
-        const hipblaslt::client::MatmulDataTypes dataTypes{
-            .computeScalar = coefficientType,
-            .computeInputA = computeInputTypeA,
-            .computeInputB = computeInputTypeB,
-            .coefficient   = coefficientType,
-            .bias          = HIP_R_32F,
-            .biasStorage   = HIP_R_32F,
-            .auxiliary     = HIP_R_32F,
-        };
-        hipblaslt::client::PreparedMatmulProblem preparation;
-        preparation.alpha = computeInterfaceValue(alpha);
-        preparation.beta  = computeInterfaceValue(beta);
-
-        auto output = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        auto       output  = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
             d, hipblaslt::host_numerics::scalarType(typeD), layoutD);
-        hipblaslt::host_numerics::MatmulReferenceInputs inputs(
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                a, hipblaslt::host_numerics::scalarType(typeA), layoutA),
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                b, hipblaslt::host_numerics::scalarType(typeB), layoutB),
-            hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                c, hipblaslt::host_numerics::scalarType(typeC), layoutC),
-            output);
+        const auto inputA = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            a, hipblaslt::host_numerics::scalarType(typeA), layoutA);
+        const auto inputB = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            b, hipblaslt::host_numerics::scalarType(typeB), layoutB);
+        const auto inputC = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+            c, hipblaslt::host_numerics::scalarType(typeC), layoutC);
+
+        using namespace roc::host_numerics;
+        const ScalarType accumulatorType
+            = hipblaslt::host_numerics::referenceAccumulatorType(coefficientType);
+        MatmulOptions options(accumulatorType);
+        options.conjugateA = transA == HIPBLAS_OP_C;
+        options.conjugateB = transB == HIPBLAS_OP_C;
+        const ScalarType inputComputeTypeA
+            = scaleAIsMx ? inputA.type()
+                         : hipblaslt::host_numerics::referenceComputeType(computeInputTypeA);
+        const ScalarType inputComputeTypeB
+            = scaleBIsMx ? inputB.type()
+                         : hipblaslt::host_numerics::referenceComputeType(computeInputTypeB);
+        if(inputComputeTypeA != inputA.type())
+            options.computeTypeA = inputComputeTypeA;
+        if(inputComputeTypeB != inputB.type())
+            options.computeTypeB = inputComputeTypeB;
+
         const auto vector = [&](const void* values, size_t elements) {
             return hipblaslt::host_numerics::copyTensorFromEncodedStorage(
                 values,
                 hipblaslt::host_numerics::scalarType(coefficientType),
-                roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                    roc::host_numerics::Shape{elements}));
+                Layout::contiguousLastDimensionFastest(Shape{elements}));
         };
+        if(scaleA && !scaleAIsMx)
+            options.preQuantizationScalesA.push_back(
+                vector(scaleA, scaleAIsVector ? static_cast<size_t>(m) : 1).expandDims(1));
         if(alphaVector)
-            inputs.alphaVector = vector(alphaVector, static_cast<size_t>(m));
-        if(scaleA)
-            inputs.scaleA = vector(scaleA, scaleAIsVector ? static_cast<size_t>(m) : 1);
-        if(scaleB)
-            inputs.scaleB = vector(scaleB, scaleBIsVector ? static_cast<size_t>(n) : 1);
-        inputs.scaleC
-            = hipblaslt::host_numerics::realOnlyScalarValue(&scaleCValue, coefficientType);
-        inputs.scaleD = hipblaslt::host_numerics::scalarValue(&scaleDValue, coefficientType);
+            options.preQuantizationScalesA.push_back(
+                vector(alphaVector, static_cast<size_t>(m)).expandDims(1));
+        if(scaleB && !scaleBIsMx)
+            options.preQuantizationScalesB.push_back(
+                vector(scaleB, scaleBIsVector ? static_cast<size_t>(n) : 1).expandDims(0));
 
-        const auto scaleMode = [](const void* scale, bool vectorScale, bool mxScale) {
-            if(mxScale)
-                return hipblaslt_scaling_format::Block_32_UE8M0;
-            if(vectorScale)
-                return hipblaslt_scaling_format::Vector;
-            return scale ? hipblaslt_scaling_format::Scalar : hipblaslt_scaling_format::none;
-        };
-        (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
-                                                            dataTypes,
-                                                            preparation,
-                                                            std::move(inputs),
-                                                            scaleMode(scaleA,
-                                                                      scaleAIsVector,
-                                                                      scaleAIsMx),
-                                                            scaleMode(scaleB,
-                                                                      scaleBIsVector,
-                                                                      scaleBIsMx));
+        const Tensor alphaTensor
+            = hipblaslt::host_numerics::scalarValue(computeInterfaceValue(alpha), coefficientType);
+        const Tensor betaTensor
+            = hipblaslt::host_numerics::scalarValue(computeInterfaceValue(beta), coefficientType);
+        const Tensor scaleCTensor
+            = hipblaslt::host_numerics::realOnlyScalarValue(&scaleCValue, coefficientType);
+        const Tensor scaleDTensor
+            = hipblaslt::host_numerics::scalarValue(&scaleDValue, coefficientType);
+
+        std::optional<Tensor> referenceAccumulator;
+        if(alphaTensor.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
+           && inputA.shape()[1] != 0)
+        {
+            const Tensor product = matmulWithBlasBackend(inputA, inputB, accumulatorType, options);
+            referenceAccumulator = multiply(product, alphaTensor, accumulatorType, accumulatorType);
+        }
+        if(betaTensor.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
+        {
+            const Tensor cScale
+                = multiply(betaTensor, scaleCTensor, accumulatorType, accumulatorType);
+            Tensor addend = multiply(inputC, cScale, accumulatorType, accumulatorType);
+            referenceAccumulator
+                = referenceAccumulator
+                      ? add(*referenceAccumulator, addend, accumulatorType, accumulatorType)
+                      : std::move(addend);
+        }
+        if(!referenceAccumulator)
+            referenceAccumulator.emplace(accumulatorType,
+                                         Shape{inputA.shape()[0], inputB.shape()[1]});
+
+        EpilogueOptions conversion(accumulatorType);
+        conversion.outputScale = scaleDTensor;
+        if(output.type() == ScalarType::Int8)
+            conversion.outputConversion = OutputConversion::SaturatingInt8;
+        referenceEpilogueInto(*referenceAccumulator, {.output = output}, conversion);
+
         hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
-            d, roc::host_numerics::storageBytesForLayout(output.type(), output.layout()), output);
+            d, storageBytesForLayout(output.type(), output.layout()), output);
     }
 } // namespace
 
@@ -938,7 +938,7 @@ TEST(HostNumericsCblasBridge, DistinctHalfCAndFloatD)
     const auto                   originalC = c;
     std::array<float, 4>         d{-1, -2, -3, -4};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       2,
                                       2,
@@ -977,72 +977,33 @@ TEST(HostNumericsCblasBridge, DistinctHalfCAndFloatD)
     EXPECT_FLOAT_EQ(d[3], 2 * 154 + 3 * 2 * static_cast<float>(originalC[4]));
 }
 
-TEST(HostNumericsCblasBridge, ConsumesNormalizedMatmulProblemAndTensorBindings)
+TEST(HostNumericsCblasBridge, ComposesAlphaMatmulAndBetaCWithTensorOperations)
 {
     using namespace roc::host_numerics;
-
-    const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{2, 2});
-    const Layout batchedLayout(Shape{2, 2, 1}, {1, 2, 4});
-    const hipblaslt::client::MatmulMatrix  matrix{HIP_R_32F, batchedLayout, 4};
-    const hipblaslt::client::MatmulProblem problem{
-        .m          = 2,
-        .n          = 2,
-        .k          = 2,
-        .operationA = HIPBLAS_OP_N,
-        .operationB = HIPBLAS_OP_N,
-        .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
-        .batchCount = 1,
-        .a          = matrix,
-        .b          = matrix,
-        .c          = matrix,
-        .d          = matrix,
-        .auxiliary  = std::nullopt,
-        .cEqualsD   = false,
-    };
-    const hipblaslt::client::MatmulDataTypes dataTypes{
-        .computeScalar = HIP_R_32F,
-        .computeInputA = HIP_R_32F,
-        .computeInputB = HIP_R_32F,
-        .coefficient   = HIP_R_32F,
-        .bias          = HIP_R_32F,
-        .biasStorage   = HIP_R_32F,
-        .auxiliary     = HIP_R_32F,
-    };
-    hipblaslt::client::PreparedMatmulProblem preparation;
-    preparation.alpha.f32 = 2.0f;
-    preparation.beta.f32  = 3.0f;
 
     const std::array<float, 4> a{1, 2, 3, 4};
     const std::array<float, 4> b{5, 6, 7, 8};
     const std::array<float, 4> c{1, 1, 1, 1};
-    Tensor                     d(ScalarType::Float32, matrixLayout);
-    hipblaslt::host_numerics::MatmulReferenceInputs inputs(
-        Tensor::copyNativeValues<float>(Shape{2, 2}, a),
-        Tensor::copyNativeValues<float>(Shape{2, 2}, b),
-        Tensor::copyNativeValues<float>(Shape{2, 2}, c),
-        d);
+    const Tensor               inputA = Tensor::copyNativeValues<float>(Shape{2, 2}, a);
+    const Tensor               inputB = Tensor::copyNativeValues<float>(Shape{2, 2}, b);
+    const Tensor               inputC = Tensor::copyNativeValues<float>(Shape{2, 2}, c);
+    const Tensor output = matmul(inputA, inputB, ScalarType::Float32) * 2.0f + inputC * 3.0f;
 
-    hipblaslt::host_numerics::referenceMatmulGemm(problem,
-                                                  dataTypes,
-                                                  preparation,
-                                                  std::move(inputs),
-                                                  hipblaslt_scaling_format::none,
-                                                  hipblaslt_scaling_format::none);
-    EXPECT_FLOAT_EQ(d.loadAs<float>({0, 0}), 41.0f);
-    EXPECT_FLOAT_EQ(d.loadAs<float>({0, 1}), 47.0f);
-    EXPECT_FLOAT_EQ(d.loadAs<float>({1, 0}), 89.0f);
-    EXPECT_FLOAT_EQ(d.loadAs<float>({1, 1}), 103.0f);
+    EXPECT_FLOAT_EQ(output.loadAs<float>({0, 0}), 41.0f);
+    EXPECT_FLOAT_EQ(output.loadAs<float>({0, 1}), 47.0f);
+    EXPECT_FLOAT_EQ(output.loadAs<float>({1, 0}), 89.0f);
+    EXPECT_FLOAT_EQ(output.loadAs<float>({1, 1}), 103.0f);
 }
 
 TEST(HostNumericsCblasBridge, AppliesScaleCInsideSharedGemm)
 {
-    const float          a      = 4.0f;
-    const float          b      = 5.0f;
-    const float          c      = 7.0f;
-    float                d      = -1.0f;
-    const float          scaleC = 2.0f;
-    const float          scaleD = 1.0f;
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    const float a      = 4.0f;
+    const float b      = 5.0f;
+    const float c      = 7.0f;
+    float       d      = -1.0f;
+    const float scaleC = 2.0f;
+    const float scaleD = 1.0f;
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1090,7 +1051,7 @@ TEST(HostNumericsCblasBridge, MixedHalfInputs)
     const std::array<hipblasLtHalf, 6> b{7, 9, 11, 8, 10, 12};
     std::array<float, 4>               d{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       2,
                                       2,
@@ -1132,7 +1093,7 @@ TEST(HostNumericsCblasBridge, QuantizesCombinedOperandScaleAndAlphaVector)
     const std::array<float, 1> alphaVector{0.6f};
     const std::array<float, 1> scaleA{0.7f};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1170,7 +1131,7 @@ TEST(HostNumericsCblasBridge, AppliesSameWidthCrossFormatComputeQuantization)
     const std::array<float, 1>        b{1.0f};
     std::array<float, 1>              d{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1207,7 +1168,7 @@ TEST(HostNumericsCblasBridge, AppliesOutputScaleBeforeNarrowConversion)
     const std::array<float, 1>   b{3.0f};
     std::array<hipblasLtHalf, 1> d{hipblasLtHalf(0.0f)};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1245,7 +1206,7 @@ TEST(HostNumericsCblasBridge, ConvertsFnuzOutputWithComponentCodec)
     const std::array<float, 1>       b{1.0f};
     std::array<hipblaslt_f8_fnuz, 1> d{hipblaslt_f8_fnuz(0.0f)};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1282,7 +1243,7 @@ TEST(HostNumericsCblasBridge, SaturatesRoundedInt8Output)
     const std::array<float, 1> b{2.0f};
     std::array<int8_t, 1>      d{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1320,7 +1281,7 @@ TEST(HostNumericsCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
     const float          finiteC  = 3.0f;
     std::array<float, 1> output{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1351,7 +1312,7 @@ TEST(HostNumericsCblasBridge, ZeroScalarsSuppressNonFiniteInputs)
 
     const float a = 2.0f;
     const float b = 4.0f;
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1387,7 +1348,7 @@ TEST(HostNumericsCblasBridge, IntegerComputeUsesWideReferenceAndSaturatingOutput
     const std::array<int8_t, 2> b{1, 1};
     std::array<int8_t, 1>       d{};
 
-    testHipblasltReferenceGemm<int32_t>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<int32_t>(HIPBLAS_OP_N,
                                         HIPBLAS_OP_N,
                                         1,
                                         1,
@@ -1426,7 +1387,7 @@ TEST(HostNumericsCblasBridge, TransposedPaddedScaleUsesLogicalRows)
     const std::array<float, 2> scaleA{2.0f, 3.0f};
     std::array<float, 2>       d{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_T,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_T,
                                       HIPBLAS_OP_N,
                                       2,
                                       1,
@@ -1465,7 +1426,7 @@ TEST(HostNumericsCblasBridge, PackedFloat4InputUsesLogicalElementLayout)
     const std::array<float, 2>          b{3.0f, 4.0f};
     std::array<float, 1>                d{};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,
@@ -1505,7 +1466,7 @@ TEST(HostNumericsCblasBridge, ComplexConjugateTranspose)
     const std::array<Complex, 2> b{Complex(2, -1), Complex(-4, 3)};
     std::array<Complex, 1>       d{Complex(0, 0)};
 
-    testHipblasltReferenceGemm<Complex>(HIPBLAS_OP_C,
+    testTensorMatmulOperations<Complex>(HIPBLAS_OP_C,
                                         HIPBLAS_OP_N,
                                         1,
                                         1,
@@ -1540,7 +1501,6 @@ TEST(HostNumericsCblasBridge, ComplexConjugateTranspose)
 
 TEST(HostNumericsCblasBridge, UsesResolvedComplexReferenceTypes)
 {
-    using namespace roc::host_numerics;
     using Complex = std::complex<float>;
 
     Arguments arguments{};
@@ -1551,48 +1511,44 @@ TEST(HostNumericsCblasBridge, UsesResolvedComplexReferenceTypes)
     arguments.d_type     = HIP_C_32F;
     const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
 
-    const Layout matrixLayout = Layout::contiguousLastDimensionFastest(Shape{1, 1});
-    const Layout batchedLayout(Shape{1, 1, 1}, {1, 1, 1});
-    const hipblaslt::client::MatmulMatrix  matrix{HIP_C_32F, batchedLayout, 1};
-    const hipblaslt::client::MatmulProblem problem{
-        .m          = 1,
-        .n          = 1,
-        .k          = 1,
-        .operationA = HIPBLAS_OP_N,
-        .operationB = HIPBLAS_OP_N,
-        .batchMode  = HIPBLASLT_BATCH_MODE_STRIDED,
-        .batchCount = 1,
-        .a          = matrix,
-        .b          = matrix,
-        .c          = matrix,
-        .d          = matrix,
-        .auxiliary  = std::nullopt,
-        .cEqualsD   = false,
-    };
-    hipblaslt::client::PreparedMatmulProblem preparation;
-    preparation.alpha.cf = Complex{2.0f, 3.0f};
-    preparation.beta.cf  = Complex{4.0f, 5.0f};
+    const Complex a{1.0f, 2.0f};
+    const Complex b{3.0f, -1.0f};
+    const Complex c{-2.0f, 4.0f};
+    const Complex alpha{2.0f, 3.0f};
+    const Complex beta{4.0f, 5.0f};
+    Complex       d{};
 
-    const Complex                                   a{1.0f, 2.0f};
-    const Complex                                   b{3.0f, -1.0f};
-    const Complex                                   c{-2.0f, 4.0f};
-    Tensor                                          d(ScalarType::ComplexFloat32, matrixLayout);
-    hipblaslt::host_numerics::MatmulReferenceInputs inputs(
-        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&a, 1)),
-        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&b, 1)),
-        Tensor::copyNativeValues<Complex>(Shape{1, 1}, std::span<const Complex>(&c, 1)),
-        d);
+    testTensorMatmulOperations<Complex>(HIPBLAS_OP_N,
+                                        HIPBLAS_OP_N,
+                                        1,
+                                        1,
+                                        1,
+                                        alpha,
+                                        &a,
+                                        1,
+                                        &b,
+                                        1,
+                                        beta,
+                                        &c,
+                                        1,
+                                        &d,
+                                        1,
+                                        nullptr,
+                                        nullptr,
+                                        nullptr,
+                                        Complex{1.0f, 0.0f},
+                                        false,
+                                        false,
+                                        HIP_C_32F,
+                                        HIP_C_32F,
+                                        HIP_C_32F,
+                                        HIP_C_32F,
+                                        dataTypes.computeInputA,
+                                        dataTypes.computeInputB);
 
-    (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
-                                                        dataTypes,
-                                                        preparation,
-                                                        std::move(inputs),
-                                                        hipblaslt_scaling_format::none,
-                                                        hipblaslt_scaling_format::none);
-
-    const Complex expected = preparation.alpha.cf * a * b + preparation.beta.cf * c;
-    EXPECT_FLOAT_EQ(d.loadAs<Complex>({0, 0}).real(), expected.real());
-    EXPECT_FLOAT_EQ(d.loadAs<Complex>({0, 0}).imag(), expected.imag());
+    const Complex expected = alpha * a * b + beta * c;
+    EXPECT_FLOAT_EQ(d.real(), expected.real());
+    EXPECT_FLOAT_EQ(d.imag(), expected.imag());
 }
 
 TEST(HostNumericsCblasBridge, BuildsEmptyBatchLayoutsWithoutAddressingAnElement)
@@ -1615,7 +1571,7 @@ TEST(HostNumericsCblasBridge, EmptyOutputShapesAreNoOps)
 {
     const std::array<float, 6> values{1, 2, 3, 4, 5, 6};
 
-    EXPECT_NO_THROW(testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    EXPECT_NO_THROW(testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                                       HIPBLAS_OP_N,
                                                       0,
                                                       3,
@@ -1643,7 +1599,7 @@ TEST(HostNumericsCblasBridge, EmptyOutputShapesAreNoOps)
                                                       HIP_R_32F,
                                                       HIP_R_32F));
 
-    EXPECT_NO_THROW(testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    EXPECT_NO_THROW(testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                                       HIPBLAS_OP_N,
                                                       3,
                                                       0,
@@ -1681,7 +1637,7 @@ TEST(HostNumericsCblasBridge, ComplexScaleCUsesOnlyItsRealComponent)
     const Complex c{3.0f, 4.0f};
     Complex       d{-1.0f, -1.0f};
 
-    testHipblasltReferenceGemm<Complex>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<Complex>(HIPBLAS_OP_N,
                                         HIPBLAS_OP_N,
                                         1,
                                         1,
@@ -1724,7 +1680,7 @@ TEST(HostNumericsCblasBridge, LargeProblemUsesAcceleratedBackend)
     const std::array<float, 1> b{2};
     std::vector<float>         d(m, 1);
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       m,
                                       1,
@@ -1760,7 +1716,7 @@ TEST(HostNumericsCblasBridge, ZeroReductionDoesNotRequireBlasOperands)
 {
     std::array<float, 1> d{2.0f};
 
-    testHipblasltReferenceGemm<float>(HIPBLAS_OP_N,
+    testTensorMatmulOperations<float>(HIPBLAS_OP_N,
                                       HIPBLAS_OP_N,
                                       1,
                                       1,

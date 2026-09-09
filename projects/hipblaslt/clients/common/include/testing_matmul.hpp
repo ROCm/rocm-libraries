@@ -38,6 +38,7 @@
 #include "utility.hpp"
 #include <algorithm>
 #include <array>
+#include <complex>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -48,8 +49,8 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
-#include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/MatmulValidation.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 #include <iomanip>
 #include <limits>
@@ -62,6 +63,7 @@
 #include <roc/host_numerics/epilogue.hpp>
 #include <roc/host_numerics/mx.hpp>
 #include <roc/host_numerics/reduction.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 #include <set>
 #include <span>
 #include <vector>
@@ -2887,45 +2889,97 @@ void testing_matmul_with_bias(const Arguments&                                  
                           ? hostBufferTensor(hD_gold_epl, Talpha, dLayout, false)
                           : hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode);
 
-                hipblaslt::host_numerics::MatmulReferenceInputs referenceInputs(
-                    referenceA, referenceB, referenceC, referenceD);
-                if(arg.scaleAlpha_vector)
-                {
-                    referenceInputs.alphaVector = hScaleAlphaVec.at(gemmIdx).tensor(
-                        hipblaslt::host_numerics::scalarType(Tc),
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{
-                                preparedProblem.scaleAlphaElements}));
-                }
+                using namespace roc::host_numerics;
+
+                const ScalarType computeTypeA
+                    = isScaleAMXFormat
+                          ? referenceA.type()
+                          : hipblaslt::host_numerics::referenceComputeType(dataTypes.computeInputA);
+                const ScalarType computeTypeB
+                    = isScaleBMXFormat
+                          ? referenceB.type()
+                          : hipblaslt::host_numerics::referenceComputeType(dataTypes.computeInputB);
+                const ScalarType accumulatorType
+                    = hipblaslt::host_numerics::referenceAccumulatorType(dataTypes.coefficient);
+                MatmulOptions matmulOptions(accumulatorType);
+                matmulOptions.conjugateA = problem.operationA == HIPBLAS_OP_C;
+                matmulOptions.conjugateB = problem.operationB == HIPBLAS_OP_C;
+                if(computeTypeA != referenceA.type())
+                    matmulOptions.computeTypeA = computeTypeA;
+                if(computeTypeB != referenceB.type())
+                    matmulOptions.computeTypeB = computeTypeB;
                 if(arg.scaleA == hipblaslt_scaling_format::Scalar
                    || arg.scaleA == hipblaslt_scaling_format::Vector)
                 {
-                    referenceInputs.scaleA = hScaleA.at(gemmIdx).tensor(
-                        hipblaslt::host_numerics::scalarType(Tc),
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.a.scaleElements}));
+                    matmulOptions.preQuantizationScalesA.push_back(
+                        hScaleA.at(gemmIdx)
+                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                                    Layout::contiguousLastDimensionFastest(
+                                        Shape{preparedProblem.a.scaleElements}))
+                            .expandDims(1));
+                }
+                if(arg.scaleAlpha_vector)
+                {
+                    matmulOptions.preQuantizationScalesA.push_back(
+                        hScaleAlphaVec.at(gemmIdx)
+                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                                    Layout::contiguousLastDimensionFastest(
+                                        Shape{preparedProblem.scaleAlphaElements}))
+                            .expandDims(1));
                 }
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar
                    || arg.scaleB == hipblaslt_scaling_format::Vector)
                 {
-                    referenceInputs.scaleB = hScaleB.at(gemmIdx).tensor(
-                        hipblaslt::host_numerics::scalarType(Tc),
-                        roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                            roc::host_numerics::Shape{preparedProblem.b.scaleElements}));
+                    matmulOptions.preQuantizationScalesB.push_back(
+                        hScaleB.at(gemmIdx)
+                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                                    Layout::contiguousLastDimensionFastest(
+                                        Shape{preparedProblem.b.scaleElements}))
+                            .expandDims(0));
                 }
-                if(arg.scaleC)
-                    referenceInputs.scaleC
-                        = hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Tc);
-                if(arg.scaleD && !preparedProblem.epilogueEnabled)
-                    referenceInputs.scaleD
-                        = hipblaslt::host_numerics::scalarValue(scaleDValue, Tc);
 
-                (void)hipblaslt::host_numerics::referenceMatmulGemm(
-                    problem, dataTypes, preparedProblem, referenceInputs, arg.scaleA, arg.scaleB);
+                const Tensor alpha = hipblaslt::host_numerics::scalarValue(preparedProblem.alpha,
+                                                                           dataTypes.coefficient);
+                const Tensor beta  = hipblaslt::host_numerics::scalarValue(preparedProblem.beta,
+                                                                          dataTypes.coefficient);
+                const Tensor scaleC
+                    = arg.scaleC ? hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Tc)
+                                 : Tensor::scalar(accumulatorType, 1);
+                const Tensor outputScale
+                    = arg.scaleD && !preparedProblem.epilogueEnabled
+                          ? hipblaslt::host_numerics::scalarValue(scaleDValue, Tc)
+                          : Tensor::scalar(accumulatorType, 1);
+
+                std::optional<Tensor> referenceAccumulator;
+                if(alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
+                   && referenceA.shape()[1] != 0)
+                {
+                    const Tensor product = matmulWithBlasBackend(
+                        referenceA, referenceB, accumulatorType, matmulOptions);
+                    referenceAccumulator
+                        = multiply(product, alpha, accumulatorType, accumulatorType);
+                }
+                if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
+                {
+                    const Tensor cScale = multiply(beta, scaleC, accumulatorType, accumulatorType);
+                    Tensor addend = multiply(referenceC, cScale, accumulatorType, accumulatorType);
+                    referenceAccumulator
+                        = referenceAccumulator
+                              ? add(*referenceAccumulator, addend, accumulatorType, accumulatorType)
+                              : std::move(addend);
+                }
+                if(!referenceAccumulator)
+                    referenceAccumulator.emplace(
+                        accumulatorType, Shape{referenceA.shape()[0], referenceB.shape()[1]});
+
+                EpilogueOptions conversion(accumulatorType);
+                conversion.outputScale = outputScale;
+                if(referenceD.type() == ScalarType::Int8)
+                    conversion.outputConversion = OutputConversion::SaturatingInt8;
+                referenceEpilogueInto(*referenceAccumulator, {.output = referenceD}, conversion);
 
                 if(preparedProblem.epilogueEnabled)
                 {
-                    using namespace roc::host_numerics;
                     EpilogueOutputs epilogueOutputs{
                         .output = hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode),
                         .rawOutput
