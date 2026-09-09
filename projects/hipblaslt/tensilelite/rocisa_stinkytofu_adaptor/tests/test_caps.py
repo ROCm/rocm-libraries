@@ -36,6 +36,7 @@ class TestGetCapsDynamic(unittest.TestCase):
         self.assertIsInstance(bugs, dict)
         self.assertIn("SupportedISA", asm)
         self.assertIn("HasWave32", arch)
+        self.assertIn("LdsGranularity", arch)
         self.assertIn("MaxVgpr", reg)
 
     def test_gfx1250_modifier_caps_present(self):
