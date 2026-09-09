@@ -3603,10 +3603,10 @@ class GlobalWriteBatchWriter:
     isNT  = bool(ntd & 0x4)
 
     vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3   batchA packed/assembled dwords (2-aligned)
-    vPack2       = self.cvtVgprStruct.vgprBf16Temp2   # +8..11  batchB packed/assembled dwords (2-aligned)
-    vSD          = self.cvtVgprStruct.vgprStoreData   # +12..15 blended store src (2-aligned)
-    vVoff        = self.cvtVgprStruct.vgprVoff        # +16     per-store voffset (cndmask result)
-    vBlend       = self.cvtVgprStruct.vgprBlendTmp    # +17     shared temp: odd-data / store-2 even-addr
+    vPack2       = self.cvtVgprStruct.vgprBf16Temp2   # +4..7   batchB packed/assembled dwords (2-aligned)
+    vSD          = self.cvtVgprStruct.vgprStoreData   # +8..11  blended store src (2-aligned)
+    vVoff        = self.cvtVgprStruct.vgprVoff        # +15  per-store voffset (cndmask result)
+    vBlend       = self.cvtVgprStruct.vgprBlendTmp    # +16  shared temp: odd-data / store-2 even-addr
     vPermAddr    = self.cvtVgprStruct.vgprPermAddr
     vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
     vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
