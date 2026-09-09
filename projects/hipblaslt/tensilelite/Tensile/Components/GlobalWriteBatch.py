@@ -3602,15 +3602,29 @@ class GlobalWriteBatchWriter:
     isSlc = bool(ntd & 0x2)
     isNT  = bool(ntd & 0x4)
 
-    vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3   batchA packed/assembled dwords (2-aligned)
-    vPack2       = self.cvtVgprStruct.vgprBf16Temp2   # +4..7   batchB packed/assembled dwords (2-aligned)
-    vSD          = self.cvtVgprStruct.vgprStoreData   # +8..11  blended store src (2-aligned)
-    vVoff        = self.cvtVgprStruct.vgprVoff        # +15  per-store voffset (cndmask result)
-    vBlend       = self.cvtVgprStruct.vgprBlendTmp    # +16  shared temp: odd-data / store-2 even-addr
+    vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3  batchA packed/assembled dwords (2-aligned, cvt)
+    vVoff        = self.cvtVgprStruct.vgprVoff        # per-store voffset (cndmask result, cvt)
+    vBlend       = self.cvtVgprStruct.vgprBlendTmp    # shared temp: odd-data / store-2 even-addr (cvt)
     vPermAddr    = self.cvtVgprStruct.vgprPermAddr
     vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
     vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
     addrDVgpr    = addrCalc.addrDVgpr
+
+    # ValuC-slot reuse (Stage 4): batchA's accumulator slots become dead the moment
+    # packPair(vPack, batchA) consumes them -- batchA (the earlier pair) is stored ONLY by
+    # this fold, so its two sba elements' 4-slot windows [sumIdx0..sumIdx0+3] and
+    # [sumIdx1..sumIdx1+3] are never read again.  For subtile kernels the whole ValuC block is
+    # pool-RESERVED (KernelWriterAssembly skips the "add ValuC back as available" for
+    # UseSubtileImpl), so those slots are conservatively held, not genuinely live -- reuse
+    # them for the batchB pack (vPack2) and the blended store src (vSD) instead of fresh cvt
+    # scratch.  vc(sumIdx,0)'s absolute VGPR index is sumIdx (prefixOffset == startVgprValu);
+    # each element's 4 accumulators are contiguous (a valid dwordx4 window) though the two
+    # elements themselves need NOT be adjacent.  This drops the cvt fold block from 17 to 9
+    # and never grows the high-water past ValuC, which is what lets near-cap tiles host the fold.
+    assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0, \
+      f"ValuC reuse needs 2-aligned batchA element windows (sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
+    vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
+    vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
 
     permlane16 = getattr(self, "_permlane16Active", False)
 
