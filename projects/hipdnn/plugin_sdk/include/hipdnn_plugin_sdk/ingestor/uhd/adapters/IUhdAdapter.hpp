@@ -15,7 +15,7 @@
 namespace hipdnn_plugin_sdk::ingestor::uhd
 {
 
-/// @brief Adapter types matching the UhdAdapter enum in Descriptors.hpp.
+/// @brief Adapter types matching the UhdAdapter enum a UHD descriptor declares.
 enum class UhdAdapterType
 {
     STATIC_ORDER = 0,

@@ -28,9 +28,9 @@ namespace score_transform
 /// Transform names this runtime can invert. An empty name and "identity" both mean
 /// the model was trained on the raw target.
 ///
-/// Kept in sync with the `transform` field's documented vocabulary in
-/// RFC 0019 §4 — a name the descriptor may declare but this list
-/// omits is a descriptor that passes schema review and then fails to load.
+/// Kept in sync with the `score.transform` vocabulary a UHD descriptor may declare
+/// (RFC 0019 §4) — a name the format advertises but this list omits is a descriptor
+/// that passes review and then fails to load.
 inline constexpr std::array<const char*, 6> SUPPORTED_TRANSFORMS
     = {"", "identity", "log1p", "log", "exp", "sqrt"};
 

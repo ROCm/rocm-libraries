@@ -233,6 +233,7 @@ TEST(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
 
             case UhdAdapter::TREE_DATA:
             case UhdAdapter::TABLE:
+            case UhdAdapter::CUSTOM_LIBRARY:
             {
                 ASSERT_FALSE(heuristic->modelArtifactPath.empty())
                     << "engine '" << set.engine.name << "' ships heuristic '" << heuristic->name

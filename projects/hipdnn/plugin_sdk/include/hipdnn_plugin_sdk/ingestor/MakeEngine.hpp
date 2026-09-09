@@ -6,7 +6,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
@@ -31,13 +33,20 @@ namespace hipdnn_plugin_sdk::ingestor
 ///        winner-cache shard. Defaulted from @p set like @p describedBy -- a caller
 ///        that already moved `set.engine` out must pass it explicitly, or the state
 ///        manager gets an empty name and disables its disk cache.
+/// @param knobs The UED's declared knobs, carrying RFC 0019 §6.3 check 2 into the
+///        heuristic factory. Defaulted from @p set for the same reason as the two above,
+///        and for the same reason a caller that already moved `set.engine` out must pass
+///        it: read from a moved-from UED the list is empty, and an empty list compares
+///        equal to the axes of a model that reads no `$kernel.*` feature -- so the check
+///        that is supposed to catch a knob/axis disagreement instead passes vacuously,
+///        or, once a model does read one, refuses every model an engine ever ships.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
                      const std::string& graphMatchSymbol,
                      std::string describedBy = {},
                      std::string engineName = {},
-                     const std::vector<std::string>& knobs = {})
+                     std::vector<std::string> knobs = {})
 {
     if(describedBy.empty())
     {
@@ -47,10 +56,10 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         engineName = set.engine.name;
     }
-    // knobs is a parameter, not read from set.engine here. makeEngine moves the UED before
-    // calling this, so `set.engine.knobs` was a moved-from vector -- always empty. RFC 0019
-    // §6.3 compares those knobs against the model's $kernel.* axes, so the check it defines
-    // ran on an empty set and passed vacuously for every engine that has ever shipped.
+    if(knobs.empty())
+    {
+        knobs = set.engine.knobs;
+    }
     auto heuristic
         = makeKernelHeuristic(set.heuristic, describedBy, knobs, set.heuristicsByArch);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
@@ -86,7 +95,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
                                   std::move(graphMatchSymbol),
                                   std::move(describedBy),
                                   std::move(engineName),
-                                  knobs),
+                                  std::move(knobs)),
         deviceResolver);
 }
 

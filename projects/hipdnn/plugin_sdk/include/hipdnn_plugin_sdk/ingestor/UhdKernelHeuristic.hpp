@@ -274,12 +274,15 @@ public:
         config.name = descriptor.name;
         config.featuresSignature = descriptor.featuresSignature;
         config.featuresHash = descriptor.featuresHash;
+        config.categoricalEncoding = descriptor.categoricalEncoding;
         config.objective = descriptor.objective;
         config.scoreUnits = descriptor.score.units;
         config.scoreCalibrated = descriptor.score.calibrated;
         config.scoreTransform = descriptor.score.transform;
         config.staticOrderFields = descriptor.staticOrderFields;
         config.nativeSymbol = descriptor.nativeSymbol;
+        config.customLibrarySymbol = descriptor.customLibrarySymbol;
+        config.modelHash = descriptor.modelHash;
 
         for(const auto& entry : descriptor.derived)
         {
