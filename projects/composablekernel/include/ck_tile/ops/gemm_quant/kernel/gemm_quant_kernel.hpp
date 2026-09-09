@@ -529,16 +529,21 @@ struct QuantGemmMultiDKernel
                                                 const index_t k_size,
                                                 const index_t i_m)
     {
-        // Route A through 64-bit global load/store only when the large-tensor global path
-        // is active and A is ColumnMajor (RowMajor A keeps the M base-shift path).
-        [[maybe_unused]] constexpr bool kAGlobalLoad =
-            UseLargeTensorGlobalLoad() && std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
+        // Route A through 64-bit global load/store when the large-tensor global path is
+        // active: ColumnMajor A for large M, and RowMajor A for large K (its per-M-tile view
+        // spans the full K extent, whose far offset (MPerBlock-1)*stride_A + (K-1) overflows
+        // 32-bit index_t past ~2^31). RowMajor A still rides the M base-shift; the widened
+        // offsets compose with it exactly as the C store already does.
+        [[maybe_unused]] constexpr bool kAGlobalLoad = UseLargeTensorGlobalLoad();
 
         // Step 1: Create tensor view for A
         const auto& a_tensor_view = [&]() {
             if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
             {
-                return make_naive_tensor_view<address_space_enum::global>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              memory_operation_enum::set,
+                                              amd_buffer_coherence_enum::coherence_default,
+                                              kAGlobalLoad>(
                     a_ptr,
                     make_tuple(kargs.M, k_size),
                     make_tuple(kargs.stride_A, 1),
@@ -1740,10 +1745,10 @@ struct QuantGemmMultiDKernel
         if(any_large_tensor)
         {
             // Two paths can service a large single dimension:
-            //   * M base-shift (RowMajor A/Ds/C): handles large M/N unconditionally.
-            //   * 64-bit global load/store: handles large B/C/D (any layout) and large
-            //     ColumnMajor A.
-            // Reject only the configurations that neither path can cover.
+            //   * M base-shift (RowMajor A/Ds/C): bounds large M/N per M-tile.
+            //   * 64-bit global load/store: addresses large A/B/C/D (any layout) in 64-bit.
+            // RowMajor A rides both: the base-shift bounds M while its 64-bit view covers
+            // large K. Reject only the configurations that neither path can cover.
             if constexpr(!IsLargeTensorMOffsettingSupported() && !UseLargeTensorGlobalLoad())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
@@ -1755,14 +1760,16 @@ struct QuantGemmMultiDKernel
             else if constexpr(!IsLargeTensorMOffsettingSupported() && UseLargeTensorGlobalLoad() &&
                               std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
             {
-                // A large RowMajor A stays on the M base-shift path (which needs RowMajor
-                // Ds/C, not satisfied here), so global load/store cannot cover it.
+                // A's own 64-bit view could address a large RowMajor A, but the RowColQuant
+                // AQ scale is an (M, N) broadcast addressed with 32-bit offsets that only the M
+                // base-shift bounds. Without RowMajor Ds/C that base-shift is unavailable, so a
+                // large RowMajor A (large M in particular) would overflow the AQ offset. Reject.
                 if(is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{}))
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C for the M "
-                                      "base-shift path; global load/store cannot cover it!");
+                        CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C so the M "
+                                      "base-shift can bound the AQ scale offset!");
                     }
                     return false;
                 }
