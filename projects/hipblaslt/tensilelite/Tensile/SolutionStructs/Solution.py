@@ -6016,12 +6016,11 @@ class Solution(collections.abc.Mapping):
         return
       # TODO: support staggerU if needed
       _disableRuntimeStaggerU(state)
-      # GSU is applied to the prefetch stream in Components/GL2Prefetch.py, which
-      # offsets each workgroup onto its own K chunk and widens the per-iteration
-      # step to the chunk stride. Runtime user override is not wired up yet, so the
-      # kernel runs with whatever GSU the solution was tuned with.
-      state["InternalSupportParams"]["SupportUserGSU"] = False
-      if state["StreamK"] != 0 and state["StreamK"] != 3:
+      # 256 bytes is not multiple of 6 bits, causing math calculations errors
+      if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
+        reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
+        return
+      if state["StreamK"] not in [0, 3]:
         reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
