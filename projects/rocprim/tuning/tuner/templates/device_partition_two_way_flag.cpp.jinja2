@@ -1,0 +1,5 @@
+{% extends "device_partition.cpp.jinja2" %}
+
+{% block benchmark_type %}
+using benchmark_type = device_partition_two_way_flag_benchmark<data_type, config>;
+{% endblock %}
