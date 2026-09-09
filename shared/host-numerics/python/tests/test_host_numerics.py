@@ -969,7 +969,9 @@ class TensorAndGemmTests(unittest.TestCase):
         self.assertEqual(result.reported_mismatches[0].index, 5)
         diagnostic = str(result)
         self.assertTrue(
-            diagnostic.startswith("comparison failed: 1 of 6 compared elements mismatched")
+            diagnostic.startswith(
+                "comparison failed: 1 of 6 compared elements mismatched"
+            )
         )
         self.assertIn("index 5 [1, 2]", diagnostic)
         self.assertIn("absolute difference", diagnostic)
