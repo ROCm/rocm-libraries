@@ -1255,6 +1255,16 @@ field resolves, and the hash matches. Only the values are new. Two approaches ap
   Stronger detection, at the cost of per-evaluation checking latency and of publishing the training
   distribution inside a shipped artifact, which not every author will accept.
 
+**Device drift within an architecture is accepted, not treated as out-of-distribution.** A model trained
+on one SKU of a gfx target is used on every SKU of that target. `gcnArchName` does not distinguish them,
+so the UED's arch-keyed maps resolve them to one UHD by construction
+([Section 3.1](#31-descriptor-relationships)), and a UHD per architecture-and-CU-count is not expressible
+without a different keying mechanism. The resulting ranking is right, or occasionally slightly wrong, and
+that is the intended trade: a suboptimal kernel rather than a wrong answer, against a combinatorial number
+of models. The constraint this places on the `features_signature` — raw device values always, computed
+features only where the sweep varied them — is enforced by the generation tool
+([Section 13.5](#135-sweep-space-grid-vs-constraint)) rather than detected at load.
+
 This RFC specifies **(a) for v1, with two exact-match exceptions.** Both are discrete lookups rather than
 per-feature range checks, so they cost little and catch the highest-impact cases:
 
@@ -1807,6 +1817,38 @@ explicit `sweep_values` list. Neither addresses *cross-knob* validity — that i
 [Section 13.2](#132-benchmarking-via-hipdnn-autotune). **OPEN**: standardize where the shape corpus and
 any knob grid live (a tool-side config vs. a descriptor field), so a heuristic can be regenerated
 reproducibly without out-of-band inputs.
+
+**Device coverage is a third sweep axis, and the tool checks it.** A gfx target is not one machine: CU
+count varies across SKUs of the same architecture (gfx942 spans parts with materially different CU
+counts), and `gcnArchName` does not distinguish them — every such SKU resolves to the same arch key in the
+UED's heuristic maps ([Section 3.1](#31-descriptor-relationships)) and therefore to the same UHD. A sweep
+run on one machine sees one value for every `$device.*` field.
+
+Cross-SKU use is the intended behavior, not a defect ([Section 8.3](#83-out-of-distribution-inputs)), but
+it constrains what the signature may contain. The generation tool therefore checks device coverage before
+it emits, and warns when the target architecture is known to ship at multiple CU counts while the sweep
+covered only one:
+
+> `warning: gfx942 ships SKUs at several CU counts; this sweep observed $device.cu_count = 304 only.
+>  Features computed from it are calibrated to that value.`
+
+The rule the warning enforces: **a device value may appear raw in a `features_signature` regardless of
+sweep coverage, but may appear inside a computed feature only if the sweep varied it.** The two cases
+degrade differently, which is why they are treated differently:
+
+- **Raw and constant is inert.** A zero-variance feature yields no split in a tree model, so the trained
+  ranking never depends on it and a different device changes nothing. The model is simply CU-agnostic.
+- **Computed from a constant is not.** `total_tiles / $device.cu_count` with a fixed denominator is a
+  rescaled `total_tiles`; the model does split on it, and those thresholds are calibrated to the one CU
+  count the sweep saw. On another SKU every value shifts systematically, and the splits no longer fall
+  where they were placed. A ratio pre-commits to a relationship; separate raw features let the model form
+  it only when the data supports it.
+
+So the tool declines to emit device-derived features when the underlying field was constant, keeps the raw
+entry, and records the observed value in the model metadata so the condition is visible after the fact.
+Sweeping several SKUs under one arch removes the restriction and is the better answer where the hardware
+is available: the field then varies, the model learns its effect, and intra-arch differences become
+learnable rather than something the signature must avoid.
 
 ### 13.6 Auto-deriving a first-pass `features_signature`
 
