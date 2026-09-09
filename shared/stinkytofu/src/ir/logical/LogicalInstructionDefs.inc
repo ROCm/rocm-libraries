@@ -2951,6 +2951,16 @@
              false,
              "IF_SALU"},
 
+                                    {"SBfmB64",
+             "SBfmB64",
+             2,
+             true,
+             "Scalar Other",
+             false,
+             false,
+             false,
+             "IF_SALU"},
+
                                     {"SMovkI32",
              "SMovkI32",
              1,
@@ -3258,6 +3268,16 @@
 
                                     {"SAtomicCmpswapX2",
              "SAtomicCmpswapX2",
+             2,
+             true,
+             "Memory Scalar",
+             false,
+             false,
+             false,
+             "IF_SMemAtomic"},
+
+                                    {"SAtomicUmaxX2",
+             "SAtomicUmaxX2",
              2,
              true,
              "Memory Scalar",
