@@ -42,6 +42,10 @@ from codegen_common import (  # noqa: E402
     gemm_aquant_effective_epilogue,
     make_bquant_kernel_name,
     make_gemm_rowcolquant_kernel_name,
+    normalize_gfx_arch,
+    rowcol_tensor_quant_default_tile,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250,
     make_aquant_kernel_name,
     # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
     fp8_warp_tile_k_for_arch,
@@ -737,6 +741,68 @@ class TestCentralArchFilter(unittest.TestCase):
         self.assertEqual(arch_warp_tile_key("fp8"), "fp8_fp8_fp32")
         self.assertEqual(arch_warp_tile_key("int8"), "int8_int8_int32")
         self.assertEqual(arch_warp_tile_key("fp8", "bf8"), "fp8_bf8_fp32")
+class TestNormalizeGfxArch(unittest.TestCase):
+    """Feature suffixes must be stripped exactly once, here."""
+
+    def test_bare_target_is_unchanged(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250"), "gfx1250")
+        self.assertEqual(normalize_gfx_arch("gfx942"), "gfx942")
+
+    def test_single_suffix_is_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250:xnack-"), "gfx1250")
+
+    def test_multiple_suffixes_are_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx942:sramecc+:xnack-"), "gfx942")
+
+    def test_unknown_or_malformed_input_is_passed_through(self):
+        # Not a validator: an unrecognised or empty string must come back
+        # unchanged (minus any suffix) so the caller's own arch test decides.
+        self.assertEqual(normalize_gfx_arch(""), "")
+        self.assertEqual(normalize_gfx_arch("notagfx:weird"), "notagfx")
+        self.assertEqual(normalize_gfx_arch(":xnack-"), "")
+
+
+class TestRowColTensorQuantDefaultTile(unittest.TestCase):
+    """gfx1250 tile selection is EXACT, not a gfx12 family match.
+
+    gfx1200/gfx1201 are WMMA parts too, but their 8-bit warp fragment is
+    16x16x16, not gfx1250's 16x16x64/16x16x128. Handing them the gfx1250 tile
+    compiles cleanly and returns garbage, so a family match here is a
+    silent-wrong-answer bug.
+    """
+
+    def test_gfx1250_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_gfx1250_with_feature_suffix_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250:xnack-"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_other_gfx12_parts_do_not_inherit_the_gfx1250_tile(self):
+        for arch in ("gfx1200", "gfx1201", "gfx1201:xnack-"):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_gfx9_parts_take_the_mfma_tile(self):
+        for arch in ("gfx942", "gfx950", "gfx942:sramecc+:xnack-", ""):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_returns_a_copy_not_the_shared_dict(self):
+        t = rowcol_tensor_quant_default_tile("gfx1250")
+        t["tile_m"] = -1
+        self.assertNotEqual(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250["tile_m"], -1)
 
 
 if __name__ == "__main__":
