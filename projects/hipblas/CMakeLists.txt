@@ -19,8 +19,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-# ROCm software requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
-cmake_minimum_required( VERSION 3.5 )
+# FindCUDAToolkit, used by the CUDA backend, was added in CMake 3.17.
+cmake_minimum_required( VERSION 3.17 )
 
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )
@@ -85,14 +85,21 @@ option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 # Pass -DUSE_CUDA=ON to cmake (or --cuda to rmake.py/install.sh) to enable.
 option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
+# Select the backend before loading HIP's CMake package. Otherwise the package
+# invokes hipconfig to determine the platform. hip::host supplies the HIP
+# headers used by hipBLAS and its clients on both backends.
 if(USE_CUDA)
-  # CUDA backend: use the CUDAToolkit module (requires nvcc on PATH or
-  # CMAKE_CUDA_COMPILER set by the caller).  No hipcc involvement.
+  set(HIP_PLATFORM nvidia)
+else()
+  set(HIP_PLATFORM amd)
+endif()
+find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
+
+if(USE_CUDA)
+  # CUDA backend: use the CUDAToolkit module (requires nvcc on PATH,
+  # CUDAToolkit_ROOT, or CMAKE_CUDA_COMPILER set by the caller).
   find_package(CUDAToolkit REQUIRED)
   set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
-else()
-  # AMD backend: hip::host / hip::device imported targets drive compilation.
-  find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)

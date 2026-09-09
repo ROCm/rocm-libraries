@@ -147,7 +147,7 @@ source, see the :doc:`rocBLAS <rocblas:index>`,
 :doc:`rocSOLVER <rocsolver:index>`, :doc:`rocSPARSE <rocsparse:index>`,
 and :doc:`rocPRIM <rocprim:index>` documentation.
 
-The minimum version of CMake is currently 3.16.8. See the ``--cmake_install`` flag in ``rmake.py`` to
+The minimum version of CMake is currently 3.17.0. See the ``--cmake_install`` flag in ``rmake.py`` to
 upgrade automatically.
 
 To use the test and benchmark clients' host reference functions, you must manually download and install
