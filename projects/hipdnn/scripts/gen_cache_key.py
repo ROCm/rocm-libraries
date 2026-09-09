@@ -280,6 +280,12 @@ class Emitter:
         ]
         if not domains:
             return None
+        if len(domains) > 1:
+            names = ", ".join(f"'{f['name']}'" for f in domains)
+            raise SystemExit(
+                f"ERROR: {UID_DOMAIN_ATTRIBUTE} is declared on {len(domains)} fields "
+                f"({names}); ordinals need exactly one"
+            )
         candidates = []
         for candidate in self.fields_of(root):
             candidate_type = candidate["type"]
@@ -288,7 +294,10 @@ class Emitter:
                 or candidate_type.get("element") != "Obj"
             ):
                 continue
-            candidate_element = self.schema["objects"][candidate_type.get("index", -1)]
+            candidate_index = candidate_type.get("index", -1)
+            if candidate_index < 0:
+                continue
+            candidate_element = self.schema["objects"][candidate_index]
             candidate_keys = [
                 f for f in candidate_element["fields"] if self.is_uid_key(f)
             ]
@@ -302,12 +311,6 @@ class Emitter:
                 f"ERROR: {UID_DOMAIN_ATTRIBUTE} has {len(candidates)} domain-shaped "
                 f"candidates ({names}); ordinals need exactly one"
             )
-        if len(domains) > 1:
-            names = ", ".join(f"'{f['name']}'" for f in domains)
-            raise SystemExit(
-                f"ERROR: {UID_DOMAIN_ATTRIBUTE} is declared on {len(domains)} fields "
-                f"({names}); ordinals need exactly one"
-            )
         field = domains[0]
         ftype = field["type"]
         if ftype["base_type"] != "Vector" or ftype.get("element") != "Obj":
@@ -315,7 +318,13 @@ class Emitter:
                 f"ERROR: {UID_DOMAIN_ATTRIBUTE} on '{field['name']}' requires a vector "
                 "of tables"
             )
-        element = self.schema["objects"][ftype.get("index", -1)]
+        element_index = ftype.get("index", -1)
+        if element_index < 0:
+            raise SystemExit(
+                f"ERROR: {UID_DOMAIN_ATTRIBUTE} on '{field['name']}' has no element "
+                "index; the schema does not name its table"
+            )
+        element = self.schema["objects"][element_index]
         keys = [f for f in element["fields"] if self.is_uid_key(f)]
         if len(keys) != 1:
             raise SystemExit(
@@ -869,6 +878,7 @@ class Emitter:
                 )
                 self.w("            {")
                 self.w("                return false;")
+                self.w("            }")
             elif element in ("Float", "Double"):
                 self.w("            const auto aValue = aItems->Get(index);")
                 self.w("            const auto bValue = bItems->Get(index);")

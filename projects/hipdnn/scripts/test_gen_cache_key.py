@@ -306,7 +306,10 @@ class TestPortableByteOperations(unittest.TestCase):
     def test_a_float_field_compares_its_object_representation(self):
         root = table(f"{NS}.Root", [field("alpha", "Float", 0)])
         bodies = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())
-        self.assertIn("std::memcmp(&aValue, &bValue", bodies[("equal", "Root")])
+        self.assertIn(
+            "std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0",
+            bodies[("equal", "Root")],
+        )
 
     def test_an_optional_double_keeps_its_presence_tag(self):
         root = table(f"{NS}.Root", [field("beta", "Double", 0, optional=True)])
@@ -314,7 +317,7 @@ class TestPortableByteOperations(unittest.TestCase):
             ("equal", "Root")
         ]
         self.assertIn("aValue.has_value() != bValue.has_value()", body)
-        self.assertIn("std::memcmp(&*aValue, &*bValue", body)
+        self.assertIn("std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0", body)
 
     def test_a_float_vector_compares_elements_by_object_representation(self):
         root = table(
@@ -324,11 +327,35 @@ class TestPortableByteOperations(unittest.TestCase):
         body = function_bodies(Emitter(schema([root]), f"{NS}.Root").emit())[
             ("equal", "Root")
         ]
-        self.assertIn("std::memcmp(&aValue, &bValue, sizeof(aValue))", body)
+        self.assertIn("std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0", body)
         self.assertNotIn(
             "aItems->Get(index) != bItems->Get(index)",
             body,
         )
+
+
+class TestEmittedBodiesAreWellFormed(unittest.TestCase):
+    """Every vector element kind must emit balanced braces.
+
+    A branch that drops its closing brace still passes an `assertIn` on the body
+    text, but the header it emits does not compile. Brace balance is the property
+    worth asserting, over every element kind the emitter has a branch for.
+    """
+
+    ELEMENT_KINDS = ["String", "Float", "Double", "Int", "Long", "UByte", "Bool"]
+
+    def test_a_vector_of_each_element_kind_emits_balanced_braces(self):
+        for element in self.ELEMENT_KINDS:
+            with self.subTest(element=element):
+                root = table(
+                    f"{NS}.Root", [field("values", "Vector", 0, element=element)]
+                )
+                header = Emitter(schema([root]), f"{NS}.Root").emit()
+                self.assertEqual(
+                    header.count("{"),
+                    header.count("}"),
+                    f"a [{element}] vector emits unbalanced braces; the header will not compile",
+                )
 
 
 class TestUnhandledBaseType(unittest.TestCase):
