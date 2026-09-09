@@ -19,6 +19,11 @@ namespace ck_tile {
 #ifndef CK_TILE_FMHA_BWD_SINK_TDM_WAIT
 #define CK_TILE_FMHA_BWD_SINK_TDM_WAIT 1
 #endif
+// 0 = keep the hand-written scheduler prescriptions, 1 = drop them where the
+// loop body holds a single Q tile, 2 = drop them always. See schedgate.py.
+#ifndef CK_TILE_FMHA_BWD_SCHED_DROP_MODE
+#define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 1
+#endif
 #ifndef CK_TILE_FMHA_BWD_DV_IN_REG
 #define CK_TILE_FMHA_BWD_DV_IN_REG 1
 #endif
@@ -89,6 +94,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
     using FmhaDropout           = remove_cvref_t<typename Problem::FmhaDropout>;
     using HotLoopScheduler      = typename Policy::template HotLoopScheduler<Problem>;
+
+    // Mirror tile pairing inlines two bodies into the function and only fires
+    // for masked instances, so IsMasking is what distinguishes the two regimes.
+    static constexpr bool kDropStagedSched =
+        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 2) ||
+        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 1 && !FmhaMask::IsMasking);
 
     using BlockFmhaShape = remove_cvref_t<typename Problem::BlockFmhaShape>;
 
@@ -774,8 +785,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
 
-            HotLoopScheduler::template GemmStagedScheduler<0>();
-            __builtin_amdgcn_sched_barrier(0);
+            if constexpr(!kDropStagedSched)
+            {
+                HotLoopScheduler::template GemmStagedScheduler<0>();
+                __builtin_amdgcn_sched_barrier(0);
+            }
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -999,8 +1013,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             q_reg_tensor = load_tile(q_rd_dst);
             lse          = load_tile(lse_rd_dst);
 
-            HotLoopScheduler::template GemmStagedScheduler<3>();
-            __builtin_amdgcn_sched_barrier(0);
+            if constexpr(!kDropStagedSched)
+            {
+                HotLoopScheduler::template GemmStagedScheduler<3>();
+                __builtin_amdgcn_sched_barrier(0);
+            }
             // STAGE7 SGrad@K^T Gemm4
             auto dq_acc = QGradBlockTileType{};
             clear_tile(dq_acc);
@@ -1020,7 +1037,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             do_reg_tensor = load_tile(do_rd_dst);
             d             = load_tile(d_rd_dst);
 
-            HotLoopScheduler::template GemmStagedScheduler<4>();
+            if constexpr(!kDropStagedSched)
+            {
+                HotLoopScheduler::template GemmStagedScheduler<4>();
+            }
 
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
