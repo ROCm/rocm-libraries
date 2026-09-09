@@ -130,6 +130,61 @@ class TestA2AGemmSegmentAbi:
         assert int(m.group(1)) == sum(1 for _, size in self._layout_args() if size == 4)
 
 
+class TestA2AGemmBatchNumbering:
+    """The prologue's batch span: the first block and the block count."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _fused_w_offset(self, src):
+        import re
+
+        m = re.search(
+            r"s_load_dword s\[sgprA2AShardCounter\], "
+            r"s\[sgprKernArgAddress:sgprKernArgAddress\+1\], (0x[0-9a-f]+)",
+            src,
+        )
+        assert m, "no FusedW kernarg load in the emitted kernel"
+        return int(m.group(1), 16)
+
+    def test_cu_count_is_read_from_the_kernarg(self):
+        import re
+
+        from Tensile.Components.Signature import fusedA2AKernArgLayout
+
+        src = self._src()
+        layout = fusedA2AKernArgLayout()
+        want = self._fused_w_offset(src) + layout["FusedNumCu"] - layout["FusedW"]
+        loaded = [
+            int(h, 16)
+            for h in re.findall(
+                r"s_load_dword s(?:\[sgpr\w+\]|\d+), "
+                r"s\[sgprKernArgAddress:sgprKernArgAddress\+1\], (0x[0-9a-f]+)",
+                src,
+            )
+        ]
+        assert want in loaded, "FusedNumCu at %#x is never loaded" % want
+
+    def test_block_span_is_clamped_to_the_token_block_count(self):
+        import re
+
+        assert re.search(r"s_min_u32[^\n]*sgprNumWorkGroups1", self._src())
+
+    def test_span_lands_in_two_long_lived_scalars(self):
+        src = self._src()
+        assert ".set sgprA2ABlockLo," in src
+        assert ".set sgprA2ABlockCount," in src
+
+    def test_block_count_is_the_span_width(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s\[sgprA2ABlockCount\][^\n]*sgprA2ABlockLo", self._src()
+        )
+
+
 class TestA2AGemmRegisterBudget:
     """The emitted kernel's SGPR high-water mark."""
 

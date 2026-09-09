@@ -9867,6 +9867,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr("A2AShardCounter", 1)
       self.defineSgpr("A2AShardIdx", 1)
       self.defineSgpr("A2AKLocal", 1)
+      self.defineSgpr("A2ABlockLo", 1)
+      self.defineSgpr("A2ABlockCount", 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
 
