@@ -311,7 +311,9 @@ def evaluate_regret(
     if params is None:
         params = dict(_DEFAULT_PARAMS)
 
-    features = df[feature_cols].values
+    # Encoded, as train_model fits it. Raw values measure a different model, and for a
+    # string feature measure nothing: LightGBM rejects the column.
+    features = build_feature_matrix(df, feature_cols)
     measured = df[target_col].values
     groups = _problem_groups(df, problem_cols)
 
