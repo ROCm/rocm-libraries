@@ -300,6 +300,13 @@ function(hkp_wire_pack_target)
     add_custom_target(hkp_packaging_${ARG_NAME} ALL
                       DEPENDS "${_stamp}"
                       COMMENT "hkp: descriptor packaging (${ARG_NAME})")
+    if(TARGET hkp_rocke_wheel_python_interp)
+        # Every root shares one venv. A file-level edge alone leaves generators
+        # that build per directory copying the provisioning recipe into each pack
+        # target, so a parallel fresh build can reprovision the venv while
+        # another pack is using it.
+        add_dependencies(hkp_packaging_${ARG_NAME} hkp_rocke_wheel_python_interp)
+    endif()
     set_property(GLOBAL PROPERTY HKP_PACK_STAMP_${ARG_NAME} "${_stamp}")
 
     # The key manifest normalises each registered path the same lexical way, so
@@ -498,10 +505,10 @@ function(hkp_probe_comgr_resolvable out_ok out_detail)
     # Probe under the SAME override the build will use, so configure and build
     # ask the same question. Without this a machine that only resolves comgr via
     # the override would fail configure despite being correctly configured.
-    set(_probe_env "PYTHONPATH=${_pp}")
+    set(_probe_extra_env "")
     if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
-        list(APPEND _probe_env
-             "ROCKE_COMGR_LIB=${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+        set(_probe_extra_env
+            "ROCKE_COMGR_LIB=${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
     endif()
     # ctypes records the path it opened on the loaded handle, so comparing that
     # against the override is what distinguishes "the override loaded" from
@@ -515,8 +522,11 @@ got = getattr(lib, \"_name\", None)
 if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
     sys.exit(f\"comgr loaded {got!r} instead of the requested {want!r}\")
 ")
+    # Each assignment must reach `-E env` as ONE argv element: the Windows
+    # PYTHONPATH separator is also CMake's list separator, so an unquoted
+    # expansion splits it and `-E env` takes the tail as the executable.
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" -E env ${_probe_env}
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${_pp}" ${_probe_extra_env} --
                 "${Python3_EXECUTABLE}" -c "${_probe_py}"
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
@@ -915,6 +925,13 @@ loaded is the one named here.")
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
             ${_rocke_args})
     else()
+        # A tree left over from an earlier configuration that did pack keeps
+        # being loaded: the engine selects the plugin-relative directory on
+        # existence alone, and nothing else removes it once the pack target and
+        # its install rule are gone.
+        if(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
+            file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
+        endif()
         message(STATUS
             "hkp: no production source root set "
             "(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty); production "

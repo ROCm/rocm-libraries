@@ -278,6 +278,24 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
+if(NOT DEFINED HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
+    message(FATAL_ERROR
+        "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
+endif()
+
+# The offset a test binary walks from its own directory to reach the plugin engine
+# directory and the trees hanging off it. Binaries land under CMAKE_INSTALL_BINDIR, the
+# plugin engine directory under HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR; both are
+# relative to ${CMAKE_BINARY_DIR} in the build tree and to the prefix in the install tree,
+# so this one offset reaches them in either -- and a binary carries no path belonging to
+# the machine that configured it. Computed against a synthetic root because
+# file(RELATIVE_PATH) needs two absolute paths, and only the relationship between them
+# matters here.
+set(_synthetic_root "/__hipkernelprovider_root__")
+file(RELATIVE_PATH HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR
+     "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
+     "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Production content.
     set(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider")
@@ -334,14 +352,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
-    # The offset a test binary walks from its own directory to reach the test descriptor
-    # trees. Both trees hang off HIPDNN_PLUGIN_ENGINE_ROOTDIR and both binaries off
-    # CMAKE_INSTALL_BINDIR, under ${CMAKE_BINARY_DIR} in the build tree and under the
-    # prefix in the install tree, so this one offset reaches them in either -- and a
-    # binary carries no path belonging to the machine that configured it. Computed against
-    # a synthetic root because file(RELATIVE_PATH) needs two absolute paths, and only the
-    # relationship between them matters here.
-    set(_synthetic_root "/__hipkernelprovider_root__")
+    # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
          "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")

@@ -20,11 +20,12 @@ add_executable(
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
-# libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
+# libhipdnn_backend.so. HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the binary
+# directory to the plugin engine directory, derived from the configured install layout.
 target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
+        PLUGIN_PATH="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/hip_kernel_provider"
 )
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
