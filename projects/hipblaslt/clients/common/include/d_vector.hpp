@@ -28,9 +28,9 @@
 
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
-#include <hipblaslt/host_numerics/hipblaslt_init.hpp>
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 
@@ -348,10 +348,11 @@ public:
         , m_bytes((s + m_pad * 2) * sizeof(T))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // A nonzero byte pattern makes writes into either guard observable by
+        // the byte-for-byte checks in device_vector_check().
         if(!m_init_guard)
         {
-            hipblaslt_init_nan(m_guard, MEM_MAX_GUARD_PAD);
+            std::fill_n(reinterpret_cast<unsigned char*>(m_guard), sizeof(m_guard), 0xa5);
             m_init_guard = true;
         }
     }
@@ -494,10 +495,11 @@ public:
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // Initialize every byte: the runtime-typed guard can be as wide as a
+        // double, rather than the one-byte char used for its backing array.
         if(!m_init_guard_type)
         {
-            hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD);
+            std::fill_n(reinterpret_cast<unsigned char*>(m_guard_type), sizeof(m_guard_type), 0xa5);
             m_init_guard_type = true;
         }
     }

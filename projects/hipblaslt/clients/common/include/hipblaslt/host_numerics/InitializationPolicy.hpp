@@ -25,6 +25,14 @@ namespace hipblaslt::host_numerics
             MatrixB = 1,
             MatrixC = 2,
             Bias    = 3,
+            Auxiliary,
+            ScaleA,
+            ScaleB,
+            ScaleC,
+            ScaleD,
+            ScaleE,
+            AlphaVector,
+            Count,
         };
 
         inline uint64_t seedForSequence(uint64_t seed, uint64_t sequence)

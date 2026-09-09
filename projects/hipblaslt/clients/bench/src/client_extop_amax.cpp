@@ -116,18 +116,6 @@ int parseArgs(int                       argc,
     return EXIT_SUCCESS;
 }
 
-template <typename Dtype>
-void dumpBuffer(const char* title, Dtype* data, int N)
-{
-    std::cout << "----- " << title << "----- " << std::endl;
-    for(int n = 0; n < N; n++)
-    {
-        std::cout << float(data[n]) << " ";
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
-}
-
 template <typename T>
 void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
 {
@@ -145,12 +133,6 @@ void compare(const char* title, const std::vector<T>& cpuOutput, const std::vect
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
-template <typename DType>
-void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
-{
-    hipblaslt::host_numerics::initialize(data, numElements, initMethod);
-}
-
 template <typename Ti, typename To>
 int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initialization& init)
 {
@@ -165,12 +147,19 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     hipErr      = hipMalloc(&gpuInput, m * n * tiNumBytes);
 
     std::vector<To> cpuOutput(1, 0.f);
-    std::vector<Ti> cpuInput(m * n, 0.f);
     std::vector<To> refOutput(1, 0.f);
+    using namespace roc::host_numerics;
+    const Tensor cpuInput = generate(hipblaslt::host_numerics::scalarType<Ti>(),
+                                     Shape{numElements},
+                                     hipblaslt::host_numerics::initializationRecipe(
+                                         hipblaslt::host_numerics::scalarType<Ti>(),
+                                         init,
+                                         hipblaslt::host_numerics::defaultInitializationSeed,
+                                         hipblaslt::host_numerics::TrigonometricComponent::Cosine));
 
-    initData(cpuInput.data(), numElements, init);
-
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * tiNumBytes);
+    hipErr = hipMemcpyHtoD(gpuInput,
+                           cpuInput.rawEncodedBackingStorage().data(),
+                           cpuInput.rawEncodedBackingStorage().size());
 
     hipStream_t stream{};
     hipErr = hipStreamCreate(&stream);
@@ -179,21 +168,11 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
 
-    using namespace roc::host_numerics;
     Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
         refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsoluteInto(hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-                                     cpuInput.data(),
-                                     cpuInput.size(),
-                                     Layout::contiguousLastDimensionFastest(Shape{numElements})),
-                                 referenceOutput,
-                                 ScalarType::Float32);
+    referenceMaximumAbsoluteInto(cpuInput, referenceOutput, ScalarType::Float32);
     hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
         refOutput.data(), refOutput.size(), referenceOutput);
-
-    // dumpBuffer("Input", cpuInput.data(), m * n);
-    // dumpBuffer("GPU", cpuOutput.data(), 1);
-    // dumpBuffer("CPU", refOutput.data(), 1);
 
     compare("Output", cpuOutput, refOutput);
 

@@ -127,19 +127,22 @@ namespace hipblaslt::host_numerics
             type, std::move(component), configuration.complexPolicy, configuration.seed);
     }
 
-    inline GenerationRecipe realOnlyRandomRecipe(ScalarType type)
+    inline GenerationRecipe realOnlyRandomRecipe(ScalarType type,
+                                                 uint64_t   seed = defaultInitializationSeed)
     {
         if(type == ScalarType::E8M0)
             return GenerationRecipe::realOnly(
-                GenerationRecipe::uniformRawInteger({.lower = 1, .upper = 10}));
-        return randomIntegerRecipe(type, {.complexPolicy = ComplexGenerationPolicy::RealOnly});
+                GenerationRecipe::uniformRawInteger({.lower = 1, .upper = 10}), {.seed = seed});
+        return randomIntegerRecipe(
+            type, {.complexPolicy = ComplexGenerationPolicy::RealOnly, .seed = seed});
     }
 
     inline GenerationRecipe trigonometricRecipe(ScalarType              type,
                                                 TrigonometricComponent  realComponent,
                                                 bool                    positiveOnly = false,
                                                 ComplexGenerationPolicy complexPolicy
-                                                = ComplexGenerationPolicy::Cartesian)
+                                                = ComplexGenerationPolicy::Cartesian,
+                                                uint64_t seed = defaultInitializationSeed)
     {
         const TrigonometricComponent imaginaryComponent
             = realComponent == TrigonometricComponent::Sine ? TrigonometricComponent::Cosine
@@ -148,7 +151,7 @@ namespace hipblaslt::host_numerics
                                        trigonometricComponent(realComponent, positiveOnly),
                                        trigonometricComponent(imaginaryComponent, positiveOnly),
                                        complexPolicy,
-                                       defaultInitializationSeed);
+                                       seed);
     }
 
     inline GenerationRecipe hplRecipe(ScalarType type, HplRecipeConfiguration configuration = {})

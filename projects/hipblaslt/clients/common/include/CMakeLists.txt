@@ -15,7 +15,6 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_data.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_datatype2string.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/host_numerics/hipblaslt_init.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_math.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_parse_data.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.hpp"

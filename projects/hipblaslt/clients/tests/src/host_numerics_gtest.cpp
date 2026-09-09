@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <hipBuffer.hpp>
-#include <hipblaslt/host_numerics/GroupedGemmDataInitialization.hpp>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/HostComparison.hpp>
@@ -20,6 +19,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -42,6 +42,26 @@ namespace
             return seedForSequence(seed, OperandSequence::MatrixC);
         }
         throw std::invalid_argument("Unsupported hipBLASLt matrix role.");
+    }
+
+    std::vector<float>
+        groupedValues(size_t                                                    size,
+                      hipblaslt_initialization                                  mode,
+                      hipblaslt::host_numerics::initialization::OperandSequence operand,
+                      uint64_t seed = hipblaslt::host_numerics::defaultInitializationSeed)
+    {
+        using namespace roc::host_numerics;
+        using namespace hipblaslt::host_numerics;
+        const Tensor generated = generate(
+            ScalarType::Float32,
+            Shape{size},
+            groupedGemmInitializationRecipe(ScalarType::Float32,
+                                            mode,
+                                            operand,
+                                            initialization::seedForSequence(seed, operand)));
+        std::vector<float> result(size);
+        generated.copyLogicalElementsToEncodedStorage(std::as_writable_bytes(std::span(result)));
+        return result;
     }
 
     template <typename Compute>
@@ -293,15 +313,21 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
 
 TEST(HostNumericsDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {
-    std::array<std::complex<float>, 4> values{};
-    hipblaslt::host_numerics::initialize(std::span<std::complex<float>>(values),
-                                         hipblaslt_initialization::trig_float,
-                                         hipblaslt::host_numerics::TrigonometricComponent::Sine);
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
 
-    for(size_t index = 0; index < values.size(); ++index)
+    const Tensor values = generate(ScalarType::ComplexFloat32,
+                                   Shape{4},
+                                   initializationRecipe(ScalarType::ComplexFloat32,
+                                                        hipblaslt_initialization::trig_float,
+                                                        17,
+                                                        TrigonometricComponent::Sine));
+
+    for(size_t index = 0; index < values.elementCount(); ++index)
     {
-        EXPECT_FLOAT_EQ(values[index].real(), std::sin(static_cast<float>(index)));
-        EXPECT_FLOAT_EQ(values[index].imag(), std::cos(static_cast<float>(index)));
+        const auto value = values.loadAs<std::complex<float>>({index});
+        EXPECT_FLOAT_EQ(value.real(), std::sin(static_cast<float>(index)));
+        EXPECT_FLOAT_EQ(value.imag(), std::cos(static_cast<float>(index)));
     }
 }
 
@@ -309,20 +335,23 @@ TEST(HostNumericsDataInitializationBridge, ComplexRandomUsesTypedCartesianDomain
 {
     using namespace roc::host_numerics;
 
-    std::array<std::complex<float>, 8> first{};
-    std::array<std::complex<float>, 8> second{};
-    hipblaslt::host_numerics::initialize(std::span<std::complex<float>>(first),
-                                         hipblaslt_initialization::rand_int);
-    hipblaslt::host_numerics::initialize(std::span<std::complex<float>>(second),
-                                         hipblaslt_initialization::rand_int);
-    EXPECT_EQ(first, second);
+    const GenerationRecipe recipe = hipblaslt::host_numerics::initializationRecipe(
+        ScalarType::ComplexFloat32,
+        hipblaslt_initialization::rand_int,
+        hipblaslt::host_numerics::defaultInitializationSeed,
+        hipblaslt::host_numerics::TrigonometricComponent::Cosine);
+    const Tensor first  = generate(ScalarType::ComplexFloat32, Shape{8}, recipe);
+    const Tensor second = generate(ScalarType::ComplexFloat32, Shape{8}, recipe);
+    EXPECT_TRUE(
+        std::ranges::equal(first.rawEncodedBackingStorage(), second.rawEncodedBackingStorage()));
 
     constexpr std::array<float, 8> expectedReal{2, 6, 3, 9, 10, 8, 1, 9};
     constexpr std::array<float, 8> expectedImaginary{8, 5, 9, 5, 1, 5, 6, 7};
-    for(size_t index = 0; index < first.size(); ++index)
+    for(size_t index = 0; index < first.elementCount(); ++index)
     {
-        EXPECT_EQ(first[index].real(), expectedReal[index]);
-        EXPECT_EQ(first[index].imag(), expectedImaginary[index]);
+        const auto value = first.loadAs<std::complex<float>>({index});
+        EXPECT_EQ(value.real(), expectedReal[index]);
+        EXPECT_EQ(value.imag(), expectedImaginary[index]);
     }
 }
 
@@ -331,20 +360,14 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
     using namespace hipblaslt::host_numerics;
     using namespace roc::host_numerics;
 
-    std::vector<float> a(5);
-    std::vector<float> b(7);
-    std::vector<float> c(4);
-    std::vector<float> bias(3);
-
-    hipblaslt::host_numerics::initializeGroupedGemm(a,
-                                                    static_cast<int64_t>(a.size()),
-                                                    b,
-                                                    static_cast<int64_t>(b.size()),
-                                                    c,
-                                                    static_cast<int64_t>(c.size()),
-                                                    bias,
-                                                    static_cast<int64_t>(bias.size()),
-                                                    hipblaslt_initialization::rand_int);
+    const auto a = groupedValues(
+        5, hipblaslt_initialization::rand_int, initialization::OperandSequence::MatrixA);
+    const auto b = groupedValues(
+        7, hipblaslt_initialization::rand_int, initialization::OperandSequence::MatrixB);
+    const auto c = groupedValues(
+        4, hipblaslt_initialization::rand_int, initialization::OperandSequence::MatrixC);
+    const auto bias = groupedValues(
+        3, hipblaslt_initialization::rand_int, initialization::OperandSequence::Bias);
 
     const auto expected = [](size_t size, initialization::OperandSequence sequence) {
         std::vector<float>          values(size);
@@ -353,11 +376,13 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmUsesStableRoleSequencesAnd
         if(sequence == initialization::OperandSequence::MatrixB)
             component
                 = component.withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = false});
-        initializeTensor(values.data(),
-                         Layout::contiguousLastDimensionFastest(Shape{size}),
-                         GenerationRecipe::realOnly(std::move(component),
-                                                    {.seed = initialization::seedForSequence(
-                                                         defaultInitializationSeed, sequence)}));
+        const Tensor generated = generate(
+            ScalarType::Float32,
+            Shape{size},
+            GenerationRecipe::realOnly(
+                std::move(component),
+                {.seed = initialization::seedForSequence(defaultInitializationSeed, sequence)}));
+        generated.copyLogicalElementsToEncodedStorage(std::as_writable_bytes(std::span(values)));
         return values;
     };
 
@@ -382,20 +407,17 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
     constexpr uint64_t seed     = 0x123456789abcdef0ULL;
 
     const auto generated = [](uint64_t callerSeed) {
-        std::array<std::vector<float>, 4> operands;
-        for(auto& operand : operands)
-            operand.resize(elements);
-        hipblaslt::host_numerics::initializeGroupedGemm(operands[0],
-                                                        static_cast<int64_t>(operands[0].size()),
-                                                        operands[1],
-                                                        static_cast<int64_t>(operands[1].size()),
-                                                        operands[2],
-                                                        static_cast<int64_t>(operands[2].size()),
-                                                        operands[3],
-                                                        static_cast<int64_t>(operands[3].size()),
-                                                        hipblaslt_initialization::rand_int,
-                                                        callerSeed);
-        return operands;
+        using hipblaslt::host_numerics::initialization::OperandSequence;
+        return std::array{
+            groupedValues(
+                elements, hipblaslt_initialization::rand_int, OperandSequence::MatrixA, callerSeed),
+            groupedValues(
+                elements, hipblaslt_initialization::rand_int, OperandSequence::MatrixB, callerSeed),
+            groupedValues(
+                elements, hipblaslt_initialization::rand_int, OperandSequence::MatrixC, callerSeed),
+            groupedValues(
+                elements, hipblaslt_initialization::rand_int, OperandSequence::Bias, callerSeed),
+        };
     };
 
     const auto first       = generated(seed);
@@ -420,21 +442,14 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmPropagatesCallerSeed)
 
 TEST(HostNumericsDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipes)
 {
-    std::vector<float> a(4);
-    std::vector<float> b(4);
-    std::vector<float> c(4);
-    std::vector<float> bias(4);
-
     const auto initialize = [&](hipblaslt_initialization initialization) {
-        hipblaslt::host_numerics::initializeGroupedGemm(a,
-                                                        static_cast<int64_t>(a.size()),
-                                                        b,
-                                                        static_cast<int64_t>(b.size()),
-                                                        c,
-                                                        static_cast<int64_t>(c.size()),
-                                                        bias,
-                                                        static_cast<int64_t>(bias.size()),
-                                                        initialization);
+        using hipblaslt::host_numerics::initialization::OperandSequence;
+        return std::tuple{
+            groupedValues(4, initialization, OperandSequence::MatrixA),
+            groupedValues(4, initialization, OperandSequence::MatrixB),
+            groupedValues(4, initialization, OperandSequence::MatrixC),
+            groupedValues(4, initialization, OperandSequence::Bias),
+        };
     };
     const auto expectHplRange = [](const auto& values) {
         for(const float value : values)
@@ -444,13 +459,13 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipe
         }
     };
 
-    initialize(hipblaslt_initialization::hpl);
+    auto [a, b, c, bias] = initialize(hipblaslt_initialization::hpl);
     expectHplRange(a);
     expectHplRange(b);
     expectHplRange(c);
     expectHplRange(bias);
 
-    initialize(hipblaslt_initialization::special);
+    std::tie(a, b, c, bias) = initialize(hipblaslt_initialization::special);
     for(const float value : a)
         EXPECT_EQ(value, hipblaslt::host_numerics::specialInitializationAValue);
     for(const float value : b)
@@ -462,36 +477,22 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipe
 TEST(HostNumericsDataInitializationBridge,
      GroupedGemmHandlesZeroAndRejectsUnsupportedInitialization)
 {
-    std::vector<float> a(1, 1.0f);
-    std::vector<float> b(1, 1.0f);
-    std::vector<float> c(1, 1.0f);
-    std::vector<float> bias(1, 1.0f);
-
-    hipblaslt::host_numerics::initializeGroupedGemm(a,
-                                                    static_cast<int64_t>(a.size()),
-                                                    b,
-                                                    static_cast<int64_t>(b.size()),
-                                                    c,
-                                                    static_cast<int64_t>(c.size()),
-                                                    bias,
-                                                    static_cast<int64_t>(bias.size()),
-                                                    hipblaslt_initialization::zero);
+    using hipblaslt::host_numerics::initialization::OperandSequence;
+    const auto a    = groupedValues(1, hipblaslt_initialization::zero, OperandSequence::MatrixA);
+    const auto b    = groupedValues(1, hipblaslt_initialization::zero, OperandSequence::MatrixB);
+    const auto c    = groupedValues(1, hipblaslt_initialization::zero, OperandSequence::MatrixC);
+    const auto bias = groupedValues(1, hipblaslt_initialization::zero, OperandSequence::Bias);
     EXPECT_EQ(a[0], 0.0f);
     EXPECT_EQ(b[0], 0.0f);
     EXPECT_EQ(c[0], 0.0f);
     EXPECT_EQ(bias[0], 0.0f);
 
-    EXPECT_THROW(
-        hipblaslt::host_numerics::initializeGroupedGemm(a,
-                                                        static_cast<int64_t>(a.size()),
-                                                        b,
-                                                        static_cast<int64_t>(b.size()),
-                                                        c,
-                                                        static_cast<int64_t>(c.size()),
-                                                        bias,
-                                                        static_cast<int64_t>(bias.size()),
-                                                        hipblaslt_initialization::norm_dist),
-        std::invalid_argument);
+    EXPECT_THROW(hipblaslt::host_numerics::groupedGemmInitializationRecipe(
+                     roc::host_numerics::ScalarType::Float32,
+                     hipblaslt_initialization::norm_dist,
+                     OperandSequence::MatrixA,
+                     hipblaslt::host_numerics::defaultInitializationSeed),
+                 std::invalid_argument);
 }
 
 TEST(HostNumericsMatrixTransformBridge, MapsLayoutsAndTransposes)
@@ -721,13 +722,17 @@ TEST(HostNumericsTolerancePolicy, Gfx11ScalesComputeTypeEpsilon)
 
 TEST(HostNumericsDataInitializationBridge, CounterBasedGenerationIsRepeatable)
 {
-    std::array<float, 16> first{};
-    std::array<float, 16> second{};
-    hipblaslt::host_numerics::initialize(std::span<float>(first),
-                                         hipblaslt_initialization::norm_dist);
-    hipblaslt::host_numerics::initialize(std::span<float>(second),
-                                         hipblaslt_initialization::norm_dist);
-    EXPECT_EQ(first, second);
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+
+    const GenerationRecipe recipe = initializationRecipe(ScalarType::Float32,
+                                                         hipblaslt_initialization::norm_dist,
+                                                         17,
+                                                         TrigonometricComponent::Cosine);
+    const Tensor           first  = generate(ScalarType::Float32, Shape{16}, recipe);
+    const Tensor           second = generate(ScalarType::Float32, Shape{16}, recipe);
+    EXPECT_TRUE(
+        std::ranges::equal(first.rawEncodedBackingStorage(), second.rawEncodedBackingStorage()));
 }
 
 TEST(HostNumericsDataInitializationBridge, DirectMatrixNormalGenerationIsRepeatable)
@@ -1061,10 +1066,11 @@ TEST(HostNumericsDataInitializationBridge, UnsupportedModesThrowInsteadOfProduci
                          defaultInitializationSeed),
         std::invalid_argument);
 
-    std::array<float, 1> values{};
-    EXPECT_THROW(
-        initialize(std::span<float>(values), hipblaslt_initialization::fp16_accumulator_probe),
-        std::invalid_argument);
+    EXPECT_THROW(initializationRecipe(ScalarType::Float32,
+                                      hipblaslt_initialization::fp16_accumulator_probe,
+                                      defaultInitializationSeed,
+                                      TrigonometricComponent::Cosine),
+                 std::invalid_argument);
 }
 
 TEST(HostNumericsDataInitializationBridge, PinnedTensorInitializationUploadsToDevice)
