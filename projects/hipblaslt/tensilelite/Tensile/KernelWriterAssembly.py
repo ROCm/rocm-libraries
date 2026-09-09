@@ -7903,7 +7903,88 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
                             comment="lost the election -> skip the enqueue"))
 
+    module.add(self.a2aEnqueue(kernel, skipLabel))
     module.add(skipLabel)
+    return module
+
+  def a2aEnqueue(self, kernel, skipLabel):
+    """Emit the enqueuer's whole packing pass: one reservation per peer queue,
+    A2ABlockCount packet pairs inside it, one submit.
+
+    Runs only on the elected work-group; the packet pair goes in the inner
+    loop body. Both loops are do-while with no top-of-loop test, so they
+    require W >= 2 (guarded here) and A2ABlockCount >= 1.
+    """
+    from .Components.Signature import fusedA2AKernArgLayout
+    from .Components.SdmaPacketEmitter import ATOMIC_PACKET_DWORDS, COPY_PACKET_DWORDS
+    from .Components.SdmaRingEmitter import (CURSOR_PAIR_BYTES, PEER_GROUP_BYTES,
+                                             SdmaRingEmitter)
+
+    module    = Module("a2aEnqueue")
+    layout    = fusedA2AKernArgLayout()
+    fusedBase = self.states.fusedA2AKernArgBase
+    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
+    pairBytes = (COPY_PACKET_DWORDS + ATOMIC_PACKET_DWORDS) * 4
+
+    qLoop = Label(self.labels.getNameInc("a2a_queue_loop"), "one reservation per peer queue")
+    pLoop = Label(self.labels.getNameInc("a2a_packet_loop"), "packet pairs on this queue")
+
+    size    = self.sgprPool.checkOut(1, tag="a2aEnq_size", preventOverflow=False)
+    srank   = self.sgprPool.checkOut(1, tag="a2aEnq_srank", preventOverflow=False)
+    qLeft   = self.sgprPool.checkOut(1, tag="a2aEnq_qLeft", preventOverflow=False)
+    peerGrp = self.sgprPool.checkOut(1, tag="a2aEnq_peerGroup", preventOverflow=False)
+    curOff  = self.sgprPool.checkOut(1, tag="a2aEnq_cursorOff", preventOverflow=False)
+    pLeft   = self.sgprPool.checkOut(1, tag="a2aEnq_pLeft", preventOverflow=False)
+    pad     = self.sgprPool.checkOut(1, tag="a2aEnq_pad", preventOverflow=False)
+    cached  = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_cachedIdx", preventOverflow=False)
+    cur     = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_cur", preventOverflow=False)
+    pending = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_pending", preventOverflow=False)
+
+    module.add(SSubU32(dst=sgpr(qLeft), src0=sgpr("A2AShardCounter"), src1=1,
+                       comment="W-1 peer queues to serve"))
+    module.add(SCmpEQU32(src0=sgpr(qLeft), src1=0, comment="W == 1?"))
+    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="no remote queues"))
+
+    module.add(SMulI32(dst=sgpr(size), src0=sgpr("A2ABlockCount"), src1=pairBytes,
+                       comment="reservation = count * %u (one pair per block)" % pairBytes))
+
+    # s walks the remote ranks from myRank+1, wrapping at W (design: rem[i]).
+    module.add(self.argLoader.loadKernArg(srank, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank"))
+    module.add(SAddU32(dst=sgpr(srank), src0=sgpr(srank), src1=1, comment="s = myRank + 1"))
+    module.add(SCmpLgU32(src0=sgpr(srank), src1=sgpr("A2AShardCounter"), comment="s != W?"))
+    module.add(SCSelectB32(dst=sgpr(srank), src0=sgpr(srank), src1=0, comment="wrap s to 0 at W"))
+
+    module.add(qLoop)
+    module.add(SMulI32(dst=sgpr(peerGrp), src0=sgpr(srank), src1=PEER_GROUP_BYTES,
+                       comment="peer group offset = s * %u" % PEER_GROUP_BYTES))
+    module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
+                              src=sgpr(srank),
+                              comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
+    ring.emitLazyInitCursors(module, self, peerGrp, "A2ACounterPtr", curOff)
+    ring.emitRefreshCache(module, self, peerGrp, cached)
+    ring.emitReserveQueueSpace(module, self, peerGrp, "A2ACounterPtr", curOff,
+                               cached, sgpr(size), cur, pad)
+    module.add(SMovB64(dst=sgpr(pending, 2), src=sgpr(cur, 2), comment="pending = reserved base"))
+
+    module.add(SMovB32(dst=sgpr(pLeft), src=sgpr("A2ABlockCount"), comment="pairs left on this queue"))
+    module.add(pLoop)
+    module.add(SSubU32(dst=sgpr(pLeft), src0=sgpr(pLeft), src1=1, comment="one pair placed"))
+    module.add(SCmpLgU32(src0=sgpr(pLeft), src1=0, comment="more pairs?"))
+    module.add(SCBranchSCC1(labelName=pLoop.getLabelName(), comment="next pair"))
+
+    ring.emitSubmitPacket(module, self, peerGrp, "A2ACounterPtr", curOff, cur, pending)
+
+    module.add(SAddU32(dst=sgpr(srank), src0=sgpr(srank), src1=1, comment="s += 1"))
+    module.add(SCmpLgU32(src0=sgpr(srank), src1=sgpr("A2AShardCounter"), comment="s != W?"))
+    module.add(SCSelectB32(dst=sgpr(srank), src0=sgpr(srank), src1=0, comment="wrap s to 0 at W"))
+    module.add(SSubU32(dst=sgpr(qLeft), src0=sgpr(qLeft), src1=1, comment="one queue done"))
+    module.add(SCmpLgU32(src0=sgpr(qLeft), src1=0, comment="more queues?"))
+    module.add(SCBranchSCC1(labelName=qLoop.getLabelName(), comment="next queue"))
+
+    for reg in (pending, cur, cached, pad, pLeft, curOff, peerGrp, qLeft, srank, size):
+      self.sgprPool.checkIn(reg)
     return module
 
   def closeA2AShardLoop(self, kernel):

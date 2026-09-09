@@ -246,6 +246,63 @@ class TestA2AGemmElection:
         ), "the election atomic does not sit at the flag block offset"
 
 
+class TestA2AGemmEnqueueLoops:
+    """The enqueuer's packing pass: one reservation and one submit per queue."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _queue_loop_body(self, src):
+        import re
+
+        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
+        assert head and tail, "no a2a queue loop in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def test_each_queue_reserves_once_and_submits_once(self):
+        body = self._queue_loop_body(self._src())
+        assert body.count("s_atomic_cmpswap_x2") == 1
+        assert body.count("s_store_dwordx2") == 3
+
+    def test_cursors_are_raised_before_the_reserve_loop(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
+        assert rsv, "no reserve loop inside the queue loop"
+        assert body[: rsv.start()].count("s_atomic_umax_x2") == 2
+
+    def test_room_check_cache_is_seeded_before_the_reserve_loop(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
+        assert rsv, "no reserve loop inside the queue loop"
+        assert "cachedHwReadIndex = hardware rptr" in body[: rsv.start()]
+
+    def test_packet_loop_runs_once_per_block(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        assert re.search(
+            r"s_mov_b32 s\d+, s\[sgprA2ABlockCount\][^\n]*\n"
+            r"label_a2a_packet_loop\w*:",
+            body,
+        ), "the packet loop is not seeded from A2ABlockCount"
+
+    def test_single_rank_skips_the_packing_pass(self):
+        import re
+
+        assert re.search(
+            r"s_cmp_eq_u32 s\d+, 0[^\n]*// W == 1\?\n"
+            r"s_cbranch_scc1 label_A2ASkipEnqueue",
+            self._src(),
+        ), "W == 1 does not skip the packing pass"
+
+
 class TestA2AGemmRegisterBudget:
     """The emitted kernel's SGPR high-water mark."""
 
