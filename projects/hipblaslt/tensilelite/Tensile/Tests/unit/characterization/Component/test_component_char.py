@@ -169,6 +169,45 @@ def test_localread_get_lds_read_mem_token():
     assert idx == 3
 
 
+def _dcpWriter(divergent, **stateKwargs):
+    """A writer carrying the per-side token state decoupled PGR installs."""
+    states = types.SimpleNamespace(ldsReadTokenIdx=3, **stateKwargs)
+    return types.SimpleNamespace(
+        states=states,
+        _dcpDivergent=lambda kernel: divergent,
+        _dcpTokenSide=lambda tc: {"A": "A", "MXSA": "A", "B": "B", "MXSB": "B"}[tc],
+    )
+
+
+@pytest.mark.parametrize("tc,expected", [("A", 7), ("MXSA", 7), ("B", 9), ("MXSB", 9)])
+def test_localread_mem_token_divergent_pgr_reads_its_own_side(tc, expected):
+    # Divergent decoupled PGR gives each side its own LDS token, so a read must
+    # wait on the side that filled it rather than on the shared token.
+    writer = _dcpWriter(True, memTokenLdsDcp={"A": [7, 8], "B": [9, 10]},
+                        ldsReadTokenIdxA=7, ldsReadTokenIdxB=9)
+    _token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, {"tensorChar": tc})
+    assert idx == expected
+
+
+def test_localread_mem_token_coupled_pgr_keeps_shared_token():
+    # memTokenLdsDcp present but the pair is coupled: the shared token stands.
+    writer = _dcpWriter(False, memTokenLdsDcp={"A": [7, 8], "B": [9, 10]},
+                        ldsReadTokenIdxA=7, ldsReadTokenIdxB=9)
+    _token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, {"tensorChar": "A"})
+    assert idx == 3
+
+
+def test_localread_mem_token_divergent_without_dcp_state_keeps_shared_token():
+    # TDMFuse != 1 accepts a divergent pair without installing memTokenLdsDcp;
+    # the shared token is the only one that exists.
+    writer = _dcpWriter(True)
+    _token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, {"tensorChar": "A"})
+    assert idx == 3
+
+
 def test_localread_emit_lds_read():
     added = []
 

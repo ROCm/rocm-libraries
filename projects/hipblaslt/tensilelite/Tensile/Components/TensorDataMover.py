@@ -1,6 +1,7 @@
 from ..Component import TensorDataMover
 from ..Common.DataType import DataType
 from ..Common import INDEX_CHARS
+from .TDMFuse import tdmWaveComponents
 from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
@@ -192,8 +193,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
         with writer.allocTmpSgpr(3, tag="TensorDataMoverLoadWaveSeparated_tmpSgprRes") as tmpSgprRes:
-            numComp: int = numWaves // 2
-            assert numComp & (numComp - 1) == 0, "numComp must be power of 2"
+            numComp, compShift = tdmWaveComponents(kernel, tc)
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
@@ -203,7 +203,12 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
-            mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
+            if compShift is None:
+                mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "wCompId = 0 (one wave carries this tensor)"))
+            elif compShift == 0:
+                mod.add(SMovB32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), f"wCompId = fTid // wavelen({wavelen}) (one component per wave)"))
+            else:
+                mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), compShift, sgpr(waveIdxSgpr), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
             if ("MXS" in tc):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit

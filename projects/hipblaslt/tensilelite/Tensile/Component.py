@@ -237,6 +237,9 @@ class LocalRead(Component):
             inBuf  = ldsByteOffset - tP["localReadSwapByteOffset"]
             half   = 1 if inBuf >= writer.tdmSplitLdsBoundary(kernel, tP) else 0
             tok    = writer.states.memTokenLdsSplit[parity][half]
+        elif hasattr(writer.states, "memTokenLdsDcp") and writer._dcpDivergent(kernel):
+            side = writer._dcpTokenSide(tP["tensorChar"])
+            tok = getattr(writer.states, "ldsReadTokenIdx%s" % side)
         else:
             tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok

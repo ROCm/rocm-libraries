@@ -154,6 +154,8 @@ class _ClassicPapWriter:
 
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
 _ClassicPapWriter._nextLdsToken = KernelWriter._nextLdsToken
+_ClassicPapWriter._dcpDivergent = kwa_module.KernelWriterAssembly._dcpDivergent
+_ClassicPapWriter._dcpThickThinIssueOrder = KernelWriter._dcpThickThinIssueOrder
 
 
 class _SetupNewTilePapTdmWriter:
@@ -223,6 +225,28 @@ class _SetupNewTilePapTdmWriter:
 
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+
+    def tdmFuseAMx(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
+    def tdmSeparateABDescriptors(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmSeparateABDescriptors(self, kernel)
+
+    def _dcpDivergent(self, kernel):
+        return kwa_module.KernelWriterAssembly._dcpDivergent(self, kernel)
+
+    def tdmWaveIdxReadAfterPrologue(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmWaveIdxReadAfterPrologue(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
 
     def undefineSgpr(self, name):
         # Mirror the real undefineSgpr: return the slot to the pool but keep the name
@@ -796,6 +820,11 @@ def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
             {"PrefetchGlobalRead": 3, "ScheduleIterAlg": 3},
             "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]",
             id="rejects_pgr_above_two",
+        ),
+        pytest.param(
+            {"PrefetchGlobalRead": 2, "PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
+            "PrefetchGlobalReadA/B: PrefetchAcrossPersistent is not",
+            id="rejects_decoupled_pgr",
         ),
     ],
 )
