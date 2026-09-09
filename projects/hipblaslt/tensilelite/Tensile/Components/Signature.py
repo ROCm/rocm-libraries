@@ -89,6 +89,7 @@ FUSED_A2A_DRAIN_SEND = 2
 #   counter_ptr      this device's counter base
 #   FusedDrain       runtime drain flag (NOT a compile-time gate)
 #   FusedAM          A2A feature-row count (first AM rows PUSH, rest local)
+#   FusedNumCu       this device's CU count
 #
 # One group per peer, so a work-group computes one base and reaches every
 # pointer it needs for that peer by immediate offset.
@@ -96,7 +97,8 @@ _FUSED_A2A_SEGMENT_ARGS = (
     [("peer_%u_%s" % (j, f), 8)
      for j in range(FUSED_A2A_MAX_RANKS) for f in FUSED_A2A_PEER_FIELDS]
     + [("counter_ptr", 8),
-       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4)])
+       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4),
+       ("FusedNumCu", 4)])
 
 def fusedA2AKernArgLayout():
     """Return {argName: intra-segment byte offset} for the fused-A2A segment.
@@ -446,6 +448,7 @@ class SignatureDefault(Signature):
             signature.addArg("FusedW",            SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",        SVK.SIG_VALUE, "u32")
             signature.addArg("FusedAM",           SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedNumCu",        SVK.SIG_VALUE, "u32")
             # Publish the segment base. The prologue has already advanced
             # sgprKernArgAddress past the common-args header by commonArgsSize
             # ("Shift common args" in KernelWriterAssembly.py), while these

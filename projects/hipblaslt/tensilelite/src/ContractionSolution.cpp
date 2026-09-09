@@ -2125,13 +2125,18 @@ namespace TensileLite
 
         // The fused GEMM+A2A segment follows batchOffsets in the kernel signature.
         if(problem.fusedGemmA2A() || problemType.fusedA2AMode == 1)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
             appendFusedSegment(rv.args,
                                inputs.fusedA2APeers,
                                inputs.fusedA2ACounter,
                                inputs.fusedA2AMyRank,
                                problem.fusedA2AWorld(),
                                inputs.fusedA2ADrain,
-                               static_cast<uint32_t>(problem.fusedA2AExtent()));
+                               static_cast<uint32_t>(problem.fusedA2AExtent()),
+                               static_cast<uint32_t>(pAMDGPU->computeUnitCount));
+        }
 
         if(problemType.stochasticRounding)
         {
