@@ -253,3 +253,6 @@ make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32
 ```
 
 In addition, we provide `ASM_ARGS` and `LINK_ARGS` as additional customization points for the assemble and link step respectively. If the architecture cannot be detect corectly, you may need to manually add ``ARCH="gfx942:xnack-"`` to the ``make`` command.
+
+<!-- scratch: temporary commit to CI-validate tensilelite-only change detection for this PR; will be reverted before merge -->
+
