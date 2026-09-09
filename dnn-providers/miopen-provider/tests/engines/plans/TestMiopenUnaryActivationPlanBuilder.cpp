@@ -12,96 +12,19 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
+#include "common/PointwiseGraphCommon.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
+using namespace test_pointwise_graph_common;
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 namespace
 {
-
-// Every knob the applicability checks look at, so a single graph factory covers all cases.
-// Defaults describe the canonical valid graph: a single non-virtual fp32 NCHW RELU_FWD node.
-struct PointwiseGraphSpec
-{
-    PointwiseMode mode = PointwiseMode::RELU_FWD;
-    DataType ioDataType = DataType::FLOAT;
-    DataType computeDataType = DataType::FLOAT;
-    std::vector<int64_t> inputDims{1, 3, 4, 4};
-    std::vector<int64_t> outputDims{1, 3, 4, 4};
-    // std::nullopt emits a null strides vector, which is what the applicability check's
-    // "tensor dims or strides are null" guard looks for. A plain empty vector would not do:
-    // CreateTensorAttributesDirect only omits the field when handed a null pointer.
-    std::optional<std::vector<int64_t>> inputStrides{{48, 16, 4, 1}};
-    std::optional<std::vector<int64_t>> outputStrides{{48, 16, 4, 1}};
-    bool virtualInput = false;
-    bool virtualOutput = false;
-    bool overrideShapeEnabled = false;
-    flatbuffers::Optional<float> reluLowerClip = flatbuffers::nullopt;
-    flatbuffers::Optional<float> reluUpperClip = flatbuffers::nullopt;
-    flatbuffers::Optional<float> reluLowerClipSlope = flatbuffers::nullopt;
-};
-
-flatbuffers::FlatBufferBuilder createPointwiseGraph(const PointwiseGraphSpec& spec)
-{
-    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-
-    flatbuffers::FlatBufferBuilder builder;
-
-    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
-
-    const std::vector<int64_t>* inputStrides
-        = spec.inputStrides ? &spec.inputStrides.value() : nullptr;
-    const std::vector<int64_t>* outputStrides
-        = spec.outputStrides ? &spec.outputStrides.value() : nullptr;
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 1, "input", spec.ioDataType, inputStrides, &spec.inputDims, spec.virtualInput));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                          2,
-                                                                          "output",
-                                                                          spec.ioDataType,
-                                                                          outputStrides,
-                                                                          &spec.outputDims,
-                                                                          spec.virtualOutput));
-
-    auto pwAttr = data_objects::CreatePointwiseAttributes(builder,
-                                                          spec.mode,
-                                                          spec.reluLowerClip,
-                                                          spec.reluUpperClip,
-                                                          spec.reluLowerClipSlope,
-                                                          flatbuffers::nullopt,
-                                                          1,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          2);
-
-    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(
-        data_objects::CreateNodeDirect(builder,
-                                       "pointwise",
-                                       spec.computeDataType,
-                                       data_objects::NodeAttributes::PointwiseAttributes,
-                                       pwAttr.Union()));
-
-    auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                                       "test",
-                                                       DataType::FLOAT,
-                                                       DataType::FLOAT,
-                                                       DataType::FLOAT,
-                                                       &tensorAttributes,
-                                                       &nodes,
-                                                       flatbuffers::nullopt,
-                                                       spec.overrideShapeEnabled);
-    builder.Finish(graphOffset);
-
-    return builder;
-}
 
 // The pointwise modes handled by MiopenUnaryActivationPlanBuilder. Every check that is not
 // ReLU-parameter specific must behave identically for all of them.
@@ -547,4 +470,53 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+// ============================================================================
+// Binary-node hardening (see MiopenBinaryPointwiseChecks.cpp for the counterpart)
+// ============================================================================
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, UnaryBuilderDeclinesNodeWithSecondInput)
+{
+    // A node carrying in_1_tensor_uid is a binary node; the unary builder must not treat it as
+    // a unary RELU/SIGMOID/TANH node purely because in_2 is absent.
+    PointwiseGraphSpec spec;
+    spec.secondInputDims = {1, 3, 4, 4};
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, UnaryBuilderDeclinesNodeWithThirdInput)
+{
+    // A node carrying in_2_tensor_uid is a ternary node (e.g. BINARY_SELECT); it must be
+    // declined regardless of whether in_1 is also present.
+    PointwiseGraphSpec spec;
+    spec.addThirdInput = true;
+    auto builder = createPointwiseGraph(spec);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenUnaryActivationPlanBuilder, BinaryModesAreDeclinedByUnaryBuilder)
+{
+    // A unary regression should not be diagnosed under a binary test name: this belongs here,
+    // exercising the mode side of the split rather than the tensor-arity side above.
+    for(const auto mode : {PointwiseMode::ADD,
+                           PointwiseMode::SUB,
+                           PointwiseMode::MUL,
+                           PointwiseMode::MAX_OP,
+                           PointwiseMode::MIN_OP})
+    {
+        PointwiseGraphSpec spec;
+        spec.mode = mode;
+        spec.secondInputDims = {1, 3, 4, 4};
+        auto builder = createPointwiseGraph(spec);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))
+            << "mode: " << hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(mode);
+    }
 }

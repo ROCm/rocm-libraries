@@ -5,6 +5,7 @@
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
+#include "engines/plans/MiopenBinaryPointwisePlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
@@ -50,6 +51,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
 
              return engine;
          }},
