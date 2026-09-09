@@ -207,6 +207,15 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
+        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
+        // device ordinal, not arch, so without this an unresolved-arch context would
+        // cache an empty catalog under the SAME key a later, resolved call for this
+        // device reuses -- permanently hiding that device's real catalog.
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        {
+            return catalogFor(context);
+        }
+
         Catalog catalog = catalogFor(context);
 
         // A measured order is final; a heuristic one is provisional, so this lookup runs

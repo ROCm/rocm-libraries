@@ -451,6 +451,13 @@ TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
 
     EXPECT_TRUE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
         << "an unidentified device must match no kernel";
+
+    // The catalog cache is keyed on (graph, device ordinal), not arch: an empty-arch
+    // lookup that wrote its rejected, empty catalog under that key would permanently
+    // hide this device's real catalog once the arch is known again.
+    properties.gcnArchName = testDeviceProperties().gcnArchName;
+    EXPECT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "an unresolved-arch lookup must not poison this device's cached catalog";
 }
 
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
