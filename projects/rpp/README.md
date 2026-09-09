@@ -202,7 +202,7 @@ RPP supports various 2D image, 3D image (voxel), and audio augmentations and pri
 
 > [!NOTE]
 > Audio augmentations use an in-house FFT implementation for CPU (HOST) backend
-> and rocFFT for GPU (HIP) backend.
+> and rocFFT for GPU (HIP) backend when available (otherwise the HIP backend falls back to manual DFT).
 
 </details>
 
