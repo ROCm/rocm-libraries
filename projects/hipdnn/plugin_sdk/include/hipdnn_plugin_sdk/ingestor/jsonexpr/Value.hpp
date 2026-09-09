@@ -440,7 +440,7 @@ private:
     ///
     /// The switch narrows two spellings, both deliberately. A hexadecimal
     /// float ("0x10") is no longer read as 16: in a descriptor that is a typo,
-    /// not a value. A leading '+' is restored by hand below, because
+    /// not a value. One optional leading '+' is handled explicitly below, because
     /// from_chars rejects it and "+5" is an ordinary way to write 5.
     static double stringToNumber(const std::string& s)
     {
@@ -460,10 +460,10 @@ private:
         }
         if(s[b] == '+')
         {
-            ++b; // from_chars rejects the sign strtod accepted
-            if(b == e)
+            ++b; // from_chars rejects a leading '+'
+            if(b == e || s[b] == '+' || s[b] == '-')
             {
-                return std::nan(""); // a bare sign is not a number
+                return std::nan(""); // only one sign may precede a number
             }
         }
         const char* first = s.data() + b;

@@ -492,6 +492,10 @@ value is neither wholly supplied nor wholly absent, so `present` and
 `not_present` are both `false` on it. That is what keeps the guard above from
 accepting such a value through its `not_present` arm.
 
+If the final result is a partly resolved array, the expression returns `null`.
+This also applies when `if` or `value_or_default` returns that array, so a caller
+reading the result with `truthy()` rejects it.
+
 ### A document nested past the depth bound is unresolved
 
 A `Value` is a tree, and every consumer of one walks it recursively. A data

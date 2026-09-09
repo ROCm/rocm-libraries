@@ -45,15 +45,14 @@ using EagerFn = Value (*)(const std::vector<Value>&);
 /// argument means and which arguments run at all.
 using LazyFn = Value (*)(const std::vector<NodePtr>&, const IDataSource&);
 
-/// Every eager numeric operator returns its result through here. A NaN or
+/// Numeric operators route computed numeric results through here. A NaN or
 /// infinite result cannot be ordered, and a criterion must not accept data it
 /// never meaningfully evaluated, so a non-finite result becomes null
 /// ("unresolved") instead.
 ///
-/// This must be the single exit for all of them rather than a guard in each
-/// operator, because NaN can also arrive as an operand: Value::toNumber yields
-/// NaN for a non-numeric string and for a multi-element array. A domain check
-/// written `n <= 0.0` is false for NaN and would let it through.
+/// This also catches NaN propagated from Value::toNumber for non-numeric
+/// strings and multi-element arrays. Operators whose identities can mask a
+/// non-finite operand must guard their operands too.
 inline Value finiteOrNull(double d)
 {
     if(!std::isfinite(d))
@@ -297,9 +296,16 @@ inline Value absoluteValue(const std::vector<Value>& v)
 
 inline Value power(const std::vector<Value>& v)
 {
+    const double base = v[0].toNumber();
+    const double exponent = v[1].toNumber();
+    // pow(NaN, 0) and pow(1, NaN) return 1, hiding an invalid operand.
+    if(!std::isfinite(base) || !std::isfinite(exponent))
+    {
+        return {};
+    }
     // A domain error (a negative base with a fractional exponent) or an
     // overflow gives NaN or infinity, and finiteOrNull declines on both.
-    return finiteOrNull(std::pow(v[0].toNumber(), v[1].toNumber()));
+    return finiteOrNull(std::pow(base, exponent));
 }
 
 inline Value log2Of(const std::vector<Value>& v)

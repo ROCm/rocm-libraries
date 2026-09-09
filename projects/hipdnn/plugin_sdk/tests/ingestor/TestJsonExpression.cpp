@@ -569,73 +569,83 @@ TEST(TestJsonExpression, NullPropagatesThroughEveryOtherOperator)
     EXPECT_TRUE(eval(json({{"!", json::array({unresolvedMembership})}})).isNull());
 }
 
-TEST(TestJsonExpression, UnresolvedArrayFromTheDataSourceDeclinesEverywhere)
+TEST(TestJsonExpression, UnresolvedArraysDeclineRegardlessOfOrigin)
 {
-    // The array literals above are written into the rule. This test covers the
-    // other direction, which is the one real data takes: the data source hands
-    // back an array with a hole in it. An unsigned value beyond int64_t range
-    // reads as null (JsonDataSource::toValue), so `strides` resolves to
-    // [1, null], a value that only partly resolved.
-    //
-    // Every operator must treat that like a bare null. The lazy operators are
-    // the ones worth pinning down: they evaluate their own arguments, so they
-    // bypass OpNode's guard and need the check themselves.
-    const json doc = json{{"strides", json::array({1U, 18446744073709551000ULL})},
-                          {"clean", json::array({1, 2})}};
+    // An unsigned value beyond int64_t range reads as null. These data-source
+    // arrays must behave like literals containing unresolved references.
+    const json doc
+        = json{{"strides", json::array({1U, 18446744073709551000ULL})},
+               {"nestedStrides", json::array({1, json::array({18446744073709551000ULL, 2})})},
+               {"clean", json::array({1, 2})}};
     const jexpr::JsonDataSource src{doc};
     const auto run
         = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
+    const json partial = json::array({1, "$missing"});
+    const json nestedPartial = json::array({1, json::array({"$missing", 2})});
 
     ASSERT_EQ(src.getData("strides"), V(V::Array{V(1), V()})) << "precondition: the hole exists";
+    ASSERT_EQ(src.getData("nestedStrides"), V(V::Array{V(1), V(V::Array{V(), V(2)})}));
 
-    // Eager path.
-    EXPECT_TRUE(run(json({{"==", json::array({"$strides", json::array({1, 2})})}})).isNull());
-    EXPECT_TRUE(run(json({{"!!", json::array({"$strides"})}})).isNull());
-
-    // Lazy path: an unresolved condition picks no branch.
-    EXPECT_TRUE(run(json({{"if", json::array({"$strides", "taken", "else"})}})).isNull());
-
-    // Three-valued and/or: an unresolved operand is unknown, not truthy.
-    EXPECT_TRUE(run(json({{"and", json::array({"$strides", true})}})).isNull());
-    EXPECT_TRUE(run(json({{"or", json::array({"$strides", false})}})).isNull());
-
-    // value_or_default must supply the fallback rather than hand back a value
-    // with a hole in it.
-    EXPECT_EQ(run(json({{"value_or_default", json::array({"$strides", "fallback"})}})),
-              V("fallback"));
-    EXPECT_EQ(run(json({{"value_or_default", json::array({"$clean", "fallback"})}})),
-              V(V::Array{V(1), V(2)}));
-
-    // Presence answers false in both directions here: a partly resolved value
-    // is neither wholly supplied nor wholly absent. If `not_present` were true
-    // instead, the absent-field guard below would accept input whose field
-    // reads never ran.
-    EXPECT_EQ(run(json({{"present", json::array({"$strides"})}})), V(false));
-    EXPECT_EQ(run(json({{"not_present", json::array({"$strides"})}})), V(false));
-    EXPECT_EQ(run(json({{"present", json::array({"$clean"})}})), V(true));
-    EXPECT_EQ(run(json({{"not_present", json::array({"$absent"})}})), V(true));
-
-    // The documented absent-field guard, across every shape the field can take.
-    // What matters is that it never accepts a value the language could not
-    // resolve. Whether it declines with null or answers false is secondary,
-    // since a null result is falsy either way.
-    const auto guarded = [](const char* var) {
+    // The documented absent-or-present guard must reject a partially resolved
+    // value rather than treating it as wholly absent.
+    const auto guarded = [](const json& operand) {
         return json(
             {{"or",
               json::array(
-                  {json({{"not_present", json::array({var})}}),
-                   json({{"and",
-                          json::array(
-                              {json({{"present", json::array({var})}}),
-                               json({{"==", json::array({var, json::array({1, 2})})}})})}})})}});
+                  {json({{"not_present", json::array({operand})}}),
+                   json(
+                       {{"and",
+                         json::array(
+                             {json({{"present", json::array({operand})}}),
+                              json({{"==", json::array({operand, json::array({1, 2})})}})})}})})}});
     };
-    // A value with a hole is not absent, so the first arm is false, and it is
-    // not wholly supplied either, so the second arm cannot run. Both presence
-    // operators answer false, so the guard rejects.
-    EXPECT_EQ(run(guarded("$strides")), V(false))
-        << "the absent-field guard must not accept a hole-y value";
-    EXPECT_FALSE(run(guarded("$strides")).truthy());
-    // The shapes the guard exists to serve still behave.
+
+    for(const json& operand : {json("$strides"), partial, json("$nestedStrides"), nestedPartial})
+    {
+        SCOPED_TRACE(operand.dump());
+        // Public results decline, but nested consumers must retain the distinction
+        // between a partial array and a wholly absent value.
+        for(const json& resultRule :
+            {operand,
+             json({{"if", json::array({true, operand, "else"})}}),
+             json({{"value_or_default", json::array({"$absent", operand})}})})
+        {
+            SCOPED_TRACE(resultRule.dump());
+            const V result = run(resultRule);
+            EXPECT_TRUE(result.isNull());
+            EXPECT_FALSE(result.truthy());
+            EXPECT_EQ(run(json({{"present", json::array({resultRule})}})), V(false));
+            EXPECT_EQ(run(json({{"not_present", json::array({resultRule})}})), V(false));
+        }
+
+        // Eager operators cannot answer from a partial array.
+        EXPECT_TRUE(run(json({{"==", json::array({operand, json::array({1, 2})})}})).isNull());
+        EXPECT_TRUE(run(json({{"in", json::array({1, operand})}})).isNull());
+        EXPECT_TRUE(run(json({{"!!", json::array({operand})}})).isNull());
+
+        // Lazy operators retain unknown conditions, three-valued logic, and
+        // fallback behavior even when the array itself is not null.
+        EXPECT_TRUE(run(json({{"if", json::array({operand, "taken", "else"})}})).isNull());
+        EXPECT_TRUE(run(json({{"and", json::array({operand, true})}})).isNull());
+        EXPECT_TRUE(run(json({{"or", json::array({operand, false})}})).isNull());
+        EXPECT_EQ(run(json({{"and", json::array({operand, false})}})), V(false));
+        EXPECT_EQ(run(json({{"or", json::array({operand, true})}})), V(true));
+        EXPECT_EQ(run(json({{"value_or_default", json::array({operand, "fallback"})}})),
+                  V("fallback"));
+
+        // Neither absence guard may accept a partial array.
+        EXPECT_EQ(
+            run(json(
+                {{"or", json::array({json({{"not_present", json::array({operand})}}), false})}})),
+            V(false));
+        EXPECT_EQ(run(guarded(operand)), V(false));
+    }
+
+    // Fully resolved and wholly absent values still take their intended paths.
+    EXPECT_EQ(run(json({{"value_or_default", json::array({"$clean", "fallback"})}})),
+              V(V::Array{V(1), V(2)}));
+    EXPECT_EQ(run(json({{"present", json::array({"$clean"})}})), V(true));
+    EXPECT_EQ(run(json({{"not_present", json::array({"$absent"})}})), V(true));
     EXPECT_EQ(run(guarded("$absent")), V(true));
     EXPECT_EQ(run(guarded("$clean")), V(true));
 }
@@ -718,6 +728,38 @@ TEST(TestJsonExpression, UnresolvableNumericOperandsDecline)
     EXPECT_EQ(eval(json({{"min", json::array({3, 9})}})), V(3));
     EXPECT_EQ(eval(json({{"max", json::array({3, 9})}})), V(9));
     EXPECT_EQ(eval(json({{"abs", -5}})), V(5));
+}
+
+TEST(TestJsonExpression, PowerIdentitiesDoNotMaskUnresolvableOperands)
+{
+    // A finite pow identity cannot make an unresolvable operand usable.
+    for(const json& operands : {json::array({"not numeric", 0}),
+                                json::array({1, "not numeric"}),
+                                json::array({1, "1e-999"})})
+    {
+        SCOPED_TRACE(operands.dump());
+        const json power = json({{"pow", operands}});
+        const json equality = json({{"==", json::array({power, 1})}});
+        EXPECT_TRUE(eval(power).isNull());
+        EXPECT_TRUE(eval(equality).isNull());
+        EXPECT_TRUE(eval(json({{"!", json::array({equality})}})).isNull());
+    }
+    EXPECT_EQ(eval(json({{"pow", json::array({5, 0})}})), V(1));
+    EXPECT_EQ(eval(json({{"pow", json::array({1, 5})}})), V(1));
+}
+
+TEST(TestJsonExpression, NumericStringsRejectMultipleLeadingSigns)
+{
+    for(const char* operand : {"+-5", "--5"})
+    {
+        SCOPED_TRACE(operand);
+        const json sum = json({{"+", json::array({operand, 0})}});
+        const json equality = json({{"==", json::array({sum, -5})}});
+        EXPECT_TRUE(eval(sum).isNull());
+        EXPECT_TRUE(eval(equality).isNull());
+        EXPECT_TRUE(eval(json({{"!", json::array({equality})}})).isNull());
+    }
+    EXPECT_EQ(eval(json({{"+", json::array({"+5", 0})}})), V(5));
 }
 
 TEST(TestJsonExpression, OrderingDeclinesOnNonFiniteCoercedOperands)

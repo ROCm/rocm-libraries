@@ -55,14 +55,10 @@ struct ArrayNode final : Node
     {
         Value::Array a;
         a.reserve(items.size());
+        // Preserve unresolved elements: a partial array is not wholly absent.
         for(const auto& it : items)
         {
-            Value item = it->eval(data);
-            if(item.containsUnresolved())
-            {
-                return {};
-            }
-            a.push_back(std::move(item));
+            a.push_back(it->eval(data));
         }
         return {std::move(a)};
     }

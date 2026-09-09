@@ -81,6 +81,7 @@ public:
     }
 
     /// Evaluate against a data source. Cheap: walks the pre-compiled tree.
+    /// A final result containing unresolved elements declines as null.
     Value operator()(const DataT& data) const
     {
         if(!_root)
@@ -88,7 +89,12 @@ public:
             return {};
         }
         const detail::DataSourceAdapter<DataT> source(data);
-        return _root->eval(source);
+        Value result = _root->eval(source);
+        if(result.containsUnresolved())
+        {
+            return {};
+        }
+        return result;
     }
 
     explicit operator bool() const

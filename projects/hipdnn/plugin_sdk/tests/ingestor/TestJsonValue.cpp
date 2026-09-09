@@ -148,6 +148,10 @@ TEST(TestJsonValue, NumericStringsRejectEverythingElse)
     EXPECT_TRUE(std::isnan(asNumber("0x10"))); // hex is a typo, not 16
     EXPECT_TRUE(std::isnan(asNumber("+"))); // a bare sign is not a number
     EXPECT_TRUE(std::isnan(asNumber("-")));
+    EXPECT_TRUE(std::isnan(asNumber("+-5"))); // only one leading sign is accepted
+    EXPECT_TRUE(std::isnan(asNumber("++5")));
+    EXPECT_TRUE(std::isnan(asNumber("-+5")));
+    EXPECT_TRUE(std::isnan(asNumber("--5")));
     EXPECT_TRUE(std::isnan(asNumber("1 5"))); // interior whitespace
 }
 
