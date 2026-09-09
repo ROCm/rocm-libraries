@@ -89,6 +89,16 @@ inline int getMsbFromVgpr(const StinkyRegister& reg) {
     return static_cast<int>(reg.reg.idx) / 256;
 }
 
+/// The `reg.offset` a VGPR needs for the emitter to print its byte form: the
+/// operand text is `idx + offset`, so v272 prints `v[272-256]`, which the
+/// assembler reduces to v16 of the selected bank. Derive it, never store it --
+/// a register moved between banks keeps a bias that no longer matches its
+/// index, and `v[16-256]` is not a register.
+inline int getMsbOffsetForVgpr(const StinkyRegister& reg) {
+    const int msb = getMsbFromVgpr(reg);
+    return msb <= 0 ? 0 : msb * -256;
+}
+
 /// Record the per-slot VGPR banks of \p inst; \p hasVgpr set if any VGPR is seen.
 inline void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbDst,
                                 bool& hasVgpr) {
