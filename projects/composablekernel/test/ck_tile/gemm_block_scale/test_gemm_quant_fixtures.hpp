@@ -167,6 +167,15 @@ struct GemmConfigPreshuffleBPrefill : public GemmConfigPrefill
     static constexpr bool PreshuffleB      = true;
     static constexpr bool DoubleSmemBuffer = true;
 };
+
+// Preshuffle-B prefill config with the 64-bit global load/store opt-in enabled, for B tensors
+// whose element count exceeds the 2^31 32-bit-offset limit.  Same tile shape as
+// GemmConfigPreshuffleBPrefill; only the LargeTensors opt-in differs.
+struct GemmConfigPreshuffleBLargeTensor : public GemmConfigPreshuffleBPrefill
+{
+    static constexpr bool LargeTensors = true;
+};
+
 struct GemmConfigPreshuffleBPrefillTransposeC : public GemmConfigPreshuffleBPrefill
 {
     static constexpr bool TransposeC = true;
@@ -905,6 +914,163 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                       << rtol_atol.at(ck_tile::number<0>{})
                       << " Absolute error threshold: " << rtol_atol.at(ck_tile::number<1>{})
                       << std::endl;
+        }
+    }
+
+    // Boundary correctness check for the BQuant large-tensor (64-bit global load/store) path with
+    // PreshuffleB.  A host GEMM reference and a host preshuffle of B are both infeasible at the
+    // >2 GiB B scales this path targets (reference_permute over N*K elements int32-overflows its
+    // element count).  Instead B is filled directly in raw device-buffer offset order (which the
+    // kernel's flat B view interprets as the preshuffled weight) with a value that is a pure step
+    // function of the raw element offset: flat[i] = (i >= 2^31) ? V_FAR : V_NEAR.  Because the
+    // value depends only on the raw offset, the intra-region (k, n) interleave is irrelevant and
+    // no host permute is needed.  A is zero except at K-index hot_k = K-1, where A(m, hot_k) = m%8,
+    // with unit B dequant scales, so C(m, n) = (m % 8) * B_flat(hot_k, n).  Because hot_k = K-1 has
+    // the maximal flat-K index, B(hot_k, n) lands in the far region (offset >= 2^31) exactly when
+    // n >= N - N_Warp_Tile, giving C(m, n) = (m % 8) * (n >= N - N_Warp_Tile ? V_FAR : V_NEAR).
+    // A 32-bit offset overflow would wrap a far read into the near region (V_NEAR instead of V_FAR)
+    // or fault, so the far spot-checks distinguish correct 64-bit from buggy 32-bit addressing,
+    // while the near spot-checks (which never overflow) act as controls.  Assumes a 1-byte B type
+    // (flat element offset == byte offset, matching the byte-based 2^31 gate) and N_Warp_Tile == 16
+    // (the far region aligns to the last n-block); both are asserted below.
+    void run_test_boundary_check_bquant(
+        ck_tile::index_t M,
+        ck_tile::index_t N,
+        ck_tile::index_t K,
+        ck_tile::index_t hot_k,
+        const std::vector<std::pair<ck_tile::index_t, ck_tile::index_t>>& spot_checks)
+    {
+        static_assert(sizeof(BDataType) == 1,
+                      "run_test_boundary_check_bquant assumes a 1-byte B element type");
+        ASSERT_GE(hot_k, 0);
+        ASSERT_LT(hot_k, K);
+        ASSERT_EQ(hot_k, K - 1) << "far/near expectation assumes hot_k == K-1 (max flat-K index)";
+        ASSERT_EQ(static_cast<int>(GemmConfig::N_Warp_Tile), 16)
+            << "far/near boundary derivation assumes N_Warp_Tile == 16";
+
+        constexpr float V_NEAR = 1.0f;
+        constexpr float V_FAR  = 7.0f;
+
+        const ck_tile::index_t stride_A = K;
+        const ck_tile::index_t stride_B = K;
+        const ck_tile::index_t stride_C = N;
+
+        const ck_tile::index_t BQN       = ck_tile::integer_divide_ceil(N, QuantGroupSize::kN);
+        const ck_tile::index_t BQK       = ck_tile::integer_divide_ceil(K, QuantGroupSize::kK);
+        const ck_tile::index_t stride_BQ = this->is_row_major(BQLayout{}) ? BQN : BQK;
+
+        // Device-memory guard: B alone exceeds 2 GiB at the trigger shape.
+        {
+            size_t free_mem = 0, total_mem = 0;
+            ASSERT_EQ(hipMemGetInfo(&free_mem, &total_mem), hipSuccess);
+            const size_t required = static_cast<size_t>(M) * N * sizeof(CDataType) +
+                                    static_cast<size_t>(M) * K * sizeof(ADataType) +
+                                    static_cast<size_t>(K) * N * sizeof(BDataType) +
+                                    static_cast<size_t>(BQK) * BQN * sizeof(QDataType);
+            if(free_mem < required + (size_t{256} << 20)) // 256 MiB headroom
+            {
+                GTEST_SKIP() << "Insufficient device memory for BQuant large-tensor boundary "
+                             << "check: need ~" << ((required >> 20) + 256) << " MiB, have "
+                             << (free_mem >> 20) << " MiB free";
+            }
+        }
+
+        ck_tile::HostTensor<ADataType> a_m_k(
+            ck_tile::host_tensor_descriptor(M, K, stride_A, this->is_row_major(ALayout{})));
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(K, N, stride_B, this->is_row_major(BLayout{})));
+        ck_tile::HostTensor<QDataType> bq_bqk_bqn(
+            ck_tile::host_tensor_descriptor(BQK, BQN, stride_BQ, this->is_row_major(BQLayout{})));
+
+        // A is zero except column hot_k, where A(m, hot_k) = m % 8.
+        a_m_k.SetZero();
+        for(ck_tile::index_t m = 0; m < M; ++m)
+        {
+            a_m_k(m, hot_k) = ck_tile::type_convert<ADataType>(static_cast<float>(m % 8));
+        }
+        // Fill B directly in raw buffer-offset order: near region (offset < 2^31) = V_NEAR, far
+        // region (>= 2^31) = V_FAR.  split is in elements and equals 2^31 for the 1-byte B above.
+        {
+            const size_t total = b_k_n.get_element_space_size();
+            const size_t split = (size_t{1} << 31) / sizeof(BDataType);
+            auto* bp           = b_k_n.data();
+            std::fill(bp, bp + std::min(split, total), ck_tile::type_convert<BDataType>(V_NEAR));
+            if(total > split)
+            {
+                std::fill(bp + split, bp + total, ck_tile::type_convert<BDataType>(V_FAR));
+            }
+        }
+        // Unit dequant scales keep B_dequant == B.
+        std::fill(bq_bqk_bqn.begin(), bq_bqk_bqn.end(), ck_tile::type_convert<QDataType>(1.0f));
+
+        ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
+        ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
+        ck_tile::DeviceMem bq_bqk_bqn_dev_buf(bq_bqk_bqn.get_element_space_size() *
+                                              sizeof(QDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
+
+        c_m_n_dev_buf.SetZero();
+
+        a_m_k_dev_buf.ToDevice(a_m_k.data());
+        b_k_n_dev_buf.ToDevice(b_k_n.data());
+        bq_bqk_bqn_dev_buf.ToDevice(bq_bqk_bqn.data());
+
+        ck_tile::QuantGemmHostArgs args{
+            a_m_k_dev_buf.GetDeviceBuffer(),      // a_ptr
+            b_k_n_dev_buf.GetDeviceBuffer(),      // b_ptr
+            c_m_n_dev_buf.GetDeviceBuffer(),      // c_ptr
+            nullptr,                              // aq_ptr (not used for BQuant)
+            bq_bqk_bqn_dev_buf.GetDeviceBuffer(), // bq_ptr (scales)
+            1,                                    // k_batch
+            M,
+            N,
+            K,   // M, N, K
+            0,   // QK_A (not used for BQuant)
+            BQK, // QK_B
+            stride_A,
+            stride_B,
+            stride_C,
+            0,
+            stride_BQ // strides
+        };
+
+        ck_tile::stream_config stream_config{};
+        this->invoke_quant_gemm(args, stream_config);
+        ASSERT_EQ(hipGetLastError(), hipSuccess)
+            << "Kernel launch failed for the BQuant large-tensor boundary check (M=" << M
+            << ", N=" << N << ", K=" << K << ")";
+        ASSERT_EQ(hipStreamSynchronize(stream_config.stream_id_), hipSuccess)
+            << "Device-side fault while executing the BQuant large-tensor boundary check (M=" << M
+            << ", N=" << N << ", K=" << K << ")";
+
+        // C is small here (M*N), so read back only the requested elements via targeted reads.
+        const auto c_desc =
+            ck_tile::host_tensor_descriptor(M, N, stride_C, this->is_row_major(CLayout{}));
+        for(const auto& [m, n] : spot_checks)
+        {
+            ASSERT_GE(m, 0);
+            ASSERT_LT(m, M);
+            ASSERT_GE(n, 0);
+            ASSERT_LT(n, N);
+
+            const auto byte_offset = c_desc.GetOffsetFromMultiIndex(m, n) * sizeof(CDataType);
+
+            CDataType actual{};
+            ASSERT_EQ(
+                hipMemcpy(&actual,
+                          static_cast<const char*>(c_m_n_dev_buf.GetDeviceBuffer()) + byte_offset,
+                          sizeof(CDataType),
+                          hipMemcpyDeviceToHost),
+                hipSuccess)
+                << "Failed to read back C(" << m << ", " << n << ")";
+
+            // hot_k == K-1 has the maximal flat-K index, so B(hot_k, n) is in the far region
+            // (flat offset >= 2^31) exactly when n >= N - N_Warp_Tile.
+            const bool is_far = n >= (N - static_cast<ck_tile::index_t>(GemmConfig::N_Warp_Tile));
+            const float expected = static_cast<float>(m % 8) * (is_far ? V_FAR : V_NEAR);
+            EXPECT_NEAR(ck_tile::type_convert<float>(actual), expected, 1e-3f)
+                << "BQuant boundary-check mismatch at C(" << m << ", " << n << ") (M=" << M
+                << ", N=" << N << ", K=" << K << ", hot_k=" << hot_k << ", far=" << is_far << ")";
         }
     }
 
