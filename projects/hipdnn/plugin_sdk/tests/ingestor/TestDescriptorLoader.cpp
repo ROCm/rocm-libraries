@@ -1589,7 +1589,8 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     heuristic["derived"] = nlohmann::json::array(
         {{{"name", "tiles_m"}, {"expression", R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})"}}});
     heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
-    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    heuristic["categorical_encoding"] = {{"$kernel.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
 
@@ -1609,6 +1610,9 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     EXPECT_EQ(parsed.score.units, "tflops");
     EXPECT_TRUE(parsed.score.calibrated);
     EXPECT_EQ(parsed.score.transform, "log1p");
+    EXPECT_EQ(parsed.modelHash, "sha256:model");
+    ASSERT_EQ(parsed.categoricalEncoding.count("$kernel.dtype"), 1u);
+    EXPECT_EQ(parsed.categoricalEncoding.at("$kernel.dtype").at("bf16"), 1);
 }
 
 /// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.

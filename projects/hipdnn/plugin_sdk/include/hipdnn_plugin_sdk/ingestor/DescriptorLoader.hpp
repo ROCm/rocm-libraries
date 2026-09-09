@@ -470,12 +470,16 @@ inline UhdAdapter uhdAdapterFromString(const std::string& text, const std::strin
     {
         return UhdAdapter::TABLE;
     }
-    // `onnx` and `custom_library` are RFC 0019 §7 adapters the ingestor deliberately
-    // cannot build: one needs a runtime this path will not pull in, the other dlopens an
-    // author-supplied .so. Rejecting them by name beats accepting a descriptor that would
-    // then silently rank by declared order.
+    if(text == "custom_library")
+    {
+        return UhdAdapter::CUSTOM_LIBRARY;
+    }
+    // `onnx` is the one RFC 0019 §7 adapter this path deliberately cannot build: its runtime
+    // does not reach every provider's include path, so makeUhdAdapter answers nullptr for it.
+    // Rejecting it by name beats accepting a descriptor that would then silently rank by
+    // declared order.
     fail("unknown or unsupported UHD adapter '" + text + "' in " + where
-         + " (expected static_order, native, tree_data or table)");
+         + " (expected static_order, native, tree_data, table or custom_library)");
 }
 
 inline MatchScope matchScopeFromString(const std::string& text, const std::string& where)
@@ -684,8 +688,17 @@ inline void parseHeuristicBody(const nlohmann::json& root,
 
     case UhdAdapter::TREE_DATA:
     case UhdAdapter::TABLE:
+    case UhdAdapter::CUSTOM_LIBRARY:
     {
-        const char* key = heuristic.adapter == UhdAdapter::TREE_DATA ? "tree_data" : "table";
+        const char* key = "table";
+        if(heuristic.adapter == UhdAdapter::TREE_DATA)
+        {
+            key = "tree_data";
+        }
+        else if(heuristic.adapter == UhdAdapter::CUSTOM_LIBRARY)
+        {
+            key = "custom_library";
+        }
         const auto* object = body(key);
         if(object == nullptr)
         {
@@ -694,8 +707,25 @@ inline void parseHeuristicBody(const nlohmann::json& root,
         }
         const std::string bodyWhere = where + " '" + key + "'";
         requireObject(*object, bodyWhere);
-        requireKnownKeys(*object, {"artifact"}, bodyWhere);
+        requireKnownKeys(*object, {"artifact", "hash", "symbol"}, bodyWhere);
         heuristic.modelArtifactPath = requireString(*object, "artifact", bodyWhere);
+        if(object->find("hash") != object->end())
+        {
+            heuristic.modelHash = requireString(*object, "hash", bodyWhere);
+        }
+
+        // The `.so` names a function; without it there is nothing to call, and
+        // AdapterFactory would decline the descriptor after the tree had already been
+        // trusted enough to dlopen it.
+        if(heuristic.adapter == UhdAdapter::CUSTOM_LIBRARY)
+        {
+            heuristic.customLibrarySymbol = requireString(*object, "symbol", bodyWhere);
+        }
+        else if(object->find("symbol") != object->end())
+        {
+            fail("UHD adapter '" + std::string(key) + "' has no 'symbol'; it is a "
+                 + "custom_library field, in " + bodyWhere);
+        }
 
         // A model consumes features. Without a signature it would be handed an empty row
         // and score every candidate identically, which reads as a working heuristic that
@@ -712,6 +742,38 @@ inline void parseHeuristicBody(const nlohmann::json& root,
     // rejects anything that is not one.
     default:
         break;
+    }
+}
+
+/// RFC 0019 §6.5. A map of field name to (string value -> code), authored explicitly:
+/// §6.5 rules out an ordinal by declaration order, a hash of the string, and the
+/// underlying enum value, because each changes silently when a schema is edited or a pack
+/// rebuilt. Only a table can be diffed and version-checked.
+inline void parseCategoricalEncoding(const nlohmann::json& root,
+                                     HeuristicDescriptor& heuristic,
+                                     const std::string& where)
+{
+    const auto found = root.find("categorical_encoding");
+    if(found == root.end())
+    {
+        return;
+    }
+    const std::string encodingWhere = where + " 'categorical_encoding'";
+    requireObject(*found, encodingWhere);
+    for(const auto& field : found->items())
+    {
+        const std::string fieldWhere = encodingWhere + " '" + field.key() + "'";
+        requireObject(field.value(), fieldWhere);
+        auto& codes = heuristic.categoricalEncoding[field.key()];
+        for(const auto& entry : field.value().items())
+        {
+            if(!entry.value().is_number_integer())
+            {
+                fail("value '" + entry.key() + "' in " + fieldWhere
+                     + " must map to an integer code");
+            }
+            codes[entry.key()] = entry.value().get<int32_t>();
+        }
     }
 }
 
@@ -732,12 +794,14 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
                       "features_signature",
                       "features_hash",
                       "derived",
+                      "categorical_encoding",
                       "objective",
                       "score",
                       "static_order",
                       "native",
                       "tree_data",
                       "table",
+                      "custom_library",
                       "trained_against"},
                      where);
 
@@ -769,10 +833,11 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
         }
     }
 
+    parseCategoricalEncoding(root, heuristic, where);
+
     // Defaulted rather than required: static_order scores nothing, so an objective would
-    // be a field with no meaning. RFC 0019 §4.1 requires it of any adapter that scores,
-    // and the per-adapter checks below enforce that.
-    if(const auto objective = root.find("objective"); objective != root.end())
+    // be a field with no meaning. RFC 0019 §4.1 requires it of any adapter that scores.
+    if(root.find("objective") != root.end())
     {
         heuristic.objective = requireString(root, "objective", where);
         if(heuristic.objective != "max" && heuristic.objective != "min")
@@ -2095,6 +2160,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         }
         for(const auto& [arch, candidate] : heuristicsByArch)
         {
+            // By id, not by address. heuristicsByArch holds *copies*, so comparing addresses
+            // never matched: the default was version-checked twice and its skew reported twice.
             if(heuristic == nullptr || candidate.id != heuristic->id)
             {
                 versioned.push_back(&candidate);

@@ -409,6 +409,12 @@ def _validate_uhd(desc, source_root):
     _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
 
     adapter = desc.doc["adapter"]
+    if adapter == "native":
+        body = desc.doc.get("native")
+        if not isinstance(body, dict) or not body.get("symbol"):
+            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
+        return
+
     if adapter not in _ARTIFACT_ADAPTERS:
         return
 

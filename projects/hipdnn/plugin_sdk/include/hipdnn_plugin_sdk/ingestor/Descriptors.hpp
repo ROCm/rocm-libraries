@@ -134,6 +134,7 @@ enum class UhdAdapter
     NATIVE, ///< A scorer compiled into the engine, resolved by symbol.
     TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
+    CUSTOM_LIBRARY, ///< An author-supplied `.so`, dlopened and called by symbol (§7.2).
 };
 
 /// Units and calibration of a UHD's score, for cross-engine comparison (RFC 0019 §11.3).
@@ -175,6 +176,11 @@ struct HeuristicDescriptor
     std::string featuresHash;
     /// Evaluated before the signature, forming the `$derived.*` namespace.
     std::vector<UhdDerivedValue> derived;
+    /// RFC 0019 §6.5: field -> (string value -> code), for a feature that reads a string
+    /// field. Empty when none does, which is the common case; covered by
+    /// @ref featuresHash, so editing it invalidates the contract rather than passing
+    /// silently.
+    std::map<std::string, std::map<std::string, int32_t>> categoricalEncoding;
 
     /// "max" or "min". A model trained on a cost rather than a rate ranks ascending, and
     /// getting this wrong silently inverts every ranking it produces.
@@ -185,6 +191,11 @@ struct HeuristicDescriptor
     std::string nativeSymbol;
     /// TREE_DATA / TABLE: the artifact path, relative to @ref baseDir.
     std::string modelArtifactPath;
+    /// Checksum of the artifact, for integrity validation. Empty when the author
+    /// declared none.
+    std::string modelHash;
+    /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
+    std::string customLibrarySymbol;
     /// STATIC_ORDER: ordering criteria, e.g. {"priority", "id"}.
     std::vector<std::string> staticOrderFields;
 
