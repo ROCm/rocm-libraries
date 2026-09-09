@@ -123,7 +123,9 @@ __global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint s
     } else {
         // Vertical path: use shared memory transpose for coalesced writes (FT layout: [numBins,
         // numWindows])
-        __shared__ float magnitude_smem[16][16];  // 16x16 tile in shared memory
+        constexpr int MAG_TILE_DIM =
+            (LOCAL_THREADS_X > LOCAL_THREADS_Y) ? LOCAL_THREADS_X : LOCAL_THREADS_Y;
+        __shared__ float magnitude_smem[MAG_TILE_DIM][MAG_TILE_DIM];
 
         // Load and compute magnitude in coalesced fashion
         // Read: srcPtr[batch][window][bin] - threads read consecutive bins (coalesced)
@@ -289,17 +291,17 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 #ifdef RPP_USE_ROCFFT
     // Check if rocFFT path fits in scratch memory, otherwise fall back to manual DFT
     Rpp32s maxNumWindows = (vertical) ? dstDescPtr->w : dstDescPtr->h;
-    Rpp32u windowOutputStride = maxNumWindows * nfft;
-    Rpp32u fftOutputStride = maxNumWindows * numBins;
+    size_t windowOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(nfft);
+    size_t fftOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(numBins);
     size_t windowOutputFloats = static_cast<size_t>(dstDescPtr->n) * windowOutputStride;
     // Align fftOutput to 8 bytes (float2) accounting for total offset from base pointer.
     // fftOutput is placed after windowOutput, and we need (windowLength + alignedOffset) to be
     // even.
     size_t totalBaseOffset = static_cast<size_t>(windowLength) + windowOutputFloats;
     size_t alignedOffset = windowOutputFloats + (totalBaseOffset & 1);  // add 1 if odd
-    uint rocfftScratchSize = static_cast<uint>(windowLength) + static_cast<uint>(alignedOffset) +
-                             static_cast<uint>(dstDescPtr->n) * fftOutputStride * 2;
-    bool useRocFFT = (rocfftScratchSize <= SPECTROGRAM_MAX_SCRATCH_MEMORY);
+    size_t rocfftScratchSize = static_cast<size_t>(windowLength) + alignedOffset +
+                               static_cast<size_t>(dstDescPtr->n) * fftOutputStride * 2;
+    bool useRocFFT = (rocfftScratchSize <= static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY));
 
     if (useRocFFT) {
         // rocFFT-based implementation path

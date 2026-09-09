@@ -142,11 +142,12 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
     rpp_fft_build_bitrev(plan.bitRevM, plan.m);
     rpp_fft_build_twiddles(plan.twiddlesM, plan.m);
 
+    constexpr Rpp64f PI = 3.141592653589793238462643383279502884;
     plan.chirp.resize(nfft);
     for (Rpp32s k = 0; k < nfft; k++) {
         // exp(-pi*i*k^2/n); reduce k^2 mod 2n to keep the argument small and precise
         Rpp64s k2mod = ((Rpp64s)k * (Rpp64s)k) % (2LL * (Rpp64s)nfft);
-        Rpp64f ang = -M_PI * (Rpp64f)k2mod / (Rpp64f)nfft;
+        Rpp64f ang = -PI * (Rpp64f)k2mod / (Rpp64f)nfft;
         plan.chirp[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
     }
 
