@@ -3,9 +3,11 @@
 
 #pragma once
 
-#include <hipblaslt/host_numerics/HostComparison.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <optional>
+#include <roc/host_numerics/comparison.hpp>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hipblaslt::host_numerics
@@ -18,29 +20,25 @@ namespace hipblaslt::host_numerics
         bool                computeUlp       = false;
         bool                assertNorm       = false;
         hipblasComputeType_t computeType      = HIPBLAS_COMPUTE_32F;
-        hipDataType          inputTypeA       = HIP_R_32F;
-        hipDataType          inputTypeB       = HIP_R_32F;
+        roc::host_numerics::ScalarType inputTypeA       = roc::host_numerics::ScalarType::Float32;
+        roc::host_numerics::ScalarType inputTypeB       = roc::host_numerics::ScalarType::Float32;
     };
 
     struct MatmulValidationCase
     {
-        struct AllCloseTolerance
-        {
-            double absolute = 0.0;
-            double relative = 0.0;
-        };
+        using TensorPair = std::pair<roc::host_numerics::Tensor, roc::host_numerics::Tensor>;
 
-        std::vector<HostComparisonRequest> outputs;
+        std::vector<TensorPair> outputs;
         struct SideOutput
         {
-            HostComparisonRequest selected;
-            HostComparisonRequest norm;
-            bool useComputeNormPolicy = false;
+            TensorPair selected;
+            TensorPair norm;
+            bool       useComputeNormPolicy = false;
         };
         std::optional<SideOutput> maximum;
         std::optional<SideOutput> auxiliary;
         std::optional<SideOutput> bias;
-        AllCloseTolerance         allCloseTolerance;
+        roc::host_numerics::ComparisonTolerance allCloseTolerance;
     };
 
     struct MatmulValidationMetrics
