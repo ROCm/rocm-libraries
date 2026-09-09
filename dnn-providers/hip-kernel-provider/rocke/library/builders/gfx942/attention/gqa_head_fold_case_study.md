@@ -59,7 +59,7 @@ The 4× cut in `grid.x` is repaid by the 4× rise in `grid.y`.
 
 ## 3. The mechanism, measured
 
-Discrete gfx942 GPU, ROCm 7.13, sq=8192, bs=16, 7 launches per arm, `rocprofv3 --pmc
+gfx942 part A, ROCm 7.13, sq=8192, bs=16, 7 launches per arm, `rocprofv3 --pmc
 TCC_MISS_sum TCC_HIT_sum`. Both arms are the same builder; the fold-off arm forces
 `gfx942_gqa_fold_eligible` false.
 
@@ -79,7 +79,7 @@ Q/O traffic is unchanged by the fold.
 ## 4. Wall clock
 
 `prefill/gqa_head_fold_bench.py`, bf16 D128 GQA 32/8, `sliding_window=4096`,
-warmup 5 / 20 attempts, discrete gfx942 GPU, ROCm 7.13:
+warmup 5 / 20 attempts, gfx942 part A, ROCm 7.13:
 
 | sq | bs | nofold ms | fold ms | speedup |
 |---:|---:|---:|---:|---:|
@@ -100,12 +100,13 @@ warmup 5 / 20 attempts, discrete gfx942 GPU, ROCm 7.13:
 at ~5% from 4096 upward. Both block sizes benefit; `bs=16` is the busier gather
 (`BPT = BN // BS = 2` block-table entries per 32-key tile vs 1 at `bs=32`).
 
-**Part sensitivity is real and worth recording.** The same sweep on a gfx942 APU
-part gives **+0.6% to +13.1%**, settling at ~4.0-4.2% for long sequences instead
-of ~5.3%. A traffic optimisation depends on the memory system it is relieving, so
-quote the part with the number, and lead with the sustained long-sequence figure
-rather than the short-sequence peak. Two independent runs on the APU part agreed
-to within 0.1 points, so the difference is the part, not noise.
+**Part sensitivity is real and worth recording.** The same sweep on a second
+gfx942 part, with a different memory topology, gives **+0.6% to +13.1%**, settling
+at ~4.0-4.2% for long sequences instead of ~5.3%. A traffic optimisation depends
+on the memory system it is relieving, so quote the part with the number, and lead
+with the sustained long-sequence figure rather than the short-sequence peak. Two
+independent runs on that second part agreed to within 0.1 points, so the
+difference is the part, not noise.
 
 ## 5. Correctness
 

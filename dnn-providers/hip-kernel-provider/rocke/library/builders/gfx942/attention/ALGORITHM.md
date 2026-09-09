@@ -374,10 +374,10 @@ same kernel with the predicate forced false — same builder, so the baseline ar
 the exact pre-fold kernel. bf16 D128 GQA 32/8, `sliding_window = 4096`, block sizes
 16 and 32, seqlens 512-16384, ROCm 7.13, two different gfx942 parts:
 
-| part | range over 12 points | at seqlen >= 4096 |
+| gfx942 part | range over 12 points | at seqlen >= 4096 |
 |---|---|---|
-| discrete gfx942 GPU | +5.2% to +21.3% | ~5.3% |
-| gfx942 APU | +0.6% to +13.1% | ~4.0-4.2% |
+| part A | +5.2% to +21.3% | ~5.3% |
+| part B (different memory topology) | +0.6% to +13.1% | ~4.0-4.2% |
 
 **No regression at any point on either part.** Quote the part with the number: the
 fold removes memory traffic, so how much wall clock that buys depends on the memory
