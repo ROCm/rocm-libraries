@@ -1066,6 +1066,8 @@ public:
     // Max element index the kernel would compute for a given I/O side.
     size_t MaxKernelIndex(io_data_label io) const
     {
+        // Counted in scalar_type units; the complex-as-real x2 for r2c/c2r
+        // callbacks always happens in size_t in the wrapper.
         // Offsets (iOffset/oOffset) are applied to base pointers before
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;

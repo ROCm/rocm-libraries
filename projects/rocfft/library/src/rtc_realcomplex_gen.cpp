@@ -649,7 +649,6 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
-    src += rtc_kint_type_decl(specs.itype);
     src += rtc_precision_type_decl(specs.precision);
     src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
