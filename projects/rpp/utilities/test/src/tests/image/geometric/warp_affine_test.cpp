@@ -63,7 +63,12 @@ struct WarpAffineParams {
 // hide the real warp_affine kernel defects this test surfaces:
 //   #15 HOST bilinear reads the last column/row one texel short (all HOST_*_BILINEAR red)
 //   #16 I8 out-of-bounds fill is 0, not black -128 (I8 shift/halfshift red on both backends)
-//   #17 HIP partial-ROI placement diverges from HOST (all HIP_*_PartialRoi red)
+//   #17 the ROI origin is ignored: both backends map the origin-based output index straight to a
+//       source coordinate while still clipping to the absolute ROI rectangle, so an identity warp
+//       over a partial ROI is part black instead of the ROI content (all *_PartialRoi red)
+//   #18 on top of #17, HIP's partial-ROI placement also diverges from HOST -- with the frames
+//       mixed the two backends do not even agree with each other (HIP_*_PartialRoi red for a
+//       second, separate reason; not isolated further since #17 has to be fixed first)
 double warp_affine_tolerance(DType dt, RpptInterpolationType interp) {
     // Nearest-neighbour copies a texel verbatim, so it is bit-exact for every dtype.
     if (interp == NEAREST_NEIGHBOR) return 0.0;

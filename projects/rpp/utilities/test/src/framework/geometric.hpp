@@ -111,11 +111,11 @@ inline auto quantizing_store(DType dt) {
 // quantized result written packed at the destination origin. dst outside the written region is left
 // as the caller initialized it.
 //
-// The source is sampled in the ABSOLUTE image frame (not ROI-local): RPP's warp maps the origin-
-// based output index straight to a source coordinate and ignores the ROI offset (the ROI only sets
-// the output size and the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is
-// black). Ops whose source region is placed differently add the offset inside their own invMap;
-// this keeps the driver's sampling model uniform.
+// The source is sampled in the ABSOLUTE image frame (not ROI-local), and the ROI sets both the
+// output size and the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is
+// black. An op whose transform is naturally ROI-relative -- the warps, which act about the ROI
+// centre -- adds the ROI origin inside its own invMap; this keeps the driver's sampling model
+// uniform and leaves the frame choice with the op that owns the transform.
 //
 // invMap signature: void(Rpp32u n, double outX, double outY, double& srcX, double& srcY)
 //   outX/outY are origin-based output pixel indices; the op owns any pixel-center (+0.5)

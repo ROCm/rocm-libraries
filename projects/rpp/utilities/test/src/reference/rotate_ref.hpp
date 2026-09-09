@@ -47,8 +47,10 @@ Description
   being anticlockwise. Being a warp, it inverse-maps: for each output pixel the
   source coordinate is the output coordinate rotated about the centre.
 
-  The output index is origin-based and the source coordinate is absolute
-  (full-image frame). Like warp_affine and warp_perspective, RPP sizes the
+  The output index is origin-based within the ROI-sized output region, and the
+  rotation is about the ROI centre, so the source coordinate comes out
+  ROI-relative and the ROI origin (x0,y0) is added to reach the absolute
+  (full-image) frame. Like warp_affine and warp_perspective, RPP sizes the
   output from the ROI and bounds valid samples to the ROI rectangle, outside
   which the sample is black. Sampling, interpolation, border and quantize are
   handled by geometric_reference(), shared with the other warps.
@@ -56,8 +58,8 @@ Description
 Expression
   With dx = outX - cx, dy = outY - cy and R(theta) = [cos -sin; sin cos]:
 
-  srcX = cx + dx*cos(theta) - dy*sin(theta)
-  srcY = cy + dx*sin(theta) + dy*cos(theta)
+  srcX = x0 + cx + dx*cos(theta) - dy*sin(theta)
+  srcY = y0 + cy + dx*sin(theta) + dy*cos(theta)
 
 Notes
   The public header documents neither the centre of rotation nor the exact
@@ -70,6 +72,11 @@ Notes
 
   Cardinal angles (0/90/180/270) map to integer source coordinates, so the
   golden is bit-exact there.
+
+  rotate runs on the shared warp_affine machinery and so inherits its
+  ROI-origin defect: the kernels omit the +x0/+y0 above, making angle 0 over a
+  partial ROI a part-black image rather than the ROI content. Every
+  partial-ROI case is on the skip list; see warp_affine_ref.hpp.
 */
 template <typename T>
 void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
@@ -83,8 +90,8 @@ void rotate_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const R
                                const double theta = static_cast<double>(angleDeg[n]) * kPi / 180.0;
                                const double ct = std::cos(theta), st = std::sin(theta);
                                const double dx = ox - cx, dy = oy - cy;
-                               sx = cx + dx * ct - dy * st;
-                               sy = cy + dx * st + dy * ct;
+                               sx = b.x0 + cx + dx * ct - dy * st;
+                               sy = b.y0 + cy + dx * st + dy * ct;
                            });
 }
 

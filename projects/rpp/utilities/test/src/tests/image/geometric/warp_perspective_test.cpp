@@ -64,8 +64,9 @@ struct WarpPerspectiveParams {
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
 // warp_perspective kernel defects this test surfaces (shared with warp_affine
-// findings #15-#17): HOST bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128),
-// and HIP partial-ROI placement divergence.
+// findings #15-#18): HOST bilinear last col/row off-by-one, I8 out-of-bounds fill = 0 (not -128),
+// the ignored ROI origin that leaves every partial-ROI case part black, and HIP's further
+// partial-ROI placement divergence from HOST on top of it.
 double warp_perspective_tolerance(DType dt, RpptInterpolationType interp) {
     // Nearest-neighbour copies a texel verbatim; bit-exact for the w==1 (integer-coord) cases.
     if (interp == NEAREST_NEIGHBOR) return 0.0;

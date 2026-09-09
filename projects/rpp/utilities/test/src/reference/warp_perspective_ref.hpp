@@ -45,28 +45,30 @@ Description
   coordinate to sample, in homogeneous form -- the projective generalization
   of the remap contract output(x,y) = input(mapx(x,y), mapy(x,y)).
 
-  The output index (outX, outY) is origin-based and the source coordinate is
-  absolute (full-image frame): RPP's warp ignores the ROI offset for the
-  mapping and uses the ROI only to size the output and bound the valid-source
-  rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is black. Output
-  pixel centres are at integer indices; sampling, interpolation, border and
-  quantize are handled by geometric_reference(), shared with warp_affine.
+  The output index (outX, outY) is origin-based within the ROI-sized output
+  region. The matrix yields a ROI-relative source coordinate, to which the ROI
+  origin (x0,y0) is added to reach the absolute (full-image) frame that
+  geometric_reference() samples in, bounded by the valid-source rectangle
+  [x0,x0+w) x [y0,y0+h), outside which the sample is black. Output pixel
+  centres are at integer indices; sampling, interpolation, border and quantize
+  are handled by geometric_reference(), shared with warp_affine.
 
 Expression
   cx = floor(roiW/2), cy = floor(roiH/2), dx = outX - cx, dy = outY - cy
 
   w    =  m6*dx + m7*dy + m8
-  srcX = (m0*dx + m1*dy + m2) / w + cx
-  srcY = (m3*dx + m4*dy + m5) / w + cy
+  srcX = x0 + (m0*dx + m1*dy + m2) / w + cx
+  srcY = y0 + (m3*dx + m4*dy + m5) / w + cy
 
   As in warp_affine, the matrix acts about the truncated centre of the ROI.
 
 Notes
   The public header does not document the matrix direction or the mapping
-  frame. The destination->source direction and absolute-frame / origin-based
-  output placement are assumed, matching rppt_warp_affine (whose conventions
-  were confirmed against the op via pure-translation cases) since the two
-  share the same geometric machinery.
+  frame. The destination->source direction and the origin-based output
+  placement match rppt_warp_affine (whose conventions were confirmed against
+  the op via pure-translation cases) since the two share the same geometric
+  machinery -- including the ROI-origin defect described there, which is why
+  every partial-ROI case is on the skip list.
 */
 template <typename T>
 void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
@@ -81,8 +83,8 @@ void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const 
                                const double cy = static_cast<double>(b.h / 2);
                                const double dx = ox - cx, dy = oy - cy;
                                const double w = m[6] * dx + m[7] * dy + m[8];
-                               sx = (m[0] * dx + m[1] * dy + m[2]) / w + cx;
-                               sy = (m[3] * dx + m[4] * dy + m[5]) / w + cy;
+                               sx = b.x0 + (m[0] * dx + m[1] * dy + m[2]) / w + cx;
+                               sy = b.y0 + (m[3] * dx + m[4] * dy + m[5]) / w + cy;
                            });
 }
 

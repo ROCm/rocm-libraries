@@ -62,7 +62,8 @@ struct RotateParams {
 
 // Tolerances are set from legitimate numeric error only; they are NOT loosened to hide the real
 // warp kernel defects this test surfaces (shared machinery): HOST bilinear last col/row off-by-one,
-// I8 out-of-bounds fill = 0 (not -128), and HIP partial-ROI placement divergence.
+// I8 out-of-bounds fill = 0 (not -128), the ignored ROI origin that leaves every partial-ROI case
+// part black, and HIP's further partial-ROI placement divergence from HOST on top of it.
 double rotate_tolerance(DType dt, RpptInterpolationType interp) {
     // Nearest-neighbour copies a texel verbatim; bit-exact at cardinal angles (integer coords).
     if (interp == NEAREST_NEIGHBOR) return 0.0;
