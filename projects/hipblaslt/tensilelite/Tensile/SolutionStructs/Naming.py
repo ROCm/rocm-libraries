@@ -236,7 +236,17 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.discard("TDMFuse")
 
-  # LDSSegmentInterleave and TDMFuse opt in above.
+  # Same rule for TDMCross, and for the same reason: 0 is the arrangement
+  # every shipped kernel already has, so TDMC0 would rename all of them and
+  # shift dedup without asserting any difference. Precedent is TDMFuse above
+  # (no row carries _TDMF0_) and PrefetchGlobalReadA/B, which the surviving
+  # equal-pair solutions leave unset while their names carry _PGR2_.
+  if state.get("TDMCross", 0):
+    requiredParametersTemp.add("TDMCross")
+  else:
+    requiredParametersTemp.discard("TDMCross")
+
+  # LDSSegmentInterleave, TDMFuse and TDMCross opt in above.
   # PGRA/PGRB use _ABSENT_KEY_LEVEL when _NAME_ABSENT_KEYS is True.
   for key in sorted(requiredParametersTemp):
     if key == "CustomKernelName":

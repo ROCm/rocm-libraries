@@ -79,7 +79,8 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGat
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
-from .Components.TDMFuse import tdmWaveComponents, tdmFuseAMx, tdmFusePaired, tdmWavePartition
+from .Components.TDMFuse import tdmWaveComponents, tdmFuseAMx, tdmFusePaired, \
+                                tdmWavePartition, tdmGroupPartner
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -425,12 +426,20 @@ class KernelWriterAssembly(KernelWriter):
     and the prologue that built the descriptors always put the A side on the
     even waves. Identify the A side by name so a reversed call still programs
     each set on the waves that read it.
+
+    Which member is even is read off the wave assignment rather than tested
+    against TDMFuse=1, so TDMCross reaches every parity site through the
+    one function that decides it.
     """
     if not tPA["tensorChar"].endswith("A"):
       tPA, tPB = tPB, tPA
-    if self.tdmFusePaired(kernel) and tPA["tensorChar"].startswith("MX"):
-      return tPB, tPA
-    return tPA, tPB
+    # The three-way dispatch has no "even member" to name, and its own helpers
+    # (_applyStaggerTdmFuseAMx, _hoistTdmFuseAMxWrapUSel) intercept before here.
+    if self.tdmFuseAMx(kernel) or not self.isTdmWaveSeparated(kernel):
+      return tPA, tPB
+    if 0 in tdmWavePartition(kernel, tPA["tensorChar"])[1]:
+      return tPA, tPB
+    return tPB, tPA
 
   def _tdmSetMembersByParity(self, kernel, tP1, tP2):
     """(evenTc, oddTc) actually carried by the descriptor set this call programs.
@@ -443,12 +452,17 @@ class KernelWriterAssembly(KernelWriter):
     would hand each set the other set's odd-wave wrap value. Every other
     grouping keeps both members of a set inside one argument pair, so this
     returns the parity order unchanged for them.
+
+    The odd member is the even member's partner inside its descriptor group,
+    read from the grouping table. That is the same answer the hard-coded
+    {A<->MXSA, B<->MXSB} map gave for TDMFuse=1, and it stays inert for the
+    groupings whose sets already match the argument pair.
     """
     tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tP1, tP2)
     tcEven = tPEven["tensorChar"]
-    if not self.tdmFusePaired(kernel):
+    if not self.isTdmWaveSeparated(kernel):
       return tcEven, tPOdd["tensorChar"]
-    return tcEven, {"A": "MXSA", "MXSA": "A", "B": "MXSB", "MXSB": "B"}[tcEven]
+    return tcEven, tdmGroupPartner(kernel, tcEven, tPOdd["tensorChar"])
 
   def _tdmSecondMemberIsOdd(self, kernel, tP1, tP2):
     sideA, sideB = (tP1, tP2) if tP1["tensorChar"].endswith("A") else (tP2, tP1)
