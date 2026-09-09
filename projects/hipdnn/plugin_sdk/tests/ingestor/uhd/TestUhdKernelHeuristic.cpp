@@ -495,18 +495,24 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     EXPECT_EQ(ranked.front().kernelId, testId(0x02)); // still the model's order
 }
 
-/// RFC 0019 §6.3 check 2: `set(UED.knobs) == set($kernel.* axes the model reads)`. Both
-/// directions of a mismatch fail silently, which is why the RFC asks for set equality rather
-/// than a subset test, and why both are pinned here.
+/// RFC 0019 §6.3 check 2: `set($kernel.* axes the model reads) ⊆ set(UED.knobs)`. The
+/// directions are not symmetric.
 ///
-/// The expected outcome is a degraded ranking, not a failure: §5 step 7 requires a broken
-/// feature contract to leave the engine selecting, by declared order.
-TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsRefused)
+/// A knob the model does not rank on is legal. `UED.knobs` is the engine's public knob
+/// surface -- its UMDs and its callers read it -- so it cannot be reshaped by whatever a
+/// training run happened to keep. The common case is a knob whose column carried one
+/// value: training drops it because it cannot separate candidates, and the engine still
+/// has to declare it. Requiring equality here made every such model unloadable, which is
+/// how the gfx942 attention UHD went unused while reporting a successful promotion.
+///
+/// Removing the knob is the kernel author's call, informed by `uhd_gen knobs`. The
+/// runtime's job is to say so and rank anyway.
+TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRanksAnyway)
 {
-    // The caller can turn split_k and the heuristic will not react. Nothing in the output
-    // distinguishes that from a knob the model happens to weigh lightly.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_extra_knob");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_WARN);
     const auto heuristic = makeKernelHeuristic(
         modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"});
     ASSERT_NE(heuristic, nullptr);
@@ -515,9 +521,11 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsRefused)
     const MatchContext context{graph, 0, properties};
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(ranked.size(), 2U);
-    // Declared order: the high-priority kernel leads, which is exactly what the model would
-    // have overturned had it been used.
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+    // The model decides: at 2048 it prefers the large tile, overturning the priority the
+    // declared-order fallback would have honoured.
+    EXPECT_EQ(ranked.front().kernelId, testId(0x02));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "split_k"))
+        << "an unread dial has to be visible, even though it is not fatal";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
@@ -671,9 +679,11 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescri
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_degraded");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    // A knob set the model does not read breaks the §6.3 contract, so ranking degrades.
-    const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"});
+    // An axis the UED does not expose still breaks the §6.3 contract, so ranking degrades.
+    // The reverse -- a knob the model ignores -- no longer does, so it cannot be used to
+    // reach the degraded path here.
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {"split_k"});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1099,9 +1109,10 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition(  // NOLINT(misc-use-int
     }
     if(condition == "knobs_disagree_with_axes")
     {
-        // §6.3 check 2: the UED advertises a knob the model has no axis for.
+        // §6.3 check 2: the model ranks on an axis the UED never exposed. The reverse is
+        // legal now -- an exposed knob the model ignores warns and still ranks.
         const auto fixture = writeFixture(dir, preferLargeTiles());
-        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", {"tile_m", "split_k"});
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", {"split_k"});
     }
     if(condition == "calibrated_and_minimising")
     {
@@ -1370,11 +1381,12 @@ TEST(TestIngestorUhdEngineKnobContract, MakeEngineCarriesTheUedsKnobsIntoTheMode
               "model");
 }
 
-TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelDoesNotRankOnIsRefused)
+TEST(TestIngestorUhdEngineKnobContract, AnEngineRankingOnAnAxisItDoesNotExposeIsRefused)
 {
     // The comparison itself, so neither of the two cases above can be satisfied by a check
-    // that has quietly stopped comparing anything. Same engine, same model; the UED adds a
-    // knob the model has no axis for, which §6.3 requires be refused.
+    // that has quietly stopped comparing anything. Same engine, same model; the UED omits
+    // the knob the model ranks on, which §6.3 requires be refused -- selection would depend
+    // on something the caller has no way to vary.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knob_mismatch");
     const auto fixture = writeFixture(dir.path(),
                                       preferLargeTiles(),
@@ -1385,8 +1397,29 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelDoesNotRank
                                       ENGINE_SIGNATURE);
 
     EXPECT_EQ(provenanceOfEngineRanking(
-                  engineSetRankingOnTileM(dir.path(), fixture, {"tile_m", "split_k"})),
+                  engineSetRankingOnTileM(dir.path(), fixture, {"split_k"})),
               "declared_order");
+}
+
+TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelIgnoresStillRanks)
+{
+    // The case the equality check used to refuse. A constant knob is dropped by training
+    // and kept by the UED, because the UED's knob list is what the engine's UMDs and its
+    // callers read -- it does not get reshaped by a training run. This is the shape of the
+    // gfx942 attention engine, whose model went unused for exactly this reason.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_unread_knob");
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      std::nullopt,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
+    // `split_k` is declared by the schema and carried by the kernels, so it is a legal
+    // knob; the model simply does not rank on it, which is the constant-knob shape.
+    EXPECT_EQ(provenanceOfEngineRanking(
+                  engineSetRankingOnTileM(dir.path(), fixture, {"tile_m", "split_k"})),
+              "model");
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

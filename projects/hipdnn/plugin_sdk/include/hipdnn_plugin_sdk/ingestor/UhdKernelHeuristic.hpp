@@ -111,11 +111,17 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
 ///
 /// @brief The `$kernel.*` axes a feature signature actually reads.
 ///
-/// RFC 0019 §6.3 check 2 requires `F == set(UED.knobs)`, where F is this set: the knobs an
-/// engine exposes must be exactly the axes its model ranks on. Both directions matter and both
-/// fail silently. A knob the model does not read is a dial the caller can turn while the
-/// heuristic ignores it; an axis with no knob is a model ranking on something the API never
-/// lets anyone vary.
+/// RFC 0019 §6.3 check 2 requires `F ⊆ set(UED.knobs)`, where F is this set. The two
+/// directions are not symmetric, and the RFC originally asked for equality on the
+/// assumption that the generation tool derives the knob list *from* the trained feature
+/// set -- which would make a constant knob vanish from the UED the moment training
+/// dropped it as unsplittable.
+///
+/// It cannot: `UED.knobs` is the engine's public knob surface, read by its UMDs and by
+/// callers who tune, so a training run must not reshape it. A model that ignores a knob
+/// is a dial the heuristic does not read -- worth a warning, and normal for a knob whose
+/// column carried one value. A model ranking on an axis the UED never exposed is still a
+/// load error: the caller cannot vary what selection depends on.
 inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::string>& signature)
 {
     std::unordered_set<std::string> axes;
@@ -196,28 +202,61 @@ public:
             // read once per engine.
             auto config = configFrom(descriptor);
 
-            // RFC 0019 §6.3 check 2: the exposed knobs *are* the model's feature axes.
-            // Returning nullptr degrades to declared order, which is what §5 step 7 asks for
-            // on a broken feature contract -- the model's inputs are not the ones it was
-            // trained on, so its scores would be wrong.
+            // RFC 0019 §6.3 check 2: every axis the model ranks on must be a knob the
+            // engine exposes. Returning nullptr degrades to declared order, which is what
+            // §5 step 7 asks for on a broken feature contract -- the model would be
+            // ranking on something the caller has no way to vary.
             const auto axes = kernelAxesOf(config.featuresSignature);
             const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
-            if(axes != exposed)
+            const auto join = [](const auto& names) {
+                std::string text;
+                for(const auto& name : names)
+                {
+                    text += (text.empty() ? "" : ", ") + name;
+                }
+                return text.empty() ? std::string("<none>") : text;
+            };
+
+            std::vector<std::string> unexposed;
+            for(const auto& axis : axes)
             {
-                const auto join = [](const auto& names) {
-                    std::string text;
-                    for(const auto& name : names)
-                    {
-                        text += (text.empty() ? "" : ", ") + name;
-                    }
-                    return text.empty() ? std::string("<none>") : text;
-                };
+                if(exposed.count(axis) == 0)
+                {
+                    unexposed.push_back(axis);
+                }
+            }
+            if(!unexposed.empty())
+            {
+                std::sort(unexposed.begin(), unexposed.end());
                 HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describedBy << " exposes knobs [" << join(exposed)
-                            << "] but its model ranks on [" << join(axes)
-                            << "]; RFC 0019 §6.3 requires these to be the same set, so the "
-                               "model is not used and kernels rank by priority, then id");
+                    "uhd: " << describedBy << " ranks on [" << join(unexposed)
+                            << "], which its UED does not expose as knobs [" << join(exposed)
+                            << "]; RFC 0019 §6.3 requires the model's axes to be exposed, so "
+                               "the model is not used and kernels rank by priority, then id");
                 return nullptr;
+            }
+
+            // The other direction is legal and expected. A knob whose column carried one
+            // value cannot separate candidates, so training drops it from the signature --
+            // and the UED still has to declare it, because it is the engine's public knob
+            // surface and its UMDs and callers read it. Reported so an unread dial is
+            // visible, never fatal: `uhd_gen knobs` is what tells the kernel author
+            // whether to remove it, and that call is theirs.
+            std::vector<std::string> unread;
+            for(const auto& knob : exposed)
+            {
+                if(axes.count(knob) == 0)
+                {
+                    unread.push_back(knob);
+                }
+            }
+            if(!unread.empty())
+            {
+                std::sort(unread.begin(), unread.end());
+                HIPDNN_PLUGIN_LOG_WARN("uhd: " << describedBy << " exposes knobs ["
+                                               << join(unread)
+                                               << "] its model does not rank on; selection "
+                                                  "ignores them");
             }
 
             auto adapter = uhd::makeUhdAdapter(config);
