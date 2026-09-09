@@ -3707,7 +3707,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
-
+      if kernel["TDMPlusLdsBuf"]:
+        isSwapAndResetLwoIter = (u == 0)
       extraComment = ""
       if isLastLoop:
         extraComment += " (last unrolled loop)"
