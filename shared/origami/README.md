@@ -391,7 +391,7 @@ cmake --install build/
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `ORIGAMI_BUILD_SHARED_LIBS` | Build `liborigami` shared instead of static | `ON` |
+| `ORIGAMI_BUILD_SHARED_LIBS` | Build `liborigami` shared instead of static | `ON` for a top-level build; `OFF` when embedded as a subproject |
 | `ORIGAMI_BUILD_FROM_SOURCE` | Add `origami-cpp/` and build liborigami from this tree instead of calling `find_package(origami)` | `ON` (the wheel sets it `OFF`) |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Build the Catch2 C++ suite, and the Python suite when `ORIGAMI_ENABLE_PYTHON=ON` | `OFF` |
