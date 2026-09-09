@@ -484,6 +484,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
+    // Synthetic throttle cycles charged to DS placement in the current WMMA.
+    // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
+    int dsSchedulingBudgetUsed_ = 0;
     // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
     std::vector<int> dsTargetPerWindow_;
 
@@ -1060,6 +1063,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     activeWmmaBlockedScale_ = node->inst->getHwInstDesc()->blockedScaleMask;
     activeWmmaNode_ = node;
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
+    dsSchedulingBudgetUsed_ = 0;
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
@@ -1105,17 +1109,21 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
-    std::tuple<bool, int, int> bestKey{};
+    std::tuple<int, int, int> bestKey{};
+    const bool hideBudgetPending = nonWmmaIssuedThisRegion_ < cumulativeWmmaHideBudget_;
 
-    // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
-    // (2) global_read beats other non-WMMA kinds; (3) smallest id.
+    // Ordering, lowest key first: (1) genuinely free work; (2) a throttled DS
+    // whose pacing debt fits the active WMMA's scheduling budget; (3) work that
+    // still needs a real RAW/hazard stall. Within a tier, global_read beats
+    // other non-WMMA kinds, then smallest id wins.
     // Producer-side hazard hoisting is handled separately by
     // decidePromote(), not here — a flagged producer competes on equal terms with
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
+        const int availabilityRank = candWait == 0 ? 0 : (candKind == kLocalRead ? 1 : 2);
         const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
-        if (considerBest(cand, std::make_tuple(candWait > 0, kindRank, (int)cand->id), best,
+        if (considerBest(cand, std::make_tuple(availabilityRank, kindRank, (int)cand->id), best,
                          bestKey)) {
             kind = candKind;
             bestWait = candWait;
@@ -1137,7 +1145,19 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int dsThrottleWait = 0;
     if (dsBaseOk) {
         dsThrottleWait = dsReadThrottleWait();
-        consider(pickedDS, kLocalRead, dsThrottleWait);
+        const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
+        int schedulingSpace = activeWmmaLatency_ - schedulingPos;
+        for (int pos = schedulingPos; pos < activeWmmaLatency_; ++pos) {
+            if (isBlockedCycle(pos)) {
+                schedulingSpace = pos - schedulingPos;
+                break;
+            }
+        }
+        const bool fitsSchedulingBudget =
+            hideBudgetPending || dsThrottleWait == 0 ||
+            (schedulingPos < activeWmmaLatency_ &&
+             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
+        if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
@@ -1848,8 +1868,16 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
                                      << smallestPickable->id << " kind=" << pickKind
                                      << " wait=" << pickWait << "\n");
-                // Pay any hidden stall (hidden under the WMMA latency) before issuing.
-                if (pickWait > 0) advanceTime(pickWait);
+                // DS throttle wait consumes only its independent scheduling
+                // budget. RAW/hazard waits remain genuine elapsed stalls.
+                if (pickWait > 0) {
+                    if (pickKind == kLocalRead) {
+                        dsSchedulingBudgetUsed_ += pickWait;
+                        dsReadInflight_.advanceThrottle(pickWait);
+                    } else {
+                        advanceTime(pickWait);
+                    }
+                }
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
 
@@ -1913,16 +1941,25 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     int fallbackKind = -1;
     int fallbackWait = 0;
     if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
-        // Throttle (queue depth) is skipped for progress, but the hazard gate is
-        // unconditional (see config_.hazardRules) and still has to be paid here
-        // too.
-        int waitCycles = fallbackWait;
+        // RAW/hazard and credit-drain waits are real elapsed time. A DS throttle
+        // wait is only pacing debt: real waits satisfy as much of it as they
+        // cover, and any remainder advances only the independent throttle clock.
+        int realWait = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
-            waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
-        if (fallbackKind == kLocalRead) waitCycles = std::max(waitCycles, dsReadThrottleWait());
-        if (waitCycles > 0) advanceTime(waitCycles);
+            realWait = std::max(realWait, globalReadInflight_.minResidual());
+        if (realWait > 0) advanceTime(realWait);
+
+        int throttleWait = 0;
+        if (fallbackKind == kLocalRead) {
+            throttleWait = dsReadThrottleWait();
+            if (throttleWait > 0) {
+                dsSchedulingBudgetUsed_ += throttleWait;
+                dsReadInflight_.advanceThrottle(throttleWait);
+            }
+        }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
-                             << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
+                             << " kind=" << fallbackKind << " wait=" << realWait
+                             << " throttleWait=" << throttleWait << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
@@ -1989,6 +2026,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaBlockedScale_ = 0;
     activeWmmaNode_ = nullptr;
     nonWmmaFillsSinceActiveWmma_ = 0;
+    dsSchedulingBudgetUsed_ = 0;
     nonWmmaIssuedThisRegion_ = 0;
     cumulativeWmmaHideBudget_ = 0;
     hideBudget_ = {};
