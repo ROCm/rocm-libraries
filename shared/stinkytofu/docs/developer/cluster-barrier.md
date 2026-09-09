@@ -128,9 +128,10 @@ Multiple loads sharing the same workgroup signal receive one handshake.
 
 1. The **wait anchor** (Rule 3(b)) is the workgroup `s_barrier_signal -1`.
 2. The **signal anchor** (Rule 3(a)) is found by walking backward from the wait
-   anchor until it stands `kRule3SignalLeadCycles` estimated cycles ahead of it,
-   somewhere the handshake may legally go. The lead is a target, not a cap: a spot
-   inside a live SCC range is not one the walk may take, so it keeps climbing, and
+   anchor until it stands `ClusterBarrierRule3SignalLeadCycles` estimated cycles
+   ahead of it (default 100; 0 co-locates signal and wait), somewhere the
+   handshake may legally go. The lead is a target, not a cap: a spot inside a
+   live SCC range is not one the walk may take, so it keeps climbing, and
    `kRule3SignalMaxLeadCycles` is what bounds the answer. Past that ceiling it
    turns around and sinks back towards the wait instead.
 

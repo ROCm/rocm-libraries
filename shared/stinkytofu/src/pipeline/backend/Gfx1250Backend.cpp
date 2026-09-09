@@ -21,11 +21,12 @@
  *
  * ************************************************************************ */
 /// @file Gfx1250Backend.cpp
-/// @brief Registers the gfx1250 (RDNA4, arch 12.5.0) optimization pipeline with BackendRegistry.
+/// @brief Registers the gfx1250 (RDNA4, arch 12.5.0) optimization pipeline with
+/// BackendRegistry.
 ///
-/// When this translation unit is linked, the gfx1250 pipeline builder is registered globally
-/// so that Backend(module).runOptimization() automatically picks it up for modules with
-/// arch {12, 5, 0}.
+/// When this translation unit is linked, the gfx1250 pipeline builder is
+/// registered globally so that Backend(module).runOptimization() automatically
+/// picks it up for modules with arch {12, 5, 0}.
 
 #include <algorithm>
 
@@ -72,10 +73,11 @@
 
 namespace stinkytofu {
 namespace {
-// Deliberately a literal triple rather than getArchTriple(GfxArchID::Gfx1250): this file is
-// compiled into every build, including a Gfx1250v0-only one where that enumerator does not
-// exist. Keying on {12,5,0} is also what gives v0 v1's pipeline, which is correct -- the two
-// steppings differ in instruction timing, not in which passes should run.
+// Deliberately a literal triple rather than getArchTriple(GfxArchID::Gfx1250):
+// this file is compiled into every build, including a Gfx1250v0-only one where
+// that enumerator does not exist. Keying on {12,5,0} is also what gives v0 v1's
+// pipeline, which is correct -- the two steppings differ in instruction timing,
+// not in which passes should run.
 constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
 /// Build the gfx1250 per-region optimization passes into a PassManager.
@@ -135,8 +137,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     configureModuleInstrumentations(mpm, moduleOptions, "module", debugStreams, &module);
 
     if (runScheduler || moduleOptions.EnableESM2) {
-        // strip delay_alu before scheduling (whole-kernel: entry + callable functions,
-        // so stale delay_alu does not survive into the emitted stream)
+        // strip delay_alu before scheduling (whole-kernel: entry + callable
+        // functions, so stale delay_alu does not survive into the emitted stream)
         mpm.addPass(createFunctionToModuleAdaptor(createRemoveDelayAluPass()));
         // strip s_wait_alu before scheduling (whole-kernel)
         mpm.addPass(createFunctionToModuleAdaptor(createRemoveWaitAluPass()));
@@ -149,12 +151,14 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
         // -- region: loopWithPrefetch + noLoadLoopBody --
-        // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped CFG, so they
-        // share one region adaptor. Either gate is enough to enter this block.
+        // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped
+        // CFG, so they share one region adaptor. Either gate is enough to enter
+        // this block.
         if (runScheduler || moduleOptions.EnableWaitCntInsertion) {
             PassFeatureConfig passFeatureConfig;
             if (runScheduler) {
                 passFeatureConfig.loopConfig.unrollGemm = true;
+                passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
                 passFeatureConfig.dagFeatures.distributeGlobalRead = true;
                 passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
@@ -170,7 +174,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
                     moduleOptions.GlobalReadDrainLatency;
-                // Same option as InsertClusterBarrierPass below (see cluster-barrier.md).
+                // Same option as InsertClusterBarrierPass below (see
+                // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 if (moduleOptions.DsReadPerWmma >= 0)
                     passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
@@ -226,21 +231,24 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // branches/labels are present when MSB configuration is materialized.
         if (moduleOptions.ClusterBarrier) {
             pm.addPass(createInsertClusterBarrierPass(
-                static_cast<StreamKMulticastMode>(moduleOptions.StreamKMulticast)));
+                static_cast<StreamKMulticastMode>(moduleOptions.StreamKMulticast),
+                /*rule3SignalLeadCycles=*/
+                moduleOptions.ClusterBarrierRule3SignalLeadCycles));
         }
 
-        // Build the CFG after the flat region splice-backs so RegionClonePass can match its
-        // start BB by label. InsertVgprMsb runs after RegionClonePass so the cloned BB gets
-        // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
-        // inherit the loop's src C MSB).
+        // Build the CFG after the flat region splice-backs so RegionClonePass can
+        // match its start BB by label. InsertVgprMsb runs after RegionClonePass so
+        // the cloned BB gets its MSB computed for its actual operands (chain-head
+        // src C is zeroed, so it must not inherit the loop's src C MSB).
         pm.addPass(createCFGBuilderPass());
 
-        // TDM load wave-sync barrier insertion (kernel scope). Must run after tensorcnt
-        // insertion (StinkyWaitCntInsertionPass, in the region adaptor above), so the
-        // s_wait_tensorcnt structure it keys on exists, and after this CFGBuilderPass,
-        // so predecessors are populated for the backward scan. Before RegionClone so
-        // cloned regions carry the barrier too. Inserts a workgroup barrier between an
-        // urgent and a deferrable tensor_load group. Off by default.
+        // TDM load wave-sync barrier insertion (kernel scope). Must run after
+        // tensorcnt insertion (StinkyWaitCntInsertionPass, in the region adaptor
+        // above), so the s_wait_tensorcnt structure it keys on exists, and after
+        // this CFGBuilderPass, so predecessors are populated for the backward scan.
+        // Before RegionClone so cloned regions carry the barrier too. Inserts a
+        // workgroup barrier between an urgent and a deferrable tensor_load group.
+        // Off by default.
         if (moduleOptions.TDMLoadWaveSync) {
             pm.addPass(createTDMLoadWaveSyncPass());
         }
@@ -280,22 +288,24 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
-    // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
-    // Per function, each in isolation (reuse never chains across a call site or a function
-    // boundary).
+    // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler
+    // + VGPR MSB). Per function, each in isolation (reuse never chains across a
+    // call site or a function boundary).
     mpm.addPass(createFunctionToModuleAdaptor(createSetMatrixReusePass()));
 
     // Run after the final CFG build but before flatten/SW-prefetch: this pass
-    // covers final per-function code, while SW-prefetch owns its hints' XCnt waits.
+    // covers final per-function code, while SW-prefetch owns its hints' XCnt
+    // waits.
     constexpr bool kEnableXcntDrainProfile = false;
     mpm.addPass(createGfx1250HazardModulePass(kEnableXcntDrainProfile));
 
     // Flatten callees + byte-layout tail (entry only, single linear stream).
     {
         PassManager pm = makeEntryPM(module, debugStreams);
-        // Re-merge callable functions into the entry at their ASM placement markers so
-        // SwInstructionPrefetchRelStaticPass sees a single linear stream / legacy emission
-        // order. After the multi-function passes above; no-op with no callable functions.
+        // Re-merge callable functions into the entry at their ASM placement markers
+        // so SwInstructionPrefetchRelStaticPass sees a single linear stream /
+        // legacy emission order. After the multi-function passes above; no-op with
+        // no callable functions.
         //
         // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
         // SwInstructionPrefetchRelStaticPass handles multiple functions directly.
@@ -303,30 +313,33 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // gfx1250 hardware-entrypoint prologue: `s_mov_b64 s[64:65], 0` + `v_nop` +
         // `global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT`.
         // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
-        // is a VMEM op that ignores EXEC); s[64:65] is never HW-initialized so zeroing
-        // it is free, and v_nop is a safe first VALU instruction that also covers the
-        // write-to-use delay before the prefetch reads the pair.
-        // Runs after flatten (so the entry's first instruction is the kernel's
-        // first) and before SW-prefetch insertion so the prefetch pass anchors
-        // its byte layout on the final entry (prologue included) and its
-        // CP-boundary coverage stays gap-free.
+        // is a VMEM op that ignores EXEC); s[64:65] is never HW-initialized so
+        // zeroing it is free, and v_nop is a safe first VALU instruction that also
+        // covers the write-to-use delay before the prefetch reads the pair. Runs
+        // after flatten (so the entry's first instruction is the kernel's first)
+        // and before SW-prefetch insertion so the prefetch pass anchors its byte
+        // layout on the final entry (prologue included) and its CP-boundary
+        // coverage stays gap-free.
         pm.addPass(createInsertInitialUnclausedVmemPass());
 
         // SW instruction prefetch — abs and PC-rel are mutually exclusive.
         // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel
         // (EnableSwInstructionPrefetchRelStatic).
         if (moduleOptions.EnableSwInstructionPrefetchAbs) {
-            // One knob enables both abs passes; they are mutually exclusive by regime:
-            //   - static  : entry-burst grid, emits for (32640, 65536]; no-ops for > 65536.
-            //   - dynamic : run-time-targeted (post-CP) policy. Runs the read-only analysis dump
-            //   for
+            // One knob enables both abs passes; they are mutually exclusive by
+            // regime:
+            //   - static  : entry-burst grid, emits for (32640, 65536]; no-ops for >
+            //   65536.
+            //   - dynamic : run-time-targeted (post-CP) policy. Runs the read-only
+            //   analysis dump for
             //     total > P(0)=32640; emits the predicated prefetch ladder (after
             //     label_MultiGemmEnd) for total > 65536. Dumps to
             //     <outputDir>/<kernel>/sw_prefetch_abs_dynamic_pass.txt.
-            // Both use the module overload (reads SwInstructionPrefetchAbsBaseSgpr + debug path).
-            // Dynamic runs FIRST so its analysis dump reflects the PRISTINE layout (before the
-            // static pass's entry burst shifts offsets). At any given size exactly one pass emits,
-            // so there is no co-mutation or baseSgpr contention.
+            // Both use the module overload (reads SwInstructionPrefetchAbsBaseSgpr +
+            // debug path). Dynamic runs FIRST so its analysis dump reflects the
+            // PRISTINE layout (before the static pass's entry burst shifts offsets).
+            // At any given size exactly one pass emits, so there is no co-mutation or
+            // baseSgpr contention.
             pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
             pm.addPass(createSwInstructionPrefetchAbsStaticPass(module));
         } else if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
@@ -335,8 +348,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             pm.addPass(createSwInstructionPrefetchRelDynamicPass(module));
         }
 
-        // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
-        // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
+        // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction +
+        // summary) to
+        // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same
+        // layout as Backend).
         pm.addPass(createAccumulateInstructionSizePass(module));
 
         // Pass the whole-kernel function list so removal applies kernel-wide
