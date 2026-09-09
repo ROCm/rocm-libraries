@@ -46,126 +46,164 @@ const auto& GetTestParams()
 
 } // namespace
 
-using GPU_UnitTestConvSolverConvHipConvFwd_FP16 = GPU_UnitTestConvSolverFwd_FP16;
-using GPU_UnitTestConvSolverConvHipConvBwd_FP16 = GPU_UnitTestConvSolverBwd_FP16;
-using GPU_UnitTestConvSolverConvHipConvWrw_FP16 = GPU_UnitTestConvSolverWrw_FP16;
+using GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16 = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16 = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16 = GPU_UnitTestConvSolverWrw_FP16;
 
-using GPU_UnitTestConvSolverConvHipConvFwd_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
-using GPU_UnitTestConvSolverConvHipConvBwd_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
-using GPU_UnitTestConvSolverConvHipConvWrw_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
+using GPU_UnitTestConvSolverConvHipConvFwdNchw_FP16 = GPU_UnitTestConvSolverFwd_FP16;
+using GPU_UnitTestConvSolverConvHipConvBwdNchw_FP16 = GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16 = GPU_UnitTestConvSolverWrw_FP16;
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvFwd_FP16, ConvHipConv)
+using GPU_UnitTestConvSolverConvHipConvFwdNhwc_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
+using GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
+using GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
+
+using GPU_UnitTestConvSolverConvHipConvFwdNchw_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
+using GPU_UnitTestConvSolverConvHipConvBwdNchw_BFP16 = GPU_UnitTestConvSolverBwd_BFP16;
+using GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvBwd_FP16, ConvHipConv)
+TEST_P(GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvWrw_FP16, ConvHipConv)
+TEST_P(GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvFwd_BFP16, ConvHipConv)
+TEST_P(GPU_UnitTestConvSolverConvHipConvFwdNchw_FP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvBwd_BFP16, ConvHipConv)
+TEST_P(GPU_UnitTestConvSolverConvHipConvBwdNchw_FP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
-TEST_P(GPU_UnitTestConvSolverConvHipConvWrw_BFP16, ConvHipConv)
+TEST_P(GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvFwdNhwc_BFP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvFwdNchw_BFP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvBwdNchw_BFP16, ConvHipConv)
+{
+    this->RunTest(miopen::solver::conv::ConvHipConv{});
+};
+
+TEST_P(GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16, ConvHipConv)
 {
     this->RunTest(miopen::solver::conv::ConvHipConv{});
 };
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+    GPU_UnitTestConvSolverConvHipConvFwdNhwc_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+    GPU_UnitTestConvSolverConvHipConvBwdNhwc_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNHWC))));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
-                     testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
-                     testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
-
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
-    testing::Combine(testing::Values(GetTestParams()),
-                     testing::Values(miopenConvolutionAlgoDirect),
-                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
 
 // NCHW: same shapes through the solver's NCHW<->NHWC staging path.
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvFwdNchw_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvBwdNchw_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenHalf, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvFwdNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvBwdNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNHWC))));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvFwdNchw_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvBwdNchw_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeNchw,
-    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
+    Smoke,
+    GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
