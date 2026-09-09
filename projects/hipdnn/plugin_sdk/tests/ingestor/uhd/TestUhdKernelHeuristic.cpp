@@ -326,6 +326,55 @@ Catalog catalogAgainstPriority(int64_t seqlen)
 
 } // namespace
 
+/// The signature both derived tests describe: the model reads one derived value and one
+/// query field, so the expression behind `$derived.tile` is the whole difference between them.
+/// Carries a direct `$kernel.tile_m` alongside the derived value: §6.3 check 2 requires the
+/// model's kernel axes to equal the engine's knobs, and a reference living only inside a
+/// derived expression does not count toward them.
+const std::vector<std::string> DERIVED_SIGNATURE = {"$derived.tile", R"("$kernel.tile_m")"};
+const std::vector<std::pair<std::string, std::string>> DERIVED_TRAINED
+    = {{"tile", R"({"*":["$q.seqlen",1]})"}};
+
+TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseDerivedExpressionChangedIsRefused)
+{
+    // `$derived.tile` reads identically whichever expression stands behind it, so §6.3
+    // check 1 catches the swap only because the expressions are in the hash.
+    //
+    // The artifact carries the trained hash and the descriptor declares it, so the model
+    // file agrees with the descriptor and the only disagreement left is the one under test.
+    // tryCreate, not makeKernelHeuristic: the factory degrades a failed model to declared
+    // order rather than returning null (§5), so asking it for null would test nothing.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_derived_expression_changed");
+    const auto trainedHash
+        = uhd::FeatureExtractor::computeHash(DERIVED_SIGNATURE, {}, DERIVED_TRAINED);
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "max", trainedHash,
+                                      std::nullopt, "identity", DERIVED_SIGNATURE);
+
+    auto descriptor = modelDescriptor(dir.path(), fixture.modelFileName, fixture.objective,
+                                      fixture.calibrated, fixture.scoreTransform, trainedHash,
+                                      DERIVED_SIGNATURE);
+    descriptor.derived = {{"tile", R"({"*":["$q.seqlen",2]})"}};
+
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS, {}), nullptr);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ADerivedCarryingDescriptorLoadsWhenItsHashAgrees)
+{
+    // The other half: with the expressions agreeing end to end the descriptor comes up, so
+    // the test above is refusing the swap rather than refusing derived values as such.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_derived_agrees");
+    const auto hash = uhd::FeatureExtractor::computeHash(DERIVED_SIGNATURE, {}, DERIVED_TRAINED);
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "max", hash,
+                                      std::nullopt, "identity", DERIVED_SIGNATURE);
+
+    auto descriptor = modelDescriptor(dir.path(), fixture.modelFileName, fixture.objective,
+                                      fixture.calibrated, fixture.scoreTransform, hash,
+                                      DERIVED_SIGNATURE);
+    descriptor.derived = {{DERIVED_TRAINED.front().first, DERIVED_TRAINED.front().second}};
+
+    EXPECT_NE(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS, {}), nullptr);
+}
+
 TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");

@@ -160,9 +160,13 @@ public:
     /// bare and pre-quoted spellings of a reference agree. Order is significant —
     /// RFC 0019 §7.2 requires the signature to match training exactly, so a permuted
     /// signature must not produce a matching hash.
+    ///
+    /// Derived expressions are folded in for the reason §6.5 gives for the encoding: the
+    /// signature carries only the name, so a changed expression is invisible in it.
     static std::string computeHash(
         const std::vector<std::string>& signature,
-        const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding = {});
+        const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding = {},
+        const std::vector<std::pair<std::string, std::string>>& derived = {});
 
     /// Get the hash of this extractor's signature.
     const std::string& getSignatureHash() const
@@ -480,7 +484,7 @@ inline FeatureExtractor::FeatureExtractor(
     // tools/uhd_gen computed H(signature|encoding). Any UHD carrying an encoding therefore
     // failed §6.3 check 1 and degraded to declared order -- silently, a degraded ranking being
     // a legal one. Every piece of the plumbing existed except this argument.
-    _signatureHash = computeHash(signature, categoricalEncoding);
+    _signatureHash = computeHash(signature, categoricalEncoding, derived);
 }
 
 inline std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const
@@ -570,7 +574,8 @@ inline std::vector<std::string>
 
 inline std::string FeatureExtractor::computeHash(
     const std::vector<std::string>& signature,
-    const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding)
+    const std::map<std::string, std::map<std::string, int32_t>>& categoricalEncoding,
+    const std::vector<std::pair<std::string, std::string>>& derived)
 {
     // Canonical form is the parsed signature dumped as compact JSON, matching Python's
     // json.dumps(signature, separators=(",", ":")) in tools/uhd_gen. Parsing first means
@@ -621,6 +626,20 @@ inline std::string FeatureExtractor::computeHash(
         // std::map is key-sorted and nlohmann's default object is too, so both sides render
         // the same bytes without an explicit sort.
         serialized += "|" + encoding.dump();
+    }
+
+    // Appended only when present, so a UHD declaring none hashes as it did before.
+    // Order is significant: §6.4 evaluates in declaration order and a later value may read
+    // an earlier one, so a permutation is a different computation.
+    if(!derived.empty())
+    {
+        nlohmann::json values = nlohmann::json::array();
+        for(const auto& [name, expression] : derived)
+        {
+            values.push_back(nlohmann::json::array({name, parseSignatureEntry(expression)}));
+        }
+        detail::validateNumericLiterals(values);
+        serialized += "|" + values.dump();
     }
 
     const std::string fullHash = sha256(serialized);

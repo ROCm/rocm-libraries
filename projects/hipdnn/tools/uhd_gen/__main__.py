@@ -96,6 +96,27 @@ _COST_METRIC_MARKERS = (
 CONSTANT_FEATURE_WARN_FRACTION = 2 / 3
 
 
+def _parse_derived(entries: list[str] | None) -> list[tuple[str, str]]:
+    """Parse `NAME=EXPRESSION` pairs, keeping declaration order (RFC 0019 6.4)."""
+    parsed: list[tuple[str, str]] = []
+    for entry in entries or []:
+        name, separator, expression = entry.partition("=")
+        if not separator or not name.strip() or not expression.strip():
+            raise ValueError(f"--derived expects NAME=EXPRESSION, got {entry!r}")
+        # Parsed here so a malformed expression fails now rather than at load, where the
+        # engine would degrade to declared order without saying why.
+        try:
+            json.loads(expression)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"--derived {name.strip()!r} is not valid JsonLogic: {error}") from None
+        parsed.append((name.strip(), expression.strip()))
+
+    duplicates = {n for n, _ in parsed if [x for x, _ in parsed].count(n) > 1}
+    if duplicates:
+        raise ValueError(f"--derived names must be unique; repeated: {sorted(duplicates)}")
+    return parsed
+
+
 def _looks_like_cost_metric(target: str) -> bool:
     """Heuristic: does this target name describe something to minimize?"""
     lowered = target.lower()
@@ -167,6 +188,18 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         nargs="+",
         help="Feature column names to train on",
+    )
+    parser.add_argument(
+        "--derived",
+        nargs="+",
+        default=None,
+        metavar="NAME=EXPRESSION",
+        help=(
+            "Derived values (RFC 0019 6.4), e.g. "
+            "intensity='{\"/\":[\"$q.flops\",\"$q.bytes\"]}'. The runtime evaluates each in "
+            "order and binds it to $derived.<name> before reading the signature, so a "
+            "feature may name it. Order matters: a later expression may read an earlier one."
+        ),
     )
     parser.add_argument(
         "--keep-constant-features",
@@ -492,8 +525,9 @@ def _run_train(args: argparse.Namespace) -> int:
     model.save_model(str(lgbm_path))
     logger.info("Saved LightGBM model to %s", lgbm_path)
 
+    derived = _parse_derived(args.derived)
     features_signature = build_features_signature(features)
-    features_hash = compute_features_hash(features_signature)
+    features_hash = compute_features_hash(features_signature, derived=derived)
     fb_path = output_dir / "model.bin"
     convert(
         lgbm_path,
@@ -526,6 +560,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "adapter": "tree_data",
         "features_signature": features_signature,
         "features_hash": features_hash,
+        **({"derived": [{"name": n, "expression": e} for n, e in derived]} if derived else {}),
         "objective": args.objective,
         "score": {
             "units": args.score_units or args.target,
@@ -556,6 +591,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "keep_constant_features": bool(args.keep_constant_features),
         "features_signature": features_signature,
         "features_hash": features_hash,
+        "derived": [{"name": n, "expression": e} for n, e in derived],
         "target": args.target,
         "objective": args.objective,
         "score_units": args.score_units or args.target,
