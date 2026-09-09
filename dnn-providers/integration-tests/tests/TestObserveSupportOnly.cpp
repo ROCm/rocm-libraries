@@ -95,7 +95,7 @@ TEST_F(TestObserveSupportOnly, ResolvedQueryRecordsAllEngines)
     EXPECT_FALSE(observations[1].engineIsSupported);
 }
 
-TEST_F(TestObserveSupportOnly, ModeCNarrowsToEngineUnderTest)
+TEST_F(TestObserveSupportOnly, ModeCNarrowsToSelectedEngine)
 {
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy()),
                                                  ENGINE_A);
