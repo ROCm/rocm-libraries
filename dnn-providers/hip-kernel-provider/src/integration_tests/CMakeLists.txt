@@ -105,6 +105,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(TARGET hkp_descriptor_staging)
         add_dependencies(hip_kernel_provider_integration_tests hkp_descriptor_staging)
     endif()
+    if(HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+        )
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
@@ -142,6 +147,20 @@ endif()
 # import it first.
 if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_conv_fwd_external_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME hipkernel:Gfx950ConvFwd
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER
+            quick_Gfx950ConvFwd*
+            standard_Gfx950ConvFwd*
+    )
 endif()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA

@@ -1,0 +1,2200 @@
+[
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 14,
+    "Wi": 14,
+    "C": 32,
+    "K": 32,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/smoke/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "smoke"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 14,
+    "Wi": 14,
+    "C": 32,
+    "K": 32,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/smoke/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "smoke"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 1,
+    "Hi": 8,
+    "Wi": 8,
+    "C": 32,
+    "K": 64,
+    "Y": 1,
+    "X": 1,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/pointwise/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "pointwise"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 1,
+    "Hi": 8,
+    "Wi": 8,
+    "C": 32,
+    "K": 64,
+    "Y": 1,
+    "X": 1,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/pointwise/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "pointwise"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 17,
+    "Wi": 19,
+    "C": 32,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/strided/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "strided"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 17,
+    "Wi": 19,
+    "C": 32,
+    "K": 64,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/strided/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "strided"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 2,
+    "dilation_w": 2,
+    "N": 1,
+    "Hi": 15,
+    "Wi": 17,
+    "C": 32,
+    "K": 32,
+    "Y": 3,
+    "X": 3,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/dilated/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "dilated"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 2,
+    "pad_w": 2,
+    "dilation_h": 2,
+    "dilation_w": 2,
+    "N": 1,
+    "Hi": 15,
+    "Wi": 17,
+    "C": 32,
+    "K": 32,
+    "Y": 3,
+    "X": 3,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/dilated/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "dilated"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 2,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 11,
+    "Wi": 17,
+    "C": 32,
+    "K": 64,
+    "Y": 3,
+    "X": 5,
+    "dtype": "fp16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/nonsquare/fp16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "nonsquare"
+        }
+      ]
+    }
+  },
+  {
+    "arch": "gfx950",
+    "direction": "fwd",
+    "layout": "NHWC",
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 2,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "N": 2,
+    "Hi": 11,
+    "Wi": 17,
+    "C": 32,
+    "K": 64,
+    "Y": 3,
+    "X": 5,
+    "dtype": "bf16",
+    "_catalog_tile_k": [
+      64,
+      128
+    ],
+    "_provenance": {
+      "graph": "verification/nonsquare/bf16",
+      "sources": [
+        {
+          "source": "verification_matrix",
+          "case": "nonsquare"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 768,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 16,
+    "X": 16,
+    "G": 1,
+    "stride_h": 16,
+    "stride_w": 16,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/CLIP-ViT-B_16__bf16_nhwc_patchify16_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/CLIP-ViT-B_16__bf16_nhwc_patchify16_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/CLIP-ViT-B_16__bf16_nhwc_patchify16_bf16.json",
+          "sha256": "1a09f2292992532b491932953e87b470023e0bb06417bf4f773bd2b0c2b28121",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1024,
+    "Hi": 336,
+    "Wi": 336,
+    "Y": 14,
+    "X": 14,
+    "G": 1,
+    "stride_h": 14,
+    "stride_w": 14,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/CLIP-ViT-L_14__bf16_nhwc_patchify14_336_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/CLIP-ViT-L_14__bf16_nhwc_patchify14_336_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/CLIP-ViT-L_14__bf16_nhwc_patchify14_336_bf16.json",
+          "sha256": "faeab8e62e53dbd987c7d95582358037a8bfcdcabac2fc28cde21079e49a2663",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 128,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 4,
+    "X": 4,
+    "G": 1,
+    "stride_h": 4,
+    "stride_w": 4,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ConvNeXt-V2-B__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ConvNeXt-V2-B__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ConvNeXt-V2-B__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+          "sha256": "7afa5d79cf40369237cd4124857151b74c1ae15797ffc7ab161c9c4822275f1c",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 768,
+    "K": 3072,
+    "Hi": 14,
+    "Wi": 14,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_expand_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_expand_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_expand_1x1_bf16.json",
+          "sha256": "271f60b121d856572d771d5fcc55eb32eac844c3f713acef439bffef96bd8d3c",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3072,
+    "K": 768,
+    "Hi": 14,
+    "Wi": 14,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_project_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_project_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ConvNeXt-V2-L__bf16_nhwc_block_pw_project_1x1_bf16.json",
+          "sha256": "ac8a9d81bcaef947e0218f036e7a3b0102e4b7fc860fb2779a197a0519b5a386",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 384,
+    "K": 768,
+    "Hi": 28,
+    "Wi": 28,
+    "Y": 2,
+    "X": 2,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_downsample_2x2_s2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_downsample_2x2_s2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ConvNeXt-V2-L__bf16_nhwc_downsample_2x2_s2_bf16.json",
+          "sha256": "0fd0b31ff8fe2d120052917a30d1293b7a36634e6e3fee734de3475ca75e62fa",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 192,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 4,
+    "X": 4,
+    "G": 1,
+    "stride_h": 4,
+    "stride_w": 4,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ConvNeXt-V2-L__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ConvNeXt-V2-L__bf16_nhwc_stem_patchify_4x4_s4_bf16.json",
+          "sha256": "b79f1bbafb6af1962795f459fd6c7851e3b4137ec2bb74f8ab11218a6a3cfa1a",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1536,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 14,
+    "X": 14,
+    "G": 1,
+    "stride_h": 14,
+    "stride_w": 14,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/DINOv2-ViT-g_14__bf16_nhwc_patchify14_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/DINOv2-ViT-g_14__bf16_nhwc_patchify14_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/DINOv2-ViT-g_14__bf16_nhwc_patchify14_bf16.json",
+          "sha256": "2bfcb6d275a17eb701123fbbdca1774a28823c94811dc853f83112826830cd68",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 80,
+    "K": 480,
+    "Hi": 24,
+    "Wi": 24,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/EfficientNetV2-M__bf16_nhwc_ib_expand_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/EfficientNetV2-M__bf16_nhwc_ib_expand_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/EfficientNetV2-M__bf16_nhwc_ib_expand_1x1_bf16.json",
+          "sha256": "2d9dc138f3b956b9873167ea2401a8081a13bc1586c4310fd6bc51bfc7231312",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 24,
+    "K": 48,
+    "Hi": 192,
+    "Wi": 192,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/EfficientNetV2-S__bf16_nhwc_fused_mbconv_3x3_s2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/EfficientNetV2-S__bf16_nhwc_fused_mbconv_3x3_s2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/EfficientNetV2-S__bf16_nhwc_fused_mbconv_3x3_s2_bf16.json",
+          "sha256": "3b88242b48d5858305e0f882c0da957b88a57ca70cc26f5667f879555cd8b885",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 32,
+    "K": 512,
+    "Hi": 128,
+    "Wi": 128,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/Flux.2-VAE__bf16_nhwc_dec_conv_in_32ch_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/Flux.2-VAE__bf16_nhwc_dec_conv_in_32ch_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/Flux.2-VAE__bf16_nhwc_dec_conv_in_32ch_3x3_bf16.json",
+          "sha256": "971e0b662289299a6165956d95642b3263238dbadf838f9ba2c3b0d73cb70604",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 3200,
+    "Hi": 448,
+    "Wi": 448,
+    "Y": 14,
+    "X": 14,
+    "G": 1,
+    "stride_h": 14,
+    "stride_w": 14,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/InternViT-6B__bf16_nhwc_patchify14_448_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/InternViT-6B__bf16_nhwc_patchify14_448_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/InternViT-6B__bf16_nhwc_patchify14_448_bf16.json",
+          "sha256": "ffd6c1b57b614356db8bdc06926b9d900101d3b8dd2fe3e485f76629a782812a",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 24,
+    "K": 144,
+    "Hi": 56,
+    "Wi": 56,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_expand_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_expand_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_expand_1x1_bf16.json",
+          "sha256": "a426c82f1af7b060e0ad8d0c4aa903237aac9d7aaa2bae0347e1ae4b5c5c45e6",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 144,
+    "K": 40,
+    "Hi": 28,
+    "Wi": 28,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_project_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_project_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/MobileNetV4-Conv-L__bf16_nhwc_ib_project_1x1_bf16.json",
+          "sha256": "6f89e6cec5f1aba78a69ded81d9ab189b2ccc905694803b371f824c8a13de045",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 32,
+    "Hi": 640,
+    "Wi": 640,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/RT-DETR-R50__bf16_nhwc_hgnet_stem_3x3_s2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/RT-DETR-R50__bf16_nhwc_hgnet_stem_3x3_s2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/RT-DETR-R50__bf16_nhwc_hgnet_stem_3x3_s2_bf16.json",
+          "sha256": "c65b2861d1b9ca0c82a81ba1c4f366fe312ed1ea5ec81fd7f46be7c8765719a5",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 256,
+    "Hi": 28,
+    "Wi": 28,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/RepVGG-B2__bf16_nhwc_reparam_dense_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/RepVGG-B2__bf16_nhwc_reparam_dense_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/RepVGG-B2__bf16_nhwc_reparam_dense_3x3_bf16.json",
+          "sha256": "923b2b76f12d5ca337e3a1f9773fe30c8de9d0eebb81cd1a64cd80ff89fcd8c3",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 256,
+    "Hi": 14,
+    "Wi": 14,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-152__bf16_nhwc_bottleneck_3x3_s1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-152__bf16_nhwc_bottleneck_3x3_s1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-152__bf16_nhwc_bottleneck_3x3_s1_bf16.json",
+          "sha256": "0902386617b7221bfaf76460f3604a6321a12d563e7cb15c632094e77e6c9d1a",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 64,
+    "K": 64,
+    "Hi": 56,
+    "Wi": 56,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_bottleneck_3x3_s1_nhwc_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_bottleneck_3x3_s1_nhwc_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_bottleneck_3x3_s1_nhwc_bf16.json",
+          "sha256": "4757b00f7d8fc6350b458f804c356f942da7b98eaae9583b3c1c6ad4a18d7e41",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 128,
+    "K": 128,
+    "Hi": 56,
+    "Wi": 56,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_downsample_3x3_s2_nhwc_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_downsample_3x3_s2_nhwc_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_downsample_3x3_s2_nhwc_bf16.json",
+          "sha256": "38515937997806d4c2713f2791eb28ae33212af2bab86983fb72df6b26275fa7",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 64,
+    "K": 256,
+    "Hi": 56,
+    "Wi": 56,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_expand_1x1_nhwc_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_expand_1x1_nhwc_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_expand_1x1_nhwc_bf16.json",
+          "sha256": "667d5dfa45076c69fdc78d05b1651bb248290cfec02f8f97fcf62e2aeae6cb2a",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 64,
+    "Hi": 56,
+    "Wi": 56,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_reduce_1x1_nhwc_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_reduce_1x1_nhwc_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_reduce_1x1_nhwc_bf16.json",
+          "sha256": "82ed4d27dbca6d7731a4e4f453d5768e5e4cdff5b86fb4ee3dd67ec76d0a57fb",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 512,
+    "K": 512,
+    "Hi": 7,
+    "Wi": 7,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_stage4_3x3_512_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_stage4_3x3_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_stage4_3x3_512_bf16.json",
+          "sha256": "c80ae57cf0bd26d0f454424f23bfd1df7079a260692da61b6ca56719eb52eba3",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 256,
+    "C": 3,
+    "K": 64,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 7,
+    "X": 7,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 3,
+    "pad_w": 3,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__bf16_nhwc_stem_7x7_s2_train_n256_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__bf16_nhwc_stem_7x7_s2_train_n256_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__bf16_nhwc_stem_7x7_s2_train_n256_bf16.json",
+          "sha256": "1127b3bd29cfe11e17a73b82e992834c6c2377444446a6a3d0cd925ef40daa43",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 64,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 7,
+    "X": 7,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 3,
+    "pad_w": 3,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ResNet-50__fp16_nhwc_stem_7x7_s2_nhwc_fp16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__fp16_nhwc_stem_7x7_s2_nhwc_fp16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__fp16_nhwc_stem_7x7_s2_nhwc_fp16.json",
+          "sha256": "71f52bc447ae0a17e08db8278d4b6d6c30eb0567d9d594facbb436c9e2eabca8",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        },
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ResNet-50__int8_nhwc_stem_7x7_s2_int8.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ResNet-50__int8_nhwc_stem_7x7_s2_int8.json",
+          "sha256": "66ec8b358a11cc8cfa8052d87f83c44ce4564d6055962f4377d013c11b0f0b27",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1280,
+    "Hi": 1024,
+    "Wi": 1024,
+    "Y": 16,
+    "X": 16,
+    "G": 1,
+    "stride_h": 16,
+    "stride_w": 16,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SAM-ViT-H__bf16_nhwc_patchify16_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SAM-ViT-H__bf16_nhwc_patchify16_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SAM-ViT-H__bf16_nhwc_patchify16_bf16.json",
+          "sha256": "cea84642ca8652fc74829e66f039663bf3281ddf446717c3893dc1294f560faf",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 128,
+    "Hi": 512,
+    "Wi": 512,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SD1.5-VAE__fp16_nhwc_enc_conv_in_3x3_512_fp16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SD1.5-VAE__fp16_nhwc_enc_conv_in_3x3_512_fp16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SD1.5-VAE__fp16_nhwc_enc_conv_in_3x3_512_fp16.json",
+          "sha256": "b5811006d4556b7032d4e958db7eb9c1c5a7f07b2f54da3ea52bcd1896ba4689",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 2,
+    "C": 16,
+    "K": 1536,
+    "Hi": 128,
+    "Wi": 128,
+    "Y": 2,
+    "X": 2,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SD3-MMDiT__bf16_nhwc_latent_patchify_2x2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SD3-MMDiT__bf16_nhwc_latent_patchify_2x2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SD3-MMDiT__bf16_nhwc_latent_patchify_2x2_bf16.json",
+          "sha256": "27455a9e6bc675396da60fe369fd23801ed34b26cea53e24e09f3ddbfcedfb65",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 16,
+    "K": 512,
+    "Hi": 128,
+    "Wi": 128,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SD3-VAE__bf16_nhwc_dec_conv_in_16ch_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SD3-VAE__bf16_nhwc_dec_conv_in_16ch_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SD3-VAE__bf16_nhwc_dec_conv_in_16ch_3x3_bf16.json",
+          "sha256": "323bd4e459affcf06551c76762d0c1fe9df715e36dd241b5722472121a9dc39e",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 128,
+    "Hi": 1024,
+    "Wi": 1024,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SD3-VAE__bf16_nhwc_enc_conv_in_3x3_1024_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SD3-VAE__bf16_nhwc_enc_conv_in_3x3_1024_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SD3-VAE__bf16_nhwc_enc_conv_in_3x3_1024_bf16.json",
+          "sha256": "e8bed3e767763cedd5bcbfa25ef7e222dc4a3c8f3c3f30b5200f62017d3c03d0",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 512,
+    "K": 512,
+    "Hi": 128,
+    "Wi": 128,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_resnet_3x3_512_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_resnet_3x3_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_dec_resnet_3x3_512_bf16.json",
+          "sha256": "2798799ac05f3650827be9d978a5f9f6d18a75cf5426afe35c38d45464780048",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        },
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_mid_3x3_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_mid_3x3_512_bf16.json",
+          "sha256": "692d5a748df83301d4eb0e34ebac3fb953b43db5d8a5eb8b35dae13e600ce7cb",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 256,
+    "Hi": 512,
+    "Wi": 512,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_512_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_512_bf16.json",
+          "sha256": "faab4ee426286c903f59974a2da9b32385946e92587478a66c756fd43ff7af22",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        },
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_enc_3x3_256_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_enc_3x3_256_512_bf16.json",
+          "sha256": "7a88b9c48e57c37dd1a4cf89c6a2fa974bd06c2cf411a7273c7a21d6c1c062d4",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 512,
+    "K": 512,
+    "Hi": 256,
+    "Wi": 256,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_dec_upsample_conv_3x3_bf16.json",
+          "sha256": "d105987c0d031bd926eeb85b2c6c6fb90ae3e6a650c6b18b0753e413e6638926",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 128,
+    "K": 128,
+    "Hi": 1024,
+    "Wi": 1024,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__bf16_nhwc_enc_downsample_3x3_s2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_enc_downsample_3x3_s2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_enc_downsample_3x3_s2_bf16.json",
+          "sha256": "ef9a443dd209abd45461d249e3f3d31de6beda13a6d303cbeedfec9f9ec1e92d",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 128,
+    "K": 128,
+    "Hi": 1024,
+    "Wi": 1024,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__bf16_nhwc_enc_resnet_3x3_128_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__bf16_nhwc_enc_resnet_3x3_128_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__bf16_nhwc_enc_resnet_3x3_128_bf16.json",
+          "sha256": "686dc0b695269e0bd7883608f79592eb9479048e3fad02090a3b96e1733d796d",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 128,
+    "Hi": 1024,
+    "Wi": 1024,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SDXL-VAE__fp16_nhwc_enc_conv_in_3x3_fp16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SDXL-VAE__fp16_nhwc_enc_conv_in_3x3_fp16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SDXL-VAE__fp16_nhwc_enc_conv_in_3x3_fp16.json",
+          "sha256": "6e067fe3ddb7b5f2fca5205576fa9b0a095a52bbdaac1225990e3cead2ced6aa",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1152,
+    "Hi": 384,
+    "Wi": 384,
+    "Y": 14,
+    "X": 14,
+    "G": 1,
+    "stride_h": 14,
+    "stride_w": 14,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SigLIP-so400m__bf16_nhwc_patchify14_384_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SigLIP-so400m__bf16_nhwc_patchify14_384_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SigLIP-so400m__bf16_nhwc_patchify14_384_bf16.json",
+          "sha256": "da8376cc94e8fe0e89a7b9c399e78d7ccd7e5c7c8b7341e3f415ed0291c3b934",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1536,
+    "Hi": 512,
+    "Wi": 512,
+    "Y": 16,
+    "X": 16,
+    "G": 1,
+    "stride_h": 16,
+    "stride_w": 16,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/SigLIP2-g__bf16_nhwc_patchify16_512_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/SigLIP2-g__bf16_nhwc_patchify16_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/SigLIP2-g__bf16_nhwc_patchify16_512_bf16.json",
+          "sha256": "711b8c9723261d358f8eed63fa7ba4ba57ea934b9d65d25324c775342e60792f",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 768,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 16,
+    "X": 16,
+    "G": 1,
+    "stride_h": 16,
+    "stride_w": 16,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ViT-B_16-edge__int8_nhwc_patchify16_int8.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ViT-B_16-edge__int8_nhwc_patchify16_int8.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ViT-B_16-edge__int8_nhwc_patchify16_int8.json",
+          "sha256": "8eb2de81c681eecd32a62970f1b11ae093e9daeedad41f9ac447d0501e8d752d",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 1024,
+    "Hi": 224,
+    "Wi": 224,
+    "Y": 14,
+    "X": 14,
+    "G": 1,
+    "stride_h": 14,
+    "stride_w": 14,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/ViT-L_14__bf16_nhwc_patchify_conv2d_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/ViT-L_14__bf16_nhwc_patchify_conv2d_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/ViT-L_14__bf16_nhwc_patchify_conv2d_bf16.json",
+          "sha256": "ece54fe6ca730960458b357b5b62e13228d082a1be6fd45f844b335b8208bb42",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 256,
+    "Hi": 40,
+    "Wi": 40,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_c3k2_bottleneck_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_c3k2_bottleneck_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_c3k2_bottleneck_3x3_bf16.json",
+          "sha256": "29a76f733cd9d6419df4f3120e56cd6484c90000976c048d92e113a3cfb13f62",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        },
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLOv12-L__bf16_nhwc_a2c2f_conv_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLOv12-L__bf16_nhwc_a2c2f_conv_3x3_bf16.json",
+          "sha256": "f7fadabd551f4495757326c55b634fee0801076cb5df58eebe74aba2e1286d54",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 512,
+    "K": 256,
+    "Hi": 40,
+    "Wi": 40,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_c3k2_pw_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_c3k2_pw_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_c3k2_pw_1x1_bf16.json",
+          "sha256": "eadd99b454171d1e150ad10f94b33c30e43a53332d412223947d22f754c0d442",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 256,
+    "Hi": 80,
+    "Wi": 80,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_detect_head_3x3_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_detect_head_3x3_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_detect_head_3x3_bf16.json",
+          "sha256": "8759a0a4f894d9be6bb6192e34f290eea3fa78c0f4923bd5eddb20291af2fafd",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 64,
+    "K": 128,
+    "Hi": 320,
+    "Wi": 320,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_128_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_128_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_128_bf16.json",
+          "sha256": "5c8bc09e72960f22d168a1bc6f9e2d09de26a1586a49fa244e6b6a836e354172",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 128,
+    "K": 256,
+    "Hi": 160,
+    "Wi": 160,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_256_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_256_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_256_bf16.json",
+          "sha256": "921c4ca959ce9f6f387836c7f9e3203ebfcc8c62680b6b915b0a172157a39a22",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 256,
+    "K": 512,
+    "Hi": 80,
+    "Wi": 80,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_512_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_512_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_down_3x3_s2_512_bf16.json",
+          "sha256": "4cd8ecef1fccad53ca0dbabbc1130049dc571965f4a395950231bae3f9f1366e",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 768,
+    "K": 256,
+    "Hi": 40,
+    "Wi": 40,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_neck_c3k2_pw_1x1_p4_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_neck_c3k2_pw_1x1_p4_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_neck_c3k2_pw_1x1_p4_bf16.json",
+          "sha256": "4121c5ee3e68d8022fcae8fdc6c499bbd63871f885a6a7a6de126aea5f7bfa7d",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 512,
+    "K": 512,
+    "Hi": 20,
+    "Wi": 20,
+    "Y": 1,
+    "X": 1,
+    "G": 1,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 0,
+    "pad_w": 0,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_sppf_pw_1x1_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_sppf_pw_1x1_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_sppf_pw_1x1_bf16.json",
+          "sha256": "1877e4decff92d470427b6a588cdb9e7869e32f5188f15f005a3738bfed948d3",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 64,
+    "Hi": 1280,
+    "Wi": 1280,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_1280_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_1280_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_1280_bf16.json",
+          "sha256": "50b3b1843ea6c9a4e59601e3a7a8a7a0ce8b20be507dacbb833ed40ae81ee0bc",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 64,
+    "Hi": 640,
+    "Wi": 640,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "bf16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_bf16.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_bf16.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__bf16_nhwc_stem_3x3_s2_bf16.json",
+          "sha256": "ce3d6c0a30fb1ff3351bb97dddd4bf4c8a7a6df56498489f2fd3bff11138096c",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 64,
+    "Hi": 640,
+    "Wi": 640,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-L__int8_nhwc_stem_3x3_s2_int8.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-L__int8_nhwc_stem_3x3_s2_int8.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-L__int8_nhwc_stem_3x3_s2_int8.json",
+          "sha256": "80e65f72b7f4ce9a49fef13dc1a4d20db9e1a5f7efcd213db634d4b8a8069700",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  },
+  {
+    "N": 1,
+    "C": 3,
+    "K": 16,
+    "Hi": 640,
+    "Wi": 640,
+    "Y": 3,
+    "X": 3,
+    "G": 1,
+    "stride_h": 2,
+    "stride_w": 2,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dilation_h": 1,
+    "dilation_w": 1,
+    "dtype": "fp16",
+    "layout": "NHWC",
+    "direction": "fwd",
+    "arch": "gfx950",
+    "_catalog_tile_k": [
+      64
+    ],
+    "_provenance": {
+      "graph": "conv/fprop/YOLO11-N__int8_nhwc_stem_3x3_s2_int8.json",
+      "sources": [
+        {
+          "source": "graphs",
+          "path": "conv/fprop/YOLO11-N__int8_nhwc_stem_3x3_s2_int8.json",
+          "uri": "https://therock-dvc.s3.amazonaws.com/dnn-benchmarking/files/md5/b8/e7d9105a49d3e9c566bf26a0f87451#conv/fprop/YOLO11-N__int8_nhwc_stem_3x3_s2_int8.json",
+          "sha256": "9bdd2293a09261e9d6afaa2c5f29568a377b0b0b6c29d9a7efd424ee96535b13",
+          "archive_sha256": "0055a017febaa82f3ddd7d54aa8755d6a94e903d14246a8a2c9235cfcbc49560",
+          "repository_revision": "36f95cc7a8b8b3ee5ba82b195a8e51a7cd47f6cc"
+        }
+      ]
+    }
+  }
+]

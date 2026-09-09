@@ -1,0 +1,710 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pointwise_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              256,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "pointwise_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              64,
+              8,
+              8
+            ],
+            "strides": [
+              4096,
+              1,
+              512,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              1,
+              1
+            ],
+            "strides": [
+              32,
+              1,
+              32,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              8,
+              8
+            ],
+            "strides": [
+              2048,
+              1,
+              256,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            0,
+            0
+          ],
+          "parameters__pre_padding": [
+            0,
+            0
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "strided_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              9,
+              10
+            ],
+            "strides": [
+              5760,
+              1,
+              640,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              17,
+              19
+            ],
+            "strides": [
+              10336,
+              1,
+              608,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "strided_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              9,
+              10
+            ],
+            "strides": [
+              5760,
+              1,
+              640,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              17,
+              19
+            ],
+            "strides": [
+              10336,
+              1,
+              608,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "dilated_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              15,
+              17
+            ],
+            "strides": [
+              8160,
+              1,
+              544,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              32,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              15,
+              17
+            ],
+            "strides": [
+              8160,
+              1,
+              544,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "dilated_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              32,
+              15,
+              17
+            ],
+            "strides": [
+              8160,
+              1,
+              544,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              32,
+              32,
+              3,
+              3
+            ],
+            "strides": [
+              288,
+              1,
+              96,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              32,
+              15,
+              17
+            ],
+            "strides": [
+              8160,
+              1,
+              544,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            2,
+            2
+          ],
+          "parameters__post_padding": [
+            2,
+            2
+          ],
+          "parameters__pre_padding": [
+            2,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "nonsquare_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              11,
+              9
+            ],
+            "strides": [
+              6336,
+              1,
+              576,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              5
+            ],
+            "strides": [
+              480,
+              1,
+              160,
+              32
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              11,
+              17
+            ],
+            "strides": [
+              5984,
+              1,
+              544,
+              32
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            2
+          ],
+          "parameters__pre_padding": [
+            1,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "nonsquare_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              11,
+              9
+            ],
+            "strides": [
+              6336,
+              1,
+              576,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              32,
+              3,
+              5
+            ],
+            "strides": [
+              480,
+              1,
+              160,
+              32
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              11,
+              17
+            ],
+            "strides": [
+              5984,
+              1,
+              544,
+              32
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            2
+          ],
+          "parameters__pre_padding": [
+            1,
+            2
+          ],
+          "parameters__stride": [
+            1,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Plain channels-last convolution for the packaged gfx950 engine.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "workload_56x56_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [1, 64, 56, 56],
+            "strides": [200704, 1, 3584, 64],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [64, 64, 3, 3],
+            "strides": [576, 1, 192, 64],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [1, 64, 56, 56],
+            "strides": [200704, 1, 3584, 64],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [1, 1],
+          "parameters__post_padding": [1, 1],
+          "parameters__pre_padding": [1, 1],
+          "parameters__stride": [1, 1]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Representative 56x56 channels-last convolution from the packaged headline catalog.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    }
+  ]
+}

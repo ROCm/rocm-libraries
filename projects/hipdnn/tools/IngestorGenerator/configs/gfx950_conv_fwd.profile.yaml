@@ -1,0 +1,166 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Run these tools from the repository root. This profile describes the same
+# adapter, metadata and native hooks as gfx950_conv_fwd.yaml.
+
+slug: gfx950_conv_fwd
+bundle: gfx950_conv_fwd
+pack: gfx950_conv_fwd
+arch: gfx950
+provider_root: dnn-providers/hip-kernel-provider
+dialect: packaged
+authored_subpath: rocKE/gfx950_conv_fwd
+source: builders/common/convolution_forward.py
+builder: build_gfx950_conv_fwd
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+
+engine:
+  name: hipkernel:Gfx950ConvFwd
+  sdk_version: "1.0.0"
+  knobs: [tile_k]
+  heuristic: native
+
+request:
+  module: dispatch.grouped_convolution
+  class: ConvGroupedRequest
+  defaults:
+    direction: fwd
+    layout: NHWC
+    G: 1
+    algorithm: implicit_gemm_fwd
+dispatch:
+  module: builders.common.convolution_forward
+  function: gfx950_conv_fwd_spec_for_request
+predicate:
+  module: builders.common.convolution_forward
+  function: supports_gfx950_conv_fwd
+arch_spec:
+  module: builders.common.convolution_forward
+  class: Gfx950ConvFwdSpec
+
+# Consult the real forward candidate, including its capability gate. Grouped
+# and 3D cases the reference accepts remain visible as integration scope gaps.
+reference_candidates:
+  module: dispatch.grouped_convolution
+  function: conv_grouped_candidates
+  match: algorithm
+  family: implicit_gemm_fwd
+reference_request:
+  module: dispatch.grouped_convolution
+  class: ConvGroupedRequest
+  defaults:
+    direction: fwd
+    layout: NHWC
+    G: 1
+    algorithm: implicit_gemm_fwd
+
+metadata_fields: &metadata_fields
+  [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype, layout, groups,
+   tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_m, warp_tile_n,
+   warp_tile_k, wave_size, pipeline, epilogue]
+kmd_fields:
+  - {name: N, type: int}
+  - {name: Hi, type: int}
+  - {name: Wi, type: int}
+  - {name: C, type: int}
+  - {name: K, type: int}
+  - {name: Y, type: int}
+  - {name: X, type: int}
+  - {name: sH, type: int}
+  - {name: sW, type: int}
+  - {name: pH, type: int}
+  - {name: pW, type: int}
+  - {name: dH, type: int}
+  - {name: dW, type: int}
+  - {name: dtype, type: string}
+  - {name: layout, type: string}
+  - {name: groups, type: int}
+  - {name: tile_m, type: int}
+  - {name: tile_n, type: int}
+  - {name: tile_k, type: int, default_value: 64}
+  - {name: warp_m, type: int}
+  - {name: warp_n, type: int}
+  - {name: warp_tile_m, type: int}
+  - {name: warp_tile_n, type: int}
+  - {name: warp_tile_k, type: int}
+  - {name: wave_size, type: int}
+  - {name: pipeline, type: string}
+  - {name: epilogue, type: string}
+
+# Metadata uses the adapter's lowercase dtype names. Every tuning value is
+# resolved before emission; there are no policy-owned optional fields here.
+vocabulary:
+  dtype: {fp16: fp16, bf16: bf16}
+  layout: {NHWC: NHWC}
+  pipeline: {mem: mem}
+  epilogue: {cshuffle: cshuffle, default: default}
+policies: {}
+field_map:
+  G: groups
+  stride_h: sH
+  stride_w: sW
+  pad_h: pH
+  pad_w: pW
+  dilation_h: dH
+  dilation_w: dW
+# Partial tiles are masked. tile_k need not divide Y*X*C.
+divides: {}
+# This models native fallback ordering only. Forced knobs and BenchmarkPlan
+# can select either arm; an unforced host corpus will prefer tile_k=64.
+score: {field: tile_k, prefer: min}
+sweep:
+  tile_k:
+    values: [64, 128]
+    hazard: Keep the mem pipeline and dispatcher geometry fixed; validate every compiled arm.
+
+launch_surface:
+  - name: applicability_and_baked_constants
+    python_source: builders/common/convolution_forward.py:supports_gfx950_conv_fwd
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:kernelFits
+    kmd_fields: *metadata_fields
+    guard: matchProblem checks the unfused forward graph and storage contract; kernelFits compares every compiled shape and tuning value before loading code.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdPack.cpp
+  - name: problem_geometry_and_byte_counts
+    python_source: builders/common/convolution_forward.py:_problem_error
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:deriveGeometry
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype]
+    guard: deriveGeometry and outputExtent reject nonpositive outputs, signed byte-count overflow and unrepresentable padded or dilated coordinates.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdGeometry.cpp
+  - name: grid
+    python_source: builders/common/convolution_forward.py:grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:launchGeometry
+    kmd_fields: [N, Hi, Wi, K, Y, X, sH, sW, pH, pW, dH, dW, groups, tile_m, tile_n]
+    guard: launchGeometry bounds both workgroup axes and uses ceiling division for the masked partial tiles.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdGeometry.cpp
+  - name: block
+    python_source: builders/common/convolution_forward.py:block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:launchGeometry
+    kmd_fields: [warp_m, warp_n, wave_size, pipeline]
+    guard: launchGeometry requires wave64 and bounds the thread count; kernelFits admits only the mem pipeline and the packaged warp geometry.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdGeometry.cpp
+  - name: kernargs_and_execution
+    python_source: ../platform/python/rocke/instances/common/conv_implicit_gemm.py:build_implicit_gemm_conv
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:launch
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype]
+    guard: prepare preserves tensor bindings and validated i32 byte counts; launch checks device pointers, 16-byte alignment and non-overlap, then passes A, B, D, A_bytes, B_bytes, D_bytes.
+    test: dnn-providers/hip-kernel-provider/src/integration_tests/kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+  - name: pointer_nonalias
+    python_source: ../platform/python/rocke/instances/common/conv_implicit_gemm.py:build_implicit_gemm_conv
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp:bufferRangesDoNotOverlap
+    kmd_fields: [N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW, dtype]
+    guard: launch requires disjoint byte ranges for A, B and D, matching the original builder's noalias pointer contract.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdGeometry.cpp
+  - name: workspace
+    python_source: ../platform/python/rocke/instances/common/conv_implicit_gemm.py:build_implicit_gemm_conv
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:workspaceBytes
+    kmd_fields: [pipeline]
+    guard: The mem forward builder has no global workspace argument; workspaceBytes returns zero and prepare requests zero dynamic shared-memory bytes.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdPack.cpp
+  - name: fallback_selection
+    python_source: builders/common/convolution_forward.py:gfx950_conv_fwd_spec_for_request
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950ConvFwdNative.cpp:score
+    kmd_fields: [tile_k]
+    guard: Native score prefers the dispatcher's tile_k=64 default; BenchmarkPlan can replace that ranking with measurements.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/TestGfx950ConvFwdPack.cpp

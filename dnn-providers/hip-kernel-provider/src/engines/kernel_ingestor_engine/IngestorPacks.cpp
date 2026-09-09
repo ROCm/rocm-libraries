@@ -17,6 +17,10 @@ const std::vector<IngestorPack>& ingestorPacks()
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
+        {"hipkernel:Gfx950ConvFwd",
+         &registerGfx950ConvFwdSymbols,
+         true,
+         &resetGfx950ConvFwdModuleCache},
     };
     return s_packs;
 }
