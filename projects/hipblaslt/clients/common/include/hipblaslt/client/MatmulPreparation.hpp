@@ -25,13 +25,19 @@ namespace hipblaslt::client
 
     struct PreparedMatmulOperand
     {
+        // Device allocation and binding facts after optional operand swizzling.
         size_t  elements                       = 0;
         int64_t batchStride                    = 0;
         size_t  scaleElements                  = 0;
+        // Present only for block scaling. The host-numerics plan is the single
+        // authority for natural shape, physical layout, and exact byte counts.
         std::optional<roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan> mxScaleStorage;
         bool    replacedUnsupportedBatchStride = false;
     };
 
+    // Product execution state derived from a checked MatmulProblem and the
+    // API-facing Arguments. It contains device allocation/descriptor policy;
+    // reference arithmetic consumes Tensors directly rather than this plan.
     struct PreparedMatmulProblem
     {
         PreparedMatmulOperand a;
@@ -64,6 +70,9 @@ namespace hipblaslt::client
     MatmulSwizzleParameters matmulSwizzleParameters(hipDataType          dataType,
                                                     hipblasComputeType_t computeType);
 
+    // A and B accept separate physical scale layouts because their independent
+    // scaling formats may select different kernel ABIs. Both are values from
+    // the one host-numerics MxScaleStorageLayout model above.
     MatmulPreparation prepareMatmulProblems(
         const Arguments&                                         arguments,
         std::span<const MatmulProblem>                           matmulProblems,
