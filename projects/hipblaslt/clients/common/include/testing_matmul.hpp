@@ -47,11 +47,9 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/host_numerics/Epilogue.hpp>
 #include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
 #include <hipblaslt/host_numerics/HipblasltReferenceGemm.hpp>
 #include <hipblaslt/host_numerics/MatmulValidation.hpp>
-#include <hipblaslt/host_numerics/Reduction.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
 #include <iomanip>
 #include <limits>
@@ -61,7 +59,9 @@
 #include <optional>
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 #include <roc/host_numerics/backends/blas.hpp>
+#include <roc/host_numerics/epilogue.hpp>
 #include <roc/host_numerics/mx.hpp>
+#include <roc/host_numerics/reduction.hpp>
 #include <set>
 #include <span>
 #include <vector>
@@ -2903,10 +2903,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                           : hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode);
 
                 hipblaslt::host_numerics::MatmulReferenceInputs referenceInputs(
-                    std::move(referenceA),
-                    std::move(referenceB),
-                    std::move(referenceC),
-                    std::move(referenceD));
+                    referenceA, referenceB, referenceC, referenceD);
                 if(arg.scaleAlpha_vector)
                 {
                     referenceInputs.alphaVector = hScaleAlphaVec.at(gemmIdx).tensor(
@@ -2938,132 +2935,108 @@ void testing_matmul_with_bias(const Arguments&                                  
                     referenceInputs.scaleD
                         = hipblaslt::host_numerics::scalarValue(scaleDValue, Tc);
 
-                (void)hipblaslt::host_numerics::referenceMatmulGemm(problem,
-                                                                    dataTypes,
-                                                                    preparedProblem,
-                                                                    std::move(referenceInputs),
-                                                                    arg.scaleA,
-                                                                    arg.scaleB);
+                (void)hipblaslt::host_numerics::referenceMatmulGemm(
+                    problem, dataTypes, preparedProblem, referenceInputs, arg.scaleA, arg.scaleB);
 
                 if(preparedProblem.epilogueEnabled)
                 {
-                    auto                        pos    = problem.d.batchStride() * batchIdx;
-                    std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
-                    void*                       ePos
-                        = ((*hEInst).size() <= gemmIdx)
-                              ? nullptr
-                              : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
-                    auto  applyBias = arg.gradient ? false : arg.bias_vector;
-                    void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
-                    if(applyBias && arg.bias_stride > 0)
+                    using namespace roc::host_numerics;
+                    EpilogueOutputs epilogueOutputs{
+                        .output = hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode),
+                        .rawOutput
+                        = hostBufferTensor(hBias_gold_epl, Talpha, dLayout, pointerArrayMode),
+                    };
+                    EpilogueOptions epilogueOptions(hipblaslt::host_numerics::scalarType(Talpha));
+                    epilogueOptions.outputScale
+                        = hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha);
+                    epilogueOptions.auxiliaryScale
+                        = hipblaslt::host_numerics::scalarValue(scaleEValue, Talpha);
+                    epilogueOptions.accumulateAmax = true;
+
+                    if(arg.amaxD)
+                        epilogueOutputs.amax = hAmaxD_gold[gemmIdx].tensor(
+                            hipblaslt::host_numerics::scalarType(Talpha),
+                            Layout::contiguousLastDimensionFastest(Shape{1}));
+
+                    std::vector<HipHostBuffer>& auxiliaryBuffers = arg.gradient ? hE : hE_gold;
+                    if(auxiliaryBuffers.size() > static_cast<size_t>(gemmIdx))
                     {
-                        hBias_buf = ((char*)hBias_buf)
-                                    + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
+                        Tensor auxiliary
+                            = hostBufferTensor(auxiliaryBuffers, Taux, dLayout, pointerArrayMode);
+                        if(arg.gradient)
+                            epilogueOptions.auxiliaryInput = auxiliary;
+                        else
+                            epilogueOutputs.auxiliaryOutput = auxiliary;
                     }
 
-                    hipblaslt::host_numerics::EpilogueArguments epilogue;
-                    epilogue.rows             = problem.m;
-                    epilogue.columns          = problem.n;
-                    epilogue.leadingDimension = problem.d.leadingDimension();
-                    epilogue.input
-                        = hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha);
-                    epilogue.output = hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To);
-                    epilogue.rawOutput
-                        = hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha);
-                    epilogue.amax           = arg.amaxD ? hAmaxD_gold[gemmIdx].as<char>() : nullptr;
-                    epilogue.auxiliary      = ePos;
-                    epilogue.auxiliaryType  = Taux;
-                    epilogue.outputScale    = scaleDValue;
-                    epilogue.auxiliaryScale = scaleEValue;
-                    epilogue.bias           = applyBias ? hBias_buf : nullptr;
-                    epilogue.biasType       = Tbias;
-                    epilogue.activationParameter0 = arg.activation_arg1;
-                    epilogue.activationParameter1 = arg.activation_arg2;
-                    epilogue.outputType           = To;
-                    epilogue.computeType          = Talpha;
+                    const bool applyBias = !arg.gradient && arg.bias_vector;
+                    if(applyBias)
+                    {
+                        const ptrdiff_t biasOffset
+                            = arg.bias_stride > 0 ? arg.bias_stride * batchIdx : 0;
+                        epilogueOptions.bias
+                            = hBias[gemmIdx]
+                                  .tensor(hipblaslt::host_numerics::scalarType(Tbias),
+                                          Layout(Shape{static_cast<size_t>(problem.m)},
+                                                 {1},
+                                                 biasOffset))
+                                  .expandDims(1);
+                    }
 
                     switch(arg.activation_type)
                     {
                     case hipblaslt_activation_type::gelu:
-                        epilogue.activation = roc::host_numerics::Activation::Gelu;
+                        epilogueOptions.activation = GeluActivation{};
                         break;
                     case hipblaslt_activation_type::relu:
-                        epilogue.activation = roc::host_numerics::Activation::Relu;
+                        epilogueOptions.activation = ReluActivation{};
                         break;
                     case hipblaslt_activation_type::swish:
                         // hipBLASLt's historical SWISH_EXT path implements
                         // SiLU and ignores the activation parameter.
-                        epilogue.activation = roc::host_numerics::Activation::Silu;
+                        epilogueOptions.activation = SiluActivation{};
                         break;
                     case hipblaslt_activation_type::clamp:
-                        epilogue.activation = roc::host_numerics::Activation::Clamp;
+                        epilogueOptions.activation
+                            = ClampActivation{arg.activation_arg1, arg.activation_arg2};
                         break;
                     default:
-                        epilogue.activation = roc::host_numerics::Activation::None;
+                        epilogueOptions.activation = IdentityActivation{};
                         break;
                     }
-                    epilogue.activationApplication
-                        = arg.gradient
-                                  && epilogue.activation != roc::host_numerics::Activation::None
-                              ? roc::host_numerics::ActivationApplication::Gradient
-                              : roc::host_numerics::ActivationApplication::Forward;
-                    hipblaslt::host_numerics::referenceEpilogue(epilogue);
+                    epilogueOptions.activationApplication
+                        = arg.gradient && arg.activation_type != hipblaslt_activation_type::none
+                              ? ActivationApplication::Gradient
+                              : ActivationApplication::Forward;
+                    if(hipblaslt::host_numerics::scalarType(To) == ScalarType::Int8)
+                        epilogueOptions.outputConversion = OutputConversion::SaturatingInt8;
+                    referenceEpilogueInto(referenceD, epilogueOutputs, epilogueOptions);
 
                     if(arg.gradient && arg.bias_vector && batchIdx == problem.batchCount - 1)
                     {
-                        auto* hBias_gold_buf = hBias_gold[gemmIdx].buf();
-                        if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
-                        {
-                            hBias_gold_buf = (char*)hBias_gold_buf
-                                             + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
-                        }
-
-                        auto reduceBias = [&](const void* input,
-                                              hipDataType inputType,
-                                              int64_t     rows,
-                                              int64_t     columns,
-                                              int64_t     rowStride,
-                                              int64_t     columnStride) {
-                            hipblaslt::host_numerics::ReductionArguments reduction;
-                            reduction.rows            = rows;
-                            reduction.columns         = columns;
-                            reduction.rowStride       = rowStride;
-                            reduction.columnStride    = columnStride;
-                            reduction.input           = input;
-                            reduction.inputType       = inputType;
-                            reduction.output          = hBias_gold_buf;
-                            reduction.outputType      = Tbias;
-                            reduction.accumulatorType = HIP_R_32F;
-                            hipblaslt::host_numerics::referenceSum(reduction);
+                        const ptrdiff_t biasOffset
+                            = arg.bias_stride > 0 ? arg.bias_stride * batchIdx : 0;
+                        const size_t biasElements = static_cast<size_t>(
+                            arg.bias_source == hipblaslt_bias_source::b ? problem.n : problem.m);
+                        Tensor biasOutput = hBias_gold[gemmIdx].tensor(
+                            hipblaslt::host_numerics::scalarType(Tbias),
+                            Layout(Shape{biasElements}, {1}, biasOffset));
+                        const auto reduceBias = [&](const Tensor& input) {
+                            referenceSumInto(input, biasOutput, {1}, ScalarType::Float32);
                         };
 
                         if(arg.bias_source == hipblaslt_bias_source::d)
-                        {
-                            reduceBias(hBias_gold_epl[gemmIdx].as<char>()
-                                           + pos * realDataTypeSize(Talpha),
-                                       Talpha,
-                                       problem.m,
-                                       problem.n,
-                                       1,
-                                       problem.d.leadingDimension());
-                        }
+                            reduceBias(*epilogueOutputs.rawOutput);
                         else if(arg.bias_source == hipblaslt_bias_source::a)
-                        {
-                            reduceBias(hA[gemmIdx].buf(),
-                                       TiA,
-                                       preparedProblem.biasElements,
-                                       problem.k,
-                                       transA == HIPBLAS_OP_N ? 1 : problem.a.leadingDimension(),
-                                       transA == HIPBLAS_OP_N ? problem.a.leadingDimension() : 1);
-                        }
+                            reduceBias(referenceA);
                         else if(arg.bias_source == hipblaslt_bias_source::b)
                         {
-                            reduceBias(hB[gemmIdx].buf(),
-                                       TiB,
-                                       preparedProblem.biasElements,
-                                       problem.k,
-                                       transB == HIPBLAS_OP_N ? problem.b.leadingDimension() : 1,
-                                       transB == HIPBLAS_OP_N ? 1 : problem.b.leadingDimension());
+                            const Layout transposedB(
+                                Shape{static_cast<size_t>(preparedProblem.biasElements),
+                                      static_cast<size_t>(problem.k)},
+                                {referenceB.layout().stride(1), referenceB.layout().stride(0)},
+                                referenceB.layout().offset());
+                            reduceBias(referenceB.shareStorageWithLayout(transposedB));
                         }
                     }
                 }
