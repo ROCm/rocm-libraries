@@ -650,6 +650,12 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([3.0, 5.0], dtype=np.float32),
         )
 
+        # The low bits must survive Python scalar conversion before the
+        # operation's documented Int32 modulo conversion is applied.
+        large_integer = 2**53 + 1
+        integer_value = hv.from_numpy(np.asarray(0, dtype=np.int32))
+        self.assertEqual((integer_value + large_integer).item(), 1)
+
         padded_x = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
             [2, 2],
