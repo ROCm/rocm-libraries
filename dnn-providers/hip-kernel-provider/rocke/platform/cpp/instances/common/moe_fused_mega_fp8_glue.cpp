@@ -3,7 +3,7 @@
 /*
  * instance_moe_fused_mega_fp8_moe_fused_mega_fp8_glue.c -- PUBLIC entry + GLUE
  * for the C99 chunked port of build_moe_fused_mega_gemm_fp8
- * (rocke/instances/common/moe_fused_mega_fp8.py, lines 203-2129).
+ * (rocke/instances/common/moe_fused_mega_fp8.py, lines 208-2216).
  *
  * SCOPE (this translation unit):
  *   - rocke_fused_mega_fp8_levers_default                       (module env defaults)
@@ -13,6 +13,8 @@
  *   - rocke_fused_mega_fp8_spec_kernel_name                     (kernel_name())
  *   - rocke_moe_fused_mega_fp8_grid / _persistent_grid          (grid helpers)
  *   - rocke_moe_fused_mega_fp8_signature                        (SignatureBuilder)
+ *   - moe_fp8_validate_atom                                     (_validate_fp8_atom)
+ *   - rocke_moe_fp8_lds_allocs                                  (_lds_allocs)
  *   - rocke_build_moe_fused_mega_gemm_fp8 (+ _new + lower)      (the build driver)
  *   - rocke_moe_fp8_elem_bytes_b / _b_base / _scale_base        (rebasing closures)
  *   - rocke_moe_fp8_select_item                                 (_select_item)
@@ -57,7 +59,7 @@ rocke_fused_mega_fp8_levers_t rocke_fused_mega_fp8_levers_default(void)
 }
 
 /* ===================================================================== *
- *  FusedMegaKernelSpecFp8 defaults + __post_init__  (Python 333-359)
+ *  FusedMegaKernelSpecFp8 defaults + __post_init__  (Python 338-364)
  * ===================================================================== */
 rocke_fused_mega_kernel_spec_fp8_t rocke_fused_mega_kernel_spec_fp8_default(void)
 {
@@ -107,7 +109,7 @@ void rocke_fused_mega_kernel_spec_fp8_post_init(rocke_fused_mega_kernel_spec_fp8
 }
 
 /* ===================================================================== *
- *  gate_up_atom() / down_atom()  (Python 363-377)
+ *  gate_up_atom() / down_atom()  (Python 368-382)
  *
  *  gate_up_k==32 -> fp8 16x16x32 catalog atom, else the fp8 16x16x128 hero atom.
  *  MfmaAtom.fp8_16x16x{32,128}() == rocke_mfma_atom("fp8e4m3", 16, 16, {32,128}).
@@ -141,7 +143,7 @@ const rocke_mfma_atom_t*
 }
 
 /* ===================================================================== *
- *  mfmas_m / mfmas_n / mfmas_m_down / mfmas_n_down  (Python 379-397)
+ *  mfmas_m / mfmas_n / mfmas_m_down / mfmas_n_down  (Python 384-402)
  * ===================================================================== */
 int rocke_fused_mega_fp8_spec_mfmas_m(const rocke_fused_mega_kernel_spec_fp8_t* spec)
 {
@@ -168,7 +170,7 @@ int rocke_fused_mega_fp8_spec_mfmas_n_down(const rocke_fused_mega_kernel_spec_fp
 }
 
 /* ===================================================================== *
- *  kernel_name()  (Python 399-403)
+ *  kernel_name()  (Python 404-408)
  *
  *  "{name}_moe_fused_mega_fp8_m{tile_m}n{tile_n_inter}k{tile_k_gu}"
  * ===================================================================== */
@@ -197,7 +199,7 @@ rocke_status_t rocke_fused_mega_fp8_spec_kernel_name(const rocke_fused_mega_kern
 }
 
 /* ===================================================================== *
- *  Grid helpers  (Python 411-452)
+ *  Grid helpers  (Python 416-457)
  * ===================================================================== */
 rocke_status_t rocke_moe_fused_mega_fp8_grid(int num_m_blocks,
                                              int inter,
@@ -276,7 +278,7 @@ rocke_status_t
 }
 
 /* ===================================================================== *
- *  moe_fused_mega_fp8_signature()  (Python 455-496)
+ *  moe_fused_mega_fp8_signature()  (Python 460-501)
  * ===================================================================== */
 rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_spec_fp8_t* spec,
                                                   bool persistent,
@@ -335,7 +337,7 @@ rocke_status_t rocke_moe_fused_mega_fp8_signature(const rocke_fused_mega_kernel_
 }
 
 /* ===================================================================== *
- *  PER-EXPERT POINTER REBASING CLOSURES  (Python 1710-1772)
+ *  PER-EXPERT POINTER REBASING CLOSURES  (Python 1795-1857)
  *
  *  These four closures (rocke_moe_fp8_elem_bytes_b / _b_base / _scale_base /
  *  _select_item) are owned canonically by this glue part-file and declared in
@@ -419,7 +421,7 @@ void rocke_moe_fp8_select_item(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- *  _emit_body  (Python 1850-2093)
+ *  _emit_body  (Python 1937-2180)
  *
  *  Sequences STAGE 1a per-mi fused gate/up K-loop -> Pass A + amax butterfly ->
  *  per-block scale broadcast -> Pass C packed quantize -> STAGE 2 down loop,
@@ -741,13 +743,123 @@ void rocke_moe_fp8_emit_body(rocke_moe_fp8_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
- *  build_moe_fused_mega_gemm_fp8  (Python 1554-2129)
+ *  SPEC VALIDATION  (Python 1554-1619)
+ * ===================================================================== */
+
+/* L6: the unscaled fp8 16x16x128 hero atom is NOT a catalog shape on ANY target
+ * -- the wide-K f8 MFMA is only reachable through
+ * llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4 (MfmaAtom.fp8_16x16x128), which
+ * the JSON MMA catalog does not model, so validate_mfma_atom_in_catalog would
+ * raise a spurious NotImplementedError even on the target that HAS the
+ * instruction. That is why the catalog guard is skipped for atom.k == 128.
+ * Skipping it outright, though, also stopped rejecting the targets that
+ * genuinely lack the instruction, which then reached comgr as an uncatchable
+ * LLVM abort. This is the arch fact the catalog is missing: the scaled f8f6f4
+ * family ships on the gfx950 target family. (Python 1568.) */
+#define ROCKE_MOE_FP8_SCALED_F8F6F4_TARGET_FAMILY "gfx950"
+
+/* _validate_fp8_atom(atom, target, arch) (Python 1571-1589): reject an fp8 MFMA
+ * atom the target cannot issue. atom.k == 128 selects the scaled-f8f6f4 hero
+ * atom, gated on the target family that owns the instruction; every other fp8
+ * atom IS a catalog shape and goes through the shared per-arch catalog guard.
+ * Returns ROCKE_OK, or the builder's sticky status with the Python message. */
+static rocke_status_t moe_fp8_validate_atom(rocke_ir_builder_t* b,
+                                            const rocke_mfma_atom_t* atom,
+                                            const rocke_archtarget_t* target,
+                                            const char* arch)
+{
+    if(atom->k != 128)
+    {
+        return rocke_validate_mfma_atom_in_catalog(b, atom, arch, "moe_fused_mega_fp8");
+    }
+    if(target == NULL || target->target_family == NULL
+       || strcmp(target->target_family, ROCKE_MOE_FP8_SCALED_F8F6F4_TARGET_FAMILY) != 0)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "moe_fused_mega_fp8 MFMA atom '%s' (%s %dx%dx%d) lowers to the "
+                        "scaled f8f6f4 instruction, which %s does not have; this "
+                        "configuration requires a different target (or gate_up_k / "
+                        "down_k = 32 for the catalog 16x16x32 atom).",
+                        (atom->name != NULL) ? atom->name : "None",
+                        (atom->dtype_in != NULL) ? atom->dtype_in : "None",
+                        atom->m,
+                        atom->n,
+                        atom->k,
+                        (arch != NULL) ? arch : "None");
+        return b->status;
+    }
+    return ROCKE_OK;
+}
+
+/* _lds_allocs(spec) (Python 1592-1619). */
+size_t rocke_moe_fp8_lds_allocs(const rocke_fused_mega_kernel_spec_fp8_t* spec,
+                                const rocke_fused_mega_fp8_levers_t* levers,
+                                rocke_mega_lds_alloc_t out[ROCKE_MOE_FP8_LDS_MAX_ALLOCS])
+{
+    rocke_fused_mega_fp8_levers_t lv;
+    const rocke_mfma_atom_t* atom;
+    int tile_m;
+    int tile_n;
+    int n_blocks;
+    int n_warps;
+    int fp8_b;
+    int f32_b;
+    int dtla_slots;
+    int dtla_chunks;
+    int bstage_rows;
+
+    if(spec == NULL || out == NULL)
+    {
+        return 0;
+    }
+    lv = (levers != NULL) ? *levers : rocke_fused_mega_fp8_levers_default();
+
+    tile_m = spec->tile_m;
+    tile_n = spec->tile_n_inter;
+    n_blocks = tile_n / ROCKE_MOE_FP8_GROUP_K;
+    n_warps = spec->warp_m * spec->warp_n;
+    fp8_b = rocke_mega_lds_elem_bytes(rocke_fp8e4m3());
+    f32_b = rocke_mega_lds_elem_bytes(rocke_f32());
+
+    out[0].name = "Hidden_smem";
+    out[0].elem_bytes = fp8_b;
+    out[0].elem_count = tile_m * tile_n;
+    out[1].name = "HiddenScale_smem";
+    out[1].elem_bytes = f32_b;
+    out[1].elem_count = tile_m * n_blocks;
+    out[2].name = "HiddenF32_smem";
+    out[2].elem_bytes = f32_b;
+    out[2].elem_count = tile_m * tile_n;
+    out[3].name = "WarpAmax_smem";
+    out[3].elem_bytes = f32_b;
+    out[3].elem_count = n_warps;
+    /* BStage_smem is allocated unconditionally but only REFERENCED under
+     * use_dtla; the smem packer dead-strips it otherwise, so counting it here
+     * would over-charge the budget by the whole landing zone. */
+    if(!spec->use_dtla)
+    {
+        return 4;
+    }
+    atom = rocke_fused_mega_fp8_spec_gate_up_atom(spec);
+    dtla_slots = lv.use_x_dtla ? 5 : 4;
+    dtla_chunks = (((atom != NULL) ? atom->b_per_lane : 0) + ROCKE_MOE_FP8_DTLA_CHUNK - 1)
+                  / ROCKE_MOE_FP8_DTLA_CHUNK;
+    bstage_rows = n_warps * dtla_slots * dtla_chunks * spec->wave_size;
+    out[4].name = "BStage_smem";
+    out[4].elem_bytes = fp8_b;
+    out[4].elem_count = bstage_rows * ROCKE_MOE_FP8_DTLA_CHUNK;
+    return 5;
+}
+
+/* ===================================================================== *
+ *  build_moe_fused_mega_gemm_fp8  (Python 1627-2216)
  *
- *  validate arch/block_size + catalog (skip k==128 hero) -> resolve atom +
- *  cadence -> emit ALL b.param() in ABI order -> derived geometry + fuse-quant
- *  invariant -> prelude -> lazy _elem_bytes_b holder -> LDS allocs + 4
- *  TensorViews + bstage_view -> decode_mfma_lanes -> populate ctx -> dispatch
- *  default vs persistent path.
+ *  validate arch/block_size -> wave-size gate -> both fp8 atoms -> whole-kernel
+ *  LDS budget -> resolve cadence -> emit ALL b.param() in ABI order -> derived
+ *  geometry + fuse-quant invariant -> prelude -> lazy _elem_bytes_b holder ->
+ *  LDS allocs + 4 TensorViews + bstage_view -> decode_mfma_lanes -> populate ctx
+ *  -> dispatch default vs persistent path.
  * ===================================================================== */
 static rocke_value_t* moe_fp8_param(rocke_ir_builder_t* b,
                                     const char* name,
@@ -785,6 +897,8 @@ rocke_kernel_def_t*
 {
     rocke_moe_fp8_build_ctx_t ctx;
     const char* reason = NULL;
+    const rocke_archtarget_t* target = NULL;
+    const rocke_mfma_atom_t* down_atom;
     const rocke_type_t* fp8_global;
     const rocke_type_t* f32_global;
     const rocke_type_t* i32_global;
@@ -815,8 +929,8 @@ rocke_kernel_def_t*
     ctx.persistent = persistent;
     ctx.levers = (levers != NULL) ? *levers : rocke_fused_mega_fp8_levers_default();
 
-    /* ---- validate arch + block_size ---- (Python 1588-1590) */
-    if(!rocke_validate_arch_and_block_size(b, arch, spec->block_size, &reason, NULL))
+    /* ---- validate arch + block_size ---- (Python 1661-1663) */
+    if(!rocke_validate_arch_and_block_size(b, arch, spec->block_size, &reason, &target))
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
@@ -826,29 +940,75 @@ rocke_kernel_def_t*
         return NULL;
     }
 
-    /* ---- resolve atom; catalog guard only for non-hero (k != 128) ---- *
-     * (Python 1591-1601) */
+    /* ---- wave-size gate ---- (Python 1664-1671) *
+     * Every lane map in this family is wave64 (the amax butterfly in
+     * rocke_moe_fp8_emit_body is a hardcoded 6-stage xor over lanes 1..32), so a
+     * wave32 target would be silently wrong rather than merely slow. */
+    if(spec->wave_size != target->wave_size)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "invalid fp8 fused-mega spec for %s: spec wave_size %d != %s "
+                        "wave_size %d",
+                        arch,
+                        spec->wave_size,
+                        arch,
+                        target->wave_size);
+        return NULL;
+    }
+
+    /* ---- resolve + gate BOTH fp8 atoms ---- (Python 1672-1678) *
+     * The hero atom reuses the mfma.scale.f32.16x16x128.f8f6f4 intrinsic with
+     * the in-instruction E8M0 scales pinned to the neutral value (verified
+     * numerically standalone). gate_up_k and down_k select independently, so
+     * both atoms are checked. */
     ctx.atom = rocke_fused_mega_fp8_spec_gate_up_atom(spec);
     if(ctx.atom == NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "fp8 fused-mega: gate_up_atom unavailable");
         return NULL;
     }
-    if(ctx.atom->k != 128)
+    if(moe_fp8_validate_atom(b, ctx.atom, target, arch) != ROCKE_OK)
     {
-        if(rocke_validate_mfma_atom_in_catalog(b, ctx.atom, arch, "moe_fused_mega_fp8") != ROCKE_OK)
+        return NULL;
+    }
+    down_atom = rocke_fused_mega_fp8_spec_down_atom(spec);
+    if(down_atom == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "fp8 fused-mega: down_atom unavailable");
+        return NULL;
+    }
+    if(moe_fp8_validate_atom(b, down_atom, target, arch) != ROCKE_OK)
+    {
+        return NULL;
+    }
+
+    /* ---- whole-kernel LDS budget ---- (Python 1679-1684) *
+     * The persistent Hidden bridge, its scales, the f32 amax scratch and the
+     * DTLA landing zone all coexist, and nothing else validates their total
+     * against the per-WG budget. */
+    {
+        rocke_mega_lds_alloc_t allocs[ROCKE_MOE_FP8_LDS_MAX_ALLOCS];
+        size_t num_allocs = rocke_moe_fp8_lds_allocs(spec, &ctx.levers, allocs);
+        const char* why = NULL;
+        if(!rocke_validate_mega_lds_budget(b, allocs, num_allocs, arch, &why))
         {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "invalid fp8 fused-mega spec for %s: %s",
+                            arch,
+                            (why != NULL) ? why : "");
             return NULL;
         }
     }
 
-    /* ---- L9 cadence: spec override (None => defer to env) ---- (Python 1606) */
+    /* ---- L9 cadence: spec override (None => defer to env) ---- (Python 1689) */
     ctx.cadence = spec->has_sched_cadence ? spec->sched_cadence : NULL;
 
-    /* ---- builder attrs ---- (Python 1609) */
+    /* ---- builder attrs ---- (Python 1692) */
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
 
-    /* ---- params (BUILD_SPEC_FP8 Section 2.7) ---- (Python 1612-1654) */
+    /* ---- params (BUILD_SPEC_FP8 Section 2.7) ---- (Python 1695-1737) */
     fp8_global = rocke_ptr_type(b, rocke_fp8e4m3(), "global");
     f32_global = rocke_ptr_type(b, rocke_f32(), "global");
     i32_global = rocke_ptr_type(b, rocke_i32(), "global");
@@ -883,7 +1043,7 @@ rocke_kernel_def_t*
     ctx.slot_size = rocke_b_param(b, "slot_size", rocke_i32(), NULL);
     ctx.tokens = rocke_b_param(b, "tokens", rocke_i32(), NULL);
 
-    /* Persistent-only params (Python 1661-1664). */
+    /* Persistent-only params (Python 1746-1749). */
     if(persistent)
     {
         ctx.p_grid_x = rocke_b_param(b, "grid_x", rocke_i32(), NULL);
@@ -891,7 +1051,7 @@ rocke_kernel_def_t*
         ctx.p_P = rocke_b_param(b, "P", rocke_i32(), NULL);
     }
 
-    /* ---- derived geometry ---- (Python 1666-1687) */
+    /* ---- derived geometry ---- (Python 1751-1772) */
     tile_m = spec->tile_m;
     tile_n = spec->tile_n_inter;
     n_blocks = tile_n / ROCKE_MOE_FP8_GROUP_K;
@@ -923,30 +1083,32 @@ rocke_kernel_def_t*
     ctx.mfmas_n_down = rocke_fused_mega_fp8_spec_mfmas_n_down(spec);
     ctx.n_warps = spec->warp_m * spec->warp_n;
 
-    /* ---- SSA constants (op-order) ---- (Python 1689-1693) */
+    /* ---- SSA constants (op-order) ---- (Python 1774-1778) */
     ctx.c_wave = rocke_b_const_i32(b, spec->wave_size);
     ctx.c_warps_n = rocke_b_const_i32(b, spec->warp_n);
     ctx.c_block_m = rocke_b_const_i32(b, tile_m);
     ctx.c_block_n = rocke_b_const_i32(b, tile_n);
     ctx.c0 = rocke_b_const_i32(b, 0);
 
-    /* ---- block/thread prelude ---- (Python 1696-1700) */
+    /* ---- block/thread prelude ---- (Python 1781-1785) */
     ctx.tid = rocke_b_thread_id_x(b);
     ctx.warp_id = rocke_b_div(b, ctx.tid, ctx.c_wave);
     ctx.warp_m_idx = rocke_b_div(b, ctx.warp_id, ctx.c_warps_n);
     ctx.warp_n_idx = rocke_b_mod(b, ctx.warp_id, ctx.c_warps_n);
     ctx.lane = rocke_b_mod(b, ctx.tid, ctx.c_wave);
 
-    /* ---- lazy _elem_bytes_b holder ---- (Python 1708) */
+    /* ---- lazy _elem_bytes_b holder ---- (Python 1793) */
     ctx.elem_bytes_b = NULL;
 
-    /* ---- DEFAULT path: select the single work-item HERE ---- (Python 1778-1779) */
+    /* ---- DEFAULT path: select the single work-item HERE ---- (Python 1863-1864) */
     if(!persistent)
     {
         rocke_moe_fp8_select_item(&ctx, rocke_b_block_id_y(b), NULL);
     }
 
-    /* ---- LDS allocations ---- (Python 1784-1809) */
+    /* ---- LDS allocations + views ---- (Python 1866-1917) *
+     * Mirrored by rocke_moe_fp8_lds_allocs for the whole-kernel budget gated
+     * above; the two must stay in lock-step. */
     {
         int hidden_shape[2];
         int hscale_shape[2];
@@ -1007,14 +1169,14 @@ rocke_kernel_def_t*
         rocke_tensor_descriptor_packed(&ctx.scale_view.desc, hscale_shape, 2, rocke_f32());
     }
 
-    /* ---- lane decode + warp offsets ---- (Python 1832-1838) */
+    /* ---- lane decode + warp offsets ---- (Python 1919-1925) */
     ctx.lane_decode = rocke_decode_mfma_lanes(b, ctx.atom, ctx.lane);
     ctx.warp_m_off
         = rocke_b_mul(b, ctx.warp_m_idx, rocke_b_const_i32(b, ctx.mfmas_m * ctx.atom->m));
     ctx.warp_n_off
         = rocke_b_mul(b, ctx.warp_n_idx, rocke_b_const_i32(b, ctx.mfmas_n * ctx.atom->n));
 
-    /* ---- f32/const SSA constants ---- (Python 1840-1848) */
+    /* ---- f32/const SSA constants ---- (Python 1927-1935) */
     ctx.c_neg_log2e = rocke_b_const_f32(b, -1.4426950408889634);
     ctx.one_f32 = rocke_b_const_f32(b, 1.0);
     ctx.c_fp8_max = rocke_b_const_f32(b, ROCKE_MOE_FP8_FP8_MAX);
@@ -1030,7 +1192,7 @@ rocke_kernel_def_t*
         return NULL;
     }
 
-    /* ---- dispatch: default vs persistent ---- (Python 2095-2126) */
+    /* ---- dispatch: default vs persistent ---- (Python 2182-2213) */
     if(!persistent)
     {
         /* with b.scf_if(b.cmp_ge(expert_idx, c0)): _emit_body() */

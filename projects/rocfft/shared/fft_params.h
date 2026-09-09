@@ -516,17 +516,16 @@ public:
         }
 
         // throw if this state is not usable (symbol/code/data missing,
-        // etc)
-        void check_valid() const
+        // has wrong number of callback data entries, etc)
+        void check_valid(size_t expected_data_count) const
         {
             if(!symbol)
                 throw std::invalid_argument("missing JIT symbol");
             if(func.empty())
                 throw std::invalid_argument("missing JIT code");
             // data can be empty if the callback function doesn't need
-            // it, but if nonempty must have one ptr per device
-            if(!data.empty()
-               && data.size() != static_cast<size_t>(rocfft_scoped_device::device_count()))
+            // it, but if nonempty must have one ptr per brick
+            if(!data.empty() && data.size() != expected_data_count)
                 throw std::invalid_argument("invalid number of JIT data ptrs");
         }
     };
@@ -541,12 +540,15 @@ public:
         if(run_callbacks != fft_callback_type_jit)
             return;
 
-        if(!load_jit_cb_state)
-            throw std::invalid_argument("missing JIT load state");
-        load_jit_cb_state->check_valid();
-        if(!store_jit_cb_state)
-            throw std::invalid_argument("missing JIT store state");
-        store_jit_cb_state->check_valid();
+        // At least one of load or store callback must be provided.
+        // It's legal to only have one and not the other.
+
+        if(!load_jit_cb_state && !store_jit_cb_state)
+            throw std::invalid_argument("missing JIT state");
+        if(load_jit_cb_state)
+            load_jit_cb_state->check_valid(expected_callback_count(ifields));
+        if(store_jit_cb_state)
+            store_jit_cb_state->check_valid(expected_callback_count(ofields));
     }
 
     enum fft_mp_lib
@@ -2898,6 +2900,37 @@ public:
             process_rank = 0;
         }
         return process_rank;
+    }
+
+    // Return the number of expected callback entries for supplied
+    // fields.  For legacy funcptr callbacks, this count applies to
+    // function pointers and cbdata pointers.  For JIT callbacks this
+    // only applies to cbdata pointers.
+    size_t expected_callback_count(const std::vector<fft_field>& fields) const
+    {
+        // For library-decomposed multi-GPU, one entry per device
+        if(multiGPU > 1)
+            return multiGPU;
+
+        // If fields are not specified, we consider the input or
+        // output to have a single brick (and thus expect a single
+        // callback entry)
+        if(fields.empty())
+            return 1;
+
+        const int mpi_rank = get_process_rank();
+
+        // count the number of bricks on this rank
+        size_t expected_callbacks = 0;
+        for(const auto& f : fields)
+        {
+            for(const auto& b : f.bricks)
+            {
+                if(b.rank == mpi_rank)
+                    ++expected_callbacks;
+            }
+        }
+        return expected_callbacks;
     }
 };
 

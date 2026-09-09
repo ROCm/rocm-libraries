@@ -1,0 +1,10 @@
+{% extends "device_select.cpp.jinja2" %}
+
+{% block type_definitions %}
+using data_type = {{ data_type }};
+using flag_type = {{ flag_type }};
+{% endblock %}
+
+{% block benchmark_type %}
+using benchmark_type = device_select_predicated_flag_benchmark<data_type, flag_type, config>;
+{% endblock %}

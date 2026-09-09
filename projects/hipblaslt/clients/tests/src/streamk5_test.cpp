@@ -45,6 +45,14 @@ int unsetenv(const char* name)
 }
 #endif
 
+#define HIP_CHECK_CONTINUE(expr)                                     \
+    do                                                               \
+    {                                                                \
+        hipError_t e = (expr);                                       \
+        if(e != hipSuccess)                                          \
+            ADD_FAILURE() << #expr << " failed" << std::endl;      \
+    } while(0)
+
 namespace
 {
     inline bool gpuAvailable()
@@ -198,7 +206,13 @@ namespace
         }
 
         hipStream_t stream = nullptr;
-        hipStreamCreate(&stream);
+        if(hipStreamCreate(&stream) != hipSuccess)
+        {
+            hipblasLtDestroy(handle);
+            cleanup();
+            ADD_FAILURE() << "hipStreamCreate failed";
+            return {};
+        }
 
         // fp16 device buffers; GEMM output correctness is not verified.
         const size_t elemBytes = sizeof(uint16_t);
@@ -208,11 +222,11 @@ namespace
            || hipMalloc(&d_c, static_cast<size_t>(kM * kN) * elemBytes) != hipSuccess
            || hipMalloc(&d_ws, static_cast<size_t>(kWsBytes)) != hipSuccess)
         {
-            hipFree(d_a);
-            hipFree(d_b);
-            hipFree(d_c);
-            hipFree(d_ws);
-            hipStreamDestroy(stream);
+            HIP_CHECK_CONTINUE(hipFree(d_a));
+            HIP_CHECK_CONTINUE(hipFree(d_b));
+            HIP_CHECK_CONTINUE(hipFree(d_c));
+            HIP_CHECK_CONTINUE(hipFree(d_ws));
+            HIP_CHECK_CONTINUE(hipStreamDestroy(stream));
             hipblasLtDestroy(handle);
             cleanup();
             ADD_FAILURE() << "hipMalloc failed (insufficient device memory?)";
@@ -271,7 +285,7 @@ namespace
                             d_ws,
                             result.workspaceSize,
                             stream);
-            hipStreamSynchronize(stream);
+            HIP_CHECK_CONTINUE(hipStreamSynchronize(stream));
         }
 
         // Teardown — order mirrors creation.
@@ -280,11 +294,11 @@ namespace
         hipblasLtMatrixLayoutDestroy(matC);
         hipblasLtMatrixLayoutDestroy(matB);
         hipblasLtMatrixLayoutDestroy(matA);
-        hipFree(d_ws);
-        hipFree(d_c);
-        hipFree(d_b);
-        hipFree(d_a);
-        hipStreamDestroy(stream);
+        HIP_CHECK_CONTINUE(hipFree(d_ws));
+        HIP_CHECK_CONTINUE(hipFree(d_c));
+        HIP_CHECK_CONTINUE(hipFree(d_b));
+        HIP_CHECK_CONTINUE(hipFree(d_a));
+        HIP_CHECK_CONTINUE(hipStreamDestroy(stream));
         hipblasLtDestroy(handle);
 
         cleanup();

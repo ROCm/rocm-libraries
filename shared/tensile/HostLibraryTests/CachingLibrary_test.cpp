@@ -37,7 +37,10 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/UserDrivenTuningParser.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -1064,10 +1067,31 @@ TEST(CachingLibrary, Parsing)
 
     EXPECT_EQ(probSol.second, 3976);
 
+    // Remapped indices, negative as used by clients such as rocBLAS
+    std::vector<std::string> entriesNegative{"T",
+                                             "N",
+                                             "2304",
+                                             "256",
+                                             "1",
+                                             "1729",
+                                             "1",
+                                             "1",
+                                             "1729",
+                                             "1729",
+                                             "2304",
+                                             "f16_r",
+                                             "f16_r",
+                                             "f32_r",
+                                             "-762"};
+
+    probSol = problemFromEntries<ContractionProblem>(entriesNegative);
+    EXPECT_EQ(probSol.first.m(), 2304);
+    EXPECT_EQ(probSol.second, -762);
+
     // Bad args
     std::vector<std::string> entries2{"N", "T", "104"}; // Too short
     probSol = problemFromEntries<ContractionProblem>(entries2);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
 
     std::vector<std::string> entries3{"T",
                                       "N",
@@ -1085,7 +1109,7 @@ TEST(CachingLibrary, Parsing)
                                       "f32_r",
                                       "752"};
     probSol = problemFromEntries<ContractionProblem>(entries3);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
 
     std::vector<std::string> entries4{"T",
                                       "N",
@@ -1103,5 +1127,183 @@ TEST(CachingLibrary, Parsing)
                                       "f32_r",
                                       "752"};
     probSol = problemFromEntries<ContractionProblem>(entries4);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
+}
+
+namespace
+{
+    // One row of an override file. Rows are told apart by m, which also serves as lda and
+    // ldc, so that each names the problem returned by overrideProblem(m).
+    struct OverrideRow
+    {
+        size_t      m;
+        std::string solutionIndex;
+    };
+
+    // Writes an override file using the column layout that rocblas-gemm-tune emits
+    std::filesystem::path writeOverrideFile(std::string const&              fileName,
+                                            std::vector<OverrideRow> const& rows)
+    {
+        auto path = std::filesystem::temp_directory_path() / fileName;
+
+        std::ofstream file(path);
+        file << "transA,transB,M,N,batch_count,K,alpha,beta,lda,ldb,ldc,input_type,output_type,"
+                "compute_type,solution_index\n";
+
+        for(auto const& row : rows)
+            file << "N,N," << row.m << ",7,1,9,1,0," << row.m << ",9," << row.m
+                 << ",f32_r,f32_r,f32_r," << row.solutionIndex << "\n";
+
+        return path;
+    }
+
+    std::filesystem::path writeOverrideFile(std::string const& fileName,
+                                            std::string const& solutionIndex)
+    {
+        return writeOverrideFile(fileName, std::vector<OverrideRow>{{5, solutionIndex}});
+    }
+
+    // Entries with a batch count of one are parsed as having unit batch strides
+    Tensile::ContractionProblem overrideProblem(size_t m = 5)
+    {
+        using namespace Tensile;
+
+        return ContractionProblem::GEMM_Strides(false,
+                                                false,
+                                                DataType::Float,
+                                                DataType::Float,
+                                                DataType::Float,
+                                                DataType::Float,
+                                                m,
+                                                7,
+                                                9,
+                                                1,
+                                                m,
+                                                1,
+                                                9,
+                                                1,
+                                                m,
+                                                1,
+                                                m,
+                                                1,
+                                                0.0);
+    }
+}
+
+TEST(CachingLibrary, OverrideFromFile)
+{
+    using namespace Tensile;
+
+    AMDGPU gpu;
+    auto   problem = overrideProblem();
+
+    auto solutionDefault  = std::make_shared<ContractionSolution>();
+    auto solutionOverride = std::make_shared<ContractionSolution>();
+
+    solutionDefault->index  = 0;
+    solutionOverride->index = 1;
+
+    // Each case needs its own library, as an override lives for the life of the library
+    auto makeLibrary = [&]() {
+        auto lib = std::make_shared<MasterSolutionLibrary<ContractionProblem>>();
+
+        lib->library = std::make_shared<CachingLibrary<ContractionProblem>>(
+            std::make_shared<SingleContractionLibrary>(solutionDefault));
+        lib->solutions
+            = SolutionMap<ContractionSolution>({{0, solutionDefault}, {1, solutionOverride}});
+
+        return lib;
+    };
+
+    // Translates the biased negative indices with bias for rocBLAS-like mapping for Tensile
+    // solutions. The indices it reserves for its own kernels name no library solution, so
+    // they are reported as nothing to map rather than as an error.
+    auto mapRocblasIndex = [](int idx) -> std::optional<int> {
+        constexpr int reserved = 10;
+
+        if(idx < -reserved)
+            return -idx - reserved - 1;
+
+        return idx > 0 ? std::optional<int>(idx - 1) : std::nullopt;
+    };
+
+    EXPECT_EQ(mapRocblasIndex(-12), solutionOverride->index);
+
+    // Without a mapping the file index is one based
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_one_based.csv", "2");
+
+        EXPECT_TRUE(lib->setOverridesFromFile(gpu, path.string()));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionOverride);
+
+        std::filesystem::remove(path);
+    }
+
+    // A mapping lets the file use the indices reported by the client instead
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_mapped.csv", "-12");
+
+        EXPECT_TRUE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionOverride);
+
+        std::filesystem::remove(path);
+    }
+
+    // The same file is not usable without the mapping
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_unmapped.csv", "-12");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string()));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
+
+    // A file of nothing but reserved indices overrides nothing, which is still a failure
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_unmappable.csv", "-5");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
+
+    // A reserved index alongside a usable one is skipped without failing the file
+    {
+        auto lib = makeLibrary();
+        auto path
+            = writeOverrideFile("tensile_override_mixed.csv", {{5, "-12"}, {6, "-9"}, {7, "-12"}});
+
+        EXPECT_TRUE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(overrideProblem(5), gpu), solutionOverride);
+        EXPECT_EQ(lib->findBestSolution(overrideProblem(7), gpu), solutionOverride);
+        EXPECT_EQ(lib->findBestSolution(overrideProblem(6), gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
+
+    // Raw file indices of 0 and InvalidOverrideSolutionIndex are rejected before mapping
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_zero.csv", "0");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_invalid.csv", "-1");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
 }
