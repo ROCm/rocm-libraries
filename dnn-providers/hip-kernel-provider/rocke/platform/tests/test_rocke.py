@@ -667,6 +667,59 @@ class TestHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             LdsLayout(logical_cols=64, swizzle="xor").validate_for_async()
 
+    def test_wgrad_async_rejects_non_packed_lds_layout(self):
+        """An explicit lds_layout must reach validate_for_async() for wgrad too.
+
+        The scalar ``lds_k_pad`` guard cannot stand in for this: an explicit
+        ``lds_layout`` object beats the scalar in ``effective_lds_layout()``, and
+        the xor swizzle has no scalar analogue at all. Without the call these
+        specs build and only fail deep inside the emitter, which the sweep
+        drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
+        """
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            is_valid_wgrad_spec,
+        )
+
+        def _spec(**over):
+            return WgradConvSpec(
+                problem=ConvProblem(N=1, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+                name="wgrad_async_guard",
+                data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=1,
+                lds_k_outer=True,
+                async_dma=True,
+                **over,
+            )
+
+        # The packed layout the async intrinsic actually writes is accepted.
+        _spec(lds_layout=LdsLayout.packed_async(64)).validate()
+
+        for bad in (
+            LdsLayout.padded_k(64, 8),
+            LdsLayout(logical_cols=64, swizzle="xor"),
+        ):
+            spec = _spec(lds_layout=bad)
+            with self.assertRaises(ValueError):
+                spec.validate()
+            # And the soft validator reports it rather than skipping silently.
+            ok, why = is_valid_wgrad_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertTrue(why)
+
     def test_schedule_policy_emits_expected_hints(self):
         b = IRBuilder("sched_smoke")
         policy = SchedulePolicy.for_pipeline("compv4")
