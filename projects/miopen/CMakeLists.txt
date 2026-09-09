@@ -170,7 +170,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.6.0)
+rocm_setup_version(VERSION 3.6.1)
 
 include(TargetFlags)
 
@@ -289,6 +289,9 @@ option(MIOPEN_CK_UNBUNDLE_PER_ARCH
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
+option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" On)
+message(STATUS "Enable hipconv: ${MIOPEN_USE_HIPCONV}")
+
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
 
@@ -348,6 +351,34 @@ endif()
 message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
+
+# MIOpen's HIP device code is compiled in the same translation units as host code, so a host
+# sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
+# also instruments AMDGPU device code. ROCm/TheRock ships a device sanitizer runtime only for
+# ASan (amdgcn asanrtl.bc); there is no device UBSan runtime, so instrumented device objects
+# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, disable
+# UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined' -- so device code
+# is left uninstrumented while host code stays instrumented. Gated on 'undefined' specifically,
+# so ASan-only builds keep their working device ASan.
+#
+# Note: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
+# directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
+# then fails with "file not found". -Xarch_device scopes the flag to the device sub-compile
+# without that side effect.
+#
+# Detection lives here (before add_subdirectory); the flag is applied narrowly with
+# target_compile_options on the MIOpen library target in src/CMakeLists.txt so it only touches
+# the device-code library and not host tools (addkernels), tests, driver, or fin.
+if(HAS_HIP)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
+    set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
+    if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
+        message(STATUS "UBSan requested: will disable device-side UBSan on MIOpen HIP targets via "
+                       "'-Xarch_device -fno-sanitize=undefined' so AMDGPU device code links without "
+                       "a device UBSan runtime (host instrumentation retained)")
+        set(MIOPEN_DISABLE_DEVICE_UBSAN ON)
+    endif()
+endif()
 
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
@@ -794,6 +825,8 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        # Clang 21 cannot pass AMDGCN builtins as arguments to the HIP header feature probe.
+        -D__builtin_amdgcn_is_invocable=__has_builtin
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
         -nogpulib
 )
@@ -827,6 +860,7 @@ enable_cppcheck(
         # Ignore initializer lists in the tests
         useInitializationList:*test/*.cpp
         *:*src/sqlite/*.cpp
+        *:*src/hipconv/*
         *:*.cl
         *:*src/kernels/*.h
         # These are HIP kernel files compiled at runtime with -D defines; cppcheck

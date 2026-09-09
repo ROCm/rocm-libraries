@@ -4,6 +4,7 @@
 #pragma once
 
 #include "IRunnableKernel.hpp"
+#include <hip/hip_runtime_api.h>
 #include <string>
 
 namespace hip_kernel_provider::compilation
@@ -15,6 +16,15 @@ class Kernel : public IRunnableKernel
 {
 public:
     Kernel(const Program& program, const std::string& kernelName);
+
+    /// Wraps a function handle resolved elsewhere -- by a kpack archive's module rather
+    /// than by a HIPRTC compilation. The launch path is shared, not duplicated: a
+    /// kpack-sourced Kernel and a HIPRTC-sourced one are the same object holding the
+    /// same hipFunction_t, so launchImpl below serves both.
+    ///
+    /// The caller owns the module the function belongs to and must keep it alive for
+    /// this Kernel's lifetime; hipFunction_t is a non-owning view into a hipModule_t.
+    Kernel(hipFunction_t kernel, std::string kernelName);
 
     void setBlockSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
     void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;

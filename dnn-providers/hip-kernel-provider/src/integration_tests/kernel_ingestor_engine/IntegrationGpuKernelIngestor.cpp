@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,11 +24,9 @@
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
 
@@ -250,6 +247,30 @@ class IntegrationGpuKernelIngestor
                                                                                       ExecuteCase>
 {
 protected:
+    /// A cache root private to ONE test case, not merely to this binary.
+    ///
+    /// main() already scopes HIPDNN_CACHE_DIR away from the developer's ~/.cache/hipdnn,
+    /// which stops one RUN inheriting another's shards. It does not stop one CASE
+    /// inheriting another's: every case in this process shares that single root.
+    /// ExecutesCorrectlyWithBenchmarkingEnabled records a measured ranking for a
+    /// single-node FLOAT add, and ReportsAKnobWhoseValuesComeFromTheCatalog and
+    /// ReportsTheMaximumWorkspaceAcrossSurvivingKernels then read it back: a benchmarked
+    /// record replaces the heuristic order, so the knob default and the plan's workspace
+    /// both follow the measured winner instead of the catalog's own ranking.
+    ///
+    /// That made those two cases fail under --gtest_shuffle, and -- because the shard
+    /// outlives the process -- in default order too, on any machine where an earlier run
+    /// left one behind. It is also nondeterministic rather than merely order-dependent:
+    /// the two surviving FLOAT candidates differ by a few nanoseconds, so which one the
+    /// sweep records is a coin flip.
+    ///
+    /// Scope::TEST rather than the default: a deferring instance nested inside main()'s
+    /// would see HIPDNN_CACHE_DIR already set and quietly own nothing, isolating exactly
+    /// nothing. Destroyed with the fixture, so the redirect is undone and the scratch
+    /// tree removed on the failing path as well as the passing one.
+    hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
+        "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
+
     static int64_t engineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
@@ -309,59 +330,6 @@ protected:
 
         result = graph.build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    }
-
-    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on GPU, verifies
-    /// against CpuReferenceGraphExecutor, and reseeds inputs (`seed`) so repeated calls
-    /// never compare stale buffers. `reductionLength` widens the tolerance for kernels
-    /// that accumulate -- GPU/CPU summation order differs, so more terms need more slack
-    /// than pointwise's bit-exact default at length 1.
-    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed, int reductionLength = 1)
-    {
-        GraphTensorBundle gpuBundle;
-        GraphTensorBundle cpuBundle;
-        graph.visit([&](const INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-            }
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
-                {
-                    gpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                    cpuBundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
-                }
-            }
-        });
-        for(auto& [uid, tensor] : gpuBundle.tensors)
-        {
-            // Per-uid offset so operands are never byte-identical, or allClose() would
-            // pass on a+a as readily as a+b.
-            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
-            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-        }
-
-        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
-        auto result = graph.execute(_handle, deviceVariantPack, workspace);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-        auto [serializedGraph, serErr] = graph.to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
-
-        auto& gpuOut = gpuBundle.getTensor(3);
-        auto& cpuOut = cpuBundle.getTensor(3);
-        gpuOut.markDeviceModified();
-        // Scaled by reduction length: a K-term float sum has ~K*epsilon relative error,
-        // so an 18-term conv needs more slack than pointwise's 1-term bit-exactness.
-        const auto tolerance
-            = static_cast<float>(reductionLength) * std::numeric_limits<float>::epsilon();
-        EXPECT_TRUE(CpuFpReferenceValidation<float>(tolerance, tolerance).allClose(cpuOut, gpuOut));
     }
 };
 

@@ -16,6 +16,7 @@
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
@@ -155,6 +156,20 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
            && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
+// Select the string safe to persist as an entry's engine_name. The heuristics
+// config reader hashes it back with engineNameOrIdToId, so a name that does not
+// hash back to the benchmarked ID would silently route elsewhere; the hexadecimal
+// rendering round-trips exactly and is used instead.
+inline std::string engineRoutingKey(const std::string& engineName, int64_t engineId)
+{
+    if(!engineName.empty()
+       && hipdnn_data_sdk::utilities::engineNameOrIdToId(engineName) == engineId)
+    {
+        return engineName;
+    }
+    return hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
+}
+
 // Build a single JSON engine_overrides entry from an AutotuneResult.
 // tensorDims/tensorStrides hold one vector<int64_t> per tensor. opName is the
 // operation name for the entry (e.g. "conv_fprop"). Returns a nlohmann::json
@@ -172,7 +187,15 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     {
         entry[config_json::CRITERIA] = criteriaToJson(criteria);
     }
-    entry[config_json::ENGINE_NAME] = result.engineName;
+    const auto routingKey = engineRoutingKey(result.engineName, result.engineId);
+    if(!result.engineName.empty() && routingKey != result.engineName)
+    {
+        HIPDNN_FE_LOG_WARN("autotune: engine name \""
+                           << result.engineName
+                           << "\" does not hash to its engine ID; persisting the hexadecimal ID "
+                           << routingKey << " as the routing key instead");
+    }
+    entry[config_json::ENGINE_NAME] = routingKey;
 
     // Tensor patterns (dimensions and strides)
     nlohmann::json tensors = nlohmann::json::array();
@@ -282,9 +305,10 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
 // sdpa_fwd, batchnorm_training, layernorm, pointwise, etc.). criteria is
 // present only when the graph supplies discriminating criteria. Per tensor,
 // tensor_id is required for the v2 named-id format and stride is present when
-// strides are supplied. In autotune_metadata, converged is present only for
-// the run_until_stable strategy, and knobs is omitted entirely for
-// default-knob entries.
+// strides are supplied. engine_name is the routing key produced by
+// engineRoutingKey(). In autotune_metadata, converged is present only for the
+// run_until_stable strategy, and knobs is omitted entirely for default-knob
+// entries.
 //
 // Writes a single entry: the rank-0 winner (the first succeeded result in the
 // rank-ordered input). If no result succeeded, nothing is written and OK is

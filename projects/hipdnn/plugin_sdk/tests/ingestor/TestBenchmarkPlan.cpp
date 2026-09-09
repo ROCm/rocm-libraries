@@ -318,37 +318,35 @@ TEST(TestIngestorBenchmarkPlan, TheFastestCandidateWinsAndOnlyItReceivesTheDeleg
     EXPECT_EQ(slowRaw->launchCount(), SAMPLING_LAUNCHES);
 }
 
-/// The winner is the one with the fastest single sample, not the fastest average: a
-/// descending sequence bottoming out below a rival's constant time must win even though
-/// its mean is worse.
-TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
+/// A single lucky sample does not win the sweep. The reduction is a mean over the samples
+/// left after the slow tail is trimmed, so a candidate that is usually slower cannot beat a
+/// steady rival on one fast outlier -- it would then serve its typical, slower time on every
+/// dispatch the cached ranking covers.
+///
+/// This is the case that separates the reduction from a minimum: LUCKY_SAMPLE is far below
+/// anything the steady candidate produces, so a min-based reduction picks the wrong winner.
+TEST(TestIngestorBenchmarkPlan, TheReductionIgnoresASingleLuckySample)
 {
-    auto descending = std::make_unique<FakePlan>(64);
+    auto lucky = std::make_unique<FakePlan>(64);
     auto steady = std::make_unique<FakePlan>(64);
-    const auto* descendingRaw = descending.get();
+    const auto* luckyRaw = lucky.get();
     const auto* steadyRaw = steady.get();
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::move(descending)});
+    candidates.push_back({testId(0x01), std::move(lucky)});
     candidates.push_back({testId(0x02), std::move(steady)});
 
-    // The descending candidate samples DESCENDING_FIRST, then one less each iteration.
-    // The steady candidate returns a constant chosen strictly between the descending
-    // run's minimum and its mean, so the two reductions disagree about the winner: min
-    // picks descending, mean picks steady.
-    constexpr double DESCENDING_FIRST = 10.0;
-    constexpr double DESCENDING_MIN = DESCENDING_FIRST - (BENCHMARK_ITERATIONS - 1);
-    constexpr double DESCENDING_MEAN = DESCENDING_FIRST - (BENCHMARK_ITERATIONS - 1) / 2.0;
-    constexpr double STEADY_SAMPLE = (DESCENDING_MIN + DESCENDING_MEAN) / 2.0;
+    // The lucky candidate reports one very fast sample and is otherwise slower than the
+    // steady one, whose constant sits between the two.
+    constexpr double LUCKY_SAMPLE = 1.0;
+    constexpr double LUCKY_TYPICAL = 12.0;
+    constexpr double STEADY_SAMPLE = 10.0;
 
-    // Needs at least three iterations for the (min, mean) window to be non-empty, or the
-    // case silently stops discriminating the two reductions.
-    static_assert(BENCHMARK_ITERATIONS >= 3,
-                  "TheReductionKeepsTheMinimumSampleNotTheMean needs DESCENDING_MIN < "
-                  "STEADY_SAMPLE < DESCENDING_MEAN to tell min from mean");
-    static_assert(DESCENDING_MIN < STEADY_SAMPLE && STEADY_SAMPLE < DESCENDING_MEAN);
+    static_assert(LUCKY_SAMPLE < STEADY_SAMPLE && STEADY_SAMPLE < LUCKY_TYPICAL,
+                  "the lucky candidate must win on its best sample and lose on its typical "
+                  "one, or the case stops separating the reduction from a minimum");
 
-    double nextSample = DESCENDING_FIRST;
+    int luckySampleIndex = 0;
     const TestBenchmarkPlan::Timer timer
         = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
               const BenchmarkTestHandle& planHandle,
@@ -360,7 +358,7 @@ TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
         {
             return STEADY_SAMPLE;
         }
-        return nextSample--;
+        return luckySampleIndex++ == 0 ? LUCKY_SAMPLE : LUCKY_TYPICAL;
     };
 
     const BenchmarkTestHandle handle;
@@ -368,9 +366,66 @@ TEST(TestIngestorBenchmarkPlan, TheReductionKeepsTheMinimumSampleNotTheMean)
 
     plan.execute(handle, nullptr, 0, nullptr);
 
-    // Descending wins on its minimum despite the worse mean. Were the reduction a mean,
-    // steady's constant would beat descending's average and the counts would swap.
-    EXPECT_EQ(descendingRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+    // Steady takes the delegated execute; the lucky candidate is sampled and dropped.
+    EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES + 1);
+    EXPECT_EQ(luckyRaw->launchCount(), SAMPLING_LAUNCHES);
+}
+
+/// A single slow sample does not lose the sweep either. Interference can make an iteration
+/// slower but never faster, so the slow tail is contamination and is trimmed before the mean
+/// is taken.
+///
+/// This is the case that separates the reduction from a plain mean: OUTLIER_SAMPLE is large
+/// enough to drag the untrimmed average above the steady rival's constant.
+TEST(TestIngestorBenchmarkPlan, TheReductionTrimsASingleSlowOutlier)
+{
+    auto spiky = std::make_unique<FakePlan>(64);
+    auto steady = std::make_unique<FakePlan>(64);
+    const auto* spikyRaw = spiky.get();
+    const auto* steadyRaw = steady.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(spiky)});
+    candidates.push_back({testId(0x02), std::move(steady)});
+
+    // Spiky is genuinely the faster kernel, but one contaminated sample pushes its raw mean
+    // past steady's constant. Its remaining samples carry ordinary jitter: identical samples
+    // would leave the median absolute deviation at zero, and the reduction keeps every
+    // sample when it cannot measure a spread, which would defeat the case.
+    constexpr std::array<double, BENCHMARK_ITERATIONS> SPIKY_SAMPLES
+        = {40.0, 10.0, 10.5, 11.0, 9.5, 10.0, 10.5};
+    constexpr double SPIKY_OUTLIER = SPIKY_SAMPLES[0];
+    constexpr double STEADY_SAMPLE = 12.0;
+
+    static_assert(SPIKY_SAMPLES[1] < STEADY_SAMPLE, "spiky must be the genuinely faster candidate");
+    static_assert(SPIKY_OUTLIER > STEADY_SAMPLE * BENCHMARK_ITERATIONS
+                                      - (SPIKY_SAMPLES[1] + SPIKY_SAMPLES[2] + SPIKY_SAMPLES[3]
+                                         + SPIKY_SAMPLES[4] + SPIKY_SAMPLES[5] + SPIKY_SAMPLES[6]),
+                  "the outlier must drag the untrimmed mean above steady, or the case stops "
+                  "separating the reduction from a plain mean");
+
+    size_t spikySampleIndex = 0;
+    const TestBenchmarkPlan::Timer timer
+        = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+              const BenchmarkTestHandle& planHandle,
+              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+              uint32_t numDeviceBuffers,
+              void* workspace) -> std::optional<double> {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        if(&plan == steadyRaw)
+        {
+            return STEADY_SAMPLE;
+        }
+        return SPIKY_SAMPLES.at(spikySampleIndex++);
+    };
+
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle, timer);
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    // Spiky takes the delegated execute: the outlier is trimmed rather than averaged in.
+    EXPECT_EQ(spikyRaw->launchCount(), SAMPLING_LAUNCHES + 1);
     EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
 }
 
