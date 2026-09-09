@@ -198,10 +198,18 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
     // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on
     // failure)
     if (rocfft_setup() != rocfft_status_success) RPP_THROW("rocFFT library initialization failed");
-#endif
-#endif
-
+    try {
+        impl->PreInitializeBuffer();
+    } catch (...) {
+        rocfft_cleanup();
+        throw;
+    }
+#else
     impl->PreInitializeBuffer();
+#endif
+#else
+    impl->PreInitializeBuffer();
+#endif
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {

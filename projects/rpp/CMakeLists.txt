@@ -200,13 +200,10 @@ endif()
 
 # For HIP backend, also check for rocFFT
 if("${BACKEND}" STREQUAL "HIP")
+    set(RPP_USE_ROCFFT_LIB 0)
     find_package(ROCFFT QUIET)
     if(ROCFFT_FOUND)
         set(RPP_USE_ROCFFT_LIB 1)
-        # Don't override RPP_AUDIO_SUPPORT if user explicitly disabled it
-        if(NOT DEFINED RPP_AUDIO_SUPPORT)
-            set(RPP_AUDIO_SUPPORT ON)
-        endif()
     endif()
 endif()
 

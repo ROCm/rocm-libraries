@@ -82,7 +82,7 @@ These libraries provide a unified API that works with both AMD (ROCm) and NVIDIA
 | **hipBLASLt** | hipBLAS, Tensile | Lightweight GEMM operations with flexible APIs |
 | **hipSPARSELt** | hipSPARSE, Tensile | Sparse GEMM with structured sparsity |
 | **hipTensor** | Composable Kernel | Tensor contraction operations |
-| **RPP** | HIP only | ROCm Performance Primitives for image processing |
+| **RPP** | CPU and HIP | ROCm Performance Primitives for image processing |
 
 ## Detailed Dependencies
 
