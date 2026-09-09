@@ -296,7 +296,7 @@ Pre-submit tests currently cover unit tests and accuracy tests for:
 - gfx1151 on Windows
 
 This is a small subset of the architectures supported by rocFFT, which is a gap in testing due to
-infrasctructure issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
+infrastructure issues in TheRock's CI.  We should do at least smoke tests on all architectures, and
 performance tests when changes may affect performance.
 
 
