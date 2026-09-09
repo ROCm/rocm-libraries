@@ -32,6 +32,8 @@
 #include <cstring>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <limits>
+#include <roc/host_numerics/epilogue.hpp>
+#include <roc/host_numerics/reduction.hpp>
 #include <stdexcept>
 #include <type_traits>
 
@@ -208,146 +210,123 @@ TEST(HostNumericsTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
     EXPECT_EQ(observed, expected);
 }
 
-TEST(HostNumericsEpilogueBridge, DelegatesToProductIndependentComponent)
+TEST(HostNumericsEpilogue, SupportsTensorBackedProductComposition)
 {
+    using namespace roc::host_numerics;
+
     std::array<float, 4> input{-2, 1, 3, -4};
-    std::array<float, 4> output{};
-    std::array<float, 4> rawOutput{};
-    std::array<float, 4> auxiliary{};
     std::array<float, 2> bias{1, 2};
-    float                amax   = 5;
-    float                scaleD = 2;
-    float                scaleE = 3;
+    const Layout         matrixLayout(Shape{2, 2}, {1, 2});
+    const Tensor         inputTensor = Tensor::copyNativeStorage<float>(matrixLayout, input);
+    Tensor               output(ScalarType::Float32, matrixLayout);
+    Tensor               rawOutput(ScalarType::Float32, matrixLayout);
+    Tensor               auxiliary(ScalarType::Float32, matrixLayout);
+    Tensor               amax = Tensor::copyNativeValues<float>(Shape{1}, std::array<float, 1>{5});
 
-    hipblaslt::host_numerics::EpilogueArguments arguments;
-    arguments.rows             = 2;
-    arguments.columns          = 2;
-    arguments.leadingDimension = 2;
-    arguments.input            = input.data();
-    arguments.output           = output.data();
-    arguments.rawOutput        = rawOutput.data();
-    arguments.amax             = &amax;
-    arguments.auxiliary        = auxiliary.data();
-    arguments.auxiliaryType    = HIP_R_32F;
-    arguments.outputScale      = &scaleD;
-    arguments.auxiliaryScale   = &scaleE;
-    arguments.bias             = bias.data();
-    arguments.biasType         = HIP_R_32F;
-    arguments.activation       = roc::host_numerics::Activation::Relu;
-    arguments.outputType       = HIP_R_32F;
-    arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_numerics::referenceEpilogue(arguments);
+    EpilogueOptions options(ScalarType::Float32);
+    options.outputScale    = Tensor(2.0f);
+    options.auxiliaryScale = Tensor(3.0f);
+    options.bias           = Tensor::copyNativeValues<float>(Shape{2}, bias).expandDims(1);
+    options.activation     = ReluActivation{};
+    options.accumulateAmax = true;
+    referenceEpilogueInto(
+        inputTensor,
+        {.output = output, .rawOutput = rawOutput, .auxiliaryOutput = auxiliary, .amax = amax},
+        options);
 
-    EXPECT_EQ(output, (std::array<float, 4>{0, 6, 8, 0}));
-    EXPECT_EQ(rawOutput, output);
-    EXPECT_EQ(auxiliary, (std::array<float, 4>{-3, 9, 12, -6}));
-    EXPECT_EQ(amax, 5);
+    const std::array<float, 4> expectedOutput{0, 6, 8, 0};
+    const std::array<float, 4> expectedAuxiliary{-3, 9, 12, -6};
+    for(size_t index = 0; index < expectedOutput.size(); ++index)
+    {
+        const auto coordinates
+            = matrixLayout.shape().coordinates(index, IndexOrder::FirstDimensionFastest);
+        EXPECT_EQ(output.loadAs<float>(coordinates), expectedOutput[index]);
+        EXPECT_EQ(rawOutput.loadAs<float>(coordinates), expectedOutput[index]);
+        EXPECT_EQ(auxiliary.loadAs<float>(coordinates), expectedAuxiliary[index]);
+    }
+    EXPECT_EQ(amax.loadAs<float>({0}), 5);
 }
 
-TEST(HostNumericsEpilogueBridge, RoutesGradientAuxiliaryInput)
+TEST(HostNumericsEpilogue, RoutesGradientAuxiliaryInput)
 {
+    using namespace roc::host_numerics;
+
     std::array<float, 4> gradient{10, 20, 30, 40};
     std::array<float, 4> activationInput{-1, 1, 2, -2};
-    std::array<float, 4> output{};
-    float                one = 1;
+    const Layout         layout(Shape{2, 2}, {1, 2});
+    const Tensor         gradientTensor = Tensor::copyNativeStorage<float>(layout, gradient);
+    const Tensor activationTensor       = Tensor::copyNativeStorage<float>(layout, activationInput);
+    Tensor       output(ScalarType::Float32, layout);
 
-    hipblaslt::host_numerics::EpilogueArguments arguments;
-    arguments.rows                  = 2;
-    arguments.columns               = 2;
-    arguments.leadingDimension      = 2;
-    arguments.input                 = gradient.data();
-    arguments.output                = output.data();
-    arguments.auxiliary             = activationInput.data();
-    arguments.auxiliaryType         = HIP_R_32F;
-    arguments.outputScale           = &one;
-    arguments.auxiliaryScale        = &one;
-    arguments.activation            = roc::host_numerics::Activation::Relu;
-    arguments.activationApplication = roc::host_numerics::ActivationApplication::Gradient;
-    arguments.outputType            = HIP_R_32F;
-    arguments.computeType           = HIP_R_32F;
-    hipblaslt::host_numerics::referenceEpilogue(arguments);
+    EpilogueOptions options(ScalarType::Float32);
+    options.auxiliaryInput        = activationTensor;
+    options.activation            = ReluActivation{};
+    options.activationApplication = ActivationApplication::Gradient;
+    referenceEpilogueInto(gradientTensor, {.output = output}, options);
 
-    EXPECT_EQ(output, (std::array<float, 4>{0, 20, 30, 0}));
-    EXPECT_EQ(activationInput, (std::array<float, 4>{-1, 1, 2, -2}));
+    const std::array<float, 4> expected{0, 20, 30, 0};
+    for(size_t index = 0; index < expected.size(); ++index)
+    {
+        const auto coordinates
+            = layout.shape().coordinates(index, IndexOrder::FirstDimensionFastest);
+        EXPECT_EQ(output.loadAs<float>(coordinates), expected[index]);
+    }
+    EXPECT_EQ(activationTensor.loadAs<float>({0, 0}), -1);
+    EXPECT_EQ(activationTensor.loadAs<float>({1, 1}), -2);
 }
 
-TEST(HostNumericsEpilogueBridge, SaturatesInt8Output)
+TEST(HostNumericsEpilogue, SaturatesInt8Output)
 {
+    using namespace roc::host_numerics;
+
     std::array<float, 4>  input{-200.0f, -128.5f, 126.5f, 300.0f};
-    std::array<int8_t, 4> output{};
-    float                 one = 1;
+    const Layout          layout(Shape{2, 2}, {1, 2});
+    const Tensor          inputTensor = Tensor::copyNativeStorage<float>(layout, input);
+    Tensor                output(ScalarType::Int8, layout);
+    EpilogueOptions       options(ScalarType::Float32);
+    options.outputConversion = OutputConversion::SaturatingInt8;
+    referenceEpilogueInto(inputTensor, {.output = output}, options);
 
-    hipblaslt::host_numerics::EpilogueArguments arguments;
-    arguments.rows             = 2;
-    arguments.columns          = 2;
-    arguments.leadingDimension = 2;
-    arguments.input            = input.data();
-    arguments.output           = output.data();
-    arguments.outputScale      = &one;
-    arguments.auxiliaryScale   = &one;
-    arguments.outputType       = HIP_R_8I;
-    arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_numerics::referenceEpilogue(arguments);
-
-    EXPECT_EQ(output, (std::array<int8_t, 4>{-128, -128, 126, 127}));
+    const std::array<int8_t, 4> expected{-128, -128, 126, 127};
+    for(size_t index = 0; index < expected.size(); ++index)
+    {
+        const auto coordinates
+            = layout.shape().coordinates(index, IndexOrder::FirstDimensionFastest);
+        EXPECT_EQ(output.loadAs<int8_t>(coordinates), expected[index]);
+    }
 }
 
-TEST(HostNumericsEpilogueBridge, UsesIdentityForNullScaleDefaults)
+TEST(HostNumericsEpilogue, UsesIdentityScaleDefaults)
 {
+    using namespace roc::host_numerics;
+
     std::array<float, 4> input{-2, 1, 3, -4};
-    std::array<float, 4> output{};
-    std::array<float, 4> auxiliary{};
+    const Layout         layout(Shape{2, 2}, {1, 2});
+    const Tensor         inputTensor = Tensor::copyNativeStorage<float>(layout, input);
+    Tensor               output(ScalarType::Float32, layout);
+    Tensor               auxiliary(ScalarType::Float32, layout);
+    referenceEpilogueInto(inputTensor, {.output = output, .auxiliaryOutput = auxiliary});
 
-    hipblaslt::host_numerics::EpilogueArguments arguments;
-    arguments.rows             = 2;
-    arguments.columns          = 2;
-    arguments.leadingDimension = 2;
-    arguments.input            = input.data();
-    arguments.output           = output.data();
-    arguments.auxiliary        = auxiliary.data();
-    arguments.outputType       = HIP_R_32F;
-    arguments.computeType      = HIP_R_32F;
-    hipblaslt::host_numerics::referenceEpilogue(arguments);
-
-    EXPECT_EQ(output, input);
-    EXPECT_EQ(auxiliary, input);
+    for(size_t index = 0; index < input.size(); ++index)
+    {
+        const auto coordinates
+            = layout.shape().coordinates(index, IndexOrder::FirstDimensionFastest);
+        EXPECT_EQ(output.loadAs<float>(coordinates), input[index]);
+        EXPECT_EQ(auxiliary.loadAs<float>(coordinates), input[index]);
+    }
 }
 
-TEST(HostNumericsEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
+TEST(HostNumericsReduction, SumsStridedTensor)
 {
-    float input  = 0;
-    float output = 0;
+    using namespace roc::host_numerics;
 
-    hipblaslt::host_numerics::EpilogueArguments arguments;
-    arguments.rows             = 1;
-    arguments.columns          = 3;
-    arguments.leadingDimension = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
-    arguments.input            = &input;
-    arguments.output           = &output;
-    arguments.outputType       = HIP_R_32F;
-    arguments.computeType      = HIP_R_32F;
-
-    EXPECT_THROW(hipblaslt::host_numerics::referenceEpilogue(arguments), std::overflow_error);
-}
-
-TEST(HostNumericsReductionBridge, DelegatesStridedBiasSum)
-{
     const std::array<float, 8> input{1, 2, -99, 3, 4, -99, 5, 6};
-    std::array<float, 2>       output{};
+    const Tensor inputTensor = Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 3}), input);
+    Tensor       output(ScalarType::Float32, Shape{2});
+    referenceSumInto(inputTensor, output, {1}, ScalarType::Float32);
 
-    hipblaslt::host_numerics::ReductionArguments arguments;
-    arguments.rows            = 2;
-    arguments.columns         = 3;
-    arguments.rowStride       = 1;
-    arguments.columnStride    = 3;
-    arguments.input           = input.data();
-    arguments.inputType       = HIP_R_32F;
-    arguments.output          = output.data();
-    arguments.outputType      = HIP_R_32F;
-    arguments.accumulatorType = HIP_R_32F;
-    hipblaslt::host_numerics::referenceSum(arguments);
-
-    EXPECT_EQ(output, (std::array<float, 2>{9, 12}));
+    EXPECT_EQ(output.loadAs<float>({0}), 9);
+    EXPECT_EQ(output.loadAs<float>({1}), 12);
 }
 
 namespace
