@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import unittest
+from fractions import Fraction
 
 from dispatch.attention import (
+    AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
@@ -20,7 +22,12 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # does not implement it.
 EXPECTED_FEATURES = {
     "attention_gfx942_dense": {"causal"},
-    "attention_gfx950_dense": {"causal", "sinks", "sliding_window"},
+    "attention_gfx950_dense": {
+        "causal",
+        "causal_bottom_right",
+        "sinks",
+        "sliding_window",
+    },
     "attention_d256_decode": {"causal"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_gfx942_dense_pipe": {"causal", "sinks", "sliding_window"},
@@ -34,6 +41,7 @@ EXPECTED_FEATURES = {
 # listed) rather than inheriting silence.
 _ENABLE_FEATURE = {
     "causal": {"mask_type": 1},
+    "causal_bottom_right": {"mask_type": AttentionMaskType.BOTTOM_RIGHT_CAUSAL},
     "sliding_window": {"sliding_window": 256},
     "sinks": {"use_sinks": True},
     "fp8": {"use_fp8": True},
@@ -47,7 +55,7 @@ _ENABLE_FEATURE = {
 # on the consumers that key a compile cache on kernel_name() and is out of scope
 # here; the gap is frozen below so a future fix trips the test instead of
 # passing silently.
-_IDENTITY_ENCODED = {"fp8", "sliding_window"}
+_IDENTITY_ENCODED = {"causal_bottom_right", "fp8", "sliding_window"}
 
 
 def _attn(arch="gfx950", **kw):
@@ -63,6 +71,133 @@ def _attn(arch="gfx950", **kw):
     )
     base.update(kw)
     return AttentionRequest(**base)
+
+
+class _IntegerLike:
+    """Minimal graph-frontend integer scalar (``operator.index`` protocol)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
+class TestAttentionMaskType(unittest.TestCase):
+    def test_public_enum_exports_canonical_ordinals(self):
+        import dispatch.attention as attention
+
+        self.assertIs(attention.AttentionMaskType, AttentionMaskType)
+        self.assertIn("AttentionMaskType", attention.__all__)
+        self.assertEqual(
+            [(member.name, member.value) for member in AttentionMaskType],
+            [
+                ("NO_MASK", 0),
+                ("TOP_LEFT_CAUSAL", 1),
+                ("BOTTOM_RIGHT_CAUSAL", 2),
+                ("SLIDING_WINDOW", 3),
+            ],
+        )
+
+    def test_enum_and_raw_int_share_normalized_and_request_hash_identity(self):
+        enum_req = _attn(mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+        int_req = _attn(mask_type=2)
+
+        self.assertEqual(enum_req.normalized(), int_req.normalized())
+        self.assertEqual(enum_req.features(), frozenset({"causal"}))
+        enum_result = dispatch_attention(enum_req)
+        int_result = dispatch_attention(int_req)
+        self.assertEqual(enum_result.candidate.name, "attention_unified_2d")
+        self.assertEqual(enum_result.candidate.name, int_result.candidate.name)
+        self.assertEqual(enum_result.spec, int_result.spec)
+        self.assertEqual(
+            enum_result.kernel_id.request_hash,
+            int_result.kernel_id.request_hash,
+        )
+
+    def test_integer_like_exact_ordinals_are_accepted(self):
+        for ordinal in range(4):
+            with self.subTest(ordinal=ordinal):
+                req = _attn(mask_type=_IntegerLike(ordinal))
+                self.assertEqual(req.normalized()["mask_type"], ordinal)
+                dispatch_attention(req)
+
+    def test_non_integer_and_unknown_ordinals_are_rejected_clearly(self):
+        invalid = (
+            "2",
+            2.0,
+            1.5,
+            Fraction(2, 1),
+            Fraction(3, 2),
+            -1,
+            4,
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError, r"mask_type.*exact integer ordinal"
+                ):
+                    dispatch_attention(_attn(mask_type=value))
+
+
+class TestAttentionBottomRightRouting(unittest.TestCase):
+    def test_moving_bottom_right_is_a_distinct_request_feature(self):
+        moving = _attn(
+            seqlen_q=512,
+            seqlen_k=1024,
+            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        )
+        equal_length = _attn(mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+
+        self.assertEqual(
+            moving.features(), frozenset({"causal", "causal_bottom_right"})
+        )
+        self.assertEqual(equal_length.features(), frozenset({"causal"}))
+
+    def test_auto_declines_moving_bottom_right_instead_of_top_left_masking(self):
+        req = _attn(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=512,
+            seqlen_k=1024,
+            hdim_q=128,
+            hdim_v=128,
+            mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+            algorithm="auto",
+        )
+        verdicts = {c.name: c.admits(req) for c in attention_candidates()}
+        self.assertFalse(any(ok for ok, _ in verdicts.values()), verdicts)
+        with self.assertRaisesRegex(ValueError, "causal_bottom_right"):
+            dispatch_attention(req)
+
+    def test_only_opt_in_gfx950_dense_admits_moving_bottom_right(self):
+        verdicts = {}
+        for candidate in attention_candidates():
+            capability = candidate.capability
+            self.assertIsNotNone(capability)
+            head_size = 256 if "d256" in candidate.name else 128
+            req = _attn(
+                arch=capability.arches[0],
+                dtype=capability.dtypes[0],
+                batch=1,
+                nhead_q=32,
+                nhead_k=8,
+                seqlen_q=512,
+                seqlen_k=1024,
+                hdim_q=head_size,
+                hdim_v=head_size,
+                mask_type=2,
+                algorithm=candidate.algorithm,
+            )
+            verdicts[candidate.name] = candidate.admits(req)
+
+        accepted = {name for name, (ok, _) in verdicts.items() if ok}
+        self.assertEqual(accepted, {"attention_gfx950_dense"}, verdicts)
+        for name, (ok, why) in verdicts.items():
+            if name != "attention_gfx950_dense":
+                self.assertFalse(ok)
+                self.assertIn("causal_bottom_right", why)
 
 
 class TestAttentionDispatch(unittest.TestCase):
@@ -165,18 +300,29 @@ class TestAttentionDispatch(unittest.TestCase):
         # spec encodes must change kernel_name; the frozen causal/sinks gap must
         # not (until the consumer-side fix lands, which will flip these).
         self.assertEqual(set(_ENABLE_FEATURE), set(ATTENTION_FEATURES))
-        base = _attn(batch=1, nhead_q=16, nhead_k=16, seqlen_q=1, seqlen_k=8192)
-        base_name = dispatch_attention(base).spec.kernel_name()
         for feature in sorted(ATTENTION_FEATURES):
             with self.subTest(feature=feature):
-                variant = _attn(
+                common = dict(
                     batch=1,
                     nhead_q=16,
                     nhead_k=16,
                     seqlen_q=1,
                     seqlen_k=8192,
-                    **_ENABLE_FEATURE[feature],
                 )
+                base_kw = {}
+                if feature == "causal_bottom_right":
+                    # This feature is intentionally unavailable to auto/generic
+                    # routing, so compare it on the one opt-in implementation.
+                    common.update(
+                        seqlen_q=512,
+                        seqlen_k=1024,
+                        algorithm="attention_dense",
+                        dense_persistent="off",
+                    )
+                    base_kw["mask_type"] = AttentionMaskType.TOP_LEFT_CAUSAL
+                base = _attn(**common, **base_kw)
+                variant = _attn(**common, **_ENABLE_FEATURE[feature])
+                base_name = dispatch_attention(base).spec.kernel_name()
                 variant_name = dispatch_attention(variant).spec.kernel_name()
                 if feature in _IDENTITY_ENCODED:
                     self.assertNotEqual(base_name, variant_name)

@@ -53,7 +53,9 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
-    supports_features=ATTENTION_FEATURES,
+    # Unified kernels implement ordinary causal masking only; they do not shift
+    # the diagonal for cross-length bottom-right requests.
+    supports_features=ATTENTION_FEATURES - {"causal_bottom_right"},
 )
 
 

@@ -16,6 +16,7 @@ import unittest
 from dataclasses import replace
 
 from dispatch.attention import (
+    AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dense_spec_for_request as routed_dense_spec_for_request,
@@ -240,6 +241,97 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
+
+
+class TestDenseBottomRightWiring(unittest.TestCase):
+    @staticmethod
+    def _moving_req(mask_type, **kw):
+        base = dict(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=12288,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            mask_type=mask_type,
+        )
+        base.update(kw)
+        return _gfx950_dense_req(**base)
+
+    def test_aligned_and_ragged_moving_masks_force_nonpersistent_narrow_dma(self):
+        shapes = (
+            ("aligned", 8192, 12288, False),
+            ("ragged", 8180, 12270, True),
+        )
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            for name, sq, sk, ragged in shapes:
+                with self.subTest(mask_type=mask_type, shape=name):
+                    spec = dense_spec_for_request(
+                        self._moving_req(
+                            mask_type,
+                            seqlen_q=sq,
+                            seqlen_k=sk,
+                            dense_persistent="auto",
+                        )
+                    )
+                    self.assertTrue(spec.causal)
+                    self.assertTrue(spec.causal_bottom_right)
+                    self.assertEqual(spec.ragged, ragged)
+                    self.assertFalse(spec.persistent)
+                    self.assertFalse(spec.wide_lds_dma)
+                    self.assertIn("br", spec.kernel_name().split("_"))
+                    self.assertNotIn("persist", spec.kernel_name())
+                    self.assertNotIn("wdma", spec.kernel_name())
+
+    def test_explicit_persistent_on_rejects_moving_bottom_right(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type):
+                with self.assertRaisesRegex(ValueError, "bottom-right"):
+                    dense_spec_for_request(
+                        self._moving_req(mask_type, dense_persistent="on")
+                    )
+
+    def test_explicit_persistent_off_stays_off_for_moving_bottom_right(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type):
+                spec = dense_spec_for_request(
+                    self._moving_req(mask_type, dense_persistent="off")
+                )
+                self.assertFalse(spec.persistent)
+                self.assertFalse(spec.wide_lds_dma)
+                self.assertTrue(spec.causal_bottom_right)
+
+    def test_equal_length_bottom_right_preserves_gqa_pair_and_wide_dma(self):
+        common = dict(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="auto",
+        )
+        mask_pairs = (
+            (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
+            (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
+        )
+        for top_left, bottom_right in mask_pairs:
+            with self.subTest(top_left=top_left, bottom_right=bottom_right):
+                top_left_spec = dense_spec_for_request(
+                    _gfx950_dense_req(mask_type=top_left, **common)
+                )
+                bottom_right_spec = dense_spec_for_request(
+                    _gfx950_dense_req(mask_type=bottom_right, **common)
+                )
+                self.assertEqual(bottom_right_spec, top_left_spec)
+                self.assertFalse(bottom_right_spec.causal_bottom_right)
+                self.assertTrue(bottom_right_spec.persistent)
+                self.assertEqual(bottom_right_spec.resolved_persist_decode, "gqa_pair")
+                self.assertTrue(bottom_right_spec.wide_lds_dma)
 
 
 class TestDenseGeometrySpec(unittest.TestCase):

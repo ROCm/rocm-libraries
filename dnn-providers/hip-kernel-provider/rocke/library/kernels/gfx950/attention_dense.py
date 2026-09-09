@@ -130,6 +130,23 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
                 f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
+        if self.causal_bottom_right:
+            # The non-persistent contiguous builder is the only gfx950 path
+            # that implements the compile-time shifted diagonal.
+            if self.paged:
+                raise ValueError("causal_bottom_right is not supported with paged=True")
+            if self.persistent:
+                raise ValueError(
+                    "causal_bottom_right is not supported with persistent=True"
+                )
+            if self.sliding_window > 0:
+                raise ValueError(
+                    "causal_bottom_right is not supported with sliding_window>0"
+                )
+            if self.varlen:
+                raise ValueError(
+                    "causal_bottom_right is not supported with varlen=True"
+                )
         if self.wide_lds_dma:
             if not self.persistent:
                 raise ValueError("wide_lds_dma requires persistent=True")
@@ -303,6 +320,10 @@ def build_attention_dense(
     PAD = _LDS_PAD
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
+    # Compile-time bottom-right diagonal shift. The persistent builder returns
+    # above and deliberately remains unchanged.
+    DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right else 0
+    DIAG_TILES = DIAG_OFF // BN
     varlen = spec.varlen
     RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
@@ -638,6 +659,8 @@ def build_attention_dense(
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        if DIAG_OFF:
+            query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         for nsub in range(N_SUB):
@@ -781,7 +804,13 @@ def build_attention_dense(
         b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
     )
     if causal:
-        n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
+        # Ceil the final reachable key to a KV-tile count. block_m is a
+        # per-spec geometry choice; supports_attention_dense enforces that BN
+        # divides it, so the qb term can stay outside the ceil.
+        n_upper = b.add(
+            b.mul(qb, b.const_i32(n_per)),
+            b.const_i32((spec.block_m - 1 + DIAG_OFF) // BN + 1),
+        )
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
     else:
         n_upper = n_ktiles_val
@@ -933,6 +962,8 @@ def build_attention_dense(
     elif causal:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
         diag_start = b.mul(qb, b.const_i32(n_per))
+        if DIAG_TILES:
+            diag_start = b.add(diag_start, b.const_i32(DIAG_TILES))
         body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
         body = b.scf_for_iter(
             b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
