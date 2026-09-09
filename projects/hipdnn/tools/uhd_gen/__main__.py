@@ -593,6 +593,24 @@ def _run_train(args: argparse.Namespace) -> int:
         "score_transform": "log1p",
         "group_by": args.group_by or [],
         "num_trees": model.num_trees(),
+        # What the trees actually split on, so a kernel author can be told which knobs
+        # the model found predictive without re-deriving it from the binary. Gain is
+        # the loss reduction the feature bought; split is how often it was chosen.
+        # Diagnostic only -- a feature can be heavily split on and still be free to
+        # pin, because predicting time well is not the same as changing which
+        # candidate wins. `uhd_gen knobs` measures that, and it is the number that
+        # decides an AOT build.
+        "feature_importance": {
+            name: {
+                "gain": float(gain),
+                "split": int(split),
+            }
+            for name, gain, split in zip(
+                features,
+                model.feature_importance(importance_type="gain"),
+                model.feature_importance(importance_type="split"),
+            )
+        },
         "num_samples": len(df),
         "input_file": str(input_path),
         "training_arches": args.training_arches or [],

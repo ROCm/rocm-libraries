@@ -23,7 +23,12 @@ pd = pytest.importorskip("pandas")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from uhd_gen.knobs import analyse_knobs, knob_columns  # noqa: E402
+from uhd_gen.knobs import (  # noqa: E402
+    analyse_knobs,
+    format_author_report,
+    knob_columns,
+    rank_knobs,
+)
 
 _ENVELOPE = {
     "device": "devA",
@@ -193,3 +198,64 @@ def test_an_empty_corpus_is_refused_rather_than_reported():
     df["robustMeanMs"] = float("nan")
     with pytest.raises(ValueError, match="positive robustMeanMs"):
         analyse_knobs(df)
+
+
+# ---- ranking: the sorted answer a kernel author acts on ----------------------
+
+
+def _ranked(**kw):
+    return rank_knobs(analyse_knobs(_corpus(**kw)))
+
+
+def test_the_knob_that_decides_sorts_above_the_one_that_does_not():
+    """The list is ordered by consequence, so the top row is where kernels are earned."""
+    ranked = _ranked()
+    names = [r["short_name"] for r in ranked]
+    assert names.index("block_m") < names.index("waves_per_eu")
+
+
+def test_a_constant_sorts_last_and_reads_as_a_defect_not_a_saving():
+    """It costs no kernels, so ranking it by cost would put a defect above real findings."""
+    ranked = _ranked()
+    assert ranked[-1]["short_name"] == "block_n"
+    assert ranked[-1]["verdict"] == "CONSTANT"
+    # The reason a constant matters is that it breaks the model, not that it wastes a build.
+    assert "6.3" in ranked[-1]["advice"]
+
+
+def test_a_free_knob_is_named_droppable():
+    ranked = {r["short_name"]: r for r in _ranked()}
+    assert ranked["use_exp2_fast"]["verdict"] == "DROP"
+
+
+def test_importance_is_reported_but_never_reorders_the_ranking():
+    """Tree gain is a second opinion: a heavily-split knob can still be free to pin.
+
+    If importance could reorder, a knob the model leans on would be recommended KEEP
+    even where the measurements say pinning it is free -- which is the exact mistake
+    the report exists to prevent.
+    """
+    report = analyse_knobs(_corpus())
+    plain = [r["short_name"] for r in rank_knobs(report)]
+    misleading = {
+        "kernel.use_exp2_fast": {"gain": 999999.0, "split": 9999},
+        "kernel.block_m": {"gain": 0.1, "split": 1},
+    }
+    weighted = rank_knobs(report, misleading)
+    assert [r["short_name"] for r in weighted] == plain
+    by_name = {r["short_name"]: r for r in weighted}
+    assert by_name["use_exp2_fast"]["verdict"] == "DROP"
+    assert by_name["use_exp2_fast"]["split"] == 9999
+
+
+def test_missing_importance_leaves_the_columns_empty_rather_than_failing():
+    ranked = rank_knobs(analyse_knobs(_corpus()), {})
+    assert all(r["gain"] is None for r in ranked)
+
+
+def test_author_report_names_the_edit_to_make():
+    report = analyse_knobs(_corpus())
+    text = format_author_report(report, rank_knobs(report), "eng")
+    assert "# Knob value report -- eng" in text
+    assert "## What to change" in text
+    assert "block_n" in text.split("## What to change")[1]
