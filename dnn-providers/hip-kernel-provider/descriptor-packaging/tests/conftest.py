@@ -20,8 +20,10 @@ if _KPACK_DIR and Path(_KPACK_DIR).is_dir() and _KPACK_DIR not in sys.path:
 
 # Make the in-tree rocke platform + kernels library importable for the rocke
 # producer tests, mirroring how this conftest already wires hkp_pack and
-# rocm_kpack onto sys.path. Best-effort: absent trees leave import to whatever
-# provisioning the environment provides, and rocke_available still gates.
+# rocm_kpack onto sys.path.
+#
+# Source tree, not the packs' wheel venv: this tests producer logic, and the
+# packs already cover the wheel path.
 _ROCKE_ROOT = _TESTS_DIR.parent.parent / "rocke"
 for _rocke_sub in ("platform/python", "library"):
     _p = _ROCKE_ROOT / _rocke_sub
@@ -38,8 +40,8 @@ _ROCKE_UKD_SPEC = {
     "num_kv_heads": 8,
     "head_size": 128,
 }
-_ROCKE_SKIP_REASON = (
-    "rocke/comgr not loadable — provision the rocke platform and libamd_comgr to run"
+_ROCKE_UNAVAILABLE_HINT = (
+    "provision the rocke platform and libamd_comgr; both are ingestor requirements"
 )
 
 
@@ -97,14 +99,16 @@ def rocke_importable():
     anything, so gating them on comgr would needlessly skip them on a box that
     has rocke but no working comgr. Kept separate from rocke_available for that
     reason.
+
+    Fails rather than skips: rocke is a requirement of the ingestor, asserted at
+    configure time, so an unimportable one here is a broken build rather than an
+    unprovisioned machine.
     """
     try:
         import kernels  # noqa: F401
         import rocke  # noqa: F401
     except Exception as exc:
-        if os.environ.get("HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR"):
-            pytest.fail(f"rocke/kernels not importable: {exc}")
-        pytest.skip(f"rocke/kernels not importable: {exc}")
+        pytest.fail(f"rocke/kernels not importable: {exc}")
     return True
 
 
@@ -112,16 +116,15 @@ def rocke_importable():
 def rocke_available():
     """Session gate for the comgr-dependent rocke tests.
 
-    Returns True when rocke/kernels import and comgr loads. Otherwise skips with
-    the deferred reason, or hard-fails under HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR
-    (set in CI) so CI cannot silently skip. A real ComgrError from a compile is
-    not gated here.
+    Returns True when rocke/kernels import and comgr loads, and fails otherwise.
+    comgr ships with ROCm and configure refuses to proceed without it, so this
+    tier cannot be legitimately unavailable -- skipping instead would let a ROCm
+    bump that moved or dropped comgr turn the tier green by not running it. A
+    real ComgrError from a compile is not gated here.
     """
     ok, reason = _probe_rocke()
     if not ok:
-        if os.environ.get("HIPKERNELPROVIDER_KPACK_REQUIRE_COMGR"):
-            pytest.fail(reason)
-        pytest.skip(_ROCKE_SKIP_REASON)
+        pytest.fail(f"{reason} ({_ROCKE_UNAVAILABLE_HINT})")
     return True
 
 
