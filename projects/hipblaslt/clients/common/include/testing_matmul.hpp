@@ -2836,19 +2836,6 @@ void testing_matmul_with_bias(const Arguments&                                  
 
             for(int batchIdx = 0; batchIdx < problem.batchCount; batchIdx++)
             {
-                const auto batchLayout = [&](const hipblaslt::client::MatmulMatrix& matrix,
-                                             size_t                                 rows,
-                                             size_t                                 columns,
-                                             hipblasOperation_t                     operation,
-                                             bool separateStorage) {
-                    return hipblaslt::host_numerics::referenceBatchLayout(
-                        matrix,
-                        rows,
-                        columns,
-                        operation,
-                        static_cast<size_t>(batchIdx),
-                        separateStorage);
-                };
                 const auto hostBufferTensor = [&](std::vector<HipHostBuffer>&          buffers,
                                                   hipDataType                          type,
                                                   const roc::host_numerics::Layout& layout,
@@ -2874,18 +2861,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                         rebased, std::span<const float>(values).subspan(elementOffset, elements));
                 };
 
-                const auto aLayout = batchLayout(
-                    problem.a, problem.m, problem.k, problem.operationA, pointerArrayMode);
-                const auto bLayout = batchLayout(
-                    problem.b, problem.k, problem.n, problem.operationB, pointerArrayMode);
-                const auto cLayout = batchLayout(
-                    problem.c, problem.m, problem.n, HIPBLAS_OP_N, pointerArrayMode);
-                const auto dLayout = batchLayout(problem.d,
-                                                 problem.m,
-                                                 problem.n,
-                                                 HIPBLAS_OP_N,
-                                                 pointerArrayMode
-                                                     && !preparedProblem.epilogueEnabled);
+                const auto aLayout = problem.a.logicalBatchLayout(
+                    problem.operationA, static_cast<size_t>(batchIdx), pointerArrayMode);
+                const auto bLayout = problem.b.logicalBatchLayout(
+                    problem.operationB, static_cast<size_t>(batchIdx), pointerArrayMode);
+                const auto cLayout = problem.c.logicalBatchLayout(
+                    HIPBLAS_OP_N, static_cast<size_t>(batchIdx), pointerArrayMode);
+                const auto dLayout = problem.d.logicalBatchLayout(
+                    HIPBLAS_OP_N,
+                    static_cast<size_t>(batchIdx),
+                    pointerArrayMode && !preparedProblem.epilogueEnabled);
 
                 roc::host_numerics::Tensor referenceA
                     = isScaleAMXFormat
