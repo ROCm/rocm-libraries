@@ -75,9 +75,9 @@ compilation or execution in these cases.
 
 #### Unit tests
 
-Unit tests are correctness tests verify the behaviour of the library infrastructure.  For example,
-correctness tests cover API behaviour for cases where a user may provide invalid parameters, or
-whether internal library infrastructure behaves as expected.
+Unit tests are correctness tests that verify the behaviour of the library infrastructure.  For
+example, correctness tests cover API behaviour for cases where a user may provide invalid
+parameters, or whether internal library infrastructure behaves as expected.
 
 The API correctness is handled by rocfft-test, where gtest names are `rocfft_UnitTest.*`
 
@@ -172,12 +172,12 @@ are supported by the rocFFT library.  Currently, TheRock only tests on a subset 
 architectures.
 
 One should not re-run accuracy tests until the desired result is achieved; an error is an error, and
-would prefer to catch intermittent failures in our testing infrastructure.
+we would prefer to catch intermittent failures in our testing infrastructure.
 
 
 #### Downstream dependency tests
 
-rocFFT is used by a variety of down-stream projects, and verifying that infrastructure changes to
+rocFFT is used by a variety of down-stream projects, and verifying that infrastructure changes do
 not negatively impact these projects is important.  These tests should not be necessary for most
 pre-submit checks, but should be run in a targeted fashion and on a slower (eg monthly) cadence.
 
@@ -313,7 +313,7 @@ smoketest-levelsample should be run on any relevant PR, and this should be done 
 is a gap in TheRock's CI infrastructure.
 
 In general, performance tests aren't run, and multi-process tests are not run.
-These gaps are due to infractucture availability issues.
+These gaps are due to infrastructure availability issues.
 
 ### Desired testing standard 
 
