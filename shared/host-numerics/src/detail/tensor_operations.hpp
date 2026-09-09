@@ -15,6 +15,7 @@
 namespace roc::host_numerics::detail {
 enum class BinaryOperation {
     Add,
+    Subtract,
     Multiply,
 };
 
@@ -84,9 +85,17 @@ void binaryTyped(const BinaryInvocation& invocation, BinaryOperation operation) 
         invocation.output.shape(), invocation.selection, [&](std::span<const size_t> coordinates) {
             const Accumulator leftValue = leftReader(coordinates);
             const Accumulator rightValue = rightReader(coordinates);
-            const Accumulator value = operation == BinaryOperation::Add
-                                          ? wrappingAdd(leftValue, rightValue)
-                                          : wrappingMultiply(leftValue, rightValue);
+            const Accumulator value = [&] {
+                switch (operation) {
+                    case BinaryOperation::Add:
+                        return wrappingAdd(leftValue, rightValue);
+                    case BinaryOperation::Subtract:
+                        return wrappingSubtract(leftValue, rightValue);
+                    case BinaryOperation::Multiply:
+                        return wrappingMultiply(leftValue, rightValue);
+                }
+                throw std::invalid_argument("Unsupported elementwise binary operation.");
+            }();
             output.store(coordinates, quantize(value));
         });
 }

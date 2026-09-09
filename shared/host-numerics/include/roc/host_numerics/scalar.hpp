@@ -222,6 +222,9 @@ struct NativeScalarType<std::complex<double>> {
 template <typename T>
 inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cv_t<T>>::value;
 
+template <typename T>
+concept NativeScalar = requires { NativeScalarType<std::remove_cvref_t<T>>::value; };
+
 namespace detail {
 template <ScalarType TypeValue, typename StorageType>
 struct ScalarTag {

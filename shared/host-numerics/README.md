@@ -141,7 +141,7 @@ Tensor b = Tensor::copyNativeValues<float>(Shape{3, 2}, bValues);
 Tensor product = matmul(a, b, ScalarType::Float32);
 Tensor bias = Tensor::copyNativeValues<float>(
     Shape{2}, std::array<float, 2>{-100.0f, 1.0f});
-Tensor result = relu(product * 0.5f + bias);
+Tensor result = relu(product * 0.5f - bias);
 ```
 
 The last dimension of `bias` broadcasts over the columns. Native `0.5f` is
