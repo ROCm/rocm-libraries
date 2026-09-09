@@ -21,7 +21,7 @@ class DeviceInfo:
 
     Stores a private copy of the HIP properties result. ``target_id``,
     ``asic_revision``, ``base_arch``, and ``compiler_target`` are read-only
-    properties. Later changes to the query cache do not change this snapshot.
+    properties. Later queries do not change this snapshot.
 
     ``base_arch`` is derived by
     :func:`~rocke.core.arch.base_arch_from_target_id`. rocKE uses this name
@@ -93,9 +93,9 @@ class DeviceInfo:
 def get_device_info(device: int = 0) -> DeviceInfo:
     """Read target ID and ASIC revision for a HIP device ordinal.
 
-    Both values come from one ``hipGetDevicePropertiesR0600`` call. Successful
-    properties are cached per device, so later reads need no HIP call.
-    A failed query returns ``None`` for both values and is retried next time.
+    Each call reads fresh properties with one ``hipGetDevicePropertiesR0600``
+    call. Reading properties on the returned object makes no further HIP calls.
+    A failed query returns ``None`` for both values.
     An empty target string leaves only the target names unavailable.
     """
 

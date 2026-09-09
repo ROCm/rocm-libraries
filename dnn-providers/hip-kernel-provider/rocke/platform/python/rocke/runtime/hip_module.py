@@ -150,8 +150,6 @@ def _check(s: int, where: str) -> None:
 
 
 _hip_inited = False
-# Successful R0600 property queries, cached per device.
-_device_props_cache: dict[int, HipDevicePropR0600] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -181,16 +179,13 @@ def _device_props(device: int = 0) -> HipDevicePropR0600 | None:
     """Read HIP R0600 properties, or return ``None`` if unavailable.
 
     The function version must match the structure layout. Runtimes without
-    ``hipGetDevicePropertiesR0600`` are unsupported by this query. Successful
-    results are cached per device; failures are retried on the next call.
+    ``hipGetDevicePropertiesR0600`` are unsupported by this query. Each call
+    reads fresh properties from HIP.
 
     This does not call ``_ensure_hip_init()`` or select a device. HIP may
     initialize its runtime internally when handling the query.
     """
     device = int(device)
-    if device in _device_props_cache:
-        return _device_props_cache[device]
-
     props = HipDevicePropR0600()
     fn = _b(
         "hipGetDevicePropertiesR0600",
@@ -201,10 +196,7 @@ def _device_props(device: int = 0) -> HipDevicePropR0600 | None:
         rc = fn(ctypes.byref(props), device)
     except (AttributeError, HipError, OSError):
         return None
-    if rc != 0:
-        return None
-    _device_props_cache[device] = props
-    return props
+    return props if rc == 0 else None
 
 
 def get_device_target_id(device: int = 0) -> Optional[str]:

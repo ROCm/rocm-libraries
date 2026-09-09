@@ -71,10 +71,7 @@ def test_runtime_exports_device_info_api() -> None:
     assert "get_device_info" in runtime.__all__
 
 
-def test_device_properties_require_matching_function_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(hip_module, "_device_props_cache", {})
+def test_device_properties_require_matching_function_version() -> None:
     unavailable = mock.Mock(side_effect=AttributeError("R0600 unavailable"))
     with mock.patch.object(hip_module, "_b", return_value=unavailable) as bind:
         assert hip_module._device_props(0) is None
@@ -93,25 +90,28 @@ def test_target_id_is_read_from_its_field() -> None:
     "result",
     [1, AttributeError("R0600 unavailable"), hip_module.HipError("HIP unavailable")],
 )
-def test_device_info_retries_failed_query_and_caches_success(
-    monkeypatch: pytest.MonkeyPatch, result: int | Exception
+def test_device_info_queries_again_after_failure_or_success(
+    result: int | Exception,
 ) -> None:
-    monkeypatch.setattr(hip_module, "_device_props_cache", {})
     unavailable = (
         mock.Mock(return_value=result)
         if isinstance(result, int)
         else mock.Mock(side_effect=result)
     )
 
+    revisions = iter((0, 1))
+
     def fill_properties(out, device):
         assert device == 4
         out._obj.gcnArchName = b"gfx90a:sramecc+:xnack-"
-        out._obj.asicRevision = 0
+        out._obj.asicRevision = next(revisions)
         return 0
 
     available = mock.Mock(side_effect=fill_properties)
     with (
-        mock.patch.object(hip_module, "_b", side_effect=[unavailable, available]),
+        mock.patch.object(
+            hip_module, "_b", side_effect=[unavailable, available, available]
+        ),
         mock.patch.object(
             hip_module,
             "_hipDeviceGetAttribute",
@@ -120,11 +120,14 @@ def test_device_info_retries_failed_query_and_caches_success(
     ):
         assert device_info.get_device_info(4) == device_info.DeviceInfo(None)
         expected = device_info.DeviceInfo(_props("gfx90a:sramecc+:xnack-"))
-        assert device_info.get_device_info(4) == expected
-        assert device_info.get_device_info(4) == expected
-        assert hip_module.get_device_target_id(4) == expected.target_id
+        first = device_info.get_device_info(4)
+        second = device_info.get_device_info(4)
+        assert first == expected
+        assert second.target_id == first.target_id
+        assert second.asic_revision == 1
+        assert first.asic_revision == 0
     unavailable.assert_called_once()
-    available.assert_called_once()
+    assert available.call_count == 2
 
 
 def test_device_info_owns_snapshot_with_read_only_properties() -> None:
