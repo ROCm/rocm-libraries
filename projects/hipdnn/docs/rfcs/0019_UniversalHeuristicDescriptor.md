@@ -193,7 +193,7 @@ home. `predict_applicable_kernels` runs *during* applicability, ahead of the
 [Section 10](#10-applicability-flow) rule that the UHD runs strictly after it; that section records it as
 the one exception.
 
-### 3.2 KMD fields, and knobs as the heuristic's feature axes
+### 3.2 KMD Fields, and Knobs as the Heuristic's Feature Axes
 
 There is **one** space of variant fields, not two.
 [RFC 0017](0017_UniversalKernelDescriptor.md) establishes it: the **KMD declares the engine's variant
@@ -220,8 +220,8 @@ The consequences:
 - **The settable surface is exactly the set of kernel axes that provably affect performance.** A knob
   exists because the data showed it matters. There is no kernel field a caller can set that the
   heuristic is blind to, and none the heuristic uses that a caller cannot reach.
-- **Load-time validation is exact and bidirectional.** Assert
-  `set(UED.knobs) == set($kernel.* fields reachable from UHD.features_signature)`. Stronger than today's
+- **Load-time validation is exact and bidirectional.** `set(UED.knobs)` MUST equal
+  `set($kernel.* fields reachable from UHD.features_signature)`. Stronger than today's
   one-way "every knob names a KMD field" check, and it catches a UED and UHD regenerated out of step.
   Note *reachable*: `$kernel.*` references nested inside a computed feature count too, so
   `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` makes `tile_m0` a knob even though the signature
@@ -423,7 +423,7 @@ reasonable future extension for pinning a known-good order; if one is supplied, 
 rank first in the given order and **any catalog entry not named falls through to the default criteria**,
 so a stale list degrades gracefully rather than hiding kernels.
 
-### 4.1 Field Reference
+### 4.1 Field Reference (normative)
 
 The normative header. A loader can validate every row here without instantiating an adapter.
 
@@ -443,8 +443,8 @@ The normative header. A loader can validate every row here without instantiating
 
 Two header rules govern the split:
 
-- **The body key equals the `adapter` value.** One discriminant selects one body, with no ambiguity about
-  which schema applies. A document carrying a body for an adapter it does not name is a load error, not a
+- **The body key MUST equal the `adapter` value.** One discriminant selects one body, with no ambiguity
+  about which schema applies. A document carrying a body for an adapter it does not name is a load error, not a
   silently ignored field.
 - **The loader validates the header; the adapter validates the body.** A UHD naming an adapter the
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
@@ -592,7 +592,7 @@ pure ranker forecloses that and leaves only the rank-ordering fallback. The regr
 absolute option, keeping ranking as the fallback rather than the only mode; this is the recommended
 default. Decide per-UHD via `objective` / `score`, or standardize. See [Open Question 1](#schema-and-training).
 
-### 4.3 Future: `predict_applicable_kernels`, when there is no catalog to rank
+### 4.3 Future: `predict_applicable_kernels`, When There Is No Catalog to Rank
 
 `sort_kernel_catalog` assumes a **finite, enumerable catalog** — the engine's AOT-compiled kernels that
 pass the matchers. It scores those candidates and picks a winner. That holds for every AOT case and is
@@ -1022,7 +1022,7 @@ where one exists (dtype by byte width, so splits are interpretable), or one-hot 
 exists. Codes assigned by first-seen order are not acceptable. **OPEN:** whether to standardize per-field
 ordering semantics — see [Open Question 17](#operational).
 
-### 6.6 Example: mapping the current rocKE SDPA features
+### 6.6 Example: Mapping the Current rocKE SDPA Features
 
 > **Illustrative.** This maps the **existing** rocKE FMHA-forward feature engine
 > (`FmhaFeatureEngine`, 69 features) onto this RFC's namespaces, to show the model in practice and to
@@ -1169,7 +1169,7 @@ hsaco-equivalent for heuristics. Its one constraint: the provider must already s
 lowers author friction but requires a bespoke parser to harden. **OPEN:** See
 [Open Question 3](#schema-and-training).
 
-### 7.3 Escape hatch: `custom_library`
+### 7.3 Escape Hatch: `custom_library`
 
 For a model the in-tree walker does not cover, the engine ships its own compiled scorer `.so`, `dlopen`'d
 through a small C ABI (`score(const double* feats, ...) -> double`). Treelite generates such a `.so` from
@@ -1239,7 +1239,7 @@ others change what a trained model reads:
 | **UMD** | Narrows the catalog. A pack's criteria decide which kernels survive for a graph, so a matcher change alters the candidate set the model was trained to rank — invisible to a feature-name check. The UMD *reads* the binding; it does not produce it ([RFC 0018 §2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)). |
 
 The UHD records all three, as the versions it was generated against
-([Section 4.1](#41-field-reference)):
+([Section 4.1](#41-field-reference-normative)):
 
 ```jsonc
 "trained_against": {"ued": "1.3", "umd": "1.0", "kmd": "2.1"}
@@ -1442,7 +1442,7 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
 
   **OPEN:** in-process only vs. a persistent cross-run cache — see [Open Question 9](#operational).
 
-### 9.3 Efficient evaluation (expressive spec, fast hot path)
+### 9.3 Efficient Evaluation (Expressive Spec, Fast Hot Path)
 
 Extensibility lives in the data contract; efficiency lives in a compiled core. The seam is the adapter,
 and the extensibility cost is paid once per candidate (one indirect call), not per feature:
@@ -1540,7 +1540,7 @@ This section describes how kernel-level heuristics feed engine-level selection. 
 are [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory; this RFC supplies the heuristics
 they consult.
 
-### 11.1 The engine estimate and the kernel-catalog ranker
+### 11.1 The Engine Estimate and the Kernel-Catalog Ranker
 
 Two of the engine's three UHD roles ([Section 3.1](#31-descriptor-relationships)) participate in
 engine selection, both predicting absolute performance so they are comparable across engines:
@@ -1716,7 +1716,7 @@ and fields, the tool only rewrites data; it never introduces a new interface. Th
 hipDNN's public API — it adds no code to hipDNN and touches no provider internals — so it works for
 any provider's pack.
 
-### 13.1.1 What the author supplies, and when
+### 13.1.1 What the Author Supplies, and When
 
 The same pipeline serves first-time generation and regeneration; what differs is how much of it has to
 re-run. The trigger determines whether the existing timings can be reused or a new sweep is required,
@@ -1839,7 +1839,7 @@ pipeline is practical for engines with small or dense knob spaces and impractica
 This is a hipDNN API gap rather than a defect in the UHD design, recorded as
 [Open Question 12](#operational); the pipeline of this section depends on it for the harder cases.
 
-### 13.3 One source of truth, translated once
+### 13.3 One Source of Truth, Translated Once
 
 The tool guarantees that the runtime contract matches what was benchmarked. It emits the pack's
 descriptors (updated UED/UHD, and the KMD/`features_signature` if not already present) from the same run
@@ -1870,9 +1870,9 @@ The tool freezes and emits two contracts:
      score identically and the tie-break separates them, with a load-time warning —
      [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes).)
 
-### 13.4 New stage: package (Stage P)
+### 13.4 New Stage: Package (Stage P)
 
-From one timing run ([§13.2](#132-benchmarking-via-hipdnn-autotune)) the tool trains the catalog ranker
+From one timing run ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)) the tool trains the catalog ranker
 (`sort_kernel_catalog`) and, when needed, the engine estimate (`predict_engine_tflops`)
 ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). A package stage then emits (or
 updates) the engine's descriptor set:
@@ -1899,7 +1899,7 @@ The UMDs, UDD, and child UKDs are not regenerated; only the heuristic side chang
 the two-stage design: the expensive artifacts (compiled kernels) ship once, and the heuristics are
 layered on afterward as data.
 
-### 13.5 Sweep space: grid vs. constraint
+### 13.5 Sweep Space: Grid vs. Constraint
 
 The generation tool sweeps two things: the **problem-shape corpus** (batch, seqlen, heads, and the like —
 supplied by the author as representative shapes, or a per-op default) and optionally the **exposed knobs**
@@ -1935,8 +1935,8 @@ covered only one:
 > `warning: gfx942 ships SKUs at several CU counts; this sweep observed $device.cu_count = 304 only.
 >  Features computed from it are calibrated to that value.`
 
-The rule the warning enforces: **a device value may appear raw in a `features_signature` regardless of
-sweep coverage, but may appear inside a computed feature only if the sweep varied it.** The two cases
+The rule the warning enforces: a device value MAY appear raw in a `features_signature` regardless of
+sweep coverage, but MUST NOT appear inside a computed feature unless the sweep varied it. The two cases
 degrade differently, which is why they are treated differently:
 
 - **Raw and constant is inert.** A zero-variance feature yields no split in a tree model, so the trained
@@ -1953,7 +1953,7 @@ Sweeping several SKUs under one arch removes the restriction and is the better a
 is available: the field then varies, the model learns its effect, and intra-arch differences become
 learnable rather than something the signature must avoid.
 
-### 13.6 Auto-deriving a first-pass `features_signature`
+### 13.6 Auto-Deriving a First-Pass `features_signature`
 
 Most of a `features_signature` can be **derived from what a package already carries**, so the tool can
 propose a first pass rather than requiring an author to hand-write the feature list. The key is that
@@ -2060,7 +2060,7 @@ knobs, and the pruned knob set then changes which kernels are worth compiling.
 > deliberately left open, and the package-creation pipeline should be specified in its own document
 > rather than expanded here.
 
-### 14.1 AOT selection depends on whether the engine can JIT
+### 14.1 AOT Selection Depends on Whether the Engine Can JIT
 
 The goal of AOT differs sharply between two regimes.
 
@@ -2086,7 +2086,7 @@ engine's own generator before hipDNN sees anything.
 | Objective | **select the best** for the data | **filter the worst** to reduce size |
 | hipDNN's leverage | can inform *what to build* | can only filter *what was already built* |
 
-### 14.2 Pipeline: AOT selection
+### 14.2 Pipeline: AOT Selection
 
 1. **Generate an unoptimized KDP** that exposes all possible knobs (for JIT or AOT), through tooling
    plus user generation.
@@ -2112,7 +2112,7 @@ corpus that never exercised a cohort offers no evidence about it, and pruning ag
 blind. Whether a knob is removed, and what coverage is sufficient before removing it, remains the
 author's decision.
 
-### 14.3 Knob selection: static vs. empirical
+### 14.3 Knob Selection: Static vs. Empirical
 
 **Static analysis.** Largely package/project dependent, driven by the kernel author — increasingly with
 LLM assistance — and limited tooling. This is likely **not** an area the heuristics team owns directly.
@@ -2123,7 +2123,7 @@ rather than one super-engine, and which knobs are **dead or low-impact** for per
 engine supports both JIT and AOT; otherwise it must live **in the engine's own codebase**, wherever the
 generation/execution loop can actually run.
 
-### 14.4 Pipeline: knob reduction (hipDNN JIT case)
+### 14.4 Pipeline: Knob Reduction (hipDNN JIT Case)
 
 1. **Generate an unoptimized KDP** exposing all possible knobs for JIT.
 2. **Benchmark through hipDNN** over an algorithmically refined search space.
@@ -2164,7 +2164,7 @@ the AOT explosion, which changes what the next model sees.
 So the loop converges cheaply as long as it only ever narrows. **Benchmarking is the expensive step, and
 reduction never re-triggers it.**
 
-### 14.5 Relationship to the model-generation pipeline
+### 14.5 Relationship to the Model-Generation Pipeline
 
 [Section 13.5](#135-sweep-space-grid-vs-constraint) states that the variant space is *fixed* for model
 generation — the tool enrolls the pack's existing UKDs and times them. That holds **within** that
@@ -2225,17 +2225,17 @@ dependency-gated and land only when a concrete need appears.
 
 | Risk | Description | Mitigation |
 |------|-------------|------------|
-| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([§6.4](#64-computed-features)) |
+| **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; three-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
 | **Catalog not enumerable** | Knobs are reported independently, so the valid set is a sparse subset of the cross-product; a large knob space cannot be swept, so no training data can be gathered | Generation exposes every KMD field, so every kernel is addressable; **needs an API to enumerate the valid catalog directly** — tracked as [Open Question 12](#operational). Pipeline is viable today only for small/dense knob spaces |
 | **Knob-set churn** | A retrain that drops a feature also drops a knob, breaking a caller that was setting it | Knob removal is a **major** UED version bump; exact UED↔UHD knob-set equality checked at load so the two cannot drift; a "sticky" superset held open as an escape hatch ([Open Question 18](#operational)) |
-| **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([§13.3](#133-one-source-of-truth-translated-once)) |
-| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit semver rule at load (`major ==`, `minor <=`); additive changes need no retrain until exposed ([§8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
-| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | Arch check against training metadata; degrade to `static_order` and log; per-feature coverage metadata kept additive as a later option ([§8.3](#83-out-of-distribution-inputs)) |
+| **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
+| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit semver rule at load (`major ==`, `minor <=`); additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
+| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | Arch check against training metadata; degrade to `static_order` and log; per-feature coverage metadata kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Degrade to `static_order`; parity gate against the `native` baseline; model provenance in trace |
 | **Malformed drop-in pack** | Third-party descriptor set with a broken contract reaches a customer | Never fails the request — model disabled, error logged, estimate reported as 0; CI validation over shipped packs is the primary gate ([Open Question 14](#operational)) |
 | **Miscalibrated cross-engine scores** | Absolute score misleads engine selection | Train calibratable TFLOPS from start; fall back to rank-ordering at policy level if calibration unreliable |
-| **Selection CPU overhead** | Per-candidate scoring on the plan-build path costs more than it saves | Wall-clock load / extract / score separately against the `native` baseline; shared-prefix split; single-candidate short-circuit ([§9.4](#94-latency-target)) |
+| **Selection CPU overhead** | Per-candidate scoring on the plan-build path costs more than it saves | Wall-clock load / extract / score separately against the `native` baseline; shared-prefix split; single-candidate short-circuit ([Section 9.4](#94-latency-target)) |
 | **Cache key incompleteness** | Result cache returns wrong kernel | Fingerprint must include problem + candidate set + device |
 | **Drop-in trust** | Model artifact is author-controlled input | Bounded loader/evaluator; inherit [RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery) trust rules |
 
@@ -2361,7 +2361,7 @@ dependency-gated and land only when a concrete need appears.
     hipDNN API, not resolvable inside this RFC.
     *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 15](#15-phased-delivery) phase 5.)*
 
-13. **Publishing the schema file.** [Section 4.1](#41-field-reference) now carries a normative Draft-7
+13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) now carries a normative Draft-7
     block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
     the standalone per-version `uhd/1.0.json` with the CI parity check
     [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema) defines, deciding where that
@@ -2429,7 +2429,7 @@ dependency-gated and land only when a concrete need appears.
   catalog — the main one, and what unqualified "UHD" means here), `predict_engine_tflops` (a cheap
   engine-level estimate), and the future `predict_applicable_kernels` (candidate generator). Each is
   per-engine and arch-aware (takes `$device.*`), composed of a **universal header** (identity, feature
-  contract, objective) and an **adapter-scoped body** ([Section 4.1](#41-field-reference)).
+  contract, objective) and an **adapter-scoped body** ([Section 4.1](#41-field-reference-normative)).
 
 - **Catalog:** The set of an engine's kernels that pass every matcher for one graph — engine-scoped, the
   union across every KDP joining that engine ([RFC 0017](0017_UniversalKernelDescriptor.md)). The
