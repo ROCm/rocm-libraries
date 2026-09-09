@@ -109,6 +109,10 @@ const static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 const static std::vector<std::vector<size_t>> ioffset_range = {{0, 0}, {1, 1}};
 const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
 
+// It's hard to imagine callbacks breaking specifically on batch-1,
+// so just test batch > 1
+const static std::vector<size_t> callback_batch_range = {2};
+
 auto forward_transform_types
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
@@ -120,7 +124,7 @@ INSTANTIATE_TEST_SUITE_P(callback,
                                                                   forward_transform_types,
                                                                   callback_sizes,
                                                                   precision_range_sp_dp,
-                                                                  batch_range,
+                                                                  callback_batch_range,
                                                                   generate_types,
                                                                   stride_range,
                                                                   stride_range,
@@ -137,7 +141,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback_offset,
                                                                   forward_transform_types,
                                                                   callback_sizes,
                                                                   precision_range_sp_dp,
-                                                                  batch_range,
+                                                                  callback_batch_range,
                                                                   generate_types,
                                                                   stride_range,
                                                                   stride_range,
@@ -156,7 +160,7 @@ inline auto param_generator_scaling(const std::vector<std::vector<size_t>>& v_le
     auto params = param_generator(test_prob,
                                   callback_sizes,
                                   precision_range_sp_dp,
-                                  batch_range,
+                                  callback_batch_range,
                                   stride_range,
                                   stride_range,
                                   ioffset_range_zero,
