@@ -181,12 +181,6 @@ float invoke_gemm(ck_tile::DeviceMem& a_m_k_dev_buf,
     return ave_time;
 }
 
-template <typename T>
-struct GemmConfigTag
-{
-    using type = T;
-};
-
 template <typename CDataType>
 bool do_verify(const ck_tile::HostTensor<CDataType>& c_m_n_dev_result,
                const ck_tile::HostTensor<CDataType>& c_m_n_ref,
@@ -379,8 +373,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     const bool needsScalarC =
         mn_pad_fallback_eligible && ((CPacksN ? N : M) % CVectorSize != 0);
 
-    auto invoke = [&](auto cfg_tag) {
-        using Cfg = typename decltype(cfg_tag)::type;
+    auto invoke = [&]<typename Cfg>() {
         return invoke_gemm<Cfg,
                            Invoker,
                            ADataTypeBuf,
@@ -412,35 +405,35 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     if constexpr(k_pad_fallback_eligible && mn_pad_fallback_eligible)
     {
         if(needsScalarAB && needsScalarC)
-            ave_time = invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>>{});
+            ave_time = invoke.template operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>>();
         else if(needsScalarAB)
-            ave_time =
-                invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>{});
+            ave_time = invoke.template
+                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
         else if(needsScalarC)
-            ave_time = invoke(
-                GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>{});
+            ave_time = invoke.template operator()<
+                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
         else
-            ave_time = invoke(GemmConfigTag<GemmConfig>{});
+            ave_time = invoke.template operator()<GemmConfig>();
     }
     else if constexpr(k_pad_fallback_eligible)
     {
         if(needsScalarAB)
-            ave_time =
-                invoke(GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>{});
+            ave_time = invoke.template
+                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
         else
-            ave_time = invoke(GemmConfigTag<GemmConfig>{});
+            ave_time = invoke.template operator()<GemmConfig>();
     }
     else if constexpr(mn_pad_fallback_eligible)
     {
         if(needsScalarC)
-            ave_time = invoke(
-                GemmConfigTag<GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>{});
+            ave_time = invoke.template operator()<
+                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
         else
-            ave_time = invoke(GemmConfigTag<GemmConfig>{});
+            ave_time = invoke.template operator()<GemmConfig>();
     }
     else
     {
-        ave_time = invoke(GemmConfigTag<GemmConfig>{});
+        ave_time = invoke.template operator()<GemmConfig>();
     }
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
