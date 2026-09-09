@@ -105,35 +105,64 @@ options are not automatically validated or included in artifact identity.
 
 ### Device identity and capabilities
 
-`get_device_info(device)` reads the target ID and ASIC revision from one HIP
-properties query. `infer_device_capabilities(info)` applies explicit feature
-rules to that snapshot without another HIP call:
+`get_device_info(device)` reads a HIP properties snapshot with the target ID,
+ASIC revision, and cluster-launch flag. `infer_device_capabilities(info)` combines
+runtime feature reports and explicit rules without another HIP call:
 
 ```python
-from rocke.runtime import get_device_info, infer_device_capabilities
+from rocke.runtime import DeviceCapability, get_device_info, infer_device_capabilities
 
 info = get_device_info(0)
 caps = infer_device_capabilities(info)
-use_tdm_multicast = caps.has_tdm_multicast is True
+use_tdm_multicast = caps.support(DeviceCapability.TDM_MULTICAST) is True
 ```
 
-The immutable result has two fields: `has_tdm_multicast` and
-`has_fp4_wmma_32x16`. Each is `True` for supported, `False` for unsupported,
-or `None` when there is no rule for the architecture and revision. A caller
-requiring a feature should enable it only when the field is `True`.
+`DeviceCapabilities` owns an immutable mapping of named features to boolean
+values. `support(capability)` returns `True` for supported, `False` for
+unsupported, or `None` when no fact covers the feature. A caller requiring a
+feature should enable it only when the result is `True`.
 
-The current rules follow hipBLASLt's
+| Capability | Source of support information |
+| --- | --- |
+| `WORKGROUP_CLUSTER_LAUNCH` | HIP's `clusterLaunch` property, exposed as `info.cluster_launch`. |
+| `TDM_MULTICAST` | gfx1250: `False` at revision 0, `True` at revision 1. |
+| `MX_WMMA_FP4_32X16` | gfx1250: `False` at revision 0, `True` at revision 1. |
+| `MX_BLOCK16_CONVERSION` | gfx1250: `False` at revision 0, `True` at revision 1. |
+
+Current HIP [sets `clusterLaunch` from the device's maximum cluster size](https://github.com/ROCm/rocm-systems/blob/6f0fc55e9fcfd0ab110e519e2a1d8caf812f257a/projects/clr/hipamd/src/hip_device.cpp#L804-L807).
+This describes runtime launch support. An architecture rule cannot override a
+runtime `False`, and a failed properties query leaves this feature unknown.
+The flag can be read even when the target name or ASIC revision is unknown.
+
+The multicast and WMMA rules follow hipBLASLt's
 [gfx1250 revision mapping](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp#L8-L18)
 and [capability overrides](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/tensilelite/Tensile/Common/Architectures.py#L85-L110):
-revision 0 disables both features; revision 1 enables them. rocKE leaves other
-revisions and architectures unknown, including when the HIP query fails.
-Revision zero is a valid value. Target suffixes do not select a revision.
+revision 0 disables both features; revision 1 enables them. Other revisions and
+architectures have no rules for these two features. Revision zero is a valid
+value. Target suffixes do not select a revision.
+
+The block16 conversion rule follows CK's
+[FP4 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/data_type/test_mx_fp4_pk4scale.cpp#L198-L204)
+and [FP8/BF8 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/ck_tile/data_type/test_mx_scale.cpp#L146-L175),
+which exclude gfx1250 revision 0 from packed-scale conversions in block16 mode.
+These modes share a scale across 16 elements: scale selectors 4-7 for FP4 and
+8-11 for FP8/BF8. rocKE admits revision 1 explicitly and leaves unlisted
+revisions unknown. This rule does not imply support for every block-scaled
+matrix instruction.
 
 TDM multicast is separate from ordinary TDM loads, workgroup clusters, and
-cluster barriers. The WMMA field refers to the physical 32 by 16 FP4 instruction,
+cluster barriers. The WMMA capability refers to the physical 32 by 16 FP4 instruction,
 even when operand swapping transposes the logical matrix dimensions.
 
-These are device feature rules. Compiler support still needs its own check.
+To add a capability, add a `DeviceCapability` member and its source of facts.
+For architecture rules, `_CAPABILITY_POLICIES` maps each base architecture to
+common facts and overrides for exact ASIC revisions. An override can enable or
+disable a feature. Missing or unlisted revisions retain only the common facts;
+larger revision numbers do not automatically inherit support. Put a fact in
+the common map only when there is evidence for using it without knowing the
+revision. Runtime-reported features are resolved separately from these rules.
+
+Compiler support still needs its own check.
 `core.arch.MemoryCapabilities` describes architecture-level memory operations;
 `dispatch.Capability` describes the problems a kernel candidate covers. This
 API does not change either, select kernels, or change generated code. CPU-only

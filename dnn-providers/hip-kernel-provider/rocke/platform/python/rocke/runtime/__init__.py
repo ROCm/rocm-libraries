@@ -34,6 +34,7 @@ Layered modules (bottom-up). The core modules run torch-free;
 
   - ``device_info``  : reads HIP's target ID and ASIC revision, and derives
                       target names for compilation and architecture lookup.
+                      Also exposes HIP's cluster-launch flag.
 
   - ``device_capabilities`` : infers individual device features from a
                       ``DeviceInfo`` snapshot without further HIP calls.
@@ -89,7 +90,11 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
-from .device_capabilities import DeviceCapabilities, infer_device_capabilities
+from .device_capabilities import (
+    DeviceCapabilities,
+    DeviceCapability,
+    infer_device_capabilities,
+)
 from .device_info import DeviceInfo, get_device_info
 from .hip_module import HipError, Runtime
 from .launcher import (
@@ -117,6 +122,7 @@ __all__ = [
     "ComgrError",
     "ComgrTimings",
     "DeviceCapabilities",
+    "DeviceCapability",
     "DeviceInfo",
     "DeviceMem",
     "HipError",

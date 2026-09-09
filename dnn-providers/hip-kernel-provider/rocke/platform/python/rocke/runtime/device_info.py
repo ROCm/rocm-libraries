@@ -20,8 +20,8 @@ class DeviceInfo:
     such as ``gfx1250-strict`` or ``gfx942:sramecc+:xnack-``.
 
     Stores a private copy of the HIP properties result. ``target_id``,
-    ``asic_revision``, ``base_arch``, and ``compiler_target`` are read-only
-    properties. Later queries do not change this snapshot.
+    ``asic_revision``, ``cluster_launch``, ``base_arch``, and ``compiler_target``
+    are read-only properties. Later queries do not change this snapshot.
 
     ``base_arch`` is derived by
     :func:`~rocke.core.arch.base_arch_from_target_id`. rocKE uses this name
@@ -32,7 +32,8 @@ class DeviceInfo:
     helpers use this name in the COMGR ISA name or hipcc's ``--offload-arch``.
 
     ``asic_revision`` comes from ``asicRevision`` in the same HIP properties
-    result. A successful query may return zero.
+    result. A successful query may return zero. ``cluster_launch`` reads HIP's
+    ``clusterLaunch`` flag for multi-block cluster launches.
     """
 
     _properties: HipDevicePropR0600 | None = field(repr=False)
@@ -60,16 +61,28 @@ class DeviceInfo:
         revision = self._properties.asicRevision
         return revision if revision >= 0 else None
 
+    @property
+    def cluster_launch(self) -> bool | None:
+        """HIP-reported cluster-launch support, or ``None`` if no properties.
+
+        A false value describes this runtime's report, not whether the silicon
+        has cluster hardware. Reading this flag makes no additional HIP call.
+        """
+        if self._properties is None:
+            return None
+        return bool(self._properties.clusterLaunch)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceInfo):
             return NotImplemented
-        return (self.target_id, self.asic_revision) == (
+        return (self.target_id, self.asic_revision, self.cluster_launch) == (
             other.target_id,
             other.asic_revision,
+            other.cluster_launch,
         )
 
     def __hash__(self) -> int:
-        return hash((self.target_id, self.asic_revision))
+        return hash((self.target_id, self.asic_revision, self.cluster_launch))
 
     @property
     def base_arch(self) -> str | None:
@@ -91,11 +104,11 @@ class DeviceInfo:
 
 
 def get_device_info(device: int = 0) -> DeviceInfo:
-    """Read target ID and ASIC revision for a HIP device ordinal.
+    """Read device identity and feature flags for a HIP device ordinal.
 
     Each call reads fresh properties with one ``hipGetDevicePropertiesR0600``
     call. Reading properties on the returned object makes no further HIP calls.
-    A failed query returns ``None`` for both values.
+    A failed query returns ``None`` for the exposed properties.
     An empty target string leaves only the target names unavailable.
     """
 
