@@ -100,6 +100,10 @@ class KnobAblation:
     name: str
     values: list = field(default_factory=list)
     per_value: list[ValueAblation] = field(default_factory=list)
+    #: Whether the column varies among the candidates of a single problem. False means
+    #: the matcher binds it to the problem's shape, so it is not a choice an AOT build
+    #: makes and its pin cost is meaningless.
+    tunable: bool = True
 
     @property
     def is_constant(self) -> bool:
@@ -124,6 +128,7 @@ class KnobAblation:
             "distinct_values": len(self.values),
             "values": list(self.values),
             "constant": self.is_constant,
+            "tunable": self.tunable,
             "per_value": [v.to_dict() for v in self.per_value],
             "best_value": None if best is None else best.value,
             "cost_of_pinning": None if best is None else best.p95_regret,
@@ -153,11 +158,25 @@ def analyse_knobs(
     oracle = _oracle_by_problem(usable, group, target, objective)
     total_problems = len(oracle)
 
+    # A `kernel.*` column is not automatically something a caller tunes. The KMD
+    # declares one variant space, and it holds both: fields the matcher binds to the
+    # problem (head_size, seqlen_q, dtype -- the kernel was built for that shape) and
+    # fields a caller genuinely chooses among the candidates that survive matching
+    # (block_m, waves_per_eu).
+    #
+    # They are told apart by whether the column varies *within* a problem. A matched
+    # field cannot: every candidate the model ranks for one problem was built for that
+    # problem's shape. Pinning it therefore has no measurable cost -- the problems it
+    # would orphan simply leave the comparison -- and a report that ranks on cost alone
+    # recommends dropping seqlen_q, which means shipping kernels for one sequence
+    # length. Classify first, then only ablate what an AOT build could actually choose.
+    within = usable.groupby(group, dropna=False)
     knobs = []
     for name in knob_columns(usable):
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
-        ablation = KnobAblation(name=name, values=values)
-        if len(values) > 1:
+        tunable = bool((within[name].nunique(dropna=False) > 1).any())
+        ablation = KnobAblation(name=name, values=values, tunable=tunable)
+        if len(values) > 1 and tunable:
             for value in values:
                 subset = usable[usable[name] == value]
                 if subset.empty:
@@ -291,17 +310,25 @@ def load_importance(manifest_path: str | Path) -> dict[str, dict]:
 
 
 def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[dict]:
-    """Every knob, most consequential first, with the decision it implies.
+    """Every declared field, most consequential first, with the decision it implies.
 
-    Ordering is by what pinning the knob would cost, descending, because that is the
-    question an AOT build asks: the knob at the top is the one whose kernels are
-    buying the most, and the knob at the bottom is the one to delete first.
+    Ordering is by what pinning the field would cost, descending, because that is the
+    question an AOT build asks: the row at the top is the one whose kernels are buying
+    the most, and the row at the bottom is the one to delete first.
 
-    A constant sorts last and is reported as a defect rather than a saving. It costs
-    no kernels -- there is only one value to build -- but it is not harmless: training
-    drops a column that cannot separate candidates, and RFC 0019 §6.3 then refuses a
-    model whose features no longer match the knobs the engine exposes. A declared
-    constant is how a UHD silently stops being used.
+    Three things are deliberately never ranked on cost:
+
+    * A **matched** field -- one the matcher binds to the problem's shape, so it does
+      not vary among the candidates of any single problem. Its pin cost measures
+      nothing, because the problems it would orphan leave the comparison rather than
+      scoring badly in it. Ranked on cost, `seqlen_q` reads 0.00% and the report
+      recommends shipping kernels for one sequence length.
+    * A field whose best value still **orphans problems**. Zero regret over the
+      problems it can serve says nothing about the ones it cannot.
+    * A **constant**, which costs no kernels at all -- there is only one value to
+      build -- but is not harmless: training drops a column that cannot separate
+      candidates, and §6.3 then refuses a model whose axes no longer match the
+      engine's knobs.
     """
     importance = importance or {}
     ranked = []
@@ -315,9 +342,11 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
             "best_value": knob["best_value"],
             "cost": knob["cost_of_pinning"],
             "problems_lost": knob["problems_lost_by_pinning"],
+            "tunable": knob.get("tunable", True),
             "gain": imp.get("gain"),
             "split": imp.get("split"),
         }
+        lost = row["problems_lost"] or 0
         if knob["constant"]:
             row["verdict"] = "CONSTANT"
             only = knob["values"][0] if knob["values"] else "<none>"
@@ -325,14 +354,28 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
                 f"never varies (always {only}); remove from the KMD -- it also blocks "
                 f"the model, see RFC 0019 6.3"
             )
+        elif not row["tunable"]:
+            row["verdict"] = "MATCHED"
+            row["advice"] = (
+                f"selected by the problem, not chosen: all {knob['distinct_values']} "
+                f"values exist, but every candidate for one problem shares one of them. "
+                f"Not an AOT choice, and a model reading it from `$kernel.` needs a knob "
+                f"it should not have -- read it from the graph instead"
+            )
         elif row["cost"] is None:
             row["verdict"] = "UNMEASURED"
-            row["advice"] = "no measurement covered this knob"
+            row["advice"] = "no measurement covered this field"
+        elif lost > 0:
+            row["verdict"] = "KEEP"
+            row["advice"] = (
+                f"cannot be pinned: the best value ({row['best_value']}) leaves {lost} "
+                f"problem(s) with no kernel at all"
+            )
         elif row["cost"] <= FREE_THRESHOLD:
             row["verdict"] = "DROP"
             row["advice"] = (
-                f"pinning to {row['best_value']} costs {row['cost']:.2%} -- inside noise, "
-                f"so its kernels are not earning their build"
+                f"pinning to {row['best_value']} costs {row['cost']:.2%} and orphans "
+                f"nothing -- its kernels are not earning their build"
             )
         elif row["cost"] <= CHEAP_THRESHOLD:
             row["verdict"] = "CHEAP"
@@ -348,12 +391,14 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
             )
         ranked.append(row)
 
-    # Constants last: they carry no cost to sort on, and a defect reported above the
-    # knob that actually decides the winner would bury the ranking it exists to give.
-    return sorted(
-        ranked,
-        key=lambda r: (r["verdict"] == "CONSTANT", -(r["cost"] or 0.0), r["name"]),
-    )
+    # Matched fields and constants sort below the real choices: neither is something an
+    # AOT build decides, and either one reported above the knob that actually decides
+    # the winner would bury the ranking this exists to give.
+    def _order(row: dict) -> tuple:
+        rank = {"MATCHED": 1, "CONSTANT": 2}.get(row["verdict"], 0)
+        return (rank, -(row["cost"] or 0.0), row["name"])
+
+    return sorted(ranked, key=_order)
 
 
 def format_author_report(report: dict, ranked: list[dict], engine: str | None = None) -> str:
@@ -452,20 +497,32 @@ def run_knobs(args: argparse.Namespace) -> int:
 
     # The ranking first and unconditionally: it is the answer, and everything below is
     # its supporting detail.
-    print("  Knobs, most consequential first:")
-    header = f"    {'knob':22} {'values':>6} {'verdict':>9} {'cost':>8} {'best':>8}"
+    print("  Fields, most consequential first:")
+    # `orphans` is not decoration: a zero cost beside a non-zero orphan count is the
+    # difference between "free to pin" and "pinning it ships no kernel for those
+    # problems at all", and a table without it cannot be checked by its reader.
+    header = (f"    {'field':22} {'values':>6} {'verdict':>9} {'cost':>8} "
+              f"{'orphans':>8} {'best':>8}")
     if importance:
         header += f" {'gain':>12} {'splits':>7}"
     print(header)
     for row in ranked:
         cost = "     --" if row["cost"] is None else f"{row['cost']:7.2%}"
+        lost = "      --" if row["problems_lost"] is None else f"{row['problems_lost']:8,}"
         line = (f"    {row['short_name']:22} {row['distinct_values']:>6} "
-                f"{row['verdict']:>9} {cost} {str(row['best_value']):>8}")
+                f"{row['verdict']:>9} {cost} {lost} {str(row['best_value']):>8}")
         if importance:
             gain = "          --" if row["gain"] is None else f"{row['gain']:12,.0f}"
             split = "     --" if row["split"] is None else f"{row['split']:7,}"
             line += f" {gain} {split}"
         print(line)
+
+    matched = [r for r in ranked if r["verdict"] == "MATCHED"]
+    if matched:
+        print("\n  Selected by the problem, not chosen -- no AOT decision to make:")
+        for row in matched:
+            print(f"    {row['short_name']:22} {row['distinct_values']} values, "
+                  f"one per problem")
 
     print("\n  What to change:")
     actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP")]

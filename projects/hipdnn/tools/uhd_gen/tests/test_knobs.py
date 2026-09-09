@@ -259,3 +259,103 @@ def test_author_report_names_the_edit_to_make():
     assert "# Knob value report -- eng" in text
     assert "## What to change" in text
     assert "block_n" in text.split("## What to change")[1]
+
+
+# ---- matched fields and orphaned problems: two ways a zero cost lies ---------
+
+
+def _corpus_with_geometry(problems: int = 40, seed: int = 7) -> pd.DataFrame:
+    """A corpus carrying a field the matcher binds, beside a real knob.
+
+    `kernel.head_size` is the shape the kernel was built for, so every candidate for a
+    given problem shares it -- it varies across the corpus and never within a problem.
+    That is exactly what the gfx942 sweep produced for seqlen_q, head_size and dtype.
+    """
+    rng = random.Random(seed)
+    rows = []
+    for i in range(problems):
+        head_size = 64 if i % 2 else 128
+        for block_m in (64, 256):
+            t = 0.05 if block_m == (256 if head_size == 128 else 64) else 0.10
+            t *= 1.0 + rng.gauss(0, 0.002)
+            rows.append(
+                {
+                    **_ENVELOPE,
+                    "benchmark": f"prob{i}",
+                    "kernel": f"k{i}_{block_m}",
+                    "robustMeanMs": t,
+                    "kernel.block_m": block_m,
+                    "kernel.head_size": head_size,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_a_matched_field_is_not_reported_as_droppable():
+    """The defect the first real gfx942 run exposed.
+
+    head_size varies across the corpus and never within a problem, so pinning it has no
+    measurable cost -- the problems it orphans leave the comparison instead of scoring
+    badly in it. Ranked on cost alone it reads 0.00% and the report recommends dropping
+    it, which means shipping kernels for one head size.
+    """
+    ranked = {r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))}
+    assert ranked["head_size"]["verdict"] == "MATCHED"
+    assert ranked["head_size"]["tunable"] is False
+    # And the real knob beside it is still judged on its merits.
+    assert ranked["block_m"]["verdict"] == "KEEP"
+
+
+def test_a_matched_field_sorts_below_every_real_choice():
+    ranked = rank_knobs(analyse_knobs(_corpus_with_geometry()))
+    names = [r["short_name"] for r in ranked]
+    assert names.index("block_m") < names.index("head_size")
+
+
+def test_a_matched_field_is_never_in_what_to_change():
+    report = analyse_knobs(_corpus_with_geometry())
+    text = format_author_report(report, rank_knobs(report), "eng")
+    assert "head_size" not in text.split("## What to change")[1]
+
+
+def _corpus_no_value_covers_everything(problems: int = 45, seed: int = 11) -> pd.DataFrame:
+    """A knob that genuinely varies within every problem, yet cannot be pinned.
+
+    Each problem was built with two of the three tile values, rotating, so every problem
+    has a real choice while no single value exists everywhere. This is the shape a pack
+    takes when the generator prunes variants per geometry -- and it is the one where a
+    zero pin cost is most misleading, because the value that scores perfectly is the one
+    that simply is not there for a third of the corpus.
+    """
+    rng = random.Random(seed)
+    rows = []
+    for i in range(problems):
+        available = [(64, 128), (128, 256), (256, 64)][i % 3]
+        for block_m in available:
+            t = 0.05 * (1.0 + rng.gauss(0, 0.002))
+            rows.append(
+                {
+                    **_ENVELOPE,
+                    "benchmark": f"prob{i}",
+                    "kernel": f"k{i}_{block_m}",
+                    "robustMeanMs": t,
+                    "kernel.block_m": block_m,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_pinning_that_orphans_problems_is_never_droppable():
+    """Zero regret over the problems a value can serve says nothing about the ones it
+    cannot. A knob is only free to pin if it orphans nothing."""
+    ranked = {
+        r["short_name"]: r
+        for r in rank_knobs(analyse_knobs(_corpus_no_value_covers_everything()))
+    }
+    block_m = ranked["block_m"]
+
+    assert block_m["tunable"] is True, "every problem offers a real choice of tile"
+    assert block_m["problems_lost"] > 0, "no single tile exists across the whole corpus"
+    # Timings are flat by construction, so cost alone would read 0.00% and DROP.
+    assert block_m["verdict"] == "KEEP"
+    assert "no kernel at all" in block_m["advice"]
