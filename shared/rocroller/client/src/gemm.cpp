@@ -373,13 +373,15 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
+                    const auto scalePlan = roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+                        {descScaleA.sizes()[1], descScaleA.sizes()[0]},
+                        scaleBlockSize,
+                        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
                     const auto tmpScaleA
                         = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             reinterpret_cast<const std::byte*>(hostScaleA.data()),
                             hostScaleA.size(),
-                            {descScaleA.sizes()[1], descScaleA.sizes()[0]},
-                            scaleBlockSize,
-                            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                            scalePlan);
                     deviceScaleA = copyByteStorageToDevice(tmpScaleA);
                 }
                 else
@@ -431,13 +433,15 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
+                    const auto scalePlan = roc::host_numerics::amd_gpu_layout::planMxScaleStorage(
+                        {descScaleB.sizes()[1], descScaleB.sizes()[0]},
+                        scaleBlockSize,
+                        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
                     const auto tmpScaleB
                         = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             reinterpret_cast<const std::byte*>(hostScaleB.data()),
                             hostScaleB.size(),
-                            {descScaleB.sizes()[1], descScaleB.sizes()[0]},
-                            scaleBlockSize,
-                            roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Gfx950);
+                            scalePlan);
                     deviceScaleB = copyByteStorageToDevice(tmpScaleB);
                 }
                 else

@@ -533,7 +533,16 @@ void testing_matmul_with_bias(const Arguments&                                  
     const int32_t              problem_count   = static_cast<int32_t>(matmulProblems.size());
     const bool do_swizzle_a     = arg.swizzle_a && hipblaslt::client::supportsMatmulSwizzle(TiA);
     const bool do_swizzle_b     = arg.swizzle_b && hipblaslt::client::supportsMatmulSwizzle(TiB);
-    const bool mx_use_rocroller = hipblaslt::client::usesRocrollerMxLayout();
+
+    hipDeviceProp_t mxProperties{};
+    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProperties, 0));
+    const auto mxScaleLayout = [&](hipblaslt_scaling_format format) {
+        return isBlockScaling(format)
+                   ? hipblaslt::host_numerics::mxScaleStorageLayoutForFormat(
+                         format, mxProperties.gcnArchName)
+                   : roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
+    };
 
     if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
@@ -564,7 +573,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                                 Tbias,
                                                                 do_swizzle_a,
                                                                 do_swizzle_b,
-                                                                mx_use_rocroller);
+                                                                mxScaleLayout(arg.scaleA),
+                                                                mxScaleLayout(arg.scaleB));
     auto& preparedProblems     = preparation.problems;
     auto& firstPreparedProblem = preparedProblems.front();
     for(const auto& preparedProblem : preparedProblems)
@@ -1192,9 +1202,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                        positiveOnlyInitialization);
         };
 
-        hipDeviceProp_t mxProp{};
-        if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
-            CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
         auto mxBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
             if(offset > buffer.getNumBytes())
                 throw std::invalid_argument("MX output offset exceeds host buffer capacity.");
@@ -1204,17 +1211,17 @@ void testing_matmul_with_bias(const Arguments&                                  
             return std::span<uint8_t>(buffer.as<uint8_t>() + offset, capacity);
         };
         auto generateMxBatch
-            = [&](hipDataType                                              dataType,
-                  hipDataType                                              scaleType,
-                  std::span<uint8_t>                                       dataOutput,
-                  std::span<uint8_t>                                       scaleOutput,
-                  uint64_t                                                 rows,
-                  uint64_t                                                 columns,
-                  uint64_t                                                 leadingDimension,
-                  size_t                                                   blockRows,
-                  size_t                                                   blockColumns,
-                  roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayout,
-                  uint64_t                                                 seed) {
+            = [&](hipDataType                                                   dataType,
+                  hipDataType                                                   scaleType,
+                  std::span<uint8_t>                                            dataOutput,
+                  std::span<uint8_t>                                            scaleOutput,
+                  uint64_t                                                      rows,
+                  uint64_t                                                      columns,
+                  uint64_t                                                      leadingDimension,
+                  size_t                                                        blockRows,
+                  size_t                                                        blockColumns,
+                  const roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
+                  uint64_t                                                      seed) {
                   if(blockRows == 0 || blockColumns == 0
                      || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
                       throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
@@ -1238,9 +1245,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                       = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                           generated.scales.rawEncodedBackingStorage().data(),
                           generated.scales.rawEncodedBackingStorage().size(),
-                          {generated.scales.shape()[0], generated.scales.shape()[1]},
-                          blockRows * blockColumns,
-                          scaleLayout);
+                          scalePlan);
                   if(scaleOutput.size() < scaleStorage.size())
                       throw std::invalid_argument("hipBLASLt MX scale output is too small.");
                   if(!scaleStorage.empty())
@@ -1283,8 +1288,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 return;
 #endif
             }
-            auto const scaleLayoutA = hipblaslt::host_numerics::mxScaleStorageLayoutForFormat(
-                arg.scaleA, mxProp.gcnArchName);
+            const auto& scalePlanA = *preparedProblem.a.mxScaleStorage;
             size_t dataBatchBytesA
                 = (problem.batchCount > 1) ? elementsToBytes(problem.a.batchStride(), TiA) : 0;
             size_t scaleBatchBytesA
@@ -1307,9 +1311,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     problem.a.leadingDimension(),
                     scaleA_row,
                     scaleA_col,
-                    scaleLayoutA,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
-                               static_cast<size_t>(b)));
+                    scalePlanA,
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A, static_cast<size_t>(b)));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -1376,8 +1379,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 return;
 #endif
             }
-            auto const scaleLayoutB = hipblaslt::host_numerics::mxScaleStorageLayoutForFormat(
-                arg.scaleB, mxProp.gcnArchName);
+            const auto& scalePlanB = *preparedProblem.b.mxScaleStorage;
             size_t dataBatchBytesB
                 = (problem.batchCount > 1) ? elementsToBytes(problem.b.batchStride(), TiB) : 0;
             size_t scaleBatchBytesB
@@ -1400,9 +1402,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     problem.b.leadingDimension(),
                     scaleB_row,
                     scaleB_col,
-                    scaleLayoutB,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
-                               static_cast<size_t>(b)));
+                    scalePlanB,
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B, static_cast<size_t>(b)));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));

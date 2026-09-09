@@ -9,6 +9,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 #include <span>
 #include <vector>
 
@@ -26,6 +28,7 @@ namespace hipblaslt::client
         size_t  elements                       = 0;
         int64_t batchStride                    = 0;
         size_t  scaleElements                  = 0;
+        std::optional<roc::host_numerics::amd_gpu_layout::MxScaleStoragePlan> mxScaleStorage;
         bool    replacedUnsupportedBatchStride = false;
     };
 
@@ -52,8 +55,6 @@ namespace hipblaslt::client
 
     bool supportsMatmulSwizzle(hipDataType dataType);
 
-    bool usesRocrollerMxLayout();
-
     hipblasLtOrder_t matmulOrderForDataType(hipDataType dataType);
 
     hipblasLtMatmulMatrixScale_t matmulScaleMode(hipblaslt_scaling_format format);
@@ -63,16 +64,18 @@ namespace hipblaslt::client
     MatmulSwizzleParameters matmulSwizzleParameters(hipDataType          dataType,
                                                     hipblasComputeType_t computeType);
 
-    MatmulPreparation prepareMatmulProblems(const Arguments&               arguments,
-                                            std::span<const MatmulProblem> matmulProblems,
-                                            hipDataType                    inputTypeA,
-                                            hipDataType                    inputTypeB,
-                                            hipDataType                    inputTypeC,
-                                            hipDataType                    outputType,
-                                            hipDataType                    computeScalarType,
-                                            hipDataType                    coefficientType,
-                                            hipDataType                    biasType,
-                                            bool                           swizzleA,
-                                            bool                           swizzleB,
-                                            bool                           useRocrollerMxLayout);
+    MatmulPreparation prepareMatmulProblems(
+        const Arguments&                                         arguments,
+        std::span<const MatmulProblem>                           matmulProblems,
+        hipDataType                                              inputTypeA,
+        hipDataType                                              inputTypeB,
+        hipDataType                                              inputTypeC,
+        hipDataType                                              outputType,
+        hipDataType                                              computeScalarType,
+        hipDataType                                              coefficientType,
+        hipDataType                                              biasType,
+        bool                                                     swizzleA,
+        bool                                                     swizzleB,
+        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
+        roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB);
 } // namespace hipblaslt::client
