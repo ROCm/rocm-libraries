@@ -53,6 +53,17 @@ T wrappingMultiply(T left, T right) {
 }
 
 template <typename T>
+T wrappingSubtract(T left, T right) {
+    if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+        using Unsigned = std::make_unsigned_t<T>;
+        const Unsigned result = static_cast<Unsigned>(left) - static_cast<Unsigned>(right);
+        return std::bit_cast<T>(result);
+    } else {
+        return left - right;
+    }
+}
+
+template <typename T>
 T wrappingNegate(T value) {
     if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
         using Unsigned = std::make_unsigned_t<T>;
