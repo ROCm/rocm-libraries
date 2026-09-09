@@ -245,7 +245,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             calculateMathClocksInUnrolledLoop(bb, passCtx);
         }
         // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
-        func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+        if (publishMetadata_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
 
         return PreservedAnalyses::all();
     }
@@ -264,6 +264,14 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// pass can be used purely as a cycle-position query by other passes.
     void setAnnotateComments(bool annotate) {
         annotateComments_ = annotate;
+    }
+
+    /// When false, suppress publishing the total-cycles function metadata
+    /// (`EstimateAsmCyclesPass.totalCycles`). Read-only query callers set this
+    /// alongside setAnnotateComments(false) so run() has no IR/function side
+    /// effects — the AnalysisManager contract for a pure analysis.
+    void setPublishMetadata(bool publish) {
+        publishMetadata_ = publish;
     }
 
     /// When true, also model non-loop blocks that contain an embedded
@@ -1009,6 +1017,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
     bool annotateComments_ = true;
     bool perInstructionCycleQuery_ = false;
+    bool publishMetadata_ = true;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
@@ -1037,8 +1046,19 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
+    Function& func, AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return computeEstimatedCyclesPerInstruction(func, passCtx);
+}
+
 unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
@@ -1048,6 +1068,7 @@ std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPer
     Function& func, PassContext& passCtx) {
     EstimateAsmCyclesPassImpl pass;
     pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
     pass.setPerInstructionCycleQuery(true);
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);

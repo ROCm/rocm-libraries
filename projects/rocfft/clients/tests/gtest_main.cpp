@@ -251,6 +251,12 @@ void precompile_test_kernels(const std::string& precompile_file)
                 {
                     rocfft_params params_forward;
                     params_forward.from_token(token);
+
+                    // JIT callbacks would require JIT state to be
+                    // specified which we're not doing here
+                    if(params_forward.run_callbacks == fft_callback_type_jit)
+                        continue;
+
                     params_forward.validate();
                     params_forward.setup_structs();
 
@@ -376,7 +382,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.0)
+        ->default_val(0.1)
         ->check(CLI::PositiveNumber);
 
     constexpr auto emulation_quick      = "quick";

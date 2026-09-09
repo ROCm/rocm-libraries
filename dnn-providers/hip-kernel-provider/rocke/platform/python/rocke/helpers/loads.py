@@ -548,6 +548,14 @@ class AsyncTileLoader:
     elem_dtype: Type = F16
     dwords: int = 1  # 1, 3, or 4
     chunks_total: int = 0  # tile_rows * tile_cols / elems_per_chunk
+    # Length of the longest run of tile columns that is contiguous in global
+    # memory. ``None`` means "the col axis is dense across the whole tile" (the
+    # historical assumption). When the col axis is a composite index whose outer
+    # part strides -- e.g. wgrad's N_wg = (y, x, c), where only ``c`` is
+    # stride-1 -- a chunk that crosses one of those boundaries would fetch the
+    # wrong elements, silently. Setting this makes ``choose_dwords`` pick a
+    # width that always stays inside one run.
+    contig_cols: Optional[int] = None
     chunks_per_pass: int = 0  # = block_size
     passes: int = 0  # ceil(chunks_total / block_size)
 
@@ -560,6 +568,7 @@ class AsyncTileLoader:
         block_size: int,
         elem_bytes: int = 2,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> int:
         """Pick the widest `dwords` value that divides the tile evenly.
 
@@ -576,8 +585,20 @@ class AsyncTileLoader:
             elems = (d * 4) // elem_bytes
             if tile_cols % elems != 0:
                 continue
+            # A chunk must lie entirely inside one contiguous run of columns.
+            if contig_cols is not None and (
+                elems > contig_cols or contig_cols % elems != 0
+            ):
+                continue
             chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
+                continue
+            # Every pass fires block_size chunks. Chunks past chunks_total still
+            # issue (with the OOB sentinel, which the hardware zero-fills), so a
+            # partial last pass writes past this tile's allocation and into the
+            # next smem_alloc. Require whole passes; a narrower width is tried
+            # next and usually succeeds.
+            if chunks % block_size != 0:
                 continue
             return d
         raise ValueError(
@@ -595,6 +616,7 @@ class AsyncTileLoader:
         wave_size: int = 64,
         elem_dtype: Type = F16,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> "AsyncTileLoader":
         eb = _ELEM_BYTES.get(elem_dtype.name)
         if eb is None:
@@ -607,6 +629,7 @@ class AsyncTileLoader:
             block_size=block_size,
             elem_bytes=eb,
             max_dwords=max_dwords,
+            contig_cols=contig_cols,
         )
         elems = (d * 4) // eb
         chunks = (tile_rows * tile_cols) // elems
@@ -617,6 +640,7 @@ class AsyncTileLoader:
             block_size=block_size,
             wave_size=wave_size,
             elem_dtype=elem_dtype,
+            contig_cols=contig_cols,
             dwords=d,
             chunks_total=chunks,
             chunks_per_pass=block_size,
@@ -637,8 +661,25 @@ class AsyncTileLoader:
         return self.dwords * 4
 
     @property
-    def cols_per_chunk(self) -> int:
-        return self.elems_per_chunk
+    def chunks_per_row(self) -> int:
+        """Chunks needed to cover one tile row of ``tile_cols`` elements.
+
+        This is the divisor that decodes a flat chunk index into a tile
+        coordinate in :meth:`AsyncTileLoaderSlot.issue`::
+
+            row = chunk_idx // chunks_per_row
+            col = (chunk_idx % chunks_per_row) * elems_per_chunk
+
+        It is *not* ``elems_per_chunk``. The two coincide only when
+        ``tile_cols == elems_per_chunk ** 2`` (e.g. tile_cols=64 for a 2-byte
+        dtype at dwords=4), which is why 64 used to be the only tile width the
+        async path loaded correctly -- every other width silently decoded to
+        the wrong row and to a column past the end of the tile.
+
+        ``choose_dwords`` guarantees ``tile_cols % elems_per_chunk == 0``, so
+        this division is exact.
+        """
+        return self.tile_cols // self.elems_per_chunk
 
     @property
     def wave_bytes(self) -> int:
@@ -716,7 +757,7 @@ class AsyncTileLoaderSlot:
         c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(oob_sentinel)
         c0 = b.const_i32(0)
-        c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
+        c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
         for p in range(L.passes):
             # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
@@ -734,8 +775,8 @@ class AsyncTileLoaderSlot:
 
             # chunk_idx = tid + p * block_size
             chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_cols_per_chunk)
-            col_v = b.mod(chunk_idx, c_cols_per_chunk)
+            row = b.div(chunk_idx, c_chunks_per_row)
+            col_v = b.mod(chunk_idx, c_chunks_per_row)
             col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
 
             off_elems, valid = descriptor(b, row, col)
