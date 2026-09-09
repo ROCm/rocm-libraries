@@ -35,7 +35,8 @@ from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPos
                         SMulInt64to32, VCvtBF16toFP32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
-                        scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
+                        scalarStaticRemainder, scalarUInt32DivideAndRemainder, scalarUInt24DivideAndRemainder, \
+                        sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
                         ArgumentLoader, scalarMultiplyBpe, scalarMultiply64Bpe, vectorMultiplyBpe, vectorMultiply64Bpe
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel, TemporalHint, NonVolatile
@@ -7790,7 +7791,56 @@ class KernelWriterAssembly(KernelWriter):
           wavewidth=kernel["WavefrontSize"], doRemainder=False,
           comment="k_local = K / W"))
     self.vgprPool.checkIn(tmpVgpr)
+    module.add(self.a2aBatchSpan(kernel))
     module.add(self.a2aShardLoopLabel())
+    return module
+
+  def a2aBatchSpan(self, kernel):
+    module = Module("a2aBatchSpan")
+    from .Components.Signature import fusedA2AKernArgLayout
+    layout = fusedA2AKernArgLayout()
+    numCu  = self.sgprPool.checkOut(1, tag="a2aBatchSpan_numCu", preventOverflow=False)
+    module.add(self.argLoader.loadKernArg(numCu, "KernArgAddress",
+        sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["FusedNumCu"]), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu for the batch span"))
+    tmpVgpr = self.vgprPool.checkOut(4, tag="a2aBatchSpan_divide")
+    vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
+    ww      = kernel["WavefrontSize"]
+    iB      = self.sgprPool.checkOut(1, tag="a2aBatchSpan_iB", preventOverflow=False)
+    acc     = self.sgprPool.checkOut(1, tag="a2aBatchSpan_acc", preventOverflow=False)
+    bHi     = self.sgprPool.checkOut(1, tag="a2aBatchSpan_bHi", preventOverflow=False)
+
+    module.add(SMulI32(dst=sgpr(acc), src0=sgpr("WorkGroup1"), src1=sgpr("NumWorkGroups0"),
+                       comment="b * F"))
+    module.add(scalarUInt24DivideAndRemainder(qReg=iB, dReg=acc, divReg=numCu, rReg=-1,
+        tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False, comment="iB = b * F / numCu"))
+
+    module.add(SMulI32(dst=sgpr(acc), src0=sgpr(iB), src1=sgpr(numCu), comment="iB * numCu"))
+    module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr("NumWorkGroups0"),
+                       comment="iB * numCu + F"))
+    module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="iB * numCu + F - 1"))
+    module.add(scalarUInt24DivideAndRemainder(qReg="A2ABlockLo", dReg=acc,
+        divReg="NumWorkGroups0", rReg=-1, tmpVgprRes=vgprRes, wavewidth=ww,
+        doRemainder=False, comment="bLo = ceil(iB * numCu / F)"))
+
+    module.add(SAddU32(dst=sgpr(iB), src0=sgpr(iB), src1=1, comment="iB + 1"))
+    module.add(SMulI32(dst=sgpr(acc), src0=sgpr(iB), src1=sgpr(numCu), comment="(iB+1) * numCu"))
+    module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr("NumWorkGroups0"),
+                       comment="(iB+1) * numCu + F"))
+    module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="(iB+1) * numCu + F - 1"))
+    module.add(scalarUInt24DivideAndRemainder(qReg=bHi, dReg=acc, divReg="NumWorkGroups0",
+        rReg=-1, tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
+        comment="bHi = ceil((iB+1) * numCu / F)"))
+    module.add(SMinU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=sgpr("NumWorkGroups1"),
+                       comment="bHi = min(bHi, numTokenBlocks)"))
+    module.add(SSubU32(dst=sgpr("A2ABlockCount"), src0=sgpr(bHi), src1=sgpr("A2ABlockLo"),
+                       comment="count = bHi - bLo"))
+
+    self.vgprPool.checkIn(tmpVgpr)
+    self.sgprPool.checkIn(bHi)
+    self.sgprPool.checkIn(acc)
+    self.sgprPool.checkIn(iB)
+    self.sgprPool.checkIn(numCu)
     return module
 
   def closeA2AShardLoop(self, kernel):
