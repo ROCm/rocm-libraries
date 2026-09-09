@@ -6,6 +6,7 @@
 #include "hipblaslt_datatype2string.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -15,6 +16,37 @@
 
 namespace hipblaslt::client
 {
+    roc::host_numerics::Layout MatmulMatrix::logicalBatchLayout(hipblasOperation_t operation,
+                                                                size_t             batch,
+                                                                bool separateBatchStorage) const
+    {
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::Shape;
+
+        if(layout.shape().rank() != 3)
+            throw std::invalid_argument("A matmul matrix layout must have rank three.");
+
+        const bool      transpose    = operation != HIPBLAS_OP_N;
+        const size_t    rows         = layout.shape()[transpose ? 1 : 0];
+        const size_t    columns      = layout.shape()[transpose ? 0 : 1];
+        const ptrdiff_t rowStride    = layout.stride(transpose ? 1 : 0);
+        const ptrdiff_t columnStride = layout.stride(transpose ? 0 : 1);
+
+        ptrdiff_t offset = layout.offset();
+        if(!separateBatchStorage)
+        {
+            // Empty matrix extents have no valid element coordinate. Address
+            // the batch axis through a non-empty proxy so Layout retains the
+            // same bounds and overflow checks for empty and non-empty matrices.
+            const Layout batchAddressLayout(
+                Shape{1, 1, layout.shape().extent(2)}, {0, 0, layout.stride(2)}, layout.offset());
+            const std::array<size_t, 3> batchCoordinates{0, 0, batch};
+            offset = batchAddressLayout.elementOffset(batchCoordinates);
+        }
+
+        return Layout(Shape{rows, columns}, {rowStride, columnStride}, offset);
+    }
+
     namespace
     {
         hipblasOperation_t normalizeOperation(char operation, const char* name)

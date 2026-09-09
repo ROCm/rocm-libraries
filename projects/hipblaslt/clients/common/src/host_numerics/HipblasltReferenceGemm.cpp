@@ -10,41 +10,10 @@
 #include <roc/host_numerics/epilogue.hpp>
 #include <roc/host_numerics/tensor_operations.hpp>
 
-#include <array>
 #include <utility>
 
 namespace hipblaslt::host_numerics
 {
-    roc::host_numerics::Layout referenceBatchLayout(const hipblaslt::client::MatmulMatrix& matrix,
-                                                    size_t                                 rows,
-                                                    size_t                                 columns,
-                                                    hipblasOperation_t operation,
-                                                    size_t             batch,
-                                                    bool               separateBatchStorage)
-    {
-        using roc::host_numerics::Layout;
-        using roc::host_numerics::Shape;
-
-        const ptrdiff_t rowStride    = operation == HIPBLAS_OP_N ? 1 : matrix.layout.stride(1);
-        const ptrdiff_t columnStride = operation == HIPBLAS_OP_N ? matrix.layout.stride(1) : 1;
-
-        ptrdiff_t offset = 0;
-        if(!separateBatchStorage)
-        {
-            // A zero matrix extent has no valid {0, 0, batch} coordinate, but
-            // its batch base is still well-defined. Use a non-empty address
-            // layout to retain Layout's checked offset arithmetic without
-            // pretending that the empty matrix contains an element.
-            const Layout batchAddressLayout(Shape{1, 1, matrix.layout.shape().extent(2)},
-                                            {0, 0, matrix.layout.stride(2)},
-                                            matrix.layout.offset());
-            const std::array<size_t, 3> batchCoordinates{0, 0, batch};
-            offset = batchAddressLayout.elementOffset(batchCoordinates);
-        }
-
-        return Layout(Shape{rows, columns}, {rowStride, columnStride}, offset);
-    }
-
     void referenceMatmulGemm(const hipblaslt::client::MatmulProblem&         problem,
                              const hipblaslt::client::MatmulDataTypes&       dataTypes,
                              const hipblaslt::client::PreparedMatmulProblem& preparation,
