@@ -465,84 +465,21 @@ int main(int argc, char** argv) noexcept
         if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
             auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
-            const std::size_t graphsObserved = observationLog.graphsObserved();
-            const std::size_t graphsUnobserved = observationLog.graphsUnobserved();
 
-            const std::size_t graphsRegistered
-                = hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound;
+            const auto authoring = hipdnn_integration_tests::bundle::authorSupportClaims(
+                observationLog.all(),
+                observationLog.graphsObserved(),
+                observationLog.graphsUnobserved(),
+                hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound,
+                std::cerr);
 
-            // A graph SetUp() skipped is in neither counter; the gap is the
-            // sidecars this run left untouched without noticing.
-            const std::size_t graphsNeverReached
-                = graphsRegistered > graphsObserved + graphsUnobserved
-                      ? graphsRegistered - graphsObserved - graphsUnobserved
-                      : 0;
-
-            if(graphsObserved == 0 && graphsUnobserved == 0)
+            if(authoring.shouldFail)
             {
-                std::cerr << "\n--write-support-claims: no graphs were observed; "
-                             "nothing was written.\n"
-                             "Usual causes:\n"
-                             "  - no --test-engine was given, so there is no engine to observe\n"
-                             "  - the GPU or the engine plugin failed to load\n"
-                             "  - a --gtest_filter or --test-article selected no graphs\n";
                 exitCode = 1;
-            }
-            else
-            {
-                // Safe to run even when every graph failed: the writer groups by
-                // sidecar, so no observations means no targets and no writes.
-                const auto writeSummary
-                    = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
-                        observationLog.all());
-
-                // The graph counts lead: "observations" counts engine-by-graph
-                // cells, so it runs a multiple of the graph count and cannot
-                // serve as its own denominator.
-                std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
-                          << "  graphs registered: " << graphsRegistered
-                          << "  observed: " << graphsObserved
-                          << "  not observed: " << graphsUnobserved
-                          << "  never reached: " << graphsNeverReached << "\n"
-                          << "  observations: " << writeSummary.observationsApplied
-                          << "  written: " << writeSummary.filesWritten
-                          << "  unchanged: " << writeSummary.filesUnchanged
-                          << "  skipped: " << writeSummary.filesSkipped
-                          << "  errors: " << writeSummary.errors.size() << "\n";
-
-                if(graphsUnobserved > 0)
-                {
-                    std::cerr << "  claims for the " << graphsUnobserved
-                              << " unobserved graph(s) were left as-is; see the warnings "
-                                 "above for which, and re-run them.\n";
-                }
-
-                if(graphsNeverReached > 0)
-                {
-                    std::cerr << "  " << graphsNeverReached
-                              << " graph(s) never reached the observer, so their claims are "
-                                 "stale.\n"
-                                 "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
-                                 "device skips\n"
-                                 "  a bundle in SetUp, before anything can be observed.\n";
-                }
-
-                for(const auto& error : writeSummary.errors)
-                {
-                    std::cerr << "  ERROR: " << error << "\n";
-                }
-
-                // A partial authoring run fails. What it did write is still
-                // correct -- the exit code says "not finished", not "discard".
-                if(!writeSummary.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
-                {
-                    exitCode = 1;
-                }
             }
         }
 
-        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()
-           && hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {

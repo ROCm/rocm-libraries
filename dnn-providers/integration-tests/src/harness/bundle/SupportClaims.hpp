@@ -16,6 +16,11 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+/// The schema version every support-claim sidecar is written and read with.
+/// One constant for the writer (SupportClaimWriter.cpp) and the reader
+/// (SupportClaims.cpp); the Python verifier carries its own copy.
+constexpr int K_SUPPORT_CLAIMS_SCHEMA_VERSION = 1;
+
 /// Locates a specific support claim: the sidecar file, which case (if sweep),
 /// and the display path for reports. Constructed once at registration time and
 /// threaded through LoadedBundle -> harness -> observeSupport.

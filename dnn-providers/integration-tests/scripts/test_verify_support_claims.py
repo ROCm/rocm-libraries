@@ -470,7 +470,7 @@ class TestCanonicalForm(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.bundle_root, ignore_errors=True)
 
-    def test_non_canonical_bytes_detected(self) -> None:
+    def test_missing_trailing_newline_detected(self) -> None:
         (self.bundle_root / "A").mkdir(parents=True)
         (self.bundle_root / "A" / "Small.json").write_bytes(b"{}")
         non_canonical = json.dumps({"version": 1, "claims": {}}, indent=2)
@@ -480,6 +480,38 @@ class TestCanonicalForm(unittest.TestCase):
         errors = verify_all(self.bundle_root)
         self.assertEqual(len(errors), 1)
         self.assertIn("not in canonical form", errors[0])
+
+    def test_unsorted_keys_detected(self) -> None:
+        (self.bundle_root / "A").mkdir(parents=True)
+        (self.bundle_root / "A" / "Small.json").write_bytes(b"{}")
+        data = {
+            "version": 1,
+            "claims": {
+                "Z_ENGINE": {"gfx942": ["linux"]},
+                "A_ENGINE": {"gfx942": ["linux"]},
+            },
+        }
+        non_canonical = (
+            json.dumps(data, indent=2, sort_keys=False, ensure_ascii=False) + "\n"
+        )
+        (self.bundle_root / "A" / "Small.support.json").write_bytes(
+            non_canonical.encode("utf-8")
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertTrue(any("not in canonical form" in e for e in errors))
+
+    def test_wrong_indent_detected(self) -> None:
+        (self.bundle_root / "A").mkdir(parents=True)
+        (self.bundle_root / "A" / "Small.json").write_bytes(b"{}")
+        data = {"version": 1, "claims": {"ENGINE": {"gfx942": ["linux"]}}}
+        non_canonical = (
+            json.dumps(data, indent=4, sort_keys=True, ensure_ascii=False) + "\n"
+        )
+        (self.bundle_root / "A" / "Small.support.json").write_bytes(
+            non_canonical.encode("utf-8")
+        )
+        errors = verify_all(self.bundle_root)
+        self.assertTrue(any("not in canonical form" in e for e in errors))
 
 
 # ---------------------------------------------------------------------------

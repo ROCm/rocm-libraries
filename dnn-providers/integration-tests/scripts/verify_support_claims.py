@@ -230,11 +230,7 @@ def check_sweep_case_ids(
 ) -> None:
     sweep_path = support_path.parent / "sweep.json"
     if not sweep_path.exists():
-        _error(
-            support_path,
-            "sweep support.json has no sibling sweep.json",
-            errors,
-        )
+        # check_orphaned_sweep already reports this; no duplicate error.
         return
     try:
         with open(sweep_path, encoding="utf-8") as f:

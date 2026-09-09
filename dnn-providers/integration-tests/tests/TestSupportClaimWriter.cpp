@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,8 @@
 #include "ScratchDirectory.hpp"
 #include "SupportClaimTestUtils.hpp"
 
+using hipdnn_integration_tests::bundle::AuthoringResult;
+using hipdnn_integration_tests::bundle::authorSupportClaims;
 using hipdnn_integration_tests::bundle::dumpCanonical;
 using hipdnn_integration_tests::bundle::ObservedGraphSupport;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
@@ -666,15 +669,112 @@ TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
                                      | std::filesystem::perms::owner_exec,
                                  std::filesystem::perm_options::replace);
 
-    const auto summary = writeObservedSupportClaims(observations);
+    // RAII: restore owner_all so ScopedDirectory can rm -rf on exit even if the
+    // assertions or writeObservedSupportClaims throw.
+    struct RestorePerms
+    {
+        std::filesystem::path path;
+        ~RestorePerms()
+        {
+            std::error_code ec;
+            std::filesystem::permissions(path,
+                                         std::filesystem::perms::owner_all,
+                                         std::filesystem::perm_options::replace,
+                                         ec);
+        }
+    } restorePerms{subdir};
 
-    std::filesystem::permissions(
-        subdir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+    const auto summary = writeObservedSupportClaims(observations);
 
     ASSERT_EQ(summary.errors.size(), 1u);
     EXPECT_NE(summary.errors[0].find("could not open"), std::string::npos);
     EXPECT_EQ(summary.filesSkipped, 1u);
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// authorSupportClaims: extracted logic from main.cpp
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimAuthoring, ZeroObservationsFailsWithDiagnostic)
+{
+    std::ostringstream log;
+    const std::vector<ObservedGraphSupport> observations;
+
+    const auto result = authorSupportClaims(observations, 0, 0, 10, log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_EQ(result.writeSummary.filesWritten, 0u);
+    EXPECT_NE(log.str().find("no graphs were observed"), std::string::npos);
+}
+
+TEST(TestSupportClaimAuthoring, AllObservedSuccessDoesNotFail)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    const auto result = authorSupportClaims(observations, 1, 0, 1, log);
+
+    EXPECT_FALSE(result.shouldFail);
+    EXPECT_EQ(result.writeSummary.filesWritten, 1u);
+    EXPECT_NE(log.str().find("SUPPORT CLAIM WRITE SUMMARY"), std::string::npos);
+}
+
+TEST(TestSupportClaimAuthoring, UnobservedGraphsCauseFail)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    const auto result = authorSupportClaims(observations, 1, 2, 3, log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_NE(log.str().find("unobserved graph(s) were left as-is"), std::string::npos);
+}
+
+TEST(TestSupportClaimAuthoring, NeverReachedGraphsCauseFail)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // 1 observed + 0 unobserved but 5 registered → 4 never reached
+    const auto result = authorSupportClaims(observations, 1, 0, 5, log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_NE(log.str().find("never reached the observer"), std::string::npos);
+}
+
+TEST(TestSupportClaimAuthoring, WriteErrorsCauseFail)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Corrupt.json";
+    const auto sidecarPath = dir.path() / "Corrupt.support.json";
+    std::ofstream(sidecarPath) << "not valid json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    const auto result = authorSupportClaims(observations, 1, 0, 1, log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_FALSE(result.writeSummary.errors.empty());
+    EXPECT_NE(log.str().find("ERROR:"), std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

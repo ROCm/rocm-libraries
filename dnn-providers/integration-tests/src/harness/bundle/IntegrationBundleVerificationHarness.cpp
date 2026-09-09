@@ -225,15 +225,28 @@ std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeS
     const std::string arch = baseArchToken(_deps.policy.arch);
     const auto& rankedIds = session.engines.rankedIds;
 
-    std::vector<ObservedGraphSupport> observations;
-
-    for(const auto& engine :
-        _engineUnderTest ? std::vector<LoadedEngine>{*_engineUnderTest} : engines)
-    {
+    auto observe = [&](const LoadedEngine& engine) {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
-        observations.push_back(
-            {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+        return ObservedGraphSupport{
+            _claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported};
+    };
+
+    std::vector<ObservedGraphSupport> observations;
+
+    if(_engineUnderTest)
+    {
+        // --test-engine was given: observe only that engine.
+        observations.push_back(observe(*_engineUnderTest));
+    }
+    else
+    {
+        // No --test-engine: observe every loaded engine plugin.
+        observations.reserve(engines.size());
+        for(const auto& engine : engines)
+        {
+            observations.push_back(observe(engine));
+        }
     }
 
     return observations;

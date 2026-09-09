@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -22,5 +23,17 @@ struct WriteSummary
 };
 
 WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>& observations);
+
+struct AuthoringResult
+{
+    WriteSummary writeSummary;
+    bool shouldFail = false;
+};
+
+AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
+                                    std::size_t graphsObserved,
+                                    std::size_t graphsUnobserved,
+                                    std::size_t graphsRegistered,
+                                    std::ostream& log);
 
 } // namespace hipdnn_integration_tests::bundle

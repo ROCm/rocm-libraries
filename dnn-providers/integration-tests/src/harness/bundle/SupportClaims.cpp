@@ -19,7 +19,7 @@ namespace
 // must fail the run loudly rather than silently degrade — unlike
 // BundleMetadata's optional+WARN handling of human-authored, fully-optional
 // metadata.
-constexpr int K_SUPPORTED_SCHEMA_VERSION = 1;
+constexpr int K_SUPPORTED_SCHEMA_VERSION = K_SUPPORT_CLAIMS_SCHEMA_VERSION;
 
 const std::set<std::string>& validPlatformTokens()
 {

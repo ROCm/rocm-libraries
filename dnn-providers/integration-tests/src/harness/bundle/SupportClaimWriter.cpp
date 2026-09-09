@@ -4,17 +4,15 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 
 #include <algorithm>
-#include <chrono>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <ostream>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "common/PlatformUtils.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -28,7 +26,7 @@ using CaseId = ObservedGraphSupport::CaseId;
 
 // The parsers reject any version but 1, so a claim set that survived a read is
 // version 1 and a claim set we invented starts there.
-constexpr int K_SUPPORT_CLAIMS_VERSION = 1;
+constexpr int K_SUPPORT_CLAIMS_VERSION = K_SUPPORT_CLAIMS_SCHEMA_VERSION;
 
 // "" is a legal JSON key, so an observation with an empty engine, arch, or
 // platform serializes without complaint and lands an entry in a checked-in
@@ -238,30 +236,10 @@ enum class WriteOutcome
     WRITE_FAILED,
 };
 
-// The scratch file `writeIfChanged` streams into before renaming it over the
-// sidecar. The name has to be this process's alone: a fixed ".tmp" suffix is one
-// name every concurrent authoring run would pick, so two of them interleave
-// their writes into a single file and whichever renames first publishes the
-// other's half-written bytes. The result still parses as JSON, so nothing
-// downstream flags it.
-//
-// The pid does the work -- the OS hands no two live processes the same one. The
-// clock is for the case the pid cannot cover: two machines sharing a checkout
-// over NFS draw from separate pid spaces and can collide, and a timestamp makes
-// that need them to also start within a clock tick of each other.
-//
-// This bounds corruption, not lost updates: concurrent runs still race on the
-// rename and the last writer wins. That is why --write-support-claims documents
-// itself as one-at-a-time, and why the sidecars are checked in -- a lost update
-// shows up as a short `git diff` before it can be pushed.
 std::filesystem::path makeTempPath(const std::filesystem::path& filePath)
 {
-    const auto stamp
-        = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
-          ^ (static_cast<uint64_t>(currentProcessId()) << 32U);
-
     auto tempPath = filePath;
-    tempPath += "." + std::to_string(stamp) + ".tmp";
+    tempPath += ".tmp";
     return tempPath;
 }
 
@@ -377,6 +355,9 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
         }
 
         // Counted per outcome, so the number says what reached a file.
+        // All four WriteOutcome arms are listed; -Wswitch catches a future addition.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-default"
         switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
         {
         case WriteOutcome::WRITTEN:
@@ -395,12 +376,78 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
             summary.errors.push_back("write failed: " + sidecarPath.string());
             ++summary.filesSkipped;
             break;
-        default:
-            break;
         }
+#pragma GCC diagnostic pop
     }
 
     return summary;
+}
+
+AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
+                                    const std::size_t graphsObserved,
+                                    const std::size_t graphsUnobserved,
+                                    const std::size_t graphsRegistered,
+                                    std::ostream& log)
+{
+    AuthoringResult result;
+
+    const std::size_t graphsNeverReached
+        = graphsRegistered > graphsObserved + graphsUnobserved
+              ? graphsRegistered - graphsObserved - graphsUnobserved
+              : 0;
+
+    if(graphsObserved == 0 && graphsUnobserved == 0)
+    {
+        log << "\n--write-support-claims: no graphs were observed; "
+               "nothing was written.\n"
+               "Usual causes:\n"
+               "  - no engine plugins were loaded (check plugin paths)\n"
+               "  - the GPU failed to initialise\n"
+               "  - a --gtest_filter or --test-article selected no graphs\n";
+        result.shouldFail = true;
+        return result;
+    }
+
+    result.writeSummary = writeObservedSupportClaims(observations);
+
+    const auto& ws = result.writeSummary;
+
+    log << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+        << "  graphs registered: " << graphsRegistered << "  observed: " << graphsObserved
+        << "  not observed: " << graphsUnobserved << "  never reached: " << graphsNeverReached
+        << "\n"
+        << "  observations: " << ws.observationsApplied << "  written: " << ws.filesWritten
+        << "  unchanged: " << ws.filesUnchanged << "  skipped: " << ws.filesSkipped
+        << "  errors: " << ws.errors.size() << "\n";
+
+    if(graphsUnobserved > 0)
+    {
+        log << "  claims for the " << graphsUnobserved
+            << " unobserved graph(s) were left as-is; see the warnings "
+               "above for which, and re-run them.\n";
+    }
+
+    if(graphsNeverReached > 0)
+    {
+        log << "  " << graphsNeverReached
+            << " graph(s) never reached the observer, so their claims are "
+               "stale.\n"
+               "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
+               "device skips\n"
+               "  a bundle in SetUp, before anything can be observed.\n";
+    }
+
+    for(const auto& error : ws.errors)
+    {
+        log << "  ERROR: " << error << "\n";
+    }
+
+    if(!ws.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
+    {
+        result.shouldFail = true;
+    }
+
+    return result;
 }
 
 } // namespace hipdnn_integration_tests::bundle
