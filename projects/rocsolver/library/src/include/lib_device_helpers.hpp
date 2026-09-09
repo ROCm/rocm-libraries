@@ -1685,7 +1685,7 @@ __host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
     If STRICT = false, it returns the number of elements in 'X' that are smaller than or
     equal to 'val' **/
 template <typename T>
-__device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT, bool REVERSE)
+__device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool is_strict, bool is_reversed)
 {
     rocblas_int d = 1;
     rocblas_int u = n;
@@ -1696,9 +1696,9 @@ __device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT
     if(n == 0)
         return 0;
 
-    if(REVERSE)
+    if(is_reversed)
     {
-        if(STRICT)
+        if(is_strict)
         {
             // while there is still an interval to search
             while(d != u)
@@ -1740,7 +1740,7 @@ __device__ __host__ rocblas_int bisearch(T val, T* X, rocblas_int n, bool STRICT
 
     else
     {
-        if(STRICT)
+        if(is_strict)
         {
             // while there is still an interval to search
             while(d != u)
