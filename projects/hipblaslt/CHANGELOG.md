@@ -2,7 +2,7 @@
 
 Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).
 
-## hipBLASLt 1.4.1 for ROCm 10.1.0
+## hipBLASLt 1.5.0 for ROCm 10.1.0
 
 ### Added
 
