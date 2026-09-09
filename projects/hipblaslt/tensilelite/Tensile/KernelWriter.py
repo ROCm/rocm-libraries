@@ -53,6 +53,8 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
+from .Components.TDMFuse import tdmWaveIssueOrder, decoupledThickGateRelaxation, \
+     dcpThickGateCountOverridden, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -732,12 +734,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self._dcpScheduleSingleBufferedFillLate(kernel)
 
   def _dcpThickThinIssueOrder(self, kernel, tensorParametersA="A", tensorParametersB="B"):
-    if not self._dcpDivergent(kernel):
-      return tensorParametersA, tensorParametersB
-    _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
-    if numLdsBlkA >= numLdsBlkB:
-      return tensorParametersA, tensorParametersB
-    return tensorParametersB, tensorParametersA
+    """(thick, thin) of the pair handed in, as the wave assignment sees it.
+
+    LAYER 3 of the wave-assignment split: tdmWaveAssignment (layer 1) decides
+    which wave issues what, tdmWaveIssueOrder reads it and weighs the two data
+    tensors, and dcpThickThinIssueOrder (layer 2) does the ordering. Nothing
+    here reads TDMCross; only layer 1 does.
+
+    Call sites pass tensor-parameter objects, not the names "A"/"B", so this
+    reorders whatever it is handed rather than returning literals.
+    """
+    return tdmWaveIssueOrder(kernel, tensorParametersA, tensorParametersB)
 
   ##############################################################################
   # Decouple PGR: move a single-buffered tensor's fill to sub-iteration
@@ -857,21 +864,44 @@ class KernelWriter(metaclass=abc.ABCMeta):
         changed += 1
     assert changed, "decoupled PGR: producer clone carries no tensor_load_to_lds"
 
-  def _dcpApplyThickWait1(self, kernel, asm):
-    if not self._dcpDivergent(kernel):
-      return asm
+  def _dcpClampTensorcnt(self, asm, target):
+    """Clamp every s_wait_tensorcnt above `target` down to it.
 
-    # TDMFuse=1 needs nothing from this pass: the wait-count insertion pass
-    # already emits its thick gate relaxed, from the disjoint A/B tensor tokens
-    # memTokenLdsDcp assigns.
+    Gate-pricing experiment support only. Reached only for a divergent pair on
+    the token path, whose only non-zero tensorcnt waits are the two relaxed
+    gates, so this touches the gate and nothing else. Downward by construction:
+    the substitution fires only where the emitted count exceeds the target.
+    """
+    def clamp(m):
+      return m.group(1) + str(target) if int(m.group(2)) > target else m.group(0)
+    return re.sub(r"^(\s*s_wait_tensorcnt\s+)(\d+)", clamp, asm, flags=re.M)
+
+  def _dcpApplyThickWait1(self, kernel, asm):
+    # decoupledThickGateRelaxation owns which mechanism relaxes this pair's thick
+    # gate and to what count; this pass runs only for the groupings it names.
+    # DCP_THICK_GATE_TOKENS needs nothing from here -- the wait-count insertion
+    # pass has already emitted that gate relaxed from the disjoint A/B tensor
+    # tokens memTokenLdsDcp assigns -- and None means the pair earns no
+    # relaxation at all.
     #
-    # Text could not do this job in any case. s_wait_tensorcnt N is an
+    # Text could not do the token job in any case. s_wait_tensorcnt N is an
     # age-ordered drain on one counter, not a per-tensor mask, so which tensor a
     # count bypasses follows from issue order alone; and the label the paired
     # fill emits sits after the fill body, so scanning forward from it leaves
     # the group entirely and the first wait found belongs to unrelated code.
-    if kernel.get("TDMFuse", 0) == 1:
+    gate = decoupledThickGateRelaxation(kernel)
+    if gate is None:
       return asm
+    if gate.mechanism != DCP_THICK_GATE_TEXT:
+      # DCP_THICK_GATE_TOKENS needs nothing from this pass: the wait-count
+      # insertion pass has already emitted that gate relaxed from the disjoint
+      # A/B tensor tokens memTokenLdsDcp assigns. Its count is derived there
+      # rather than read from gate.tensorcnt, so pricing that count is the one
+      # thing text has to do for it -- off unless the gate-pricing hook is set,
+      # so the default path stays byte-identical.
+      if not dcpThickGateCountOverridden(gate.mechanism):
+        return asm
+      return self._dcpClampTensorcnt(asm, gate.tensorcnt)
 
     lines = asm.splitlines(keepends=True)
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
@@ -883,9 +913,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # block it is about to be read from.
     thickTc = "A" if numLdsBlkA == 2 else "B"
     marker = "DcpEarlyFill%s" % thickTc
-    # Separate descriptor sets leave the double-buffered tensor's own second
-    # block outstanding as well as the sibling fill.
-    relaxed = 2
+    relaxed = gate.tensorcnt
 
     changed = 0
     for i, line in enumerate(lines):
@@ -7758,18 +7786,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         % (half1Tokens, sorted(reserved), splitBase)
       self.states.memTokenLdsSplit = \
         [[blk, half1Tokens[blk]] for blk in range(self.states.numLDSBlk)]
-    if (self._dcpDivergent(kernel) and kernel["enableTDMA"] and kernel["enableTDMB"]
-        and kernel.get("TDMFuse", 0) == 1):
+    # Disjoint per-tensor tokens are how the DCP_THICK_GATE_TOKENS grouping gets
+    # its relaxed thick gate: with A and B on separate tensor tokens the
+    # wait-count insertion pass can age-order the drain instead of emitting a
+    # full one. decoupledThickGateRelaxation is the single reader of that choice.
+    _dcpGate = decoupledThickGateRelaxation(kernel)
+    if _dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS:
       _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
-      if numLdsBlkA == 1 or numLdsBlkB == 1:
-        self.states.memTokenLdsDcp = {
-          "A": [0, 1 if numLdsBlkA > 1 else 0],
-          "B": [2, 3 if numLdsBlkB > 1 else 2],
-        }
-        self.states.ldsReadTokenIdxA = self.states.memTokenLdsDcp["A"][0]
-        self.states.ldsReadTokenIdxB = self.states.memTokenLdsDcp["B"][0]
-        self.states.ldsTensorTokenIdxA = self.states.memTokenLdsDcp["A"][0]
-        self.states.ldsTensorTokenIdxB = self.states.memTokenLdsDcp["B"][0]
+      self.states.memTokenLdsDcp = {
+        "A": [0, 1 if numLdsBlkA > 1 else 0],
+        "B": [2, 3 if numLdsBlkB > 1 else 2],
+      }
+      self.states.ldsReadTokenIdxA = self.states.memTokenLdsDcp["A"][0]
+      self.states.ldsReadTokenIdxB = self.states.memTokenLdsDcp["B"][0]
+      self.states.ldsTensorTokenIdxA = self.states.memTokenLdsDcp["A"][0]
+      self.states.ldsTensorTokenIdxB = self.states.memTokenLdsDcp["B"][0]
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0

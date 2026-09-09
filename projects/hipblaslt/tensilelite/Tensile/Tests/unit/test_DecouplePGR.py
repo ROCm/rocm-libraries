@@ -799,6 +799,21 @@ def _thickWaitKernel(pgrA=1, pgrB=2, **overrides):
         "PrefetchGlobalReadB": pgrB,
         "TDMFuse": 0,
         "InitCIterWmma": 0,
+        # Which arm emits this kernel is decided by the resolved grouping, and
+        # tdmGrouping declines the grouping a TDMFuse integer names when its
+        # guards are unmet -- falling back to the shared default. A fixture that
+        # set TDMFuse=1 and nothing else therefore described a solution whose
+        # descriptors are shared, not a paired one, and only looked paired while
+        # the emission sites read the same integer it did. These keys are what
+        # make TDMFuse=1 actually resolve to {A,MXSA} + {MXSB,B}; they are inert
+        # at TDMFuse=0, whose grouping is the fallback and needs no guard.
+        "TDMInst": 3,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "NumWaves": 4,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
     }
     ks.update(overrides)
     return ks

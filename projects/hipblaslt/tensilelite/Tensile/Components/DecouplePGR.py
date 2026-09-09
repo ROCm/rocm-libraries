@@ -133,6 +133,19 @@ def _ldsAlignedBytes(ks, pt, mxTc, depthU, macroTile):
     )
 
 
+def ldsAlignedBytesForTensor(ks, mxTc, problemType=None):
+    """One tensor's aligned LDS bytes for one block, or None if unresolvable.
+
+    The public face of _ldsAlignedBytes for callers that account per tensor
+    rather than per owner-group. Block size is not MacroTile alone: element
+    size, MX scale block, pad and alignment all enter, which is why callers
+    must not estimate it from the tile shape.
+    """
+    pt = problemType if problemType is not None else (ks.get("ProblemType") or {})
+    macroTile = ks["MacroTile1"] if mxTc.endswith("B") else ks["MacroTile0"]
+    return _ldsAlignedBytes(ks, pt, mxTc, ks["DepthU"], macroTile)
+
+
 def decouplePGRLdsBytesEstimate(ks, problemType=None):
     """Owner-grouped LDS estimate for auto (-1,-1).
 
@@ -365,6 +378,24 @@ def divergentPairUnsupportedReason(ks):
                 "wave-separated TDM descriptor (NumWaves > 1); this solution has "
                 "NumWaves=%u" % ks["NumWaves"])
     return None
+
+
+def dcpThickThinIssueOrder(items):
+    """Order the items one issue slot was handed, thickest first.
+
+    LAYER 2. Pure: it knows nothing about tensors, waves or groupings, only
+    that `items` is a sequence of (ldsBlocks, item) and that more blocks means
+    issue earlier. Thick-first is what makes the relaxed gate mean anything --
+    s_wait_tensorcnt N is an age-ordered drain on one counter, so which tensor
+    a count bypasses follows from issue order alone.
+
+    The sort is stable, which is how the tie cases keep their answer: an equal
+    pair -- (2,2) and (1,1) alike -- comes back in the order it was handed, so
+    a caller passing (A, B) still gets (A, B). That is the same guarantee the
+    old `numLdsBlkA >= numLdsBlkB` comparison gave by using >= rather than >,
+    and it now holds for any number of items rather than exactly two.
+    """
+    return tuple(item for _, item in sorted(items, key=lambda pair: -pair[0]))
 
 
 def decoupledSingleBuffered(ks):
