@@ -183,14 +183,16 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         help="Feature column names to train on",
     )
     parser.add_argument(
-        "--keep-constant-features",
+        "--drop-constant-features",
         action="store_true",
-        dest="keep_constant_features",
-        help="Keep feature columns that never vary in the input. By default such a "
-        "column is dropped from features_signature: it cannot separate candidates, and "
-        "it costs a feature extraction per candidate score at runtime. Pass this when "
-        "the column does vary in the world and this corpus is merely thin, so the "
-        "signature matches the richer corpus you intend to retrain on.",
+        dest="drop_constant_features",
+        help="Drop feature columns that never vary in the input, and remove them from "
+        "the engine's knobs at promote time. Off by default: constancy is measured "
+        "against this corpus, and a CSV cannot tell a field the pack pins from one a "
+        "thin sweep failed to cover -- dropping the second yields a model that cannot "
+        "generalise and a features_signature that depends on coverage. Pass this only "
+        "when you have decided the field is genuinely not worth varying, because it "
+        "removes the knob from the engine's public surface.",
     )
     parser.add_argument(
         "--target",
@@ -386,7 +388,7 @@ def _run_train(args: argparse.Namespace) -> int:
             "train on: %s. A model over columns that never vary scores every candidate "
             "identically; shipping one is worse than shipping none, because the engine "
             "would rank by a model that cannot discriminate instead of falling back to "
-            "its declared order. --keep-constant-features does not help -- it changes "
+            "its declared order. --drop-constant-features does not help -- it changes "
             "the signature, not the fact that no column varies. Widen the corpus, or "
             "pass --features that vary in it.",
             input_path,
@@ -395,28 +397,37 @@ def _run_train(args: argparse.Namespace) -> int:
         return 1
 
     if constants:
-        if args.keep_constant_features:
-            logger.warning(
-                "KEPT %d constant feature column(s) at --keep-constant-features: %s. "
-                "They stay in features_signature so the hash matches the richer corpus "
-                "you intend to retrain on, but they inform nothing in this model and "
-                "cost a feature extraction per candidate score at runtime.",
-                len(constants),
-                constant_listing,
-            )
-        else:
+        # Surfaced on every run, kept or dropped: a constant field is something the
+        # kernel author needs to know about their pack, and it is the one finding that
+        # is free -- it needs no benchmark, only the corpus. `uhd_gen knobs` ranks what
+        # each varying knob is worth; this is the part that costs nothing to say.
+        logger.warning(
+            "%d feature column(s) never vary in %s: %s. They cannot separate one "
+            "candidate from another, so no tree will split on them.",
+            len(constants),
+            input_path,
+            constant_listing,
+        )
+        if args.drop_constant_features:
             for name, value in constants:
                 logger.warning(
-                    "DROPPED constant feature column %s: every row is %r. It cannot "
-                    "separate one candidate from another, so it is NOT in the trained "
-                    "features_signature and features_hash is over the smaller set. If "
-                    "this column does vary in the world and this corpus is merely thin, "
-                    "retrain with --keep-constant-features -- better, widen the corpus.",
+                    "DROPPING constant feature column %s (every row is %r) at "
+                    "--drop-constant-features. It leaves features_signature, and "
+                    "promote will remove it from the engine's knobs so the two agree.",
                     name,
                     value,
                 )
             dropped = [name for name, _ in constants]
             features = [name for name in args.features if name not in set(dropped)]
+        else:
+            logger.warning(
+                "KEEPING them in features_signature. Constancy is measured against this "
+                "corpus, not the pack: a field the sweep failed to cover looks identical "
+                "to one the kernels pin, and dropping the first produces a model that "
+                "cannot generalise. Removing a knob is the kernel author's call -- see "
+                "`uhd_gen knobs` for what each is worth -- and --drop-constant-features "
+                "carries it through to the engine's knob list."
+            )
 
         if len(constants) / len(args.features) >= CONSTANT_FEATURE_WARN_FRACTION:
             logger.warning(
@@ -578,7 +589,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "features": features,
         "constant_features": [{"column": name, "value": value} for name, value in constants],
         "dropped_constant_features": dropped,
-        "keep_constant_features": bool(args.keep_constant_features),
+        "drop_constant_features": bool(args.drop_constant_features),
         "features_signature": features_signature,
         "features_hash": features_hash,
         # Recorded unconditionally, unlike in the descriptor: the manifest is the

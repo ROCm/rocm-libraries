@@ -517,3 +517,66 @@ def test_retraining_with_the_promoted_id_needs_no_second_promote(tmp_path):
     assert _heuristic_of(ued) == promoted_id
     installed = json.loads((tree / "heuristic.uhd.json").read_text(encoding="utf-8"))
     assert installed["id"] == promoted_id
+
+
+# --------------------------------------------------------------------------------
+# Carrying an explicit constant-drop through to the engine's knob list
+# --------------------------------------------------------------------------------
+
+
+def _manifest_dropping(model_dir: Path, dropped: list[str]) -> Path:
+    _write_json(
+        model_dir / "train_manifest.json",
+        {"drop_constant_features": True,
+         "dropped_constant_features": [f"kernel.{name}" for name in dropped]},
+    )
+    return model_dir
+
+
+def test_promote_removes_knobs_the_author_asked_training_to_drop(tmp_path, capsys):
+    """`--drop-constant-features` is a decision about the engine, not just the model.
+
+    RFC 0019 §6.3 permits a knob no axis reads, so leaving it would load cleanly and
+    silently -- the caller keeps a dial the heuristic cannot react to. The drop has to
+    reach the UED for the two to mean the same thing.
+    """
+    uhd_id = str(uuid.uuid4())
+    model_dir = _manifest_dropping(_make_model_dir(tmp_path / "model", uhd_id), ["tile_m"])
+    tree = tmp_path / "tree"
+    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
+    _write_json(ued, {**json.loads(ued.read_text(encoding="utf-8")),
+                      "knobs": ["block_size", "tile_m"]})
+
+    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
+
+    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
+    assert "tile_m" in capsys.readouterr().out
+
+
+def test_promote_leaves_knobs_alone_when_training_kept_the_constants(tmp_path):
+    """The default. A knob list reshaped by a training run would let a UMD's binding
+    disappear because a sweep happened to be narrow."""
+    uhd_id = str(uuid.uuid4())
+    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
+    _write_json(
+        model_dir / "train_manifest.json",
+        {"drop_constant_features": False, "dropped_constant_features": []},
+    )
+    tree = tmp_path / "tree"
+    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
+
+    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
+
+    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
+
+
+def test_promote_without_a_manifest_touches_no_knobs(tmp_path):
+    """Older runs wrote none, and an absent manifest must not be read as "drop everything"."""
+    uhd_id = str(uuid.uuid4())
+    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
+    tree = tmp_path / "tree"
+    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
+
+    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
+
+    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
