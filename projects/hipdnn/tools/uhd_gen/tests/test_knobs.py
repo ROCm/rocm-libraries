@@ -286,6 +286,12 @@ def _corpus_with_geometry(problems: int = 40, seed: int = 7) -> pd.DataFrame:
                     "robustMeanMs": t,
                     "kernel.block_m": block_m,
                     "kernel.head_size": head_size,
+                    # The twin in the problem namespace is what marks it graph-bound:
+                    # the matcher fixed the kernel's head_size to the graph's.
+                    "q.head_size": head_size,
+                    # No `q.waves_per_eu` exists, and there is no such thing -- nothing
+                    # binds it. The pack's generator simply built one value per geometry.
+                    "kernel.waves_per_eu": 2 if head_size == 128 else 4,
                 }
             )
     return pd.DataFrame(rows)
@@ -380,3 +386,37 @@ def test_device_columns_are_not_knobs():
 
     text = format_author_report(report, rank_knobs(report), "eng")
     assert "total_global_mem" not in text
+
+
+def test_a_field_the_pack_pinned_is_told_apart_from_one_the_graph_binds():
+    """Both look identical in the data -- constant within every problem -- and they need
+    opposite answers.
+
+    `head_size` is bound by the matcher: the kernel was built for that shape, and there
+    is nothing to do. `waves_per_eu` is not bound by anything; the generator chose one
+    value per geometry, so the model was never offered the choice and no sweep can say
+    whether it matters. That is the author's decision to revisit, so it has to be named
+    differently. The gfx942 pack has exactly this shape: waves_per_eu and persistent
+    vary within 0 of its 664 geometries.
+    """
+    ranked = {r["short_name"]: r for r in rank_knobs(analyse_knobs(_corpus_with_geometry()))}
+
+    assert ranked["head_size"]["verdict"] == "MATCHED"
+    assert ranked["head_size"]["graph_bound"] is True
+    assert "$q.head_size" in ranked["head_size"]["advice"]
+
+    assert ranked["waves_per_eu"]["verdict"] == "PINNED"
+    assert ranked["waves_per_eu"]["graph_bound"] is False
+    assert "generator" in ranked["waves_per_eu"]["advice"]
+    assert "re-sweep" in ranked["waves_per_eu"]["advice"]
+
+
+def test_a_pinned_field_reaches_what_to_change_but_a_graph_bound_one_does_not():
+    """The author can act on a pinned field and cannot act on a graph-bound one, so only
+    the first belongs in the list of edits to make."""
+    report = analyse_knobs(_corpus_with_geometry())
+    text = format_author_report(report, rank_knobs(report), "eng")
+    changes = text.split("## What to change")[1]
+
+    assert "waves_per_eu" in changes
+    assert "head_size" not in changes

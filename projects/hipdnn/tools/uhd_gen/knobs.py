@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 #: Knob columns live under this prefix. `$kernel.*` is the KMD's variant space, which is
 #: exactly what an AOT build enumerates; `$q.*` describes the problem and cannot be
 #: chosen away.
+
+#: The problem namespace. A `kernel.*` field with a twin here was bound by the matcher
+#: to the graph; one without was pinned by whoever generated the pack.
+_QUERY_PREFIX = "q."
 _KERNEL_PREFIX = "kernel."
 
 #: Identity columns that share the prefix without being knobs.
@@ -101,9 +105,12 @@ class KnobAblation:
     values: list = field(default_factory=list)
     per_value: list[ValueAblation] = field(default_factory=list)
     #: Whether the column varies among the candidates of a single problem. False means
-    #: the matcher binds it to the problem's shape, so it is not a choice an AOT build
-    #: makes and its pin cost is meaningless.
+    #: no AOT choice exists for it, and its pin cost is meaningless.
     tunable: bool = True
+    #: Whether the problem namespace carries the same name. Separates a field the
+    #: matcher bound to the graph from one the pack's generator pinned per geometry --
+    #: identical in the data, different in what the author can do about it.
+    graph_bound: bool = False
 
     @property
     def is_constant(self) -> bool:
@@ -129,6 +136,7 @@ class KnobAblation:
             "values": list(self.values),
             "constant": self.is_constant,
             "tunable": self.tunable,
+            "graph_bound": self.graph_bound,
             "per_value": [v.to_dict() for v in self.per_value],
             "best_value": None if best is None else best.value,
             "cost_of_pinning": None if best is None else best.p95_regret,
@@ -162,20 +170,38 @@ def analyse_knobs(
     # declares one variant space, and it holds both: fields the matcher binds to the
     # problem (head_size, seqlen_q, dtype -- the kernel was built for that shape) and
     # fields a caller genuinely chooses among the candidates that survive matching
-    # (block_m, waves_per_eu).
+    # (block_m, use_exp2_fast).
     #
-    # They are told apart by whether the column varies *within* a problem. A matched
-    # field cannot: every candidate the model ranks for one problem was built for that
-    # problem's shape. Pinning it therefore has no measurable cost -- the problems it
-    # would orphan simply leave the comparison -- and a report that ranks on cost alone
-    # recommends dropping seqlen_q, which means shipping kernels for one sequence
-    # length. Classify first, then only ablate what an AOT build could actually choose.
+    # They are told apart by whether the column varies *within* a problem. A field that
+    # cannot offer a choice there is not something an AOT build decides: pinning it has
+    # no measurable cost, because the problems it would orphan simply leave the
+    # comparison rather than scoring badly in it. A report ranking on cost alone
+    # therefore recommends dropping seqlen_q, which means shipping kernels for one
+    # sequence length.
+    #
+    # Two different causes produce that, and they need different answers, so they are
+    # distinguished by whether the problem namespace carries the same name:
+    #
+    #   * `q.seqlen_q` exists beside `kernel.seqlen_q`  -> the matcher binds it to the
+    #     graph. Nothing to do; the kernel was built for that shape.
+    #   * no `q.waves_per_eu` exists                    -> nothing bound it. The pack's
+    #     generator simply chose one value per geometry, so the model was never offered
+    #     the choice. That is a decision the author can revisit: build both and re-sweep
+    #     to find out whether it matters, or drop it from the KMD as unearned.
+    graph_bound = {
+        column[len(_QUERY_PREFIX):]
+        for column in usable.columns
+        if column.startswith(_QUERY_PREFIX)
+    }
     within = usable.groupby(group, dropna=False)
     knobs = []
     for name in knob_columns(usable):
+        short = name[len(_KERNEL_PREFIX):]
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
         tunable = bool((within[name].nunique(dropna=False) > 1).any())
-        ablation = KnobAblation(name=name, values=values, tunable=tunable)
+        ablation = KnobAblation(
+            name=name, values=values, tunable=tunable, graph_bound=short in graph_bound
+        )
         if len(values) > 1 and tunable:
             for value in values:
                 subset = usable[usable[name] == value]
@@ -343,6 +369,7 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
             "cost": knob["cost_of_pinning"],
             "problems_lost": knob["problems_lost_by_pinning"],
             "tunable": knob.get("tunable", True),
+            "graph_bound": knob.get("graph_bound", False),
             "gain": imp.get("gain"),
             "split": imp.get("split"),
         }
@@ -354,13 +381,22 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
                 f"never varies (always {only}); remove from the KMD -- it also blocks "
                 f"the model, see RFC 0019 6.3"
             )
-        elif not row["tunable"]:
+        elif not row["tunable"] and row["graph_bound"]:
             row["verdict"] = "MATCHED"
             row["advice"] = (
-                f"selected by the problem, not chosen: all {knob['distinct_values']} "
-                f"values exist, but every candidate for one problem shares one of them. "
-                f"Not an AOT choice, and a model reading it from `$kernel.` needs a knob "
-                f"it should not have -- read it from the graph instead"
+                f"bound to the graph: all {knob['distinct_values']} values exist across "
+                f"the corpus, but the matcher fixes it per problem, so every candidate "
+                f"shares one. Not an AOT choice. A model reading it from `$kernel.` "
+                f"needs a knob it should not have -- read `$q.{row['short_name']}` instead"
+            )
+        elif not row["tunable"]:
+            row["verdict"] = "PINNED"
+            row["advice"] = (
+                f"the pack builds ONE value per geometry ({knob['distinct_values']} exist "
+                f"across the corpus), so the model is never offered the choice and no "
+                f"measurement here can say whether it matters. Nothing binds it -- this "
+                f"is the generator's decision. Build both values per geometry and "
+                f"re-sweep to find out, or drop it from the KMD as unearned"
             )
         elif row["cost"] is None:
             row["verdict"] = "UNMEASURED"
@@ -395,7 +431,7 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
     # AOT build decides, and either one reported above the knob that actually decides
     # the winner would bury the ranking this exists to give.
     def _order(row: dict) -> tuple:
-        rank = {"MATCHED": 1, "CONSTANT": 2}.get(row["verdict"], 0)
+        rank = {"PINNED": 1, "MATCHED": 2, "CONSTANT": 3}.get(row["verdict"], 0)
         return (rank, -(row["cost"] or 0.0), row["name"])
 
     return sorted(ranked, key=_order)
@@ -428,7 +464,7 @@ def format_author_report(report: dict, ranked: list[dict], engine: str | None = 
             f"| {cost} | {row['best_value']} | {gain} | {split} |"
         )
 
-    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP")]
+    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP", "PINNED")]
     lines += ["", "## What to change", ""]
     if actionable:
         for row in actionable:
@@ -517,15 +553,16 @@ def run_knobs(args: argparse.Namespace) -> int:
             line += f" {gain} {split}"
         print(line)
 
-    matched = [r for r in ranked if r["verdict"] == "MATCHED"]
+    matched = [r for r in ranked if r["verdict"] in ("MATCHED", "PINNED")]
     if matched:
-        print("\n  Selected by the problem, not chosen -- no AOT decision to make:")
+        print("\n  No AOT choice exists -- every candidate for a problem shares one value:")
         for row in matched:
+            cause = "graph-bound" if row["graph_bound"] else "pinned by the pack"
             print(f"    {row['short_name']:22} {row['distinct_values']} values, "
-                  f"one per problem")
+                  f"one per problem ({cause})")
 
     print("\n  What to change:")
-    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP")]
+    actionable = [r for r in ranked if r["verdict"] in ("CONSTANT", "DROP", "PINNED")]
     if actionable:
         for row in actionable:
             print(f"    {row['short_name']:22} {row['advice']}")
