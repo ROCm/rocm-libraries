@@ -164,7 +164,7 @@ jobs:
       # pinned to the same release. The action drops in the self-contained DVC
       # installer, so no Python interpreter on this persistent self-hosted runner is
       # mutated, and the lane does not silently move to a new DVC major. The Linux
-      # job takes DVC from its runner image instead, matching the Linux lanes there.
+      # job below installs it the same way, for the same reasons.
       - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
         with:
           version: '3.62.0'
@@ -413,13 +413,23 @@ jobs:
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
+      # Same pinned, self-contained DVC as the Windows lane: the action installs
+      # the .deb on Linux, so no Python interpreter is touched and the version does
+      # not drift.
+      #
+      # The other Linux lanes in this repo (therock-ci-linux.yml,
+      # component-ci-miopen.yml) call `dvc pull` with no install step, but both run
+      # inside a container image that ships DVC. This job runs on a bare
+      # azure-linux-scale-rocm runner, which does not.
+      - uses: iterative/setup-dvc@4bdfd2b0f6f1ad7e08afadb03b1a895c352a5239 # v2.0.0
+        with:
+          version: '3.62.0'
+
       # Golden-data fetch for hipdnn_golden_data_tests. See the Windows lane above
       # for why this exists and why it MUST precede configure.
       #
-      # DVC comes from the runner image rather than an install step, matching the
-      # other Linux lanes in this repo (therock-ci-linux.yml, component-ci-miopen.yml).
-      # LOGNAME is set for the same reason they set it: DVC needs a resolvable user
-      # on these runners (see ROCm/rocm-libraries#1617).
+      # LOGNAME is set for the same reason the other Linux lanes set it: DVC needs a
+      # resolvable user (see ROCm/rocm-libraries#1617).
       - name: Fetch golden data
         run: |
           set -euo pipefail
