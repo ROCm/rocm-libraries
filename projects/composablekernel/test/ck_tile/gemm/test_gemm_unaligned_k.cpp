@@ -11,8 +11,6 @@
 
 #include <tuple>
 
-#ifdef CK_USE_GFX1250
-
 using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 
@@ -126,5 +124,3 @@ TYPED_TEST(TestGemmUnalignedK, SplitK)
     constexpr int K = GemmConfigComputeV3_WMMA<typename TestFixture::ADataType>::K_Warp_Tile + 5;
     this->RunAndVerify(K, /*k_batch=*/2);
 }
-
-#endif // CK_USE_GFX1250

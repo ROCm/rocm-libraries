@@ -56,7 +56,7 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t VectorSizeB = 1;
     static constexpr ck_tile::index_t VectorSizeC = 1;
 
-    // Enable for gfx1250 RCR
+    // Enable for RCR
     static constexpr bool EnableKPadFallback = false;
     static constexpr bool EnableMNPadFallback = false;
 };
