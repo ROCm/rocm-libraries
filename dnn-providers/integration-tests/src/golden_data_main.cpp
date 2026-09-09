@@ -137,17 +137,25 @@ int main(int argc, char** argv) noexcept
         const auto deviceStatus = hipGetDeviceCount(&deviceCount);
         const bool gpuLaneWillRun = runGpu && deviceStatus == hipSuccess && deviceCount > 0;
 
+        // Discovered and loaded once, then handed to each lane. The tree is ~5700
+        // bundles of which ~50 carry golden data, so this is the bulk of the
+        // binary's startup; doing it per lane paid it twice and registered every
+        // failing-load test twice under the same name.
         size_t cpuRegistered = 0;
         size_t gpuRegistered = 0;
-        if(runCpu)
+        const auto bundles = hipdnn_integration_tests::bundle::loadGoldenDataBundles();
+        if(bundles.has_value())
         {
-            cpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::CPU, gpuLaneWillRun);
-        }
-        if(runGpu)
-        {
-            gpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                hipdnn_integration_tests::ReferenceExecutorType::GPU, gpuLaneWillRun);
+            if(runCpu)
+            {
+                cpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+                    *bundles, hipdnn_integration_tests::ReferenceExecutorType::CPU, gpuLaneWillRun);
+            }
+            if(runGpu)
+            {
+                gpuRegistered = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
+                    *bundles, hipdnn_integration_tests::ReferenceExecutorType::GPU, gpuLaneWillRun);
+            }
         }
 
         // Per-reference, not just per-run. A lane that registered nothing while its
