@@ -81,6 +81,7 @@ public:
             _lastOperation = "hipGetDevice";
             return;
         }
+        _device = device;
 
         int canUseStreamWaitValue = 0;
         status = hipDeviceGetAttribute(
@@ -291,6 +292,10 @@ private:
     void watchdogLoop()
     {
         std::unique_lock<std::mutex> lock(_mutex);
+        // A HIP call needs the right device set on *this* thread; the constructor set it
+        // only on the thread that created _control and _signal. Without this, the write
+        // below can silently target the wrong context and never drain the real stream.
+        static_cast<void>(hipSetDevice(_device));
         while(!_stop)
         {
             if(!_armed)
@@ -337,6 +342,7 @@ private:
     }
 
     uint32_t* _signal = nullptr;
+    int _device = 0;
     hipStream_t _control = nullptr;
     hipStream_t _armedStream = nullptr;
     hipError_t _lastError = hipSuccess;
