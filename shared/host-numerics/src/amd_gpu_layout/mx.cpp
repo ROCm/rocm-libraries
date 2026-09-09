@@ -460,45 +460,68 @@ MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view ar
     return MxScaleStorageLayout::Natural;
 }
 
-std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(
-    const std::byte* naturalScaleStorage, size_t naturalScaleByteCount,
-    std::array<size_t, 2> slowThenFastDimensions, size_t blockSize, MxScaleStorageLayout layout) {
+MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
+                                      MxScaleStorageLayout layout) {
+    const size_t naturalByteCount =
+        detail::checkedMultiply(naturalShape[0], naturalShape[1], "MX natural scale storage");
+    size_t physicalByteCount = naturalByteCount;
+
+    switch (layout) {
+        case MxScaleStorageLayout::Natural:
+            break;
+        case MxScaleStorageLayout::Gfx950:
+            physicalByteCount =
+                detail::makeGFX950ScalePlan(naturalByteCount, {naturalShape[0], naturalShape[1]})
+                    .outputElementCount;
+            break;
+        case MxScaleStorageLayout::Gfx1250:
+            physicalByteCount = detail::makeGFX1250ScalePlan(naturalByteCount, naturalShape[0],
+                                                             naturalShape[1], blockSize)
+                                    .outputElementCount;
+            break;
+        default:
+            throw std::invalid_argument("Invalid MX scale storage layout.");
+    }
+
+    return {
+        .layout = layout,
+        .naturalShape = naturalShape,
+        .blockSize = blockSize,
+        .naturalByteCount = naturalByteCount,
+        .physicalByteCount = physicalByteCount,
+    };
+}
+
+std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
+                                                          size_t naturalScaleByteCount,
+                                                          const MxScaleStoragePlan& plan) {
+    const MxScaleStoragePlan expected =
+        planMxScaleStorage(plan.naturalShape, plan.blockSize, plan.layout);
+    if (plan.naturalByteCount != expected.naturalByteCount ||
+        plan.physicalByteCount != expected.physicalByteCount)
+        throw std::invalid_argument("MX scale storage plan is inconsistent.");
     if (naturalScaleStorage == nullptr && naturalScaleByteCount != 0)
         throw std::invalid_argument("MX scale layout input storage is null.");
+    if (naturalScaleByteCount != expected.naturalByteCount)
+        throw std::invalid_argument("MX scale storage does not match its plan.");
 
-    if (layout == MxScaleStorageLayout::Natural) {
-        const size_t expectedByteCount = detail::checkedMultiply(
-            slowThenFastDimensions[0], slowThenFastDimensions[1], "MX natural scale storage");
-        if (naturalScaleByteCount != expectedByteCount) {
-            std::ostringstream message;
-            message << "MX natural scale storage byte count " << naturalScaleByteCount
-                    << " does not match dimensions product " << expectedByteCount << '.';
-            throw std::invalid_argument(message.str());
-        }
-
+    if (plan.layout == MxScaleStorageLayout::Natural) {
         if (naturalScaleByteCount == 0) return {};
         return {naturalScaleStorage, naturalScaleStorage + naturalScaleByteCount};
     }
 
-    switch (layout) {
+    std::vector<std::byte> output(expected.physicalByteCount, std::byte{0});
+    switch (plan.layout) {
         case MxScaleStorageLayout::Gfx950: {
-            const std::vector<size_t> dimensions{slowThenFastDimensions[0],
-                                                 slowThenFastDimensions[1]};
-            const size_t outputByteCount = detail::copyGfx950ScaleStorageBytes(
-                naturalScaleStorage, naturalScaleByteCount, 1, dimensions, nullptr);
-            std::vector<std::byte> output(outputByteCount, std::byte{0});
+            const std::vector<size_t> dimensions{plan.naturalShape[0], plan.naturalShape[1]};
             detail::copyGfx950ScaleStorageBytes(naturalScaleStorage, naturalScaleByteCount, 1,
                                                 dimensions, output.data());
             return output;
         }
         case MxScaleStorageLayout::Gfx1250: {
-            const size_t outputByteCount = detail::copyGfx1250ScaleStorageBytes(
-                naturalScaleStorage, naturalScaleByteCount, 1, slowThenFastDimensions[0],
-                slowThenFastDimensions[1], blockSize, nullptr);
-            std::vector<std::byte> output(outputByteCount, std::byte{0});
-            detail::copyGfx1250ScaleStorageBytes(
-                naturalScaleStorage, naturalScaleByteCount, 1, slowThenFastDimensions[0],
-                slowThenFastDimensions[1], blockSize, output.data());
+            detail::copyGfx1250ScaleStorageBytes(naturalScaleStorage, naturalScaleByteCount, 1,
+                                                 plan.naturalShape[0], plan.naturalShape[1],
+                                                 plan.blockSize, output.data());
             return output;
         }
         case MxScaleStorageLayout::Natural:
