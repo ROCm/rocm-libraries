@@ -33,6 +33,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled Composable Kernel (CK) depthwise convolution on RDNA wave32 GPUs.
 
 ### Changed
+* [Conv] Pruned ASM-GTC NHWC entries from the gfx908, gfx90a, gfx942, and gfx950 system find-databases for shapes the new large-tensor guard rejects, so immediate-mode lookups no longer resolve to a solver that is gated off at runtime. This removes 12,907 entries across the six databases, 4,668 of them rank-1, and empties 81 keys.
 * [Conv] Enabled the Winograd Rage RxS f2x3 solver on gfx950 and updated the gfx942 kernels to v4_6_1/v4_9_1.
 * [Conv] Updated the 3D AI heuristics (solver selection) for gfx942 and gfx950.
 
@@ -78,6 +79,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 * [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
+* [Conv] Gated the unmaintained ASM-GTC NHWC solvers (`ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`, `ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC` and `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`) off tensors whose size in bytes exceeds the int32 addressable range, preventing them from being selected and silently returning incorrect results on large convolutions.
 * [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
 * Fixed a thread-safety issue where concurrent access to the AI-heuristic model caches was not guarded by a mutex.
 * [Conv] Fixed Composable Kernel (CK) grouped-convolution solvers not always being registered in host code.
