@@ -37,85 +37,29 @@ def test_device_target_id_and_base_arch_are_separate(
         assert hip_module.get_device_arch(3) == base_arch
 
 
-def test_get_device_asic_revision_queries_stable_attribute() -> None:
-    def set_revision(out, attribute, device):
-        assert attribute == 10012
-        assert device == 3
-        out._obj.value = 0
-        return 0
-
-    with mock.patch.object(
-        hip_module, "_hipDeviceGetAttribute", side_effect=set_revision
-    ):
-        assert hip_module._get_device_asic_revision(3) == 0
-
-
-@pytest.mark.parametrize(
-    "failure", [1, OSError("HIP unavailable"), hip_module.HipError("HIP unavailable")]
-)
-def test_get_device_asic_revision_returns_none_on_error(
-    failure: int | OSError | hip_module.HipError,
-) -> None:
-    replacement = (
-        mock.Mock(return_value=failure)
-        if isinstance(failure, int)
-        else mock.Mock(side_effect=failure)
-    )
-    with mock.patch.object(hip_module, "_hipDeviceGetAttribute", replacement):
-        assert hip_module._get_device_asic_revision() is None
-
-
-def test_device_properties_retry_after_hip_library_becomes_available(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(hip_module, "_device_props_cache", {})
-    device = 3
-    unavailable = mock.Mock(side_effect=hip_module.HipError("HIP unavailable"))
-
-    with mock.patch.object(hip_module, "_b", return_value=unavailable):
-        assert hip_module._device_props(device) is None
-
-    def available(buffer, queried_device):
-        assert queried_device == device
-        buffer._obj.name = b"x"
-        return 0
-
-    resolved = mock.Mock(side_effect=available)
-    with mock.patch.object(hip_module, "_b", return_value=resolved):
-        props = hip_module._device_props(device)
-
-    assert props is not None
-    assert props.name == b"x"
-    assert resolved.call_count == 1
-
-
 @pytest.mark.parametrize(
     ("target_id", "base_arch", "compiler_target", "revision"),
     [
         ("gfx1250-strict", "gfx1250", "gfx1250", 0),
         ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1),
-        (None, None, None, None),
+        (None, None, None, 0),
     ],
 )
 def test_get_device_info(
     target_id: str | None,
     base_arch: str | None,
     compiler_target: str | None,
-    revision: int | None,
+    revision: int,
 ) -> None:
-    with (
-        mock.patch.object(
-            device_info, "get_device_target_id", return_value=target_id
-        ) as query_target,
-        mock.patch.object(
-            device_info, "_get_device_asic_revision", return_value=revision
-        ) as query_revision,
-    ):
+    props = _props(target_id)
+    props.asicRevision = revision
+    with mock.patch.object(device_info, "_device_props", return_value=props) as query:
         info = device_info.get_device_info(4)
 
-    query_target.assert_called_once_with(4)
-    query_revision.assert_called_once_with(4)
-    assert info == device_info.DeviceInfo(target_id=target_id, asic_revision=revision)
+    query.assert_called_once_with(4)
+    assert info == device_info.DeviceInfo(props)
+    assert info.target_id == target_id
+    assert info.asic_revision == revision
     assert info.base_arch == base_arch
     assert info.compiler_target == compiler_target
 
@@ -143,3 +87,54 @@ def test_target_id_is_read_from_its_field() -> None:
     props.name = b"gfx942"
     with mock.patch.object(hip_module, "_device_props", return_value=props):
         assert hip_module.get_device_target_id() == "gfx90a:sramecc+:xnack-"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [1, AttributeError("R0600 unavailable"), hip_module.HipError("HIP unavailable")],
+)
+def test_device_info_retries_failed_query_and_caches_success(
+    monkeypatch: pytest.MonkeyPatch, result: int | Exception
+) -> None:
+    monkeypatch.setattr(hip_module, "_device_props_cache", {})
+    unavailable = (
+        mock.Mock(return_value=result)
+        if isinstance(result, int)
+        else mock.Mock(side_effect=result)
+    )
+
+    def fill_properties(out, device):
+        assert device == 4
+        out._obj.gcnArchName = b"gfx90a:sramecc+:xnack-"
+        out._obj.asicRevision = 0
+        return 0
+
+    available = mock.Mock(side_effect=fill_properties)
+    with (
+        mock.patch.object(hip_module, "_b", side_effect=[unavailable, available]),
+        mock.patch.object(
+            hip_module,
+            "_hipDeviceGetAttribute",
+            side_effect=AssertionError("DeviceInfo must use only the properties query"),
+        ),
+    ):
+        assert device_info.get_device_info(4) == device_info.DeviceInfo(None)
+        expected = device_info.DeviceInfo(_props("gfx90a:sramecc+:xnack-"))
+        assert device_info.get_device_info(4) == expected
+        assert device_info.get_device_info(4) == expected
+        assert hip_module.get_device_target_id(4) == expected.target_id
+    unavailable.assert_called_once()
+    available.assert_called_once()
+
+
+def test_device_info_owns_snapshot_with_read_only_properties() -> None:
+    props = _props("gfx90a:sramecc+:xnack-")
+    props.asicRevision = 1
+    info = device_info.DeviceInfo(props)
+    props.gcnArchName = b"gfx942"
+    props.asicRevision = 0
+    assert info.target_id == "gfx90a:sramecc+:xnack-"
+    assert info.asic_revision == 1
+    for name in ("target_id", "asic_revision", "base_arch", "compiler_target"):
+        with pytest.raises(AttributeError):
+            setattr(info, name, None)

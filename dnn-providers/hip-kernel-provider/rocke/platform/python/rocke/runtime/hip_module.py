@@ -260,14 +260,8 @@ def get_device_count() -> int:
     return int(n.value) if rc == 0 else 0
 
 
-# hipDeviceAttributeMultiprocessorCount. Part of the stable ``hipDeviceAttribute_t``
-# ABI enum (AMD preserves numeric positions with ``...Unused`` placeholders), so this
-# is far more durable than reading a field offset out of the churny hipDeviceProp_t.
+# hipDeviceAttributeMultiprocessorCount from HIP's stable hipDeviceAttribute_t enum.
 _HIP_ATTR_MULTIPROCESSOR_COUNT = 63
-
-# hipDeviceAttributeAsicRevision, queried with hipDeviceGetAttribute so we do not
-# depend on the offset of asicRevision in hipDeviceProp_t.
-_HIP_ATTR_ASIC_REVISION = 10012
 
 
 def get_device_num_cus(device: int = 0) -> Optional[int]:
@@ -289,23 +283,6 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     except (AttributeError, OSError):
         return None
     return int(v.value) if rc == 0 and v.value > 0 else None
-
-
-def _get_device_asic_revision(device: int = 0) -> Optional[int]:
-    """Read HIP's ``hipDeviceAttributeAsicRevision`` for the device ordinal.
-
-    Returns the nonnegative revision value, including zero, or ``None`` if
-    the query fails. This reports the value without assigning feature support.
-    """
-
-    v = ctypes.c_int(-1)
-    try:
-        rc = _hipDeviceGetAttribute(
-            ctypes.byref(v), _HIP_ATTR_ASIC_REVISION, int(device)
-        )
-    except (AttributeError, HipError, OSError):
-        return None
-    return int(v.value) if rc == 0 and v.value >= 0 else None
 
 
 @dataclass
