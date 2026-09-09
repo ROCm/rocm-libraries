@@ -2012,7 +2012,25 @@ static rocke_kernel_def_t*
         }
         else if(spec->has_vector_size_b)
         {
-            load_vec_b = spec->vector_size_b;
+            /* Clamp, exactly as the K-outer branch above does. vector_size_* is
+             * a CAP, not a demand, so an explicit width wider than the tile
+             * geometry supports must be narrowed rather than obeyed. Taking it
+             * verbatim let a spec pass validation and then fail inside the
+             * coalesced tile loader. Emission-neutral: choose_vec's accepted
+             * set is a strict subset of vecs_per_thread's, so this yields
+             * exactly spec->vector_size_b wherever the verbatim path built. */
+            int cap_mo = spec->vector_size_b < max_from_C ? spec->vector_size_b : max_from_C;
+            int chosen_mo = 1;
+            rocke_status_t st_mo = rocke_coalesced_tile_loader_choose_vec_axis(
+                block_n, block_k, threads, cap_mo, true, &chosen_mo);
+            if(st_mo != ROCKE_OK)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "dgrad tilde: no usable free-axis load_vec for B tile geometry");
+                return NULL;
+            }
+            load_vec_b = chosen_mo;
             axis_b_row = (load_vec_b > 1);
         }
         else if(chosen > 1)
