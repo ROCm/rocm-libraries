@@ -659,6 +659,7 @@ class SizeMapping:
                  'MathClocksUnrolledLoop',
                  'synchronizerSizePerWG',
                  'nonTemporalA',
+                 # TH-DISABLED(24145512bf): 'temporalHintA', 'temporalHintB',
                  'nonTemporalB',
                  'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
@@ -755,6 +756,11 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   # TH-DISABLED(24145512bf): keep the .get(..., 0) form if restoring -- most
+                   # architectures emit no TemporalHint* key at all, so a bare
+                   # subscript raises KeyError for every non-gfx125x build.
+                   # temporalHintA            = d.get('TemporalHintA', 0),
+                   # temporalHintB            = d.get('TemporalHintB', 0),
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),

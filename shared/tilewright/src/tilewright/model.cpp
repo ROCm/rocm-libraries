@@ -115,6 +115,18 @@ static const dot_fn_t s_dot = select_dot_fn();
 // Set TILEWRIGHT_COMPUTE_BF16=0 to force the exact fp32 path (bitwise parity).
 // Read once at first use. Compiles to fp32 automatically where __AVX512BF16__
 // is unavailable (the bf16 weight mirrors are then never built -> fp32 path).
+// TH-DISABLED(24145512bf): with TILEWRIGHT_TH_RANK=1 rule 3 stopped using the cache hint as a hard
+// filter and let the model rank the TemporalHint variants instead. Upstream
+// 24145512bf dropped those variant trees, so there is nothing left to rank.
+// inline bool _tilewright_th_rank() {
+//   static const bool on = [] {
+//     const char* e = std::getenv("TILEWRIGHT_TH_RANK");
+//     if (e == nullptr) return false;  // default OFF
+//     return (e[0] == '1' || e[0] == 't' || e[0] == 'y' || e[0] == 'T');
+//   }();
+//   return on;
+// }
+
 inline bool _tilewright_compute_bf16() {
   static const bool on = [] {
     const char* e = std::getenv("TILEWRIGHT_COMPUTE_BF16");
@@ -1290,6 +1302,14 @@ bool is_kernel_feasible(const Problem& p, const Config& c) {
   // 2) Dot2 is only correct for M < 3.
   if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return false;
   // 3) NTA/NTB rules.
+  //
+  // TH-DISABLED(24145512bf): cache_hints_a/b stay the RAW 0..7 NonTemporal value here. Normalising
+  // them to a 0/1 flag is semantically more correct -- the hint is bit 2, so 5,
+  // 6 and 7 are hinted too and `!= 4` wrongly rejects them -- but it silently
+  // invalidates the shipped gfx950 models, whose smart_k signatures store the
+  // literal 4 and whose nta_norm feature was fit at 4/7. Fix it together with a
+  // retrain, not before.
+  //   if (_tilewright_th_rank()) return true;
   long long K_mod_128b    = (K * a_bits) % 1024;
   long long MT_K_mod_128b = (MT_K * a_bits) % 1024;
   if (K_mod_128b == 0 && MT_K_mod_128b == 0) {
