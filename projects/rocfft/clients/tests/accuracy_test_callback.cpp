@@ -91,6 +91,14 @@ std::vector<std::vector<size_t>> callback_sizes = {
 
     // 3D_BLOCK_RC
     {64, 64, 64},
+
+    // Some partial-pass lengths
+    {108, 108, 80},
+    {72, 72, 52},
+    {80, 80, 80},
+    {84, 84, 72},
+    {100, 100, 100},
+    {192, 96, 96},
 };
 
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
