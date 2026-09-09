@@ -2048,5 +2048,76 @@ TEST(TestIngestorGenericPlanBuilder,
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
+
+/// A UHD is arch-keyed, so one gfx942 model serves every gfx942 board. A corpus merged
+/// from MI300X, MI325X and MI308X therefore has to carry what each board IS, not only
+/// which one a row came from -- otherwise the model averages over hardware it cannot
+/// see. These columns are that record, written through the same deviceFeatureValues()
+/// the extractor binds, so a column and a features_signature entry cannot drift apart.
+TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheDeviceFacts)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
+
+    const TestGraph graph(makeGraphId(0xD9));
+    const TestHandle handle;
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    nlohmann::json row;
+    for(const auto& recorded : recorder.getRecordedLogs())
+    {
+        const auto start = recorded.message.find('{');
+        if(start == std::string::npos)
+        {
+            continue;
+        }
+        auto parsed = nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(!parsed.is_discarded() && parsed.contains("event")
+           && parsed["event"] == "ingestor.benchmark.candidate")
+        {
+            row = std::move(parsed);
+            break;
+        }
+    }
+    ASSERT_FALSE(row.is_null()) << "no candidate record was logged at all";
+
+    const auto properties = testDeviceProperties();
+    ASSERT_TRUE(row.contains("device.cu_count"));
+    EXPECT_EQ(row["device.cu_count"].get<int64_t>(), properties.multiProcessorCount);
+    ASSERT_TRUE(row.contains("device.total_global_mem"));
+    EXPECT_EQ(row["device.total_global_mem"].get<int64_t>(),
+              static_cast<int64_t>(properties.totalGlobalMem));
+    ASSERT_TRUE(row.contains("device.peak_memory_bandwidth"));
+    EXPECT_DOUBLE_EQ(row["device.peak_memory_bandwidth"].get<double>(),
+                     peakMemoryBandwidth(properties));
+
+    // `device` is the identity, and stays envelope rather than becoming a feature: a
+    // model splitting on which card a row came from has memorised the fleet.
+    EXPECT_FALSE(row.contains("device.arch"));
+    EXPECT_FALSE(row.contains("device.gcn_arch_name"));
+}
+
 } // namespace
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

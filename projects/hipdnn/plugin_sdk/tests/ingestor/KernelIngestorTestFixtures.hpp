@@ -160,6 +160,14 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    // Non-zero memory facts, so a corpus row emitted through this fixture carries the
+    // `device.*` columns a merged multi-board sweep depends on, rather than a set of
+    // zeroes that would satisfy an "is the column present" check while proving nothing.
+    properties.multiProcessorCount = 304;
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = 64 * 1024;
     return properties;
 }
 

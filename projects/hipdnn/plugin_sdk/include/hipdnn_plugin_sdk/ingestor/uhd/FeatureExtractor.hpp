@@ -27,7 +27,10 @@ namespace hipdnn_plugin_sdk::ingestor::uhd
 /// @brief Context for feature extraction containing all bound variables.
 ///
 /// Provides bindings for:
-/// - $device.*: Device properties (cu_count, arch, total_global_mem, etc.)
+/// - $device.*: Device properties. `cu_count` / `multi_processor_count`, `warp_size`,
+///   `total_global_mem`, `memory_bus_width`, `memory_clock_rate`, `lds_size`, and the
+///   derived `peak_memory_bandwidth`. NOT `arch`: it selects which UHD runs, so a model
+///   splitting on it would split on the thing that chose it.
 /// - $kernel.*: Kernel metadata from KMD fields (tile_m, split_k, dtype, etc.)
 /// - $q.*: Problem/query properties from graph match (batch, seqlen, heads, etc.)
 class FeatureExtractionContext

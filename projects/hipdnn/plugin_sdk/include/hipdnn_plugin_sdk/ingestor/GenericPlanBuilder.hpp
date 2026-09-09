@@ -327,7 +327,7 @@ public:
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
                      kernel.dispatchId,
-                     candidateFeatures(catalog.bound, kernel)});
+                     candidateFeatures(catalog.bound, kernel, context.deviceProperties)});
             }
             catch(const std::exception& error)
             {
@@ -451,7 +451,8 @@ private:
     /// present would make the corpus collectable only by a build that already has the
     /// model the corpus exists to train.
     static nlohmann::json candidateFeatures(const BoundTokens& bound,
-                                            const KernelDefinition& kernel)
+                                            const KernelDefinition& kernel,
+                                            const DeviceProperties& device)
     {
         nlohmann::json features = nlohmann::json::object();
         for(const auto& [token, value] : bound)
@@ -461,6 +462,17 @@ private:
         for(const auto& [field, value] : kernel.metadata)
         {
             features["kernel." + field] = detail::metadataValueToJson(value);
+        }
+        // The device half. A sweep merged from several boards of one arch is the point:
+        // the UHD is arch-keyed, so `device` alone says which card a row came from while
+        // these say what that card IS, which is what a model can actually learn from.
+        // Through deviceFeatureValues, the same list the extractor binds, so a logged
+        // column and a `features_signature` entry cannot drift apart.
+        for(const auto& entry : deviceFeatureValues(device))
+        {
+            // entry.first, not a captured structured binding: those are C++20.
+            std::visit([&features, &entry](auto held) { features["device." + entry.first] = held; },
+                       entry.second);
         }
         return features;
     }

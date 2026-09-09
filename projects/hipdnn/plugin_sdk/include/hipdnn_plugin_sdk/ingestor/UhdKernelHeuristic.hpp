@@ -63,15 +63,16 @@ inline std::optional<uhd::VariableContext::ValueType> toValueType(const Metadata
 inline uhd::FeatureExtractionContext::ValueMap
     deviceVarsFrom(const DeviceProperties& deviceProperties)
 {
-    // `cu_count` and `multi_processor_count` name the same quantity; both spellings are
-    // bound so a signature authored against either resolves.
-    //
-    // `arch` is deliberately absent. It selects which UHD runs (RFC 0019 §3.1) and is
-    // passed separately to isTrainedForArch(); admitting it as a feature would let a model
-    // split on the architecture it was chosen for.
-    return {{"cu_count", static_cast<int64_t>(deviceProperties.multiProcessorCount)},
-            {"multi_processor_count", static_cast<int64_t>(deviceProperties.multiProcessorCount)},
-            {"warp_size", static_cast<int64_t>(deviceProperties.warpSize)}};
+    // Through deviceFeatureValues, never a second list: the benchmark recorder writes
+    // the same names as `device.*` columns, and a vocabulary maintained twice drifts
+    // into a model trained on a column the runtime cannot bind.
+    uhd::FeatureExtractionContext::ValueMap vars;
+    for(const auto& entry : deviceFeatureValues(deviceProperties))
+    {
+        // entry.first, not a captured structured binding: those are C++20.
+        std::visit([&vars, &entry](auto held) { vars.emplace(entry.first, held); }, entry.second);
+    }
+    return vars;
 }
 
 inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& bound)
