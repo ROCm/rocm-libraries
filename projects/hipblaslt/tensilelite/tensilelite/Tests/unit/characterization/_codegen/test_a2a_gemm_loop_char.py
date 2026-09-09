@@ -83,6 +83,67 @@ class TestA2AGemmKernarg:
         assert "FusedW" in self._src()
 
 
+class TestA2AGemmSegmentAbi:
+    """Arg order across the layout list, the addArg sequence and the C++ twin."""
+
+    _CPP_KERNARG = "include/Tensile/FusedA2AKernArg.hpp"
+
+    def _emitted_segment(self):
+        import re
+
+        from config_harness import emit_kernels_from_config
+
+        src = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+        names = re.findall(r"-\s+\.name:\s+(\S+)", src)
+        return names[names.index("peer_0_flagPtr"):]
+
+    def _layout_args(self):
+        from Tensile.Components.Signature import _FUSED_A2A_SEGMENT_ARGS
+
+        return list(_FUSED_A2A_SEGMENT_ARGS)
+
+    def _cpp_source(self):
+        import pathlib
+
+        hdr = pathlib.Path(self._CPP_KERNARG)
+        if not hdr.is_file():
+            pytest.skip("run from the tensilelite root to reach the C++ headers")
+        return hdr.read_text()
+
+    def test_segment_ends_with_the_cu_count(self):
+        assert self._emitted_segment()[-2:] == ["FusedAM", "FusedNumCu"]
+
+    def test_addarg_order_matches_the_layout_list(self):
+        assert self._emitted_segment() == [n for n, _ in self._layout_args()]
+
+    def test_cpp_twin_appends_the_scalars_in_the_emitted_order(self):
+        import re
+
+        appended = re.findall(r'append<[^>]+>\(\s*"([A-Za-z_]\w*)"', self._cpp_source())
+        assert appended == [n for n in self._emitted_segment() if not n.startswith("peer_")]
+
+    def test_cpp_twin_counts_every_four_byte_scalar(self):
+        import re
+
+        m = re.search(r"FUSED_A2A_SLOT_COUNT \+ 1\) \* 8 \+ (\d+) \* 4", self._cpp_source())
+        assert m, "FUSED_A2A_SEGMENT_BYTES no longer has the scalar term"
+        assert int(m.group(1)) == sum(1 for _, size in self._layout_args() if size == 4)
+
+
+class TestA2AGemmRegisterBudget:
+    """The emitted kernel's SGPR high-water mark."""
+
+    def test_kernel_stays_within_the_sgpr_ceiling(self):
+        import re
+
+        from config_harness import emit_kernels_from_config
+
+        src = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+        found = re.findall(r"\.amdhsa_next_free_sgpr\s+(\d+)", src)
+        assert found, "no .amdhsa_next_free_sgpr in the emitted kernel"
+        assert int(found[0]) <= 102
+
+
 class TestA2AGemmSolutionProblemType:
     """The mode reaches the serialized solution, where the host kernarg gate reads it."""
 

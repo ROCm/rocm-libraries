@@ -67,9 +67,9 @@ namespace TensileLite
     constexpr const char* FUSED_A2A_PEER_FIELD_NAMES[FUSED_A2A_SLOT_COUNT]
         = {"flagPtr", "recvPtr", "queueBuf", "rptr", "wptr", "doorbell"};
 
-    // (MAX_RANKS groups + 1 counter) pointers * 8B + 4 scalars * 4B.
+    // (MAX_RANKS groups + 1 counter) pointers * 8B + 5 scalars * 4B.
     constexpr size_t FUSED_A2A_SEGMENT_BYTES
-        = (FUSED_A2A_MAX_RANKS * FUSED_A2A_SLOT_COUNT + 1) * 8 + 4 * 4;
+        = (FUSED_A2A_MAX_RANKS * FUSED_A2A_SLOT_COUNT + 1) * 8 + 5 * 4;
 
     // Whether worldSize fits the fixed segment above: ranks >=
     // FUSED_A2A_MAX_RANKS have no peer group, and worldSize <= 0 would
@@ -96,7 +96,8 @@ namespace TensileLite
         uint32_t                               myRank,
         uint32_t                               worldSize,
         uint32_t                               drain,
-        uint32_t                               am)
+        uint32_t                               am,
+        uint32_t                               numCu)
     {
         size_t before = args.size();
 
@@ -118,6 +119,7 @@ namespace TensileLite
         args.template append<uint32_t>("FusedW", worldSize);
         args.template append<uint32_t>("FusedDrain", drain);
         args.template append<uint32_t>("FusedAM", am);
+        args.template append<uint32_t>("FusedNumCu", numCu);
 
         size_t grew = args.size() - before;
         if(grew != FUSED_A2A_SEGMENT_BYTES)
