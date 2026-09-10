@@ -417,6 +417,21 @@ class TileInfo:
     kernel:   Kernel configuration dictionary.
   """
 
+  # GR cooperative-spread state, filled in below for A and B only: D and the MX
+  # scale tiles take no part in the spread.  These are class defaults rather
+  # than absent attributes because the consumers select behaviour from them --
+  # SubtileTLUSwizzle picks the swizzle off grWavesPerStrip and grKSplit -- and
+  # reading them through getattr(..., 1) would turn a rename into a silently
+  # wrong swizzle instead of an AttributeError.
+  grWavesPerStrip  = 1
+  grCoopWaves      = 1
+  grKSplit         = 1
+  grKWindowSplit   = 1
+  grWindowsPerWave = 1
+  grOtherAxisWaves = 1
+  # Row padding is a TDM (gfx1250) concern, so non-AB tiles carry none.
+  ldsRowPadBytes   = 0
+
   def __init__(self, geometry: TileGeometry, tc: str, writer, kernel):
     self.geometry = geometry
     self.tc = tc
@@ -447,6 +462,10 @@ class TileInfo:
 
     self.waveSize = kernel["WavefrontSize"]
     self.numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
+    # Waves whose loads tile one strip between them.  Every wave, until the A/B
+    # branch below narrows it to the cooperative fetch group.  Depends on
+    # numWaves, so it cannot be a class default like the rest.
+    self.grLoadWaves = self.numWaves
 
     # --- Compute instantiated grids (geometry + kernel config) ---
     # Subtile grid is global (waves cooperate on subtiles).
@@ -1423,8 +1442,8 @@ def mainLoop(writer, kernel):
   # A K-window split spreads grKWindowSplit consecutive K windows over the
   # fetch group, so one GR round covers that many windows' worth of subIterK
   # even though a wave issues only its own.
-  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1] * int(getattr(tiA, "grKWindowSplit", 1))
-  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1] * int(getattr(tiB, "grKWindowSplit", 1))
+  grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1] * int(tiA.grKWindowSplit)
+  grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1] * int(tiB.grKWindowSplit)
   # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
   if kernel.get("enableTDMA", False):
     grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])

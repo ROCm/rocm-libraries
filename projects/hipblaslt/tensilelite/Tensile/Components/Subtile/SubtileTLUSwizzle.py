@@ -155,8 +155,8 @@ def _sharedStrip(tileInfo) -> bool:
     after the XOR.  col_scatter has no such coupling: there the load index
     enters purely additively as a K-column shift.
     """
-    return (int(getattr(tileInfo, "grWavesPerStrip", 1)) > 1
-            or int(getattr(tileInfo, "grKSplit", 1)) > 1)
+    return (int(tileInfo.grWavesPerStrip) > 1
+            or int(tileInfo.grKSplit) > 1)
 
 
 def _stackOf(tileInfo) -> Optional[int]:
@@ -182,6 +182,7 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     return _SWIZZLE_BY_STACK.get(stack) if stack is not None else None
 
 
+
 # Stacks that use the column-scatter layout instead of a single-bit XOR.
 _COL_SCATTER_STACKS = frozenset({8, 16})
 
@@ -205,7 +206,7 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
         return None
     instM = int(tileInfo.mmaTileShape[0])
     instK = int(tileInfo.mmaTileShape[1])
-    waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
+    waveSize = int(tileInfo.waveSize)
     return _buildColScatter(stack, instM, instK, float(tileInfo.bpe), waveSize)
 
 
@@ -250,7 +251,7 @@ def swizzlePadPerStrip(tileInfo) -> int:
     # the window holds instK*stackK*chunksPerK (2x1: 1 block; 4x1: 2 -> 4).
     instK = int(tileInfo.mmaTileShape[1])
     stackK = int(tileInfo.subtileShape[1])
-    waveSize = int(getattr(tileInfo, "waveSize", 0)) or 64
+    waveSize = int(tileInfo.waveSize)
     instM = int(tileInfo.mmaTileShape[0])
     stackM = int(tileInfo.subtileShape[0])
     mStripBytes = int(stackM * instM * tileInfo.bpe)
