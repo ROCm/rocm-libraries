@@ -45,7 +45,8 @@ TWO MODES, and `--mode` is required because they make different claims.
   --mode full asks whether the shipped binary agrees with the metadata that selects
   it. The answer comes from the producing compiler's own evidence, carried by the
   descriptor: `provenance.specialization_contract` declares which metadata fields a
-  compiled kernel specialises on and how each is read off the builder's spec, and
+  compiled kernel specialises on and how each is read off the builder's spec --
+  carried by the kernel, or once by the KDP it is inline in -- and
   `provenance.effective_spec` records what the compiler observed when it built the
   bytes this descriptor names. The gate rebuilds the consumer records from the
   descriptors in front of it and hands them, with the named payload bytes, to
@@ -53,6 +54,12 @@ TWO MODES, and `--mode` is required because they make different claims.
   checkable on a machine that has never had rocKE installed. A missing, unsupported
   or mismatched record is a FAILURE -- an artifact that cannot say what it was built
   from has not established agreement.
+
+  A kernel declaring `metadata_fields: []` -- the mandatory declaration for a
+  non-compiled source, which is every AOT hip bundle -- has no producing-build
+  record to bind, so it is reported as NOT VERIFIED HERE. That is a third outcome,
+  neither a failure nor part of the pass: `hkp_pack.desk_check` states the same
+  thing about the same artifact, and two readers of one tree must not disagree.
 
   Because full mode claims every property, a check it could not RUN is a gap in
   that claim, and the run FAILS with exit 1 naming the unrun checks. Passing on a
@@ -144,10 +151,11 @@ class Profile:
     engine would pass while the one under test is broken.
 
     ``vocabulary`` declares the matcher's legal spellings for a field, as either a
-    builder-to-matcher mapping or the legal set. A UKD's own
-    ``specialization_contract`` states the same thing for the fields it specialises
-    on and is merged in automatically, so a profile only has to speak for the fields
-    no declaration covers.
+    builder-to-matcher mapping or the legal set. A UKD's
+    ``specialization_contract`` -- its own, or the one it inherits from its KDP --
+    states the same thing for the fields it specialises on and is merged in
+    automatically, so a profile only has to speak for the fields no declaration
+    covers.
 
     Nothing in a profile names a policy function, a module or a provider root. What
     a binary was built with is answered by the producing compiler's evidence under
@@ -287,11 +295,16 @@ class Entry:
     where an empty list is a wildcard. Two candidates whose coverage does not
     overlap never meet in one device's catalog, which is what makes an otherwise
     identical pair legal.
+
+    `inline` says whether the UKD lives inside the KDP, which decides whether it
+    inherits the KDP's `specialization_contract`: a standalone UKD is its own file
+    and several KDPs may reference it, so it declares its own.
     """
 
     ukd: dict
     origin_dir: str
     arch: list
+    inline: bool = True
 
 
 @dataclasses.dataclass
@@ -349,9 +362,9 @@ def resolve_bundles(index: Index) -> list[Bundle]:
                         f"'kernelDescriptors' reference -- id {item!r} matches no "
                         f"descriptor under {index.root}."
                     )
-                ukd, origin = target.doc, os.path.dirname(target.path)
+                ukd, origin, inline = target.doc, os.path.dirname(target.path), False
             elif isinstance(item, dict):
-                ukd, origin = item, os.path.dirname(kdp.path)
+                ukd, origin, inline = item, os.path.dirname(kdp.path), True
             else:
                 raise GateError(
                     f"{os.path.basename(kdp.path)}: a kernelDescriptors entry is "
@@ -360,7 +373,7 @@ def resolve_bundles(index: Index) -> list[Bundle]:
             coverage = _coverage(kdp.doc, ukd)
             if coverage is None:
                 continue
-            entries.append(Entry(ukd, origin, coverage))
+            entries.append(Entry(ukd, origin, coverage, inline))
         bundles.append(Bundle(kdp.path, kdp.doc, engine.doc, kmd.doc, entries))
     return bundles
 
@@ -396,21 +409,23 @@ def select(bundles: list[Bundle], profile: Profile) -> list[Bundle]:
 def declarations(bundles: list[Bundle], schemas: dict) -> dict:
     """(engine_id, kmd_id, ukd_id) -> the consumer entry that UKD declares.
 
-    Read straight off `provenance.specialization_contract`, which is data: a reader
-    with no producer installed learns which metadata fields the compiled kernel
-    specialises on, which are the matcher's alone, and how each specialised field is
-    read off the builder's spec. `agreement.select_declaration` owns the selection so
-    a UKD several engines reference is resolved by the (engine, KMD) PAIR rather than
+    Read off `provenance.specialization_contract`, which is data: a reader with no
+    producer installed learns which metadata fields the compiled kernel specialises
+    on, which are the matcher's alone, and how each specialised field is read off
+    the builder's spec. The declaration may be carried once by the enclosing KDP and
+    inherited, so `agreement.resolved_contract` -- not a raw key lookup -- decides
+    whether a kernel has one. `agreement.select_declaration` owns the selection so a
+    UKD several engines reference is resolved by the (engine, KMD) PAIR rather than
     by picking one of its entries.
     """
     found = {}
     for bundle in bundles:
         for entry in bundle.entries:
-            provenance = entry.ukd.get("provenance") or {}
-            if "specialization_contract" not in provenance:
+            enclosing = bundle.kdp_doc if entry.inline else None
+            if agreement.resolved_contract(entry.ukd, enclosing) is None:
                 continue
             declaration = agreement.select_declaration(
-                entry.ukd, bundle.engine, bundle.kmd, schemas
+                entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
             )
             found[(bundle.engine["id"], bundle.kmd["id"], entry.ukd["id"])] = (
                 declaration
@@ -558,11 +573,11 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
         for entry in bundle.entries:
             if entry.arch and arch not in entry.arch:
                 continue
-            provenance = entry.ukd.get("provenance") or {}
-            if "specialization_contract" not in provenance:
+            enclosing = bundle.kdp_doc if entry.inline else None
+            if agreement.resolved_contract(entry.ukd, enclosing) is None:
                 continue
             declaration = agreement.select_declaration(
-                entry.ukd, bundle.engine, bundle.kmd, schemas
+                entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
             )
             collected.setdefault(entry.ukd["id"], []).append(
                 agreement.consumer_record(
@@ -655,9 +670,16 @@ def check(
 ):
     """Run every property this mode can honestly claim, and name the rest.
 
-    Returns `(binaries, descriptors, failures, unchecked, knobs)`, where `knobs` are
-    the compiled-specialization fields the declarations name -- the set the twin
-    check keys on.
+    Returns `(binaries, descriptors, failures, unchecked, unverified, knobs)`, where
+    `knobs` are the compiled-specialization fields the declarations name -- the set
+    the twin check keys on.
+
+    `unchecked` and `unverified` are DIFFERENT outcomes and must not be merged.
+    `unchecked` is a check this run could not run, which under `--mode full` is a
+    gap in the claim and fails the gate. `unverified` is a check that ran and
+    reached a stated result: the kernel declares no specialized metadata field, so
+    there is no producing-build record to bind. That is a legitimate outcome, so it
+    neither fails the gate nor joins the pass line's list of things established.
     """
     index = Index(root)
     schemas = index.schemas()
@@ -668,6 +690,9 @@ def check(
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
     failures: list[str] = []
     unchecked: list[str] = []
+    # Kernels reported as NOT VERIFIED HERE: the check ran and there was nothing
+    # for it to bind, which is neither a failure nor a property established.
+    unverified: list[str] = []
 
     declared = declarations(bundles, schemas)
     knobs = {f for d in declared.values() for f in d["metadata_fields"]}
@@ -881,9 +906,36 @@ def check(
                         f"binary specialises on and agreement cannot be established"
                     )
                     continue
+                bound = records[entry.ukd["id"]]
+                # A declaration with no `metadata_fields` states that the compiler
+                # specialized on nothing, which is the legitimate and MANDATORY
+                # declaration for a non-compiled source. There is no
+                # producing-build record for it to bind, so it is reported rather
+                # than failed -- and rather than absorbed into the pass, which
+                # would put "the record binds these bytes" behind a kernel for
+                # which no record was ever read. `hkp_pack.desk_check` says the
+                # same thing about the same artifact; the two readers of one tree
+                # have to agree.
+                #
+                # A descriptor that CARRIES `provenance.effective_spec` is checked
+                # whatever its declaration claims. The evidence is in the file, so
+                # the check can run -- and skipping it would make relabelling the
+                # specialized field as matcher-only a waiver that turns a stale or
+                # forged record into a pass. Nothing in this tool reports "no
+                # record to bind" about a descriptor holding one.
+                claimed = any(r["declaration"]["metadata_fields"] for r in bound)
+                if not claimed and "effective_spec" not in (
+                    entry.ukd.get("provenance") or {}
+                ):
+                    unverified.append(
+                        f"{name}: declares no specialized metadata_fields, so there "
+                        f"is no producing-build record to bind and nothing here was "
+                        f"verified against a binary"
+                    )
+                    continue
                 try:
                     payload = payloads.read(entry, arch)
-                    agreement.verify(entry.ukd, records[entry.ukd["id"]], payload)
+                    agreement.verify(entry.ukd, bound, payload)
                 except GateError as exc:
                     # Already names the descriptor it is about; the payload reader
                     # is reached from other callers too and says so itself.
@@ -908,7 +960,9 @@ def check(
         print(f"      ! {f}")
     for u in unchecked:
         print(f"      ? NOT CHECKED: {u}")
-    return binaries, descriptors, failures, unchecked, knobs
+    for u in unverified:
+        print(f"      ? NOT VERIFIED HERE: {u}")
+    return binaries, descriptors, failures, unchecked, unverified, knobs
 
 
 def main(argv=None) -> int:
@@ -963,6 +1017,7 @@ def main(argv=None) -> int:
     print(f"  mode: {args.mode}")
 
     sets, by_label, bad, skipped, knobs = {}, {}, [], [], set()
+    unverified: list[str] = []
     payloads = Payloads(args.kpack_python_dir) if args.mode == "full" else None
     try:
         arch = None
@@ -970,13 +1025,14 @@ def main(argv=None) -> int:
             probe = resolve_bundles(Index(roots[0][1]))
             arch = effective_arch(probe, args.arch)
         for label, root in roots:
-            binaries, descriptors, failures, unchecked, declared = check(
+            binaries, descriptors, failures, unchecked, unbound, declared = check(
                 label, root, profile, args.mode, arch, payloads
             )
             sets[label] = binaries
             by_label[label] = descriptors
             bad += [(label, f) for f in failures]
             skipped += unchecked
+            unverified += [f"{label}: {u}" for u in unbound]
             knobs |= declared
     except GateError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -1001,6 +1057,24 @@ def main(argv=None) -> int:
         for violation in _specialization_twins(order, by_label, knobs):
             print(f"  {violation}")
             bad.append(("specialization-twins", violation))
+
+    if unverified:
+        # Stated by name and kept out of both verdict lists. It is not a failure:
+        # a kernel declaring no specialized metadata field is a bundle whose
+        # compiler settled nothing the matcher can be checked against, which is
+        # the mandatory declaration for a non-compiled source. It is not part of
+        # the pass either: no producing-build record was read for these, so the
+        # pass line must not say their binaries were bound.
+        print(f"  {len(unverified)} kernel(s) NOT VERIFIED HERE:")
+        for u in unverified:
+            print(f"      ? {u}")
+        print(
+            "  Only rocKE-origin kernels currently carry compiled-specialization "
+            "evidence; a hip kernel AOT-compiled with specializing preprocessor "
+            "defines is a real compiled specialization that this check does not "
+            "yet verify, so absence of a claim is a limit of this tool, not a "
+            "property of the kernel."
+        )
 
     print()
     if bad:
@@ -1030,6 +1104,13 @@ def main(argv=None) -> int:
             "  This run did NOT check that any shipped binary agrees with the "
             "metadata that selects it. Only --mode full reads the producing "
             "compiler's evidence, and only it can make that claim."
+        )
+        return 0
+    if unverified:
+        print(
+            "GATE PASSED: binaries nest, tuples unique, no sentinel, vocabulary "
+            "correct, and compiled specialization agrees with metadata for every "
+            "kernel that declares one -- see NOT VERIFIED HERE above for the rest"
         )
         return 0
     print(

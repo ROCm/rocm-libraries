@@ -474,6 +474,10 @@ class TestAllowListedKeys:
         "engine",
         "dispatch",
         "kernelDescriptors",
+        # An extension key the loader warns about and ignores
+        # (DescriptorLoader.hpp isExtensionKey), carrying the pack's one
+        # specialization_contract.
+        "provenance",
     }
     _UKD_KEYS = {
         "version",
@@ -690,18 +694,25 @@ class TestEngineSdkVersion:
 
 
 class TestSpecializationContractEmission:
-    """Every UKD carries the declaration a later check verifies it against.
+    """The declaration in force for every kernel of a bundle.
 
     The bundle is checked on a machine that does not have the rocKE that compiled
-    it. The contract riding on the descriptor is the whole input to that check:
+    it. The contract riding on the descriptors is the whole input to that check:
     which metadata fields the compiler consumed, how each is read back off the
-    builder object, and which are the matcher's alone.
+    builder object, and which are the matcher's alone. Where it is WRITTEN is the
+    packager's resolution rule and not a property these assert; what each kernel
+    resolves to is.
     """
 
     @staticmethod
     def _consumers(kdp):
+        """What each kernel of this KDP resolves to, through the real reader."""
+        agreement = _import_agreement()
+        if agreement is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
         return [
-            k["provenance"]["specialization_contract"] for k in kdp["kernelDescriptors"]
+            agreement.resolved_contract(kernel, kdp)
+            for kernel in kdp["kernelDescriptors"]
         ]
 
     def test_the_entry_carries_the_minted_engine_and_kmd_ids(self, scale_add_config):
@@ -750,6 +761,17 @@ class TestSpecializationContractEmission:
         assert consumer["metadata_fields"] == []
         assert sorted(consumer["matcher_only_fields"]) == ["block_size", "dtype"]
 
+    def test_the_declaration_is_written_once_for_the_whole_pack(self, scale_add_config):
+        """Every inline kernel of a bundle is one engine's, one KMD's, one field
+        partition's, so repeating the declaration per kernel says nothing extra --
+        and on a 2733-kernel pack it was 2.8x the file."""
+        kdp = build_kdp(
+            scale_add_config, scale_add_config.packs[0], mint_ids(scale_add_config)
+        )
+        assert "specialization_contract" in kdp["provenance"]
+        assert kdp["kernelDescriptors"]
+        assert not any("provenance" in k for k in kdp["kernelDescriptors"])
+
     @pytest.mark.parametrize(
         "dialect,kind",
         [("packaged", "rocke"), ("direct_load", "embedded_source")],
@@ -789,7 +811,7 @@ class TestSpecializationContractEmission:
         kmd = build_kmd(scale_add_config, ids)
         kdp = build_kdp(scale_add_config, scale_add_config.packs[0], ids)
         for kernel in kdp["kernelDescriptors"]:
-            consumers = agreement.contracts(kernel, {ids["kmd"]: kmd})
+            consumers = agreement.contracts(kernel, {ids["kmd"]: kmd}, kdp)
             assert len(consumers) == 1
             agreement.validate_consumer(consumers[0], kmd)
 

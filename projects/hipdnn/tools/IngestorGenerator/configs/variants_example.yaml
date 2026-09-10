@@ -161,8 +161,8 @@ packs:
           # what the matcher compares.
           - {dtype: fp16, seqlen_q: 4096, knobs: swept}
 
-# What the COMPILER specialized on, carried on every emitted UKD as
-# provenance.specialization_contract.
+# What the COMPILER specialized on, carried once by each emitted KDP as
+# provenance.specialization_contract and inherited by the kernels under it.
 #
 # All five fields reach `kernel_source.spec` in at least one arm, so all five are
 # checked rather than waived. `use_exp2_fast` is the interesting one: the arms that

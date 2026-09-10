@@ -683,7 +683,7 @@ def _publish(ukd: dict, kmd: dict, kdp_doc: dict, ued: dict, observed_value=1) -
     order are that module's business, and a fixture that reconstructed them would
     pass or fail on its own guess about key order rather than on the property.
     """
-    declaration = agreement.select_declaration(ukd, ued, kmd, {kmd["id"]: kmd})
+    declaration = agreement.select_declaration(ukd, ued, kmd, {kmd["id"]: kmd}, kdp_doc)
     request = agreement.observation_request(declaration, kmd)
     header = {k: v for k, v in kdp_doc.items() if k != "kernelDescriptors"}
     header["arch"] = [_ARCH]
@@ -747,13 +747,15 @@ def packed(tmp_path):
 
 def _run_full(root, payloads=None, arch=_ARCH):
     """`check` in full mode over `root`, returning its failures and narrowings."""
-    _binaries, _descriptors, failures, unchecked, _knobs = gate_module.check(
-        "set",
-        str(root),
-        gate_module.Profile.empty(),
-        "full",
-        arch,
-        payloads or _Payloads(),
+    _binaries, _descriptors, failures, unchecked, _unverified, _knobs = (
+        gate_module.check(
+            "set",
+            str(root),
+            gate_module.Profile.empty(),
+            "full",
+            arch,
+            payloads or _Payloads(),
+        )
     )
     return failures, unchecked
 
@@ -882,6 +884,87 @@ class TestFullModeChecksTheProducingBuildRecord:
         )[2:4]
         assert any("does not exist" in f for f in failures), failures
 
+    def test_a_kdp_level_declaration_covers_every_kernel_under_it(self, tmp_path):
+        """Shared carriage: the declaration is written once and inherited.
+
+        The property full mode checks is unchanged -- every kernel resolves to a
+        declaration and its evidence binds the bytes -- so a bundle that declares
+        once passes exactly as one that repeats itself per kernel does.
+        """
+        kmd, ued = _kmd(), _ued()
+        ukd = _packed_ukd()
+        contract = ukd["provenance"].pop("specialization_contract")
+        kdp = _kdp([ukd], arch=[_ARCH])
+        kdp["provenance"] = {"specialization_contract": contract}
+        _publish(ukd, kmd, kdp, ued)
+        root = tmp_path / "shared"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
+        (root / "test_engine.ued.json").write_text(json.dumps(ued))
+        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        failures, _ = _run_full(root)
+        assert not failures, failures
+
+
+class TestFullModeReportsAKernelWithNothingToBind:
+    """A packed kernel that declares no specialized field, in full mode.
+
+    `metadata_fields: []` is the MANDATORY declaration for a non-compiled source --
+    an AOT hip bundle has no builder object, so there is nothing to bind and no
+    producing-build record to read. Failing it would make full mode unpassable for
+    every hip bundle; passing it silently would claim a binding that was never made.
+    It is reported instead, exactly as `hkp_pack.desk_check` reports the same
+    artifact -- two readers of one tree must not disagree about it.
+    """
+
+    @staticmethod
+    def tree(tmp_path, metadata_fields, tag):
+        """A packed bundle with no producer evidence, as an AOT hip pack ships."""
+        kmd, ued = _kmd(), _ued()
+        ukd = _packed_ukd()
+        consumer = ukd["provenance"]["specialization_contract"]["consumers"][0]
+        consumer["metadata_fields"] = list(metadata_fields)
+        consumer["matcher_only_fields"] = sorted(
+            set(f["name"] for f in _KMD_FIELDS) - set(metadata_fields)
+        )
+        consumer["bindings"] = {f: _DECLARATION["bindings"][f] for f in metadata_fields}
+        kdp = _kdp([ukd], arch=[_ARCH])
+        root = tmp_path / tag
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
+        (root / "test_engine.ued.json").write_text(json.dumps(ued))
+        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        return root
+
+    def test_it_is_reported_rather_than_failed(self, tmp_path):
+        root = self.tree(tmp_path, [], "unbound")
+        _b, _d, failures, _unchecked, unverified, _k = gate_module.check(
+            "set", str(root), gate_module.Profile.empty(), "full", _ARCH, _Payloads()
+        )
+        assert failures == []
+        assert len(unverified) == 1
+
+    def test_it_does_not_fail_the_gate(self, tmp_path, monkeypatch, capsys):
+        """On the exit code, which is what an integrator reads."""
+        monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
+        root = self.tree(tmp_path, [], "unbound_exit")
+        profile = tmp_path / "profile.yaml"
+        profile.write_text(_PROFILE)
+        code = gate_module.main(
+            ["set", str(root), "--mode", "full", "--profile", str(profile)]
+        )
+        out = capsys.readouterr().out
+        assert code == 0, out
+        assert "GATE FAILED" not in out
+
+    def test_a_kernel_that_claims_a_field_and_has_no_evidence_still_fails(
+        self, tmp_path
+    ):
+        """The other half. Nothing above may become a way to skip a real check."""
+        root = self.tree(tmp_path, ["use_exp2_fast"], "claimed")
+        failures, _ = _run_full(root)
+        assert failures
+
 
 class TestFullModeCannotPassOnANarrowedRun:
     """A full run claims every property, so a check it could not RUN is a gap.
@@ -920,7 +1003,7 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
             docs["ukd"]["metadata"]["head_size"] = 64
 
         root = packed(mutate, tag="tampered_structural")
-        _b, _d, failures, unchecked, _k = gate_module.check(
+        _b, _d, failures, unchecked, _u, _k = gate_module.check(
             "set", str(root), gate_module.Profile.empty(), "structural"
         )
         assert failures == []

@@ -4,6 +4,7 @@ import shutil
 
 import pytest
 
+from hkp_pack import agreement
 from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
@@ -1070,6 +1071,80 @@ def test_non_object_provenance_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = "HIJACKED"
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="provenance must be an object"):
+        load_flat_input(src)
+
+
+def _share_contract_onto_kdp(kdp_path):
+    """Move the inline kernels' identical declaration onto the enclosing KDP."""
+    doc = _read(kdp_path)
+    contracts = [
+        e["provenance"].pop("specialization_contract")
+        for e in doc["kernelDescriptors"]
+        if isinstance(e, dict)
+    ]
+    assert contracts and all(c == contracts[0] for c in contracts)
+    for entry in doc["kernelDescriptors"]:
+        if isinstance(entry, dict) and not entry["provenance"]:
+            del entry["provenance"]
+    doc["provenance"] = {"specialization_contract": contracts[0]}
+    kdp_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_kdp_level_contract_is_inherited_and_ships(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    # A declaration written once on the KDP covers every inline kernel under it:
+    # the pack succeeds, the shipped shard carries the declaration on the KDP and
+    # on no kernel, and a reader with only the shard resolves a full consumer list
+    # for each of them.
+    src = _copy_fixture(tmp_path, main_fixture)
+    _share_contract_onto_kdp(src / "pointwise.kdp.json")
+    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+
+    out = tmp_path / "out" / "gfx942"
+    shipped = _read(out / "pointwise.kdp.json")
+    assert "specialization_contract" in shipped["provenance"]
+    inline = [e for e in shipped["kernelDescriptors"] if isinstance(e, dict)]
+    assert inline
+    assert not any("specialization_contract" in e.get("provenance", {}) for e in inline)
+
+    engine = _read(out / "pointwise.ued.json")
+    kmd = _read(out / "pointwise.kmd.json")
+    for kernel in inline:
+        declaration = agreement.select_declaration(
+            kernel, engine, kmd, {kmd["id"]: kmd}, shipped
+        )
+        assert declaration["engine_id"] == engine["id"]
+
+    # The standalone UKD the same KDP references keeps its own: it is its own
+    # file and no KDP speaks for it.
+    standalone = _read(out / _STANDALONE_UKD_FILE)
+    assert "specialization_contract" in standalone["provenance"]
+
+
+@pytest.mark.quick
+def test_effective_spec_on_a_kdp_is_refused_at_load(tmp_path, main_fixture):
+    # Producer evidence binds specific payload bytes and a pack has none, so a
+    # KDP claiming one is refused rather than being inherited by its kernels.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    doc["provenance"] = {"effective_spec": {"schema_version": 1}}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="effective_spec is reserved"):
+        load_flat_input(src)
+
+
+@pytest.mark.quick
+def test_a_malformed_kdp_contract_is_refused_at_load(tmp_path, main_fixture):
+    # An unusable declaration fails at the document that wrote it rather than at
+    # every kernel that would have inherited it.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "pointwise.kdp.json"
+    doc = _read(p)
+    doc["provenance"] = {"specialization_contract": {"schema_version": 1}}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="specialization_contract must be"):
         load_flat_input(src)
 
 

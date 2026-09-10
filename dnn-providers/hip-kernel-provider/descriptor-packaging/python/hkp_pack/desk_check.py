@@ -132,7 +132,7 @@ class DeskCheckNoSpecFound(RuntimeError):
     and "checked, found nothing wrong" rendered identically."""
 
 
-def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
+def resolve_entries(kdp_doc: dict, tree: dict, where: str) -> list[tuple[dict, bool]]:
     """A KDP's kernel descriptors, with standalone-UKD id references resolved.
 
     Post-pack a KDP keeps a referenced standalone UKD as a bare STRING and the UKD
@@ -143,11 +143,16 @@ def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
     check. Resolved by id against the shard, which is the hop
     `verify_variant_sets.resolve_bundles` already makes, so the two readers of one
     artifact agree about what is in it.
+
+    Each element is `(descriptor, inline)`. `inline` says whether the descriptor
+    lives inside this KDP, which is what decides whether it inherits the KDP's
+    `specialization_contract`: a standalone UKD is its own file and several KDPs
+    may reference it, so it declares its own.
     """
     kernels = []
     for item in kdp_doc.get("kernelDescriptors") or []:
         if isinstance(item, dict):
-            kernels.append(item)
+            kernels.append((item, True))
         elif isinstance(item, str):
             target = tree.get(item)
             if target is None:
@@ -155,13 +160,18 @@ def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
                     f"{where}: kernelDescriptors references id '{item}', which "
                     "resolves to no descriptor in this shard"
                 )
-            kernels.append(target)
+            kernels.append((target, False))
         else:
             raise HkpPackError(
                 f"{where}: a kernelDescriptors entry is neither an inline object "
                 f"nor an id reference (got {type(item).__name__})"
             )
     return kernels
+
+
+def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
+    """A KDP's kernel descriptors, standalone-UKD id references resolved."""
+    return [kernel for kernel, _inline in resolve_entries(kdp_doc, tree, where)]
 
 
 def load_kernels(kdp_path: Path) -> list[dict]:
@@ -294,7 +304,7 @@ def compiled_agreement(
     failures: list[str] = []
     unclaimed: list[str] = []
     verified = 0
-    for kernel in resolve_kernels(doc, tree, kdp_path.name):
+    for kernel, inline in resolve_entries(doc, tree, kdp_path.name):
         name = kernel.get("name")
         try:
             kind = kernel.get("kernel_source", {}).get("kind")
@@ -305,7 +315,7 @@ def compiled_agreement(
                     f"once the bytes do; check the packed tree."
                 )
             declaration = agreement.select_declaration(
-                kernel, engine, kmd, {kmd["id"]: kmd}
+                kernel, engine, kmd, {kmd["id"]: kmd}, doc if inline else None
             )
             records = agreement.canonical_records(
                 [

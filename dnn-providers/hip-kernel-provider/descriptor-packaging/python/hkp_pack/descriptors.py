@@ -227,6 +227,43 @@ def _reject_nonbare_arch(archs, where):
             raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
+def _validate_provenance(provenance, where, *, produced=False):
+    """Shape of one `provenance` block, wherever it is declared.
+
+    A KDP and the kernels under it declare the same `specialization_contract`
+    object -- a kernel with none of its own inherits the enclosing KDP's -- so one
+    rule covers both. An unusable declaration fails at the document that wrote it
+    rather than at every kernel that inherited it.
+
+    `effective_spec` is the producing compiler's own statement about what it
+    observed while building the payload. An authored input claiming one would be
+    asserting an observation nothing made, so it is refused at the door rather than
+    overwritten later. `produced` is true only for the one form that legitimately
+    carries it -- a shipped `kpack` kernel, because packing is what wrote it. It is
+    never true of a KDP: evidence binds specific payload bytes and a pack has none.
+    """
+    if not isinstance(provenance, dict):
+        raise HkpPackError(f"{where}: provenance must be an object")
+    if not produced and "effective_spec" in provenance:
+        raise HkpPackError(
+            f"{where}: provenance.effective_spec is reserved for the producing "
+            "compiler and cannot be authored"
+        )
+    if "specialization_contract" in provenance:
+        contract = provenance["specialization_contract"]
+        if (
+            not isinstance(contract, dict)
+            or set(contract) != {"schema_version", "consumers"}
+            or contract["schema_version"] != 1
+            or not isinstance(contract["consumers"], list)
+            or not contract["consumers"]
+        ):
+            raise HkpPackError(
+                f"{where}: specialization_contract must be "
+                "{'schema_version': 1, 'consumers': [...]} with at least one consumer"
+            )
+
+
 def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
@@ -250,32 +287,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
     kind = ks["kind"]
-    provenance = ukd.get("provenance", {})
-    if not isinstance(provenance, dict):
-        raise HkpPackError(f"{where}: provenance must be an object")
-    # `effective_spec` is the producing compiler's own statement about what it
-    # observed while building the payload. An authored input claiming one would be
-    # asserting an observation nothing made, so it is refused at the door rather
-    # than overwritten later -- a shipped `kpack` descriptor is the one form that
-    # legitimately carries it, because packing is what wrote it.
-    if kind != "kpack" and "effective_spec" in provenance:
-        raise HkpPackError(
-            f"{where}: provenance.effective_spec is reserved for the producing "
-            "compiler and cannot be authored"
-        )
-    if "specialization_contract" in provenance:
-        contract = provenance["specialization_contract"]
-        if (
-            not isinstance(contract, dict)
-            or set(contract) != {"schema_version", "consumers"}
-            or contract["schema_version"] != 1
-            or not isinstance(contract["consumers"], list)
-            or not contract["consumers"]
-        ):
-            raise HkpPackError(
-                f"{where}: specialization_contract must be "
-                "{'schema_version': 1, 'consumers': [...]} with at least one consumer"
-            )
+    _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
     if kind == "hip":
         _require(ks, ["source", "entry"], where)
         if "build" not in ks:
@@ -333,6 +345,9 @@ def _validate_kdp(desc, log=print):
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
     _reject_nonbare_arch(arch, where)
+    # A KDP may declare the `specialization_contract` its inline kernels inherit,
+    # so the block is checked here too rather than only where a kernel repeats it.
+    _validate_provenance(doc.get("provenance", {}), where)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
