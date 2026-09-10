@@ -41,6 +41,18 @@ namespace hipdnn_integration_tests::bundle
 // OutputTensors and ExpectedTensorLookup come from OutputComparison.hpp, which owns
 // the comparison this harness drives.
 
+// The probe SKIP_IF_NO_DEVICES() makes, spelled out because that macro's
+// GTEST_SKIP() returns from SetUp() and would carry the skip off before the
+// authoring log could be told about it. Same condition, same message, so a CI log
+// reader cannot tell the two apart. Only reached under a DEVICE policy, so the unit
+// tests -- which run HOST -- still never touch the HIP runtime.
+inline bool noHipDevicesAvailable()
+{
+    int deviceCount = 0;
+    const auto result = hipGetDeviceCount(&deviceCount);
+    return result == hipErrorNoDevice || deviceCount == 0;
+}
+
 // detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
 // it, so it is not this one's to own.
 
@@ -94,18 +106,21 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
-        if(_deps.policy.useDevice())
+        if(_deps.policy.useDevice() && noHipDevicesAvailable())
         {
-            SKIP_IF_NO_DEVICES();
+            noteSkipBeforeObservation();
+            GTEST_SKIP() << "No devices available. Skipping test.";
         }
 
         if(_bundle == nullptr)
         {
+            noteSkipBeforeObservation();
             GTEST_SKIP() << "No bundle set";
         }
 
         if(auto reason = checkTomlSkip(currentTestName()))
         {
+            noteSkipBeforeObservation();
             GTEST_SKIP() << "[arch " << _deps.policy.arch << "] " << *reason;
         }
 
@@ -188,6 +203,17 @@ private:
     GraphSession openGraph();
 
     void applyMetadataGuards() const;
+
+    // Called at every SetUp() exit that returns before TestBody(). Must run before
+    // the GTEST_SKIP() beside it, because GTEST_SKIP() expands to a return.
+    //
+    // static because no harness state is read or written -- the count lives in the
+    // process-wide log, which is what lets a skip recorded here be subtracted by an
+    // authoring run in main().
+    static void noteSkipBeforeObservation()
+    {
+        SupportObservationLog::get().recordSkipBeforeObservation();
+    }
 
     SupportObservation checkSupportClaims(const GraphSession& session);
 

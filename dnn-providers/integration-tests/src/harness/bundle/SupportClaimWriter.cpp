@@ -4,6 +4,7 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -13,6 +14,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "harness/bundle/SupportClaims.hpp"
 
@@ -381,27 +384,51 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
     return summary;
 }
 
+bool selectionIsNarrowed(const std::string& gtestFilter, const bool shardingActive)
+{
+    // "*" is GTest's default and the only value that certainly selects everything.
+    // Other universal spellings ("*.*", "*:-") are called narrowed here on purpose:
+    // guessing wrong in this direction suppresses one check, guessing wrong in the
+    // other direction fails a correct run, and only the second is a bug report.
+    return gtestFilter != "*" || shardingActive;
+}
+
+bool selectionWasNarrowed()
+{
+    // GTEST_FLAG_GET already folds in the GTEST_FILTER environment variable. A shard
+    // split drops tests the same way a filter does and is invisible in the filter
+    // string, so it is read separately.
+    const bool shardingActive = std::getenv("GTEST_TOTAL_SHARDS") != nullptr
+                                || std::getenv("GTEST_SHARD_INDEX") != nullptr;
+    return selectionIsNarrowed(GTEST_FLAG_GET(filter), shardingActive);
+}
+
 AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
-                                    const std::size_t graphsObserved,
-                                    const std::size_t graphsUnobserved,
-                                    const std::size_t graphsRegistered,
+                                    const AuthoringRunSummary& inputs,
                                     std::ostream& log)
 {
     AuthoringResult result;
 
-    const std::size_t graphsNeverReached
-        = graphsRegistered > graphsObserved + graphsUnobserved
-              ? graphsRegistered - graphsObserved - graphsUnobserved
-              : 0;
+    // A guard-skipped graph did not go missing -- the run said out loud that it was
+    // not going to refresh that bundle. Subtracting the named buckets first leaves a
+    // remainder that is only graphs nobody can explain, which is the one shortfall
+    // that means claims were left stale by accident. Without this, six mi200 bundles
+    // on a gfx942 box fail a correct authoring run exactly like a full disk does.
+    const std::size_t accountedFor
+        = inputs.graphsObserved + inputs.graphsUnobserved + inputs.graphsSkippedBeforeObservation;
+    const std::size_t graphsUnaccountedFor
+        = inputs.graphsRegistered > accountedFor ? inputs.graphsRegistered - accountedFor : 0;
 
-    if(graphsObserved == 0 && graphsUnobserved == 0)
+    if(inputs.graphsObserved == 0 && inputs.graphsUnobserved == 0)
     {
         log << "\n--write-support-claims: no graphs were observed; "
                "nothing was written.\n"
                "Usual causes:\n"
                "  - no engine plugins were loaded (check plugin paths)\n"
                "  - the GPU failed to initialise\n"
-               "  - a --gtest_filter or --test-article selected no graphs\n";
+               "  - a --gtest_filter selected no graphs\n"
+               "  - every selected bundle was skipped in SetUp (arch or VRAM guard, "
+               "[[test_skips]], no device)\n";
         result.shouldFail = true;
         return result;
     }
@@ -411,28 +438,53 @@ AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& obs
     const auto& ws = result.writeSummary;
 
     log << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
-        << "  graphs registered: " << graphsRegistered << "  observed: " << graphsObserved
-        << "  not observed: " << graphsUnobserved << "  never reached: " << graphsNeverReached
-        << "\n"
+        << "  graphs registered: " << inputs.graphsRegistered
+        << "  observed: " << inputs.graphsObserved << "  not observed: " << inputs.graphsUnobserved
+        << "  skipped in SetUp: " << inputs.graphsSkippedBeforeObservation
+        << "  unaccounted for: " << graphsUnaccountedFor << "\n"
         << "  observations: " << ws.observationsApplied << "  written: " << ws.filesWritten
         << "  unchanged: " << ws.filesUnchanged << "  skipped: " << ws.filesSkipped
         << "  errors: " << ws.errors.size() << "\n";
 
-    if(graphsUnobserved > 0)
+    if(inputs.graphsUnobserved > 0)
     {
-        log << "  claims for the " << graphsUnobserved
+        log << "  claims for the " << inputs.graphsUnobserved
             << " unobserved graph(s) were left as-is; see the warnings "
                "above for which, and re-run them.\n";
     }
 
-    if(graphsNeverReached > 0)
+    if(inputs.graphsSkippedBeforeObservation > 0)
     {
-        log << "  " << graphsNeverReached
-            << " graph(s) never reached the observer, so their claims are "
-               "stale.\n"
-               "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
-               "device skips\n"
-               "  a bundle in SetUp, before anything can be observed.\n";
+        log << "  " << inputs.graphsSkippedBeforeObservation
+            << " graph(s) were skipped in SetUp -- an arch or VRAM guard, a "
+               "[[test_skips]]\n"
+               "  entry, or a missing device -- so their claims were left as they "
+               "were.\n"
+               "  That is what the guard asked for; re-run on the arch they target "
+               "to refresh them.\n";
+    }
+
+    if(graphsUnaccountedFor > 0)
+    {
+        if(inputs.selectionNarrowed)
+        {
+            log << "  " << graphsUnaccountedFor
+                << " registered graph(s) were removed by a --gtest_filter or a shard "
+                   "split.\n"
+                   "  They were gone before SetUp could count them, so their claims "
+                   "are stale by\n"
+                   "  design and this is not an error. Re-run without the filter to "
+                   "refresh them.\n";
+        }
+        else
+        {
+            log << "  " << graphsUnaccountedFor
+                << " graph(s) never reached the observer and gave no reason for it, "
+                   "so their\n"
+                   "  claims are stale. Every declared skip is counted above, so a "
+                   "bundle went\n"
+                   "  missing between registration and SetUp.\n";
+        }
     }
 
     for(const auto& error : ws.errors)
@@ -440,7 +492,13 @@ AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& obs
         log << "  ERROR: " << error << "\n";
     }
 
-    if(!ws.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
+    // A narrowed run is short of graphs on purpose, so the residue says nothing about
+    // it. The other two still fail either way: a write error lost data, and an
+    // unobserved graph reached the engines and came back empty, which no filter
+    // explains.
+    const bool unexplainedShortfall = graphsUnaccountedFor > 0 && !inputs.selectionNarrowed;
+
+    if(!ws.errors.empty() || inputs.graphsUnobserved > 0 || unexplainedShortfall)
     {
         result.shouldFail = true;
     }

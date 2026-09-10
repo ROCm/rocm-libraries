@@ -102,12 +102,33 @@ public:
         return _graphsUnobserved;
     }
 
+    // Files a graph that never made it to the observer because SetUp() returned
+    // first -- no device, no bundle, a [[test_skips]] entry, or an arch or VRAM
+    // guard. Recorded at the skip itself so an authoring run can subtract it
+    // instead of inferring it: a bundle this arch was told not to run and a bundle
+    // that silently went missing produce the same shortfall in the totals, and
+    // only the second one means claims were left stale by accident.
+    void recordSkipBeforeObservation()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        ++_graphsSkippedBeforeObservation;
+    }
+
+    // Graphs skipped in SetUp, before observeSupportOnly ran. Not a judgement on
+    // whether the skip was reasonable -- only that a reason was recorded somewhere.
+    std::size_t graphsSkippedBeforeObservation() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _graphsSkippedBeforeObservation;
+    }
+
     void reset()
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _observations.clear();
         _graphsObserved = 0;
         _graphsUnobserved = 0;
+        _graphsSkippedBeforeObservation = 0;
     }
 
 private:
@@ -117,6 +138,7 @@ private:
     std::vector<ObservedGraphSupport> _observations;
     std::size_t _graphsObserved = 0;
     std::size_t _graphsUnobserved = 0;
+    std::size_t _graphsSkippedBeforeObservation = 0;
 };
 
 } // namespace hipdnn_integration_tests::bundle
