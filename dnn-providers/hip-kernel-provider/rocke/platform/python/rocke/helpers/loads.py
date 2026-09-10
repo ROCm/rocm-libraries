@@ -62,6 +62,11 @@ DescriptorFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]
 # Bytes per element for the dtypes CoalescedTileLoader / AsyncTileLoader support.
 _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 
+# The two admissible ``vector_axis`` values.  Kept as a module constant so the
+# validation in ``choose_vec`` (classmethod entry point) and ``__post_init__``
+# (direct-construction entry point) can never drift.
+_VALID_VECTOR_AXES = ("col", "row")
+
 
 @dataclass(frozen=True)
 class CoalescedTileLoader:
@@ -92,6 +97,19 @@ class CoalescedTileLoader:
         True  # use buffer_load_vN (bounds-checked); False uses raw ptr
     )
     oob_sentinel: int = (1 << 31) - 1  # voffset used when valid=False (clamped to 0)
+    # Which tile axis the ``load_vec`` contiguous run lies along.
+    #   "col" (default): each thread reads ``load_vec`` consecutive *columns*
+    #     at one row — the classic GEMM/conv layout where the reduction (K)
+    #     axis is the innermost/contiguous tensor dimension.
+    #   "row": each thread reads ``load_vec`` consecutive *rows* at one column,
+    #     then scatters them into LDS at ``[row+i, col]`` (a transpose-on-store).
+    #     Use this when the contiguous tensor dimension is the tile's *free*
+    #     (M/N) axis rather than the reduction axis — e.g. wgrad, where dY is
+    #     NHWK (K = free = stride-1) and X is NHWC (C = free-inner = stride-1)
+    #     while the reduction K_wg = N*Ho*Wo is strided. Loading along the free
+    #     axis keeps the global read coalesced + vectorised; the consumer still
+    #     reads the row-major ``(M/N, K)`` LDS tile K-contiguously, unchanged.
+    vector_axis: str = "col"
     # P33: when the descriptor's K axis is internally a (K0, K1) split
     # (e.g. implicit-GEMM ``K0=R*S × K1=C`` for NHWC convs), set
     # ``inner_dim`` to the K1 extent. The loader keeps emitting one
@@ -102,6 +120,17 @@ class CoalescedTileLoader:
     # flat-K behaviour.
     inner_dim: Optional[int] = None
 
+    def __post_init__(self) -> None:
+        # Fail fast on a mistyped ``vector_axis`` (e.g. "Row"): silently falling
+        # through to the "col" branch would change the (row, col) decode and be
+        # very hard to diagnose.  Valid paths are untouched, so byte-identity of
+        # every existing loader is preserved.
+        if self.vector_axis not in _VALID_VECTOR_AXES:
+            raise ValueError(
+                f"CoalescedTileLoader: vector_axis must be one of "
+                f"{_VALID_VECTOR_AXES}, got {self.vector_axis!r}"
+            )
+
     @classmethod
     def choose_vec(
         cls,
@@ -110,21 +139,29 @@ class CoalescedTileLoader:
         tile_cols: int,
         block_size: int,
         max_vec: int = 8,
+        vector_axis: str = "col",
     ) -> int:
         """Pick the widest `load_vec` that distributes evenly.
 
-        Conditions, in order:
-          1. `tile_cols % vec == 0` (no partial column at the end).
+        Conditions, in order (``axis`` is the axis the contiguous run lies
+        along — ``tile_cols`` in ``"col"`` mode, ``tile_rows`` in ``"row"``):
+          1. `axis % vec == 0` (no partial chunk at the end).
           2. `(tile_rows * tile_cols) % (vec * block_size) == 0` (every
              thread does the same number of chunks).
           3. `(tile_rows * tile_cols) / vec >= block_size` (at least
              one chunk per thread per phase — otherwise some threads
              would be idle).
         """
+        if vector_axis not in _VALID_VECTOR_AXES:
+            raise ValueError(
+                f"choose_vec: vector_axis must be one of {_VALID_VECTOR_AXES}, "
+                f"got {vector_axis!r}"
+            )
+        axis = tile_rows if vector_axis == "row" else tile_cols
         v = max_vec
         while v >= 1:
             if (
-                tile_cols % v == 0
+                axis % v == 0
                 and (tile_rows * tile_cols) // v >= block_size
                 and ((tile_rows * tile_cols) // v) % block_size == 0
             ):
@@ -132,7 +169,7 @@ class CoalescedTileLoader:
             v //= 2
         raise ValueError(
             f"no usable load_vec for tile {tile_rows}x{tile_cols} "
-            f"with block_size {block_size}"
+            f"with block_size {block_size} (vector_axis={vector_axis})"
         )
 
     @classmethod
@@ -145,13 +182,21 @@ class CoalescedTileLoader:
         max_vec: int = 8,
         elem_dtype: Type = F16,
         use_buffer_rsrc: bool = True,
+        vector_axis: str = "col",
     ) -> "CoalescedTileLoader":
         vec = cls.choose_vec(
             tile_rows=tile_rows,
             tile_cols=tile_cols,
             block_size=block_size,
             max_vec=max_vec,
+            vector_axis=vector_axis,
         )
+        # When the width collapses to 1 the axis is semantically irrelevant, but
+        # a "row" axis would still emit the transposed (row, col) decode.
+        # Normalise back to the canonical scalar "col" path so a vec==1 loader is
+        # byte-identical to the historical scalar loader regardless of the axis
+        # requested (and matches the col-only C++ ``from_tile``).
+        axis = "col" if vec == 1 else vector_axis
         return cls(
             tile_rows=tile_rows,
             tile_cols=tile_cols,
@@ -159,6 +204,7 @@ class CoalescedTileLoader:
             load_vec=vec,
             elem_dtype=elem_dtype,
             use_buffer_rsrc=use_buffer_rsrc,
+            vector_axis=axis,
         )
 
     @property
@@ -174,6 +220,48 @@ class CoalescedTileLoader:
     @property
     def cols_per_vec(self) -> int:
         return self.tile_cols // self.load_vec
+
+    @property
+    def rows_per_vec(self) -> int:
+        """Number of ``load_vec``-wide row chunks per column (row mode)."""
+        return self.tile_rows // self.load_vec
+
+    def _decode_row_col(
+        self, b: IRBuilder, vec_idx: Value, *, c_span: Value, c_load_vec: Value
+    ) -> Tuple[Value, Value]:
+        """Map a per-thread ``vec_idx`` to tile-local ``(row, col)``.
+
+        ``c_span`` is ``cols_per_vec`` in ``"col"`` mode (the default, where
+        the ``load_vec`` run lies along columns) and ``rows_per_vec`` in
+        ``"row"`` mode (run along rows). The emitted ops for ``"col"`` mode
+        are identical to the historical inline decode, preserving
+        byte-identity for every existing caller.
+        """
+        idx0 = b.div(vec_idx, c_span)
+        idx1 = b.mod(vec_idx, c_span)
+        chunk = b.mul(idx1, c_load_vec) if self.load_vec > 1 else idx1
+        if self.vector_axis == "row":
+            return chunk, idx0  # row = idx1*load_vec, col = idx0
+        return idx0, chunk  # row = idx0, col = idx1*load_vec
+
+    def _store_tile(
+        self, b: IRBuilder, smem_dst: Value, row: Value, col: Value, v: Value
+    ) -> None:
+        """Write a loaded chunk to LDS.
+
+        ``"col"`` mode: one ``smem_store_vN`` of the ``load_vec``-wide value
+        at ``[row, col]`` (byte-identical to the historical path).
+        ``"row"`` mode with ``load_vec > 1``: scatter the ``load_vec``
+        free-axis elements to ``[row+i, col]`` — the transpose-on-store that
+        lands the free-axis vector into the row-major ``(M/N, K)`` LDS tile
+        the consumer already reads K-contiguously.
+        """
+        if self.vector_axis == "row" and self.load_vec > 1:
+            for i in range(self.load_vec):
+                r = b.add(row, b.const_i32(i)) if i else row
+                b.smem_store_vN(smem_dst, [r, col], b.vec_extract(v, i), 1)
+        else:
+            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
 
     def load_global(
         self,
@@ -206,7 +294,9 @@ class CoalescedTileLoader:
 
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
-        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
         c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
@@ -214,9 +304,9 @@ class CoalescedTileLoader:
         staged = []
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_cols_per_vec)
-            col_v = b.mod(vec_idx, c_cols_per_vec)
-            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
 
@@ -249,10 +339,11 @@ class CoalescedTileLoader:
         """Emit the LDS writes for values previously loaded by :meth:`load_global`.
 
         ``staged`` must be the list returned by a prior :meth:`load_global` call
-        on the same loader instance. Emits ``smem_store_vN`` for each entry.
+        on the same loader instance. Emits ``smem_store_vN`` for each entry
+        (a transpose-on-store scatter in ``vector_axis="row"`` mode).
         """
         for row, col, v in staged:
-            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
 
     def load(
         self,
@@ -288,16 +379,18 @@ class CoalescedTileLoader:
 
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
-        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
         c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
 
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_cols_per_vec)
-            col_v = b.mod(vec_idx, c_cols_per_vec)
-            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
 
@@ -312,14 +405,14 @@ class CoalescedTileLoader:
                     b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
-                    b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+                    self._store_tile(b, smem_dst, row, col, v)
             else:
                 if self.load_vec == 1:
                     v = b.global_load(ptr, off_elems, dtype)
                     b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
-                    b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+                    self._store_tile(b, smem_dst, row, col, v)
 
     def fetch(
         self,
@@ -352,7 +445,9 @@ class CoalescedTileLoader:
 
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
-        c_cols_per_vec = b.const_i32(self.cols_per_vec)
+        c_span = b.const_i32(
+            self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
+        )
         c_elem_bytes = b.const_i32(elem_bytes)
         c0 = b.const_i32(0)
         c_oob = b.const_i32(self.oob_sentinel)
@@ -362,9 +457,9 @@ class CoalescedTileLoader:
         fetched = []
         for e in range(self.vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_cols_per_vec)
-            col_v = b.mod(vec_idx, c_cols_per_vec)
-            col = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
+            row, col = self._decode_row_col(
+                b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
+            )
 
             off_elems, valid = descriptor(b, row, col)
             off_bytes = b.mul(off_elems, c_elem_bytes)
@@ -386,7 +481,7 @@ class CoalescedTileLoader:
     ) -> None:
         """Store a register tile (returned by :meth:`fetch`) into LDS."""
         for row, col, v in fetched:
-            b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+            self._store_tile(b, smem_dst, row, col, v)
 
 
 # ---------------------------------------------------------------------
@@ -453,6 +548,14 @@ class AsyncTileLoader:
     elem_dtype: Type = F16
     dwords: int = 1  # 1, 3, or 4
     chunks_total: int = 0  # tile_rows * tile_cols / elems_per_chunk
+    # Length of the longest run of tile columns that is contiguous in global
+    # memory. ``None`` means "the col axis is dense across the whole tile" (the
+    # historical assumption). When the col axis is a composite index whose outer
+    # part strides -- e.g. wgrad's N_wg = (y, x, c), where only ``c`` is
+    # stride-1 -- a chunk that crosses one of those boundaries would fetch the
+    # wrong elements, silently. Setting this makes ``choose_dwords`` pick a
+    # width that always stays inside one run.
+    contig_cols: Optional[int] = None
     chunks_per_pass: int = 0  # = block_size
     passes: int = 0  # ceil(chunks_total / block_size)
 
@@ -465,6 +568,7 @@ class AsyncTileLoader:
         block_size: int,
         elem_bytes: int = 2,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> int:
         """Pick the widest `dwords` value that divides the tile evenly.
 
@@ -481,8 +585,20 @@ class AsyncTileLoader:
             elems = (d * 4) // elem_bytes
             if tile_cols % elems != 0:
                 continue
+            # A chunk must lie entirely inside one contiguous run of columns.
+            if contig_cols is not None and (
+                elems > contig_cols or contig_cols % elems != 0
+            ):
+                continue
             chunks = (tile_rows * tile_cols) // elems
             if chunks < block_size:
+                continue
+            # Every pass fires block_size chunks. Chunks past chunks_total still
+            # issue (with the OOB sentinel, which the hardware zero-fills), so a
+            # partial last pass writes past this tile's allocation and into the
+            # next smem_alloc. Require whole passes; a narrower width is tried
+            # next and usually succeeds.
+            if chunks % block_size != 0:
                 continue
             return d
         raise ValueError(
@@ -500,6 +616,7 @@ class AsyncTileLoader:
         wave_size: int = 64,
         elem_dtype: Type = F16,
         max_dwords: int = 4,
+        contig_cols: Optional[int] = None,
     ) -> "AsyncTileLoader":
         eb = _ELEM_BYTES.get(elem_dtype.name)
         if eb is None:
@@ -512,6 +629,7 @@ class AsyncTileLoader:
             block_size=block_size,
             elem_bytes=eb,
             max_dwords=max_dwords,
+            contig_cols=contig_cols,
         )
         elems = (d * 4) // eb
         chunks = (tile_rows * tile_cols) // elems
@@ -522,6 +640,7 @@ class AsyncTileLoader:
             block_size=block_size,
             wave_size=wave_size,
             elem_dtype=elem_dtype,
+            contig_cols=contig_cols,
             dwords=d,
             chunks_total=chunks,
             chunks_per_pass=block_size,
@@ -542,8 +661,25 @@ class AsyncTileLoader:
         return self.dwords * 4
 
     @property
-    def cols_per_chunk(self) -> int:
-        return self.elems_per_chunk
+    def chunks_per_row(self) -> int:
+        """Chunks needed to cover one tile row of ``tile_cols`` elements.
+
+        This is the divisor that decodes a flat chunk index into a tile
+        coordinate in :meth:`AsyncTileLoaderSlot.issue`::
+
+            row = chunk_idx // chunks_per_row
+            col = (chunk_idx % chunks_per_row) * elems_per_chunk
+
+        It is *not* ``elems_per_chunk``. The two coincide only when
+        ``tile_cols == elems_per_chunk ** 2`` (e.g. tile_cols=64 for a 2-byte
+        dtype at dwords=4), which is why 64 used to be the only tile width the
+        async path loaded correctly -- every other width silently decoded to
+        the wrong row and to a column past the end of the tile.
+
+        ``choose_dwords`` guarantees ``tile_cols % elems_per_chunk == 0``, so
+        this division is exact.
+        """
+        return self.tile_cols // self.elems_per_chunk
 
     @property
     def wave_bytes(self) -> int:
@@ -621,7 +757,7 @@ class AsyncTileLoaderSlot:
         c_elem_bytes = b.const_i32(elem_bytes)
         c_oob = b.const_i32(oob_sentinel)
         c0 = b.const_i32(0)
-        c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
+        c_chunks_per_row = b.const_i32(L.chunks_per_row)
 
         for p in range(L.passes):
             # Per-pass LDS base = per_wave_lds_base + p * pass_bytes.
@@ -639,8 +775,8 @@ class AsyncTileLoaderSlot:
 
             # chunk_idx = tid + p * block_size
             chunk_idx = b.add(tid, b.const_i32(p * L.block_size))
-            row = b.div(chunk_idx, c_cols_per_chunk)
-            col_v = b.mod(chunk_idx, c_cols_per_chunk)
+            row = b.div(chunk_idx, c_chunks_per_row)
+            col_v = b.mod(chunk_idx, c_chunks_per_row)
             col = b.mul(col_v, b.const_i32(L.elems_per_chunk))
 
             off_elems, valid = descriptor(b, row, col)

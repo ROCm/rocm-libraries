@@ -27,11 +27,10 @@ from pprint import pformat
 from pathlib import Path
 from typing import Dict, Tuple
 
-from Tensile.Common import print1, print2, printWarning, IsaVersion, IsaInfo
+from Tensile.Common import print1, print2, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
 from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
-from Tensile import CUSTOM_KERNEL_PATH
 
 
 def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:
@@ -49,17 +48,8 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
     if not isCustomKernelConfig(sol):
         return sol, False
 
-    ck = sol.get("CustomKernel")
-    if isinstance(ck, dict) and ck.get("name"):
-        name = ck["name"]
-    else:
-        name = sol.get("CustomKernelName", "")
-    dir = CUSTOM_KERNEL_PATH
-    try:
-        config = getCustomKernelConfig(name, {}, dir)
-    except (RuntimeError, KeyError, TypeError) as e:
-        printWarning(f"Skipping custom kernel '{name}': missing or invalid custom.config ({e})")
-        return sol, False
+    name = sol["CustomKernelName"]
+    config = getCustomKernelConfig(name, {})
     sol.update(config)
 
     mi = sol["MatrixInstruction"]
@@ -88,12 +78,6 @@ def hasCustomKernel(file: Path) -> bool:
     """
     Check if the given logic file contains at least one custom kernel.
 
-    Matches both the legacy flat ``CustomKernelName: <name>`` key and the
-    ``CustomKernel:`` mapping key (holding a ``name``/``args``/``macrotile``/...
-    block) that replaced it -- handleCustomKernel() still accepts either shape,
-    so this pre-filter must recognize both or it silently drops solutions from
-    logic files written in the older style.
-
     Args:
         file: Path to a logic file.
 
@@ -103,7 +87,7 @@ def hasCustomKernel(file: Path) -> bool:
     with open(file, "r") as f:
         for line in f:
             l = line.strip()
-            if l.startswith(("CustomKernelName:", "CustomKernel:")) and not l.endswith("''"):
+            if l.startswith("CustomKernelName:") and not l.endswith("''"):
                 return True
     return False
 

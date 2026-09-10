@@ -5,7 +5,7 @@
 #include "MiopenContainer.hpp"
 
 hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
-    HipdnnMiopenHandle::getEngineManager()
+    HipdnnMiopenHandle::getEngineManager() const
 {
     return container->getEngineManager();
 }
