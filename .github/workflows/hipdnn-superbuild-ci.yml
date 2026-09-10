@@ -31,8 +31,6 @@ jobs:
       run:
         shell: bash
     env:
-      VENV_PATH: B:\rocm_wheels
-      THIRD_PARTY_DEPS_DIR: B:\third-party-deps
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
       # than a TheRock family name. A lane that needs a family name will need its own variable.
@@ -79,6 +77,13 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      - name: Set environment
+        run: |
+          V='B:\rocm_wheels'
+          echo "VENV_PATH=$V" >> "$GITHUB_ENV"
+          echo "VENV_PYTHON=$V/Scripts/python.exe" >> "$GITHUB_ENV"
+          echo 'THIRD_PARTY_DEPS_DIR=B:\third-party-deps' >> "$GITHUB_ENV"
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -116,21 +121,20 @@ jobs:
       - name: Check ROCm wheel freshness
         shell: pwsh
         run: |
-          & "$env:VENV_PATH\Scripts\python.exe" .github/scripts/check_wheel_freshness.py --max-age-days 14
+          & $env:VENV_PYTHON .github/scripts/check_wheel_freshness.py --max-age-days 14
           if ($LASTEXITCODE -ne 0) { throw "ROCm nightly wheels are stale" }
 
       - name: Download third-party dependency sources
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python projects/hipdnn/python/download_third_party_deps.py `
+          & $env:VENV_PYTHON projects/hipdnn/python/download_third_party_deps.py `
             --deps-dir $env:THIRD_PARTY_DEPS_DIR
           if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
 
       - name: Install rocm_kpack
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $python = $env:VENV_PYTHON
           # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
           # commit lives in the rocm-systems monorepo, so cloning it whole (or
           # letting pip do it via a git+ URL) would pull far more than the packer.
@@ -168,7 +172,7 @@ jobs:
       # setup-python tool-cache interpreter instead.
       - name: Install pytest
         run: |
-          "$VENV_PATH/Scripts/python.exe" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
+          "$VENV_PYTHON" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
 
       - name: Configure superbuild
         run: |
@@ -186,8 +190,8 @@ jobs:
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
-            -DPython_EXECUTABLE="$VENV_PATH/Scripts/python.exe" \
-            -DPython3_EXECUTABLE="$VENV_PATH/Scripts/python.exe"
+            -DPython_EXECUTABLE="$VENV_PYTHON" \
+            -DPython3_EXECUTABLE="$VENV_PYTHON"
 
       - name: Build
         run: cmake --build build
@@ -226,34 +230,30 @@ jobs:
       - name: Install Python build dependencies
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
+          & $env:VENV_PYTHON -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
           if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
 
       - name: Pack frontend wheel
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
+          & $env:VENV_PYTHON projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
             --build-dir build `
             --wheel-dir (Join-Path "build" "wheel_package")
 
       - name: Install frontend wheel
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           $wheel = Get-ChildItem (Join-Path "build" "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
           if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
-          & $python -m pip install --force-reinstall $wheel.FullName
+          & $env:VENV_PYTHON -m pip install --force-reinstall $wheel.FullName
 
       - name: Run frontend wheel tests
         shell: pwsh
         run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           $env:ROCM_PATH = $env:ROCM_SDK_PATH
           $env:HIP_PATH = $env:ROCM_SDK_PATH
           $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
-          & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
+          & $env:VENV_PYTHON -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
@@ -294,7 +294,9 @@ jobs:
 
       - name: Set environment
         run: |
-          echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
+          V="${{ runner.temp }}/rocm_wheels"
+          echo "VENV_PATH=$V" >> "$GITHUB_ENV"
+          echo "VENV_PYTHON=$V/bin/python" >> "$GITHUB_ENV"
           echo "THIRD_PARTY_DEPS_DIR=${{ runner.temp }}/third-party-deps" >> "$GITHUB_ENV"
 
       - name: Set up Python
@@ -323,7 +325,7 @@ jobs:
           echo "Initializing ROCm SDK"
           rocm-sdk init
 
-          SITE_PACKAGES=$("$VENV_PATH/bin/python" -c "import site; print(site.getsitepackages()[0])")
+          SITE_PACKAGES=$("$VENV_PYTHON" -c "import site; print(site.getsitepackages()[0])")
           ROCM_SDK_PATH="$SITE_PACKAGES/_rocm_sdk_devel"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
@@ -350,12 +352,12 @@ jobs:
 
       - name: Check ROCm wheel freshness
         run: |
-          "$VENV_PATH/bin/python" .github/scripts/check_wheel_freshness.py --max-age-days 14
+          "$VENV_PYTHON" .github/scripts/check_wheel_freshness.py --max-age-days 14
 
       - name: Download third-party dependency sources
         run: |
           set -euo pipefail
-          "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
+          "$VENV_PYTHON" projects/hipdnn/python/download_third_party_deps.py \
             --deps-dir "$THIRD_PARTY_DEPS_DIR"
 
       - name: Install rocm_kpack
@@ -378,9 +380,9 @@ jobs:
           test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
           # Installing the directory rebuilds and reinstalls every time, so a
           # warm venv cannot keep an older build of this same 0.1.0 version.
-          "$VENV_PATH/bin/pip" install "$KPACK_SRC/shared/kpack"
+          "$VENV_PYTHON" -m pip install "$KPACK_SRC/shared/kpack"
           # Derived from the installed module, which also proves it imports.
-          KPACK_PYTHON_DIR=$("$VENV_PATH/bin/python" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
+          KPACK_PYTHON_DIR=$("$VENV_PYTHON" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
           test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
@@ -391,7 +393,7 @@ jobs:
       # setup-python tool-cache interpreter instead.
       - name: Install pytest
         run: |
-          "$VENV_PATH/bin/python" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
+          "$VENV_PYTHON" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
 
       - name: Configure superbuild
         run: |
@@ -412,8 +414,8 @@ jobs:
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
-            -DPython_EXECUTABLE="$VENV_PATH/bin/python" \
-            -DPython3_EXECUTABLE="$VENV_PATH/bin/python"
+            -DPython_EXECUTABLE="$VENV_PYTHON" \
+            -DPython3_EXECUTABLE="$VENV_PYTHON"
 
       - name: Build
         run: cmake --build build
@@ -447,11 +449,11 @@ jobs:
       - name: Install Python build dependencies
         run: |
           set -euo pipefail
-          "$VENV_PATH/bin/python" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
+          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
 
       - name: Pack frontend wheel
         run: |
-          "$VENV_PATH/bin/python" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+          "$VENV_PYTHON" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
             --build-dir build \
             --wheel-dir build/wheel_package
 
@@ -459,7 +461,7 @@ jobs:
         run: |
           set -euo pipefail
           wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl)
-          "$VENV_PATH/bin/python" -m pip install --force-reinstall "$wheel"
+          "$VENV_PYTHON" -m pip install --force-reinstall "$wheel"
 
       - name: Run frontend wheel tests
         run: |
@@ -467,7 +469,7 @@ jobs:
           # LD_LIBRARY_PATH is how the wheel's extension finds libhipdnn_backend.
           ROCM_PATH="$ROCM_SDK_PATH" \
             LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
-            "$VENV_PATH/bin/python" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
+            "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary
