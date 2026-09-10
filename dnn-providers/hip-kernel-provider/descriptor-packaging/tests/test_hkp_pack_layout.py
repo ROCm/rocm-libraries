@@ -1237,6 +1237,7 @@ _UNPRODUCED_SOURCES = {
         "toc_key": "pointwise_add",
         "symbol": "PointwiseAdd",
         "sha256": "0" * 64,
+        "signature": [{"kind": "global_buffer", "size": 8, "offset": 0}],
     },
 }
 
