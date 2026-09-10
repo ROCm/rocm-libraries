@@ -51,6 +51,10 @@ private:
 template <typename DType>
 struct TypedMatrixTransformIO : public MatrixTransformIO
 {
+    // The extension API consumes device pointers, while host-numerics owns only
+    // host storage. Allocate the three device buffers here, generate A and B as
+    // typed host Tensors using their actual layouts, and copy their encoded
+    // storage to the device. C is output-only and remains uninitialized.
     TypedMatrixTransformIO(const roc::host_numerics::Layout& aLayout,
                            const roc::host_numerics::Layout& bLayout,
                            const roc::host_numerics::Layout& outputLayout,
@@ -69,14 +73,16 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
         allocate(&this->a, aBytes);
         allocate(&this->b, bBytes);
         allocate(&this->c, cBytes);
-        init(this->a,
-             aLayout,
-             initMethod,
-             hipblaslt::host_numerics::initialization::OperandSequence::MatrixA);
-        init(this->b,
-             bLayout,
-             initMethod,
-             hipblaslt::host_numerics::initialization::OperandSequence::MatrixB);
+        initializeDeviceInput(
+            this->a,
+            aLayout,
+            initMethod,
+            hipblaslt::host_numerics::initialization::OperandSequence::MatrixA);
+        initializeDeviceInput(
+            this->b,
+            bLayout,
+            initMethod,
+            hipblaslt::host_numerics::initialization::OperandSequence::MatrixB);
     }
 
     ~TypedMatrixTransformIO() override
@@ -98,18 +104,19 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
     }
 
 private:
-    void init(DType*                                                    buf,
-              const roc::host_numerics::Layout&                         layout,
-              hipblaslt_initialization                                  initMethod,
-              hipblaslt::host_numerics::initialization::OperandSequence sequence)
+    void initializeDeviceInput(
+        DType*                                                    buffer,
+        const roc::host_numerics::Layout&                         layout,
+        hipblaslt_initialization                                  initialization,
+        hipblaslt::host_numerics::initialization::OperandSequence sequence)
     {
         const auto     type = hipblaslt::host_numerics::scalarType<DType>();
         const uint64_t seed = hipblaslt::host_numerics::initialization::seedForSequence(
             hipblaslt::host_numerics::defaultInitializationSeed, sequence);
         const auto recipe = hipblaslt::host_numerics::initializationRecipe(
-            type, initMethod, seed, hipblaslt::host_numerics::TrigonometricComponent::Cosine);
+            type, initialization, seed, hipblaslt::host_numerics::TrigonometricComponent::Cosine);
         const auto       generated = roc::host_numerics::generate(type, layout, recipe);
-        const hipError_t error     = hipMemcpy(buf,
+        const hipError_t error     = hipMemcpy(buffer,
                                            generated.rawEncodedBackingStorage().data(),
                                            generated.rawEncodedBackingStorage().size(),
                                            hipMemcpyHostToDevice);

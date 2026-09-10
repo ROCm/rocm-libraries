@@ -629,6 +629,31 @@ TEST(HostNumericsDataInitializationBridge, RandomHelpersUseComponentRecipes)
                    nanRecipe(ScalarType::Float32, ComplexGenerationPolicy::RealOnly));
     for(size_t index = 0; index < nanValues.elementCount(); ++index)
         EXPECT_TRUE(std::isnan(nanValues.loadAs<float>({index})));
+
+    constexpr std::array integerTypes{
+        ScalarType::Boolean,
+        ScalarType::UInt8,
+        ScalarType::Int8,
+        ScalarType::UInt16,
+        ScalarType::Int16,
+        ScalarType::UInt32,
+        ScalarType::Int32,
+        ScalarType::UInt64,
+        ScalarType::Int64,
+        ScalarType::Int4,
+    };
+    for(const ScalarType type : integerTypes)
+    {
+        const Tensor zeroOrOne = generate(
+            type,
+            Shape{64},
+            uniformZeroOneRecipe(type, ComplexGenerationPolicy::RealOnly, 17));
+        for(size_t index = 0; index < zeroOrOne.elementCount(); ++index)
+        {
+            const int64_t value = zeroOrOne.loadAs<int64_t>({index});
+            EXPECT_TRUE(value == 0 || value == 1) << scalarTypeName(type);
+        }
+    }
 }
 
 TEST(HostNumericsDataInitializationBridge, RuntimeDispatchSupportsEveryFp8Encoding)

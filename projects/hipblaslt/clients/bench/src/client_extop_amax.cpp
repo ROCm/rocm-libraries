@@ -116,20 +116,11 @@ int parseArgs(int                       argc,
     return EXIT_SUCCESS;
 }
 
-template <typename T>
-void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
+void reportComparison(const char*                        title,
+                      const roc::host_numerics::Tensor& observed,
+                      const roc::host_numerics::Tensor& expected)
 {
-    const auto report = roc::host_numerics::compare(
-        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-            cpuOutput.data(),
-            cpuOutput.size(),
-            roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                roc::host_numerics::Shape{cpuOutput.size()})),
-        hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-            refOutput.data(),
-            refOutput.size(),
-            roc::host_numerics::Layout::contiguousLastDimensionFastest(
-                roc::host_numerics::Shape{refOutput.size()})));
+    const auto report = roc::host_numerics::compare(observed, expected);
     std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
@@ -146,16 +137,17 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     auto hipErr = hipMalloc(&gpuOutput, toNumBytes);
     hipErr      = hipMalloc(&gpuInput, m * n * tiNumBytes);
 
-    std::vector<To> cpuOutput(1, 0.f);
-    std::vector<To> refOutput(1, 0.f);
-    using namespace roc::host_numerics;
-    const Tensor cpuInput = generate(hipblaslt::host_numerics::scalarType<Ti>(),
-                                     Shape{numElements},
-                                     hipblaslt::host_numerics::initializationRecipe(
-                                         hipblaslt::host_numerics::scalarType<Ti>(),
-                                         init,
-                                         hipblaslt::host_numerics::defaultInitializationSeed,
-                                         hipblaslt::host_numerics::TrigonometricComponent::Cosine));
+    const auto scalarType = hipblaslt::host_numerics::scalarType<To>();
+    roc::host_numerics::Tensor observedOutput(scalarType, roc::host_numerics::Shape{});
+    roc::host_numerics::Tensor referenceOutput(scalarType, roc::host_numerics::Shape{});
+    const roc::host_numerics::Tensor cpuInput
+        = roc::host_numerics::generate(hipblaslt::host_numerics::scalarType<Ti>(),
+                                       roc::host_numerics::Shape{numElements},
+                                       hipblaslt::host_numerics::initializationRecipe(
+                                           hipblaslt::host_numerics::scalarType<Ti>(),
+                                           init,
+                                           hipblaslt::host_numerics::defaultInitializationSeed,
+                                           hipblaslt::host_numerics::TrigonometricComponent::Cosine));
 
     hipErr = hipMemcpyHtoD(gpuInput,
                            cpuInput.rawEncodedBackingStorage().data(),
@@ -166,15 +158,12 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     //warmup
     auto hipblasltErr = hipblasltExtAMax(type, dtype, gpuOutput, gpuInput, m, n, stream);
 
-    hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
+    hipErr = hipMemcpyDtoH(
+        observedOutput.rawEncodedBackingStorage().data(), gpuOutput, toNumBytes);
 
-    Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
-        refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
-    referenceMaximumAbsoluteInto(cpuInput, referenceOutput, ScalarType::Float32);
-    hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
-        refOutput.data(), refOutput.size(), referenceOutput);
-
-    compare("Output", cpuOutput, refOutput);
+    roc::host_numerics::referenceMaximumAbsoluteInto(
+        cpuInput, referenceOutput, roc::host_numerics::ScalarType::Float32);
+    reportComparison("Output", observedOutput, referenceOutput);
 
     hipEvent_t beg, end;
     hipErr      = hipEventCreate(&beg);

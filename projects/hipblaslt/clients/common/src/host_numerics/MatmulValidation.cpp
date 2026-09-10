@@ -138,11 +138,11 @@ namespace hipblaslt::host_numerics
         }
     } // namespace
 
-    bool validateMatmulOutputs(const MatmulValidationOptions&        options,
-                               std::span<const MatmulValidationCase> cases,
-                               MatmulValidationMetrics               metrics)
+    MatmulValidationSummary validateMatmulOutputs(const MatmulValidationOptions&        options,
+                                                  std::span<const MatmulValidationCase> cases)
     {
-        size_t     failedChecks = 0;
+        MatmulValidationSummary summary;
+        size_t                  failedChecks = 0;
         const auto record = [&](bool passed) { failedChecks += static_cast<size_t>(!passed); };
         double ulpSum           = 0.0;
         size_t ulpCount         = 0;
@@ -181,7 +181,7 @@ namespace hipblaslt::host_numerics
                 for(const auto& report : outputReports)
                 {
                     const double normError = std::abs(report.relativeFrobeniusError);
-                    metrics.relativeFrobeniusError += normError;
+                    summary.relativeFrobeniusError += normError;
                     if(options.assertNorm)
                         record(norm_check(normError,
                                           validationCase.outputs.front().first.type(),
@@ -217,8 +217,8 @@ namespace hipblaslt::host_numerics
             {
                 for(const auto& report : outputReports)
                 {
-                    metrics.maximumUlp
-                        = std::max(metrics.maximumUlp, report.unitsInLastPlace.maximumUlp);
+                    summary.maximumUlp
+                        = std::max(summary.maximumUlp, report.unitsInLastPlace.maximumUlp);
                     ulpSum += report.unitsInLastPlace.sumUlp;
                     ulpCount += report.unitsInLastPlace.ulpCompared;
                 }
@@ -251,7 +251,7 @@ namespace hipblaslt::host_numerics
                                                                   false,
                                                                   false);
                           const double normError = std::abs(report.relativeFrobeniusError);
-                          metrics.relativeFrobeniusError += normError;
+                          summary.relativeFrobeniusError += normError;
                           if(options.assertNorm)
                               record(output->useComputeNormPolicy
                                          ? norm_check(normError,
@@ -270,11 +270,12 @@ namespace hipblaslt::host_numerics
 
         if(options.searchAllClose && allCloseCompared)
         {
-            metrics.absoluteTolerance = allCloseFailed ? 1.0 : requiredAbsolute;
-            metrics.relativeTolerance = allCloseFailed ? 1.0 : requiredRelative;
+            summary.absoluteTolerance = allCloseFailed ? 1.0 : requiredAbsolute;
+            summary.relativeTolerance = allCloseFailed ? 1.0 : requiredRelative;
         }
         if(options.computeUlp && ulpCount != 0)
-            metrics.averageUlp = ulpSum / ulpCount;
-        return failedChecks == 0;
+            summary.averageUlp = ulpSum / ulpCount;
+        summary.passed = failedChecks == 0;
+        return summary;
     }
 } // namespace hipblaslt::host_numerics

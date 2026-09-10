@@ -28,12 +28,9 @@ namespace
                                           roc::host_numerics::Tensor(observed[batch]));
         }
 
-        double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
-        const bool passed
-            = validateMatmulOutputs({.compareNorm = true, .assertNorm = assertNorm},
-                                    std::span(&testCase, 1),
-                                    {error, absolute, relative, maximumUlp, averageUlp});
-        return {error, passed};
+        const MatmulValidationSummary summary = validateMatmulOutputs(
+            {.compareNorm = true, .assertNorm = assertNorm}, std::span(&testCase, 1));
+        return {summary.relativeFrobeniusError, summary.passed};
     }
 
     hipblaslt::host_numerics::MatmulValidationCase::TensorPair scalarComparison(float expected,
@@ -47,10 +44,9 @@ namespace
     {
         using namespace hipblaslt::host_numerics;
 
-        double error = 0.0, absolute = 0.0, relative = 0.0, maximumUlp = 0.0, averageUlp = 0.0;
-        validateMatmulOutputs(
-            {.searchAllClose = true}, cases, {error, absolute, relative, maximumUlp, averageUlp});
-        return {absolute, relative};
+        const MatmulValidationSummary summary
+            = validateMatmulOutputs({.searchAllClose = true}, cases);
+        return {summary.absoluteTolerance, summary.relativeTolerance};
     }
 }
 
@@ -108,24 +104,19 @@ TEST(HostNumericsMatmulValidation, EmptyOutputsAreNoOps)
     testCase.outputs.emplace_back(Tensor(ScalarType::Float32, Shape{0, 3, 2}),
                                   Tensor(ScalarType::Float32, Shape{0, 3, 2}));
 
-    double relativeFrobenius = 0.0;
-    double absolute          = 0.0;
-    double relative          = 0.0;
-    double maximumUlp        = 0.0;
-    double averageUlp        = 0.0;
-    EXPECT_TRUE(
-        validateMatmulOutputs({.compareAllClose = true,
-                               .compareNorm     = true,
-                               .searchAllClose  = true,
-                               .computeUlp      = true,
-                               .assertNorm      = true},
-                              std::span(&testCase, 1),
-                              {relativeFrobenius, absolute, relative, maximumUlp, averageUlp}));
-    EXPECT_EQ(relativeFrobenius, 0.0);
-    EXPECT_EQ(absolute, 0.0);
-    EXPECT_EQ(relative, 0.0);
-    EXPECT_EQ(maximumUlp, 0.0);
-    EXPECT_EQ(averageUlp, 0.0);
+    const MatmulValidationSummary summary
+        = validateMatmulOutputs({.compareAllClose = true,
+                                 .compareNorm     = true,
+                                 .searchAllClose  = true,
+                                 .computeUlp      = true,
+                                 .assertNorm      = true},
+                                std::span(&testCase, 1));
+    EXPECT_TRUE(summary.passed);
+    EXPECT_EQ(summary.relativeFrobeniusError, 0.0);
+    EXPECT_EQ(summary.absoluteTolerance, 0.0);
+    EXPECT_EQ(summary.relativeTolerance, 0.0);
+    EXPECT_EQ(summary.maximumUlp, 0.0);
+    EXPECT_EQ(summary.averageUlp, 0.0);
 }
 
 TEST(MatmulAlgoIndex, MixedValidityContract)
