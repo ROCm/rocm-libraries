@@ -9,9 +9,13 @@ add_executable(hipdnn_corpus_gen_tests
 
 target_compile_options(hipdnn_corpus_gen_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
+# nlohmann is header-only and reaches this target as an include directory through
+# hipdnn_flatbuffers_sdk (hipdnn_add_dependency_includes), not as a link target. Naming
+# nlohmann_json::nlohmann_json here fails configure outright: find_package's IMPORTED
+# targets are directory-scoped, so the one flatbuffers_sdk creates does not exist here.
 target_link_libraries(hipdnn_corpus_gen_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_corpus_gen
-    hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
+    hipdnn_plugin_sdk)
 
 # The shipped operation declarations are checked as artifacts, not as inline copies, so the
 # files themselves cannot rot unnoticed.
