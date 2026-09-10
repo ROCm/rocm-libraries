@@ -144,6 +144,98 @@ namespace TensileLite
                 return mismatches;
             }
 
+            struct A2ACounterLayout
+            {
+                size_t F            = 0;
+                size_t tokenBlocks  = 0;
+                size_t batches      = 0;
+                size_t flagBytes    = 0;
+                size_t payloadBytes = 0;
+                size_t allocBytes   = 0;
+            };
+
+            // Sizes the mode-1 counter region, then checks that derivation against
+            // the grid solve() reports. probeInputs is read for pointer values the
+            // invocation records; nothing is launched.
+            bool a2aCounterLayout(ContractionSolution&          solution,
+                                  Hardware const&               hardware,
+                                  ContractionProblemGemm const& problem,
+                                  ContractionInputs const&      probeInputs,
+                                  size_t                        M,
+                                  size_t                        N,
+                                  int                           W,
+                                  char const*                   tag,
+                                  A2ACounterLayout&             out)
+            {
+                auto const* amd = dynamic_cast<AMDGPU const*>(&hardware);
+                if(!amd || amd->computeUnitCount == 0)
+                {
+                    std::cerr << tag << " ERROR: no CU count to size the counter region"
+                              << std::endl;
+                    return false;
+                }
+                if(problem.transposeC01())
+                {
+                    std::cerr << tag
+                              << " ERROR: transposeC01 swaps the two free sizes before the tile "
+                                 "divide; this arm's counter layout assumes it is off"
+                              << std::endl;
+                    return false;
+                }
+                const size_t numCu = amd->computeUnitCount;
+                const size_t mt0   = solution.sizeMapping.macroTile.x;
+                const size_t mt1   = solution.sizeMapping.macroTile.y;
+
+                // a2aBatchSpan computes iB as (b * F) / numCu over b in [0, tokenBlocks).
+                out.F            = (M + mt0 - 1) / mt0;
+                out.tokenBlocks  = (N + mt1 - 1) / mt1;
+                out.batches      = (out.tokenBlocks - 1) * out.F / numCu + 1;
+                out.flagBytes    = fusedA2AMode1FlagBytes((uint32_t)W, (uint32_t)out.tokenBlocks);
+                out.payloadBytes = fusedA2AMode1PayloadBytes(
+                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches);
+                out.allocBytes = fusedA2AMode1AllocBytes(
+                    (uint32_t)W, (uint32_t)out.tokenBlocks, (uint32_t)out.batches);
+
+                // ContractionSolution folds y and z into x unless clusters are on.
+                // The comparison is on the work-group total, not the per-axis counts.
+                auto         probe    = solution.solve(problem, probeInputs, hardware, nullptr, 0, nullptr);
+                const size_t launched = probe.size() != 1
+                                            ? 0
+                                            : (size_t)probe[0].numWorkGroups.x
+                                                  * probe[0].numWorkGroups.y
+                                                  * probe[0].numWorkGroups.z;
+                if(launched != out.F * out.tokenBlocks)
+                {
+                    std::cerr << tag << " ERROR: " << probe.size() << " kernel(s) launching "
+                              << launched << " work-groups; the counter region was sized for 1 "
+                              << "kernel of " << out.F << "*" << out.tokenBlocks << "="
+                              << out.F * out.tokenBlocks << std::endl;
+                    return false;
+                }
+                std::cout << tag << " tokenBlocks=" << out.tokenBlocks << " F=" << out.F
+                          << " numCu=" << numCu << " batches=" << out.batches
+                          << " flagBytes=" << out.flagBytes << " counterAlloc=" << out.allocBytes
+                          << std::endl;
+                return true;
+            }
+
+            // Zeroes the whole payload and arms the guard tail past it.
+            hipError_t a2aAllocCounter(DeviceBuffer& buf, A2ACounterLayout const& layout)
+            {
+                hipError_t err = buf.allocateFineGrained(layout.allocBytes);
+                if(err != hipSuccess)
+                    return err;
+                err = hipMemset(buf.ptr, 0, layout.payloadBytes);
+                if(err != hipSuccess)
+                    return err;
+                std::vector<uint32_t> guard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
+                fusedA2ACounterSentinelFill(guard.data());
+                return hipMemcpy((char*)buf.ptr + layout.payloadBytes,
+                                 guard.data(),
+                                 FUSED_A2A_COUNTER_SENTINEL_BYTES,
+                                 hipMemcpyHostToDevice);
+            }
+
             int runA2APrefillForWorld(hip::SolutionAdapter&                     adapter,
                                       std::shared_ptr<SolutionIterator>         solutionIterator,
                                       std::shared_ptr<Hardware>                 hardware,
@@ -160,6 +252,17 @@ namespace TensileLite
 
                 std::cout << "[a2a-prefill] W=" << W << " M=" << M << " N=" << N << " K=" << K
                           << " k_local=" << kLoc << std::endl;
+
+                // At W>=2 the mode-1 prologue reaches the peer queue pointers, which
+                // this arm leaves null. The loopback arm is the W>=2 path.
+                if(W >= 2)
+                {
+                    std::cout << "[a2a-prefill] W=" << W
+                              << " skipped: this arm has no peer queues; run it with "
+                                 "--a2a-loopback for W>=2"
+                              << std::endl;
+                    return 0;
+                }
 
                 ContractionProblemGemm problem = base;
                 problem.resetTensor(ContractionProblemGemm::TENSOR::B,
@@ -223,6 +326,15 @@ namespace TensileLite
                     std::cerr << "[a2a-prefill] ERROR: solution wants a workspace" << std::endl;
                     return 1;
                 }
+
+                // The election runs at every W and increments counter[iB].
+                A2ACounterLayout layout;
+                if(!a2aCounterLayout(
+                       *solution, *hardware, problem, inputs, M, N, W, "[a2a-prefill]", layout))
+                    return 1;
+                DeviceBuffer devCounter;
+                HIP_CHECK_EXC(a2aAllocCounter(devCounter, layout));
+                inputs.fusedA2ACounter = devCounter.ptr;
 
                 hipStream_t stream = nullptr;
                 HIP_CHECK_EXC(hipStreamCreate(&stream));
@@ -296,35 +408,6 @@ namespace TensileLite
                     return 1;
                 }
 
-                auto const* amd = dynamic_cast<AMDGPU const*>(hardware.get());
-                if(!amd || amd->computeUnitCount == 0)
-                {
-                    std::cerr << "[a2a-loopback] ERROR: no CU count to size the counter region"
-                              << std::endl;
-                    return 1;
-                }
-                const size_t numCu = amd->computeUnitCount;
-
-                // The kernel's iB spans [0, batches): a2aBatchSpan computes it as
-                // (b * F) / numCu over b in [0, tokenBlocks).
-                const size_t mt0         = solution->sizeMapping.macroTile.x;
-                const size_t mt1         = solution->sizeMapping.macroTile.y;
-                const size_t F           = (M + mt0 - 1) / mt0;
-                const size_t tokenBlocks = (N + mt1 - 1) / mt1;
-                const size_t batches     = (tokenBlocks - 1) * F / numCu + 1;
-
-                const size_t flagBytes
-                    = fusedA2AMode1FlagBytes((uint32_t)W, (uint32_t)tokenBlocks);
-                const size_t payloadBytes = fusedA2AMode1PayloadBytes(
-                    (uint32_t)W, (uint32_t)tokenBlocks, (uint32_t)batches);
-                const size_t allocBytes = fusedA2AMode1AllocBytes(
-                    (uint32_t)W, (uint32_t)tokenBlocks, (uint32_t)batches);
-
-                std::cout << "[a2a-loopback] tokenBlocks=" << tokenBlocks << " F=" << F
-                          << " numCu=" << numCu << " batches=" << batches
-                          << " flagBytes=" << flagBytes << " counterAlloc=" << allocBytes
-                          << std::endl;
-
                 const size_t aElems   = M * K;
                 const size_t bElems   = (size_t)W * N * kLoc;
                 const size_t cdElems  = M * N;
@@ -340,21 +423,11 @@ namespace TensileLite
                 HIP_CHECK_EXC(devC.allocate(cdElems * sizeof(BFloat16)));
                 HIP_CHECK_EXC(devD.allocate(cdElems * sizeof(BFloat16)));
                 HIP_CHECK_EXC(devX.allocate(bBytes));
-                HIP_CHECK_EXC(devCounter.allocateFineGrained(allocBytes));
 
                 HIP_CHECK_EXC(hipMemcpy(
                     devA.ptr, hostA.data(), aElems * sizeof(BFloat16), hipMemcpyHostToDevice));
                 HIP_CHECK_EXC(hipMemcpy(devX.ptr, hostB.data(), bBytes, hipMemcpyHostToDevice));
                 HIP_CHECK_EXC(hipMemset(devC.ptr, 0, cdElems * sizeof(BFloat16)));
-                // Once, over the whole payload. The per-launch reset below covers
-                // the flag region only.
-                HIP_CHECK_EXC(hipMemset(devCounter.ptr, 0, payloadBytes));
-                std::vector<uint32_t> guard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
-                fusedA2ACounterSentinelFill(guard.data());
-                HIP_CHECK_EXC(hipMemcpy((char*)devCounter.ptr + payloadBytes,
-                                        guard.data(),
-                                        FUSED_A2A_COUNTER_SENTINEL_BYTES,
-                                        hipMemcpyHostToDevice));
 
                 const uint32_t                          node = sdmaNodeIdForDevice(0);
                 std::vector<std::unique_ptr<SdmaQueue>> queues;
@@ -369,7 +442,6 @@ namespace TensileLite
                 inputs.d               = devD.ptr;
                 inputs.alpha           = 1.0f;
                 inputs.beta            = 0.0f;
-                inputs.fusedA2ACounter = devCounter.ptr;
                 inputs.fusedA2AMyRank  = 0;
                 inputs.fusedA2ADrain   = 0;
                 // peer[s].x rides in the mode-0 recvPtr slot. At myRank 0 the
@@ -386,24 +458,15 @@ namespace TensileLite
                          (void*)r.Queue_DoorBell_aql});
                 }
 
+                A2ACounterLayout layout;
+                if(!a2aCounterLayout(
+                       *solution, *hardware, problem, inputs, M, N, W, "[a2a-loopback]", layout))
+                    return 1;
+                HIP_CHECK_EXC(a2aAllocCounter(devCounter, layout));
+                inputs.fusedA2ACounter = devCounter.ptr;
+
                 hipStream_t stream = nullptr;
                 HIP_CHECK_EXC(hipStreamCreate(&stream));
-
-                {
-                    auto probe = solution->solve(problem, inputs, *hardware, nullptr, 0, stream);
-                    if(probe.size() != 1 || probe[0].numWorkGroups.x != F
-                       || probe[0].numWorkGroups.y != tokenBlocks)
-                    {
-                        std::cerr << "[a2a-loopback] ERROR: launch geometry is "
-                                  << probe.size() << " kernel(s) of "
-                                  << (probe.empty() ? 0 : probe[0].numWorkGroups.x) << "x"
-                                  << (probe.empty() ? 0 : probe[0].numWorkGroups.y)
-                                  << " work-groups, but the counter region was sized for 1 kernel of "
-                                  << F << "x" << tokenBlocks << std::endl;
-                        (void)hipStreamDestroy(stream);
-                        return 1;
-                    }
-                }
 
                 int rc = 0;
                 for(int it = 0; it < launches; it++)
@@ -419,7 +482,7 @@ namespace TensileLite
                     HIP_CHECK_EXC(hipMemsetAsync((char*)devCounter.ptr
                                                      + FUSED_A2A_MODE1_FLAG_OFFSET,
                                                  0,
-                                                 flagBytes,
+                                                 layout.flagBytes,
                                                  stream));
 
                     auto kernels = solution->solve(problem, inputs, *hardware, nullptr, 0, stream);
@@ -456,7 +519,7 @@ namespace TensileLite
 
                     std::vector<uint32_t> gotGuard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
                     HIP_CHECK_EXC(hipMemcpy(gotGuard.data(),
-                                            (const char*)devCounter.ptr + payloadBytes,
+                                            (const char*)devCounter.ptr + layout.payloadBytes,
                                             FUSED_A2A_COUNTER_SENTINEL_BYTES,
                                             hipMemcpyDeviceToHost));
                     const int badGuard = fusedA2ACounterSentinelFirstBad(gotGuard.data());
@@ -473,7 +536,7 @@ namespace TensileLite
                     if(badGuard >= 0)
                     {
                         std::cerr << "[a2a-loopback] ERROR: counter guard word " << badGuard
-                                  << " overwritten; counter[iB] ran past " << payloadBytes
+                                  << " overwritten; counter[iB] ran past " << layout.payloadBytes
                                   << " bytes" << std::endl;
                     }
                     if(badSeg >= 0 || mismatches != 0 || badGuard >= 0)
