@@ -15,8 +15,8 @@ hitting the branch points that differ across variants:
   - depthwise scalar-FMA path (cpg=1)
 
 Requires a ROCm GPU (gfx942 or gfx950) and torch.  Run:
-    PYTHONPATH=rocke/platform/python <torch-python> -m pytest \\
-        rocke/platform/tests/instances/test_direct_load_correctness.py -v
+    PYTHONPATH=rocke/platform/python <torch-python> -m pytest \
+        rocke/platform/tests/instances/test_direct_conv_correctness.py -v
 """
 
 from __future__ import annotations
