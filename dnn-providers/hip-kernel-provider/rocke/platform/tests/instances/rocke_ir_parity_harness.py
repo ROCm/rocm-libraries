@@ -174,6 +174,7 @@ def build_conv_wgrad(
     epilogue="default",
     split_k=1,
     dtype_d="fp16",
+    two_stage=False,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm_wgrad import (
@@ -202,6 +203,7 @@ def build_conv_wgrad(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=split_k,
+            two_stage=two_stage,
         )
         return build_implicit_gemm_conv_wgrad(spec, arch=arch)
 
@@ -249,6 +251,38 @@ def build_dgrad(
             split_k=split_k,
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_conv_wgrad_reduce(
+    name, arch, wg_M, wg_N, dtype_d="fp16", tile_m=4, tile_n=64
+):
+    """Build a workspace-reduce (Stage 2) kernel for the two-stage deterministic wgrad.
+
+    ``wg_M`` = K (output channels), ``wg_N`` = Y*X*C (filter spatial × input channel).
+    A minimal ConvProblem with Y=1, X=1, C=wg_N, K=wg_M is used solely to satisfy
+    WgradReduceSpec's requirement for a ConvProblem (it only reads wg_M/wg_N from it).
+    """
+
+    def _build():
+        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            build_conv_wgrad_workspace_reduce,
+        )
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+
+        # WgradReduceSpec only uses p for wg_M (= K) and wg_N (= Y*X*C).
+        # Y=1, X=1 → wg_N = C = wg_N.
+        p = ConvProblem(N=1, Hi=1, Wi=1, C=wg_N, K=wg_M, Y=1, X=1)
+        spec = WgradReduceSpec(
+            problem=p,
+            dtype_d=dtype_d,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            name=name,
+        )
+        return build_conv_wgrad_workspace_reduce(spec, arch=arch)
 
     return _build
 
@@ -508,6 +542,31 @@ def _d256_problem():
     )
 
 
+def _d128_swa_fold_problem():
+    """Validated gfx942 GQA head-fold cohort point (GQA 32/8 = 4:1, hd128, bs16,
+    sq8192 bf16, sliding window).
+
+    ``block_size=16`` on purpose: BPT = BN // BS is the number of paged KV blocks
+    consumed per 32-key tile, so bs16 walks TWO block-table entries per tile where
+    bs32 walks one. Pinning the bs16 variant records the busier paged gather.
+    """
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
+    return UnifiedAttentionProblem(
+        total_q=8192,
+        num_seqs=1,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_size=16,
+        max_seqlen_q=8192,
+        max_seqlen_k=8192,
+        dtype="bf16",
+        sliding_window=4096,
+        num_cus=120,
+    )
+
+
 @contextlib.contextmanager
 def _pinned_attention_arch(arch):
     """Pin the *memoized runtime device arch* the D256 fast routes gate on.
@@ -602,6 +661,58 @@ def build_attention_d256_gfx942(arch):
                 )
             spec = _tiled_spec_from_problem(problem)
             return build_gfx942_4warp_gqa(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_d128_swa_fold_gfx942(arch):
+    """gfx942 GQA head-fold (D128 sliding-window bf16), the DEFAULT for its cohort.
+
+    Mirrors ``build_attention_d256_gfx942`` but pins the *fold* cohort. The D256
+    case above cannot stand in for this one: ``build_gfx942_4warp_gqa`` returns
+    ``_build_gfx942_4warp_gqa_lean`` at the ``HD == _4WGQA_LEAN_HEAD_SIZE`` (256)
+    early-return, which is ~20 lines BEFORE the D128 fold body -- so the D256
+    golden never lowers a single line of the folded kernel.
+
+    The fold rewrites device-side (token, head) index math, the folded head index
+    ``kv_head*4 + m%4`` and the launch grid. Its other guards both have escape
+    hatches: the CPU test only greps the kernel NAME (a mangled kernel keeps its
+    name), and the on-GPU oracle is skipped on every non-gfx942 host. This golden
+    is the only one of the three that runs at every llvm flavor on any host, with
+    no GPU.
+
+    Raises if the cohort is not fold-eligible, so a future predicate narrowing can
+    never silently re-bless the UNFOLDED kernel under this case id.
+    """
+
+    def _build():
+        from kernels.common.attention_unified import (
+            _tiled_spec_from_problem,
+            gfx942_gqa_fold_eligible,
+        )
+        from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+        problem = _d128_swa_fold_problem()
+        with _pinned_attention_arch(arch):
+            if not gfx942_gqa_fold_eligible(
+                problem.head_size,
+                problem.num_queries_per_kv,
+                problem.sliding_window,
+                problem.dtype,
+                problem.block_size,
+            ):
+                raise RuntimeError(
+                    f"GQA head-fold not selected under pinned arch {arch!r}; "
+                    "would pin the unfolded kernel"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            kernel = build_gfx942_4warp_gqa(spec, arch=arch)
+            if not kernel.name.endswith("_4wgqa_fold"):
+                raise RuntimeError(
+                    f"fold-eligible cohort lowered {kernel.name!r}, which is not "
+                    "the folded kernel; the predicate and the builder disagree"
+                )
+            return kernel
 
     return _build
 
@@ -1559,6 +1670,89 @@ def cases():
         ),
     )
 
+    # Two-stage wgrad Stage 1: workspace-store epilogue instead of atomic-add.
+    # split_k=4, two_stage=True — exercises the _emit_wgrad_workspace_store_epilogue
+    # path.  The problem/tile params match the existing spk4 case for comparability.
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx950/n1h8c16k32r3_spk4",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_twostage_spk4",
+            "gfx950",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+    add(
+        "conv_wgrad_two_stage",
+        "conv_wgrad_two_stage/gfx942/n1h8c16k32r3_spk4",
+        "gfx942",
+        build_conv_wgrad(
+            "irhash_wgrad_942_twostage_spk4",
+            "gfx942",
+            wgrad1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            split_k=4,
+            two_stage=True,
+        ),
+    )
+
+    # Workspace reduce Stage 2: reads f32 partial sums written by Stage 1 and
+    # reduces along split_k, emitting the result as dtype_d.
+    # wg_M=32, wg_N=72 (3*3*8): small 3x3 filter footprint, fp16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m32n72_fp16",
+            "gfx950",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
+        ),
+    )
+    # wg_M=64, wg_N=576 (3*3*64): larger filter footprint, bf16 output.
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16",
+        "gfx950",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_950_m64n576_bf16",
+            "gfx950",
+            wg_M=64,
+            wg_N=576,
+            dtype_d="bf16",
+        ),
+    )
+    add(
+        "conv_wgrad_reduce",
+        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16",
+        "gfx942",
+        build_conv_wgrad_reduce(
+            "irhash_wgrad_reduce_942_m32n72_fp16",
+            "gfx942",
+            wg_M=32,
+            wg_N=72,
+            dtype_d="fp16",
+        ),
+    )
+
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         add(
@@ -2116,6 +2310,16 @@ def cases():
         build_attention_d256_gfx942("gfx942"),
     )
 
+    # gfx942 GQA head-fold (D128 sliding-window bf16). Registered SEPARATELY from
+    # the D256 case above because that one early-returns into the lean D256 kernel
+    # and never reaches the D128 fold body -- and the fold is default-ON for its
+    # cohort with no other host-runnable guard.
+    add(
+        "attention_d128_swa",
+        "attention_d128_swa/gfx942/4warp_gqa_fold",
+        "gfx942",
+        build_attention_d128_swa_fold_gfx942("gfx942"),
+    )
     # Grouped GEMM: hand-authored dense grouped bf16 GEMM (gfx950 / CDNA4),
     # production lever defaults. Python-lowered only (no C++ engine mirror), so
     # this pins the Python emitter's IR; re-bless when its codegen changes.

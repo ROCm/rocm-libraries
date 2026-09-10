@@ -45,12 +45,12 @@ add_custom_target(intrinsics_compiled
 
 # Install the intrinsic-compiler tool
 install(TARGETS intrinsic-compiler
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        RUNTIME DESTINATION bin
         COMPONENT tools)
 
 # Install the .st.bc file
 install(FILES "${INTRINSIC_BC_FILE}"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        DESTINATION lib
         COMPONENT runtime)
 
 ##===----------------------------------------------------------------------===##

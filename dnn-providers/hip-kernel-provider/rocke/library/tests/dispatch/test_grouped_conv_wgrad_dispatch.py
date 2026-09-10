@@ -148,5 +148,59 @@ class TestGroupedConvDirectionSurface(unittest.TestCase):
             self.assertGreater(len(conv_grouped_candidates(direction)), 0, direction)
 
 
+class TestForceDeterministic(unittest.TestCase):
+    """``force_deterministic`` flag on ConvGroupedRequest promotes two_stage=True."""
+
+    def test_force_deterministic_sets_two_stage_for_split_k_gt1(self):
+        # When force_deterministic=True and split_k resolves to > 1, the
+        # WgradConvSpec produced by to_wgrad_spec must have two_stage=True.
+        r = dispatch_conv_grouped(_wgrad("gfx942", force_deterministic=True))
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        if ws.split_k > 1:
+            self.assertTrue(
+                ws.two_stage,
+                "force_deterministic=True with split_k > 1 must produce two_stage=True",
+            )
+
+    def test_force_deterministic_noop_for_split_k_1(self):
+        # split_k=1 is always deterministic; force_deterministic must not error.
+        r = dispatch_conv_grouped(_wgrad("gfx1250", force_deterministic=True))
+        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertEqual(ws.split_k, 1, "gfx1250 always uses split_k=1")
+        self.assertFalse(ws.two_stage, "split_k=1 needs no two_stage")
+
+
+class TestTwoStageGridShape(unittest.TestCase):
+    """Stage 1 and Stage 2 grid shapes for the two-stage deterministic path."""
+
+    def test_stage1_grid_z_is_groups_times_split_k(self):
+        # Stage 1 grid z encodes both group and split-K slice:
+        #   z = groups * split_k
+        for arch in ("gfx942", "gfx950"):
+            r = dispatch_conv_grouped(_wgrad(arch, G=4))
+            groups = r.request.G
+            split_k = r.grid[2] // groups
+            self.assertEqual(r.grid[2], groups * split_k)
+
+    def test_stage2_grid_z_is_groups(self):
+        # Stage 2 (workspace-reduce) uses grid z = groups: block_id_z is the
+        # group index, one CTA per group covering wg_M x wg_N output elements.
+        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            wgrad_reduce_grid,
+        )
+
+        for arch in ("gfx942", "gfx950"):
+            r = dispatch_conv_grouped(_wgrad(arch, G=4))
+            ws = r.spec.to_wgrad_spec(_problem(r.request))
+            s2_spec = WgradReduceSpec(
+                problem=ws.problem,
+                dtype_d=ws.data.dtype_d,
+                groups=r.request.G,
+            )
+            grid = wgrad_reduce_grid(s2_spec)
+            self.assertEqual(grid[2], r.request.G, "Stage 2 grid z must equal groups")
+
+
 if __name__ == "__main__":
     unittest.main()

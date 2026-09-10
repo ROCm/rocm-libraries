@@ -1389,7 +1389,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            s_wait_tensorcnt_barrier<0>();
+            s_wait_tensorcnt_barrier<1>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -1622,7 +1622,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                    p_scale_arg,
                    v_scale(number<k1_loops - 1>{}));
 
-            s_wait_tensorcnt_barrier<0>();
+            s_wait_tensorcnt_barrier<1>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
@@ -1653,6 +1653,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             mainloop(k_lds_write_ptr, k_lds_read_ptr, v_lds_write_ptr, v_lds_read_ptr);
             i_total_loops++;
         } while(i_total_loops < num_total_loop);
+
+        s_wait_tensorcnt_barrier<0>();
 
         if constexpr(kStoreLSE)
         {
