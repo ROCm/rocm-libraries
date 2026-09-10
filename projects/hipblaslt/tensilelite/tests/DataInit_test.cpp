@@ -502,6 +502,23 @@ TEST(HostNumericsStructuredSparsity, ValidationFailureDoesNotMutateCallerStorage
     EXPECT_EQ(metadataOutput, originalMetadata);
 }
 
+TEST(HostNumericsStructuredSparsity, ZeroExtentIsANoOp)
+{
+    const TensorDescriptor dense("dense", rocisa::DataType::Int8, {0, 4}, {1, 1});
+    const TensorDescriptor compressed("compressed", rocisa::DataType::Int8, {0, 4}, {1, 1});
+    const TensorDescriptor metadata("metadata", rocisa::DataType::Int8, {0, 4}, {1, 1});
+
+    EXPECT_NO_THROW(initCPUSparseInput(PruneSparseMode::PruneXX00,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      dense,
+                                      compressed,
+                                      metadata,
+                                      0,
+                                      false));
+}
+
 TEST(HostNumericsStructuredSparsity, TensileAdapterCoversModesLayoutsAndSparseSides)
 {
     const std::array<PruneSparseMode, 7> modes{
