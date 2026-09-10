@@ -389,9 +389,10 @@ Flags (see `src/main.cpp`'s argparse block for the authoritative list):
 | `--vm`, `--verification-mode auto\|golden\|gpu\|cpu\|golden-check` | How **bundle** output is verified (independent of `--reference-executor`). `auto` tries golden → GPU ref → CPU ref → skip, in that order. Also `HIPDNN_TEST_VERIFICATION_MODE`. |
 | `--no-bundles` | Disable bundle/sweep registration, leaving only compiled-in C++ tests. Also `HIPDNN_TEST_ALLOW_BUNDLES=0`. |
 | `--gd`, `--golden-data-dir <path>` | Bundle data root. Defaults to `<exe>/../lib/integration-test-bundles/`. Also `HIPDNN_TEST_GOLDEN_DATA_DIR`. |
-| `--fail-on-unsupported` | FAIL instead of SKIP when no engine supports a graph. **C++ graph tests only** — `failOnUnsupported()` is checked in `IntegrationGraphVerificationHarness.hpp:95-112`; the bundle harness's `skipEngineCouldNotRun()` (`IntegrationBundleVerificationHarness.cpp:165-178`) always `GTEST_SKIP`s regardless. Useless in a default bundle-only build; see §8.2. |
+| `--fail-on-unsupported` | FAIL instead of SKIP when no engine supports a graph. **C++ graph tests only** — `failOnUnsupported()` is checked in `checkEngineSupportOrSkip()` (`IntegrationGraphVerificationHarness.hpp:96-102`); bundles route their result through `IntegrationBundleVerificationHarness::reportOutcome()`, whose `OutcomeStatus::SKIPPED` arm `GTEST_SKIP`s at `IntegrationBundleVerificationHarness.cpp:127` and never consults the flag. **Verified live**: a single bundle case run with `--fail-on-unsupported` against `ASM_SDPA_ENGINE` still reported `[  SKIPPED ]`, not a failure. To turn a lost-support bundle into a FAIL you need `--enforce-support-claims` plus a sidecar — see §8.2. |
 | `--skip-graph-validation` | PASS immediately after confirming engine support, without executing/validating the graph. |
 | `--generate-support-matrix [file]` | Emit a markdown support matrix (default `support_matrix.md`). **Records C++ graph tests only** — the sole `recordGraphSupport()` call site is `IntegrationGraphVerificationHarness.hpp:80`, so with `BUILD_CPP_GRAPH_TESTS=OFF` (the default) it writes a header-only file. See §8.2. |
+| `--enforce-support-claims` | Turn a broken `.support.json` claim (engine no longer supports a claimed graph) into a test FAIL instead of a silent SKIP. Off by default (`main.cpp:148-153`). **Requires `--test-engine`** — without it the binary refuses to start: `Error: --enforce-support-claims requires --test-engine; there is no engine to check sidecar claims against.` (`main.cpp:379-385`, verified live). Inert unless a sidecar exists next to the bundle; see §8.2. |
 | `--capture-bundles <dir>` | Dump compiled-in C++ graph tests as JSON bundles (migration tooling, not day-to-day). |
 | `--gtest_filter=<pattern>` | Standard GTest filter, passed through after hipDNN's own args are parsed — see §6 for its semantics and footguns. |
 
@@ -482,53 +483,57 @@ typo'd label/regex is a misconfiguration, but CTest alone will not tell you
 that via its exit code — check the printed test count, or add
 `--no-tests=error` when scripting.
 
-### 8.2 Support claims exist as a schema, but nothing enforces them yet — a passing suite can hide a real regression
+### 8.2 Support claims are enforced on demand, but nothing in the tree claims anything yet
 
 RFC 0015 (`docs/rfcs/0015_EngineSupportClaims.md`) defines a
 `{Name}.support.json` (and template-sweep `support.json`) claim file: which
 `(engine, arch, platform)` combinations a bundle's author asserts must stay
-supported. Its stated purpose is exactly to close a **silent regression
-channel**: today, when an engine that used to accept a graph starts
-declining it, the golden-reference framework maps that to `GTEST_SKIP` —
-the suite stays green and nobody is told coverage was lost.
+supported. Its purpose is to close a **silent regression channel**: when an
+engine that used to accept a graph starts declining it, the harness maps
+that to `GTEST_SKIP` — the suite stays green and nobody is told coverage
+was lost.
 
-**As of this writing, the enforcement half of RFC 0015 is not wired in, and
-no claim files exist anywhere in the tree yet** (`git grep`/`glob` for
-`*.support.json` or a bare sweep `support.json` under
-`integration-test-bundles/` returns nothing). `src/harness/bundle/
-SupportClaims.{hpp,cpp}` implement the parser and
-`SupportClaims::isClaimed()`/`SweepSupportClaims::isClaimed()`, but nothing
-in `IntegrationBundleVerificationHarness.cpp` or `main.cpp` calls
-`loadSupportClaims()`, `loadSweepSupportClaims()`, or `isClaimed()` outside
-the parser's own unit test (`tests/TestSupportClaims.cpp`). There is no
-`--write-support-claims` or `--enforce-support-claims` flag in `main.cpp`'s
-argparse block. Concretely: when an engine declines a graph,
-`get_ranked_engine_ids()` reports it missing, the harness throws
-`EngineNotApplicableError`, and that is caught and converted to an
-unconditional `GTEST_SKIP()` — regardless of whether a `support.json` next
-to the bundle claims that engine as supported (moot today since none
-exist, but the code path has no gate even if one did).
+**The enforcement half has landed.** `--enforce-support-claims`
+(`main.cpp:148-153`, default off) arms it, and `isClaimed()` is now called
+from production code, not just the parser's unit test:
+`IntegrationBundleVerificationHarness::checkSupportClaims()`
+(`IntegrationBundleVerificationHarness.cpp:60`, invoked from the header at
+`:125`) reaches `SupportVerdict.cpp:221-227`, which loads the sidecar and
+calls `SweepSupportClaims::isClaimed()` / `SupportClaims::isClaimed()`.
+Two guards protect against a vacuous "enforced nothing, exit 0" run:
+the flag hard-requires `--test-engine` (`main.cpp:379-385`), and a run that
+discovers claims but never queries one exits FATAL
+(`main.cpp:422-430`).
 
-**This is not hypothetical — it's the normal, currently-observed behavior
-of the suite.** Running the quick tier's exact filter
-(`--gtest_filter=quick_*:Smoke/*-*DISABLED*`) against `HIPBLASLT_ENGINE` on
-this exact hardware (gfx1151, Windows) produced:
+**But no bundle carries a claim yet.** A glob for `*.support.json` or a
+bare sweep `support.json` under `integration-test-bundles/` still returns
+nothing, and `shouldEnforceClaims()` additionally requires the sidecar to
+exist on disk (`IntegrationBundleVerificationHarness.hpp:211-212`). So
+**today the flag changes nothing** — verified live: the same ASM_SDPA
+bundle case run with `--enforce-support-claims --test-engine
+ASM_SDPA_ENGINE` still reported `Skipped: 1`, exit 0. Enforcement is real
+machinery pointed at an empty magazine.
+
+**The green-but-empty run is the normal, currently-observed behavior.**
+The full `hip-kernel-provider-asm-sdpa-external-integration-check` target
+on this hardware (gfx1151, Windows) produced:
 
 ```
-Passed:  0 / 2976 (0.0%)
-Skipped: 2976
+Passed:  0 / 6772 (0.0%)
+Skipped: 6772
 Failed:  0
 ```
 
-exit 0, "ctest passed," 100% skip. In this specific case the skip is
-legitimate — hipBLASLt has a known, tracked crash on gfx115x/Windows
-(`#9962`) that gates its own native unit tests off the same way — but nothing
-in the exit code, the ctest summary, or a casual glance distinguishes that
-from a real regression that silently dropped every graph. The *mechanism*
-that produces "0 failed, 100% skipped, green" is identical whether the
-cause is a known/tracked limitation or an undetected regression; only
-reading the skip reasons (or, once implemented, an enforced support claim)
-tells them apart.
+exit 0, target succeeded, 100% skip. Every skip carried the bundle
+harness's message, e.g. `Engine could not execute bundle "…/quick/SdpaFwd/
+bhsd/bf16/hd128_causal_batch/Small/Small.json": Engine ASM_SDPA_ENGINE does
+not support this graph (1 output tensor(s), 0 ranked engine(s))`. The
+earlier `HIPBLASLT_ENGINE` quick-tier run behaved identically
+(`Passed: 0 / 2976`, `Skipped: 2976`), where the cause is a known, tracked
+hipBLASLt crash on gfx115x/Windows (`#9962`). The *mechanism* producing
+"0 failed, 100% skipped, green" is identical whether the cause is a tracked
+limitation or an undetected regression; only the skip reasons tell them
+apart.
 
 **Consequences for you:**
 - A bare "ctest passed" / "0 failed" result is **not** evidence that an
@@ -536,27 +541,24 @@ tells them apart.
   investigating "did engine X regress on graph Y," don't stop at exit
   code — check the `Skipped: N` line in the "TEST COVERAGE SUMMARY" and
   **read the skip reasons**. A TOML `test_skips` entry prints
-  `[arch <arch>] <reason>`; an engine declining the graph prints the
-  harness's `EngineNotApplicableError` skip instead. Those two look alike in
-  a summary and mean completely different things.
+  `[arch <arch>] <reason>`; an engine declining a bundle prints `Engine
+  could not execute bundle "<path>": Engine <NAME> does not support this
+  graph (<N> output tensor(s), 0 ranked engine(s))`. Those look alike in a
+  summary and mean completely different things.
 - **Neither `--generate-support-matrix` nor `--fail-on-unsupported` helps
-  here in a default build**, despite appearances: both are wired only into
-  the C++ graph-test harness (`IntegrationGraphVerificationHarness.hpp:80`
-  and `:95-112`), which `BUILD_CPP_GRAPH_TESTS=OFF` compiles out. **Verified
-  live**: `--generate-support-matrix` over 114 skipped bundle cases wrote a
-  27-byte `support_matrix.md` containing only its `# Engine Support Matrix`
-  header. Until RFC 0015's enforcement lands, comparing skip *reasons* run
-  over run is the only real detection available for bundles.
-- A `support.json`/`{Name}.support.json` existing next to a bundle today
-  would be informational/aspirational only — it is not a live gate. Don't
-  tell a user "this is protected by a support claim" as if it fails CI; it
-  doesn't, yet (and as of this writing none exist to even test that
-  against).
-- Before relying on this section, re-check `main.cpp`'s argparse block and
-  `IntegrationBundleVerificationHarness.cpp` for `--write-support-claims`/
-  `--enforce-support-claims`/`isClaimed(` call sites — if RFC 0015's
-  enforcement ladder has since landed, this caveat is stale and the claim
-  files are load-bearing again.
+  here in a default build**: both are wired only into the C++ graph-test
+  harness (`IntegrationGraphVerificationHarness.hpp:80` and `:96-102`),
+  which `BUILD_CPP_GRAPH_TESTS=OFF` compiles out. **Verified live**:
+  `--generate-support-matrix` over 114 skipped bundle cases wrote a 27-byte
+  `support_matrix.md` containing only its `# Engine Support Matrix` header,
+  and `--fail-on-unsupported` left a declined bundle as `[  SKIPPED ]`.
+- **Don't tell a user a graph "is protected by a support claim" without
+  checking for the sidecar file.** The gate is real now, but it only fires
+  for a bundle that has a `.support.json` *and* a run that passed
+  `--enforce-support-claims`. Neither is true by default, and as of this
+  writing no sidecar exists anywhere to fire on.
+- Until sidecars are authored, comparing skip *reasons* run over run
+  remains the only detection available for bundles.
 
 ### 8.3 Missing bundle data degrades to SKIP, not a build/config error
 
@@ -641,5 +643,6 @@ because bundle registration counts are checked by the §8.1 guard instead.
 - `projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md` — bundle vs
   template-sweep on-disk format.
 - `projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md` — the support
-  claim schema referenced in §8.2, including its intended enforcement
-  ladder once implemented.
+  claim schema referenced in §8.2 and the enforcement ladder behind
+  `--enforce-support-claims`. The parser, the verdict path and the CLI flag
+  have landed; authoring the `.support.json` sidecars has not.
