@@ -2474,8 +2474,9 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
 
     This wires the kernel config that the parity + trace benchmarks proved
     fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
-    GQA-8 / bf16 and fp16, with attention sinks) into production. The combo
-    stacks, on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+    GQA-8) into production: bf16 for the whole cohort, and fp16 only for sink
+    prefill (the fp16 win was measured on sinks). The combo stacks, on top of
+    ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
 
       * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
       * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
@@ -2500,7 +2501,13 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     """
     if _resolve_attention_arch() != "gfx950":
         return False
-    if problem.dtype not in ("bf16", "fp16"):
+    # fp16 combo is sink-prefill only (the fp16 widening was measured on sinks);
+    # non-sink fp16 stays on its existing path. bf16 admits the whole cohort.
+    # Mirror this in the C++ twin.
+    if problem.dtype == "fp16":
+        if not problem.use_sinks:
+            return False
+    elif problem.dtype != "bf16":
         return False
     # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
     # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo

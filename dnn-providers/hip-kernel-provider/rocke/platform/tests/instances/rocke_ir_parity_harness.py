@@ -353,6 +353,7 @@ def build_attention_2d(
     sliding_window=0,
     has_softcap=False,
     use_alibi=False,
+    use_sinks=False,
     **kw,
 ):
     def _build():
@@ -365,7 +366,7 @@ def build_attention_2d(
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
-            use_sinks=False,
+            use_sinks=use_sinks,
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             use_alibi=use_alibi,
@@ -2009,6 +2010,22 @@ def cases():
             num_kv_heads=2,
             dtype="fp16",
             use_alibi=True,
+        ),
+    )
+    # fp16 + sinks combo: the only fp16 path that enables _enable_combo_2d
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_d64_sink",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=True,
         ),
     )
     add(
