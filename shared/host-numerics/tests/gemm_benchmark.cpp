@@ -48,7 +48,6 @@ struct NumericProfile {
     ScalarType accumulatorType;
     bool blockScaled = false;
     bool affineLayouts = false;
-    bool commonEpilogue = false;
 };
 
 NumericProfile numericProfile(std::string_view name) {
@@ -58,8 +57,8 @@ NumericProfile numericProfile(std::string_view name) {
     if (name == "bf16") return {ScalarType::BFloat16, ScalarType::BFloat16, ScalarType::Float32};
     if (name == "f8") return {ScalarType::Float8E4M3, ScalarType::Float32, ScalarType::Float32};
     if (name == "bf8") return {ScalarType::Float8E5M2, ScalarType::Float32, ScalarType::Float32};
-    if (name == "f32-affine-epilogue")
-        return {ScalarType::Float32, ScalarType::Float32, ScalarType::Float32, false, true, true};
+    if (name == "f32-affine")
+        return {ScalarType::Float32, ScalarType::Float32, ScalarType::Float32, false, true};
     if (name == "f4mx")
         return {ScalarType::Float4E2M1, ScalarType::Float32, ScalarType::Float32, true};
     if (name == "f6mx")
@@ -67,7 +66,7 @@ NumericProfile numericProfile(std::string_view name) {
     if (name == "bf6mx")
         return {ScalarType::Float6E3M2, ScalarType::Float32, ScalarType::Float32, true};
     throw std::invalid_argument(
-        "Profile must be f32, f64, f16, bf16, f8, bf8, f32-affine-epilogue, f4mx, f6mx, "
+        "Profile must be f32, f64, f16, bf16, f8, bf8, f32-affine, f4mx, f6mx, "
         "or bf6mx.");
 }
 
@@ -152,21 +151,13 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
 
     if (problem.computeTypeA || problem.computeTypeB || !problem.preQuantizationScalesA.empty() ||
         !problem.preQuantizationScalesB.empty() || problem.mathMode != MathMode::Default ||
-        problem.conjugateA || problem.conjugateB ||
-        problem.outputConversion != OutputConversion::Default)
+        problem.conjugateA || problem.conjugateB)
         throw std::invalid_argument("Benchmark scalar oracle does not support this profile.");
-    if (problem.activation != Activation::None && problem.activation != Activation::Relu)
-        throw std::invalid_argument("Benchmark scalar oracle does not support this activation.");
 
     const size_t rows = problem.a.shape()[0];
     const size_t reductions = problem.a.shape()[1];
     const size_t columns = problem.b.shape()[1];
     const Shape outputShape{rows, columns};
-    const auto scaleValue = [&](const std::optional<Tensor>& scale, size_t row, size_t column) {
-        return scale ? scale->broadcastTo(outputShape).loadAs<Accumulator>({row, column})
-                     : Accumulator(1);
-    };
-
     for (const size_t logicalIndex :
          problem.outputSelection.indices(problem.d.shape().elementCount())) {
         const auto coordinates =
@@ -198,19 +189,7 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
             blockBase = blockEnd;
         }
 
-        Accumulator effectiveAlpha = problem.alpha.item<Accumulator>();
-        effectiveAlpha *= scaleValue(problem.scaleA, row, column);
-        effectiveAlpha *= scaleValue(problem.scaleB, row, column);
-        effectiveAlpha *= scaleValue(problem.scaleAlpha, row, column);
-        Accumulator result = effectiveAlpha * accumulation;
-        if (problem.beta.item<Accumulator>() != Accumulator(0))
-            result += problem.beta.item<Accumulator>() * problem.scaleC.item<Accumulator>() *
-                      problem.c.loadAs<Accumulator>({row, column});
-        if (problem.bias)
-            result += problem.bias->broadcastTo(outputShape).loadAs<Accumulator>({row, column});
-        if (problem.activation == Activation::Relu) result = std::max(Accumulator(0), result);
-        result *= problem.outputScale.item<Accumulator>();
-        destination.storeFrom({row, column}, result);
+        destination.storeFrom({row, column}, accumulation);
     }
 }
 
@@ -278,7 +257,6 @@ int main(int argc, char** argv) {
                                   outputOffset);
         const Tensor a = makeMatrix(profile.inputType, aLayout, 1);
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
-        const Tensor c = makeMatrix(profile.outputType, outputLayout, 5, !profile.commonEpilogue);
         const Tensor output(profile.outputType, outputLayout);
         GemmTestOptions requestOptions(profile.accumulatorType);
         requestOptions.outputSelection = selection;
@@ -292,22 +270,7 @@ int main(int argc, char** argv) {
             requestOptions.blockScaleB = makeBlockScales(options.columns, reductionBlocks, 4);
             requestOptions.blockSizeB = blockSize;
         }
-        if (profile.commonEpilogue) {
-            requestOptions.alpha = 0.75f;
-            requestOptions.beta = -0.25f;
-            requestOptions.bias =
-                makeMatrix(ScalarType::Float32,
-                           Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 6);
-            requestOptions.scaleA =
-                makeMatrix(ScalarType::Float32,
-                           Layout::contiguousLastDimensionFastest(Shape{options.rows, 1}), 7);
-            requestOptions.scaleB =
-                makeMatrix(ScalarType::Float32,
-                           Layout::contiguousLastDimensionFastest(Shape{1, options.columns}), 8);
-            requestOptions.activation = Activation::Relu;
-            requestOptions.outputScale = 0.5f;
-        }
-        GemmTestCase request(a, b, c, output, requestOptions);
+        GemmTestCase request(a, b, output, requestOptions);
 
         const GemmBackend backend = options.backend;
         GemmTestRunInfo runInfo;
@@ -330,7 +293,7 @@ int main(int argc, char** argv) {
         const Tensor expected(profile.outputType, outputLayout);
         GemmTestOptions expectedOptions = requestOptions;
         expectedOptions.outputSelection = validationSelection;
-        GemmTestCase expectedRequest(a, b, c, expected, expectedOptions);
+        GemmTestCase expectedRequest(a, b, expected, expectedOptions);
         runScalarOracle(expectedRequest, expected);
 
         const std::vector<size_t> validationIndices = validationSelection.indices(outputElements);

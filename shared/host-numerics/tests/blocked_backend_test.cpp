@@ -42,8 +42,8 @@ std::vector<float> makeValues(size_t rows, size_t columns, size_t seed) {
 }
 
 GemmTestCase makeProblem(const std::vector<float>& a, const std::vector<float>& b,
-                         const std::vector<float>& c, roc::host_numerics::Tensor d, size_t rows,
-                         size_t reductionElements, size_t columns) {
+                         roc::host_numerics::Tensor d, size_t rows, size_t reductionElements,
+                         size_t columns) {
     using namespace roc::host_numerics;
 
     return GemmTestCase(Tensor::copyNativeStorage<float>(
@@ -52,9 +52,6 @@ GemmTestCase makeProblem(const std::vector<float>& a, const std::vector<float>& 
                         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(
                                                              Shape{reductionElements, columns}),
                                                          std::span<const float>(b)),
-                        Tensor::copyNativeStorage<float>(
-                            Layout::contiguousLastDimensionFastest(Shape{rows, columns}),
-                            std::span<const float>(c)),
                         std::move(d), ScalarType::Float32);
 }
 
@@ -153,9 +150,8 @@ void testReducedPrecisionAccumulators() {
                                                     std::span<const float>(values));
         Tensor b = Tensor::copyValuesWithConversion(type, Shape{reductions, 1},
                                                     std::span<const float>(values));
-        Tensor c(type, Shape{1, 1});
         Tensor d(type, Shape{1, 1});
-        GemmTestCase problem(a, b, c, d, type);
+        GemmTestCase problem(a, b, d, type);
 
         float expected = 0.0f;
         float fullPrecision = 0.0f;
@@ -188,11 +184,10 @@ void testSelectedBlockAccumulatorFamilies() {
 
     const std::vector<float> reducedA(rows * reductions, 0.1f);
     const std::vector<float> reducedB(reductions * columns, 0.1f);
-    const std::vector<float> reducedC(rows * columns, 0.0f);
     for (const ScalarType accumulatorType : {ScalarType::Float16, ScalarType::BFloat16}) {
         Tensor output = makeOutput(rows, columns, untouchedValue);
         GemmTestCase problem =
-            makeProblem(reducedA, reducedB, reducedC, output, rows, reductions, columns);
+            makeProblem(reducedA, reducedB, output, rows, reductions, columns);
         problem.accumulatorType = accumulatorType;
         problem.outputSelection = selection;
 
@@ -210,12 +205,10 @@ void testSelectedBlockAccumulatorFamilies() {
 
     const std::vector<int32_t> integerA(rows * 2, std::numeric_limits<int32_t>::max());
     const std::vector<int32_t> integerB(2 * columns, 2);
-    const std::vector<int32_t> integerC(rows * columns, 0);
     const std::vector<int32_t> integerInitial(rows * columns, -99);
     Tensor integerOutput = Tensor::copyNativeValues<int32_t>(Shape{rows, columns}, integerInitial);
     GemmTestCase integerProblem(Tensor::copyNativeValues<int32_t>(Shape{rows, 2}, integerA),
                                 Tensor::copyNativeValues<int32_t>(Shape{2, columns}, integerB),
-                                Tensor::copyNativeValues<int32_t>(Shape{rows, columns}, integerC),
                                 integerOutput, ScalarType::Int32);
     integerProblem.outputSelection = selection;
     const GemmTestRunInfo integerRun = referenceGemm(integerProblem, GemmBackend::Blocked);
@@ -230,12 +223,10 @@ void testSelectedBlockAccumulatorFamilies() {
     using Complex = std::complex<float>;
     const std::vector<Complex> complexA(rows * 2, Complex(1.0f, 2.0f));
     const std::vector<Complex> complexB(2 * columns, Complex(3.0f, 4.0f));
-    const std::vector<Complex> complexC(rows * columns, Complex(0.0f, 0.0f));
     const std::vector<Complex> complexInitial(rows * columns, Complex(-99.0f, -99.0f));
     Tensor complexOutput = Tensor::copyNativeValues<Complex>(Shape{rows, columns}, complexInitial);
     GemmTestCase complexProblem(Tensor::copyNativeValues<Complex>(Shape{rows, 2}, complexA),
                                 Tensor::copyNativeValues<Complex>(Shape{2, columns}, complexB),
-                                Tensor::copyNativeValues<Complex>(Shape{rows, columns}, complexC),
                                 complexOutput, ScalarType::ComplexFloat32);
     complexProblem.outputSelection = selection;
     const GemmTestRunInfo complexRun = referenceGemm(complexProblem, GemmBackend::Blocked);
@@ -263,12 +254,10 @@ void testSmallEdgeBlock() {
 
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
-    const std::array<float, 4> c{1, 1, 1, 1};
     Tensor d(ScalarType::Float32, Shape{2, 2});
     GemmTestCase problem(
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
-        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
         d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
     require(queryGemmSupport(problem, GemmBackend::Blocked).supported,
             "Blocked backend unexpectedly rejected the test GEMM.");
@@ -304,7 +293,6 @@ void testExplicitSelectionBlockPlan() {
 
     const std::vector<float> a = makeValues(rows, reductionElements, 1);
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
-    const std::vector<float> c = makeValues(rows, columns, 3);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::explicitIndices({
         44 * columns + 69,
@@ -315,7 +303,7 @@ void testExplicitSelectionBlockPlan() {
     });
 
     GemmTestCase blockedProblem =
-        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+        makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
     blockedProblem.outputSelection = selection;
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Explicit blocked selection result mismatch.");
@@ -331,12 +319,11 @@ void testStridedSelectionBlockPlan() {
 
     const std::vector<float> a = makeValues(rows, reductionElements, 5);
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
-    const std::vector<float> c = makeValues(rows, columns, 7);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::strided(3, 509);
 
     GemmTestCase blockedProblem =
-        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+        makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
     blockedProblem.outputSelection = selection;
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Strided blocked selection result mismatch.");
@@ -355,7 +342,6 @@ void testBlockScaledSelectionBlockPlan() {
 
     const std::vector<float> a = makeValues(rows, reductionElements, 9);
     const std::vector<float> b = makeValues(reductionElements, columns, 10);
-    const std::vector<float> c(rows * columns, 0.0f);
     std::vector<float> scaleA(rows * scaleBlocks);
     std::vector<float> scaleB(columns * scaleBlocks);
     for (size_t row = 0; row < rows; ++row) {
@@ -372,7 +358,7 @@ void testBlockScaledSelectionBlockPlan() {
         OutputSelection::explicitIndices({0, 32 * columns + 32, 32 * columns + 34});
 
     GemmTestCase blockedProblem =
-        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+        makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
     const Tensor blockScaleA = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{rows, scaleBlocks}),
         std::span<const float>(scaleA));
@@ -399,11 +385,10 @@ void testBlockScaleAppliedAfterCompleteScaleSegment() {
     const std::vector<float> a(reductionElements, 1.0f);
     std::vector<float> b(reductionElements, 1.0e37f);
     std::fill(b.begin() + reductionElements / 2, b.end(), -1.0e37f);
-    const std::vector<float> c(1, 0.0f);
     const std::array<float, 1> scaleA{8.0f};
     Tensor blockedOutput = makeOutput(1, 1, untouchedValue);
 
-    GemmTestCase blockedProblem = makeProblem(a, b, c, blockedOutput, 1, reductionElements, 1);
+    GemmTestCase blockedProblem = makeProblem(a, b, blockedOutput, 1, reductionElements, 1);
     const Tensor blockScaleA = Tensor::copyNativeValues<float>(Shape{1, 1}, scaleA);
     blockedProblem.blockScaleA = blockScaleA;
     blockedProblem.blockSizeA = reductionElements;
@@ -423,14 +408,13 @@ void testOneSidedBlockScaling() {
     constexpr size_t columns = 2;
     const std::vector<float> a(rows * reductionElements, 1.0f);
     const std::vector<float> b(reductionElements * columns, 1.0f);
-    const std::vector<float> c(rows * columns, 0.0f);
     const std::array<float, 4> scales{2.0f, 3.0f, 4.0f, 5.0f};
     const Tensor blockScale = Tensor::copyNativeValues<float>(Shape{2, 2}, scales);
 
     const auto checkOneSide = [&](bool scaleOperandA, const std::array<float, 4>& expected) {
         Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
         GemmTestCase blockedProblem =
-            makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+            makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
         if (scaleOperandA) {
             blockedProblem.blockScaleA = blockScale;
             blockedProblem.blockSizeA = 8;
@@ -456,9 +440,8 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     constexpr size_t rows = 2;
     constexpr size_t columns = 2;
     const std::vector<float> empty;
-    const std::vector<float> c{1.0f, 2.0f, 3.0f, 4.0f};
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
-    GemmTestCase blockedProblem = makeProblem(empty, empty, c, blockedOutput, rows, 0, columns);
+    GemmTestCase blockedProblem = makeProblem(empty, empty, blockedOutput, rows, 0, columns);
     const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
     blockedProblem.blockScaleA = emptyScale;
     blockedProblem.blockSizeA = 8;
@@ -478,11 +461,10 @@ void testFullSelection() {
 
     const std::vector<float> a = makeValues(rows, reductionElements, 11);
     const std::vector<float> b = makeValues(reductionElements, columns, 12);
-    const std::vector<float> c = makeValues(rows, columns, 13);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
     GemmTestCase blockedProblem =
-        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+        makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Full blocked selection result mismatch.");
     require(
@@ -498,9 +480,8 @@ void testAutomaticSelectionUsesBlockedBackend() {
     constexpr size_t columns = 32;
     const std::vector<float> a = makeValues(rows, reductionElements, 18);
     const std::vector<float> b = makeValues(reductionElements, columns, 19);
-    const std::vector<float> c(rows * columns, 0.0f);
     Tensor output = makeOutput(rows, columns, untouchedValue);
-    GemmTestCase problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
+    GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
 
     const GemmSupportInfo fullSupport = queryGemmSupport(problem, GemmBackend::Blocked);
     require(fullSupport.supported, "Blocked backend rejected dense work.");
@@ -530,11 +511,10 @@ void testParallelFullSelection() {
 
     const std::vector<float> a = makeValues(rows, reductionElements, 15);
     const std::vector<float> b = makeValues(reductionElements, columns, 16);
-    const std::vector<float> c = makeValues(rows, columns, 17);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
     GemmTestCase blockedProblem =
-        makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
+        makeProblem(a, b, blockedOutput, rows, reductionElements, columns);
 
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Parallel blocked GEMM result mismatch.");
@@ -555,9 +535,8 @@ void testOverlappingOutputIsRejectedAcrossBackends() {
         std::fill_n(a.begin() + row * reductionElements, reductionElements,
                     static_cast<float>(row + 1));
     const std::vector<float> b(reductionElements * columns, 1.0f);
-    const std::vector<float> c(rows * columns, 0.0f);
     Tensor output(ScalarType::Float32, Layout(Shape{rows, columns}, {0, 0}));
-    GemmTestCase problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
+    GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
 
     require(!queryGemmSupport(problem, GemmBackend::Blocked),
             "Blocked GEMM accepted overlapping destination elements.");
@@ -571,10 +550,9 @@ void testOutputCannotAliasInputs() {
     constexpr size_t extent = 2;
     const std::vector<float> a{1, 2, 3, 4};
     const std::vector<float> b{5, 6, 7, 8};
-    const std::vector<float> c{9, 10, 11, 12};
 
     GemmTestCase overlapsA =
-        makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
+        makeProblem(a, b, makeOutput(extent, extent, 0), extent, extent, extent);
     overlapsA.d = overlapsA.a;
     require(!queryGemmSupport(overlapsA, GemmBackend::Blocked),
             "GEMM accepted destination storage that overlaps A.");
@@ -593,9 +571,8 @@ void testParallelSparseSelection() {
         std::fill_n(a.begin() + row * reductionElements, reductionElements,
                     static_cast<float>(row + 1));
     const std::vector<float> b(reductionElements * columns, 1.0f);
-    const std::vector<float> c(rows * columns, 0.0f);
     Tensor output = makeOutput(rows, columns, sentinel);
-    GemmTestCase problem = makeProblem(a, b, c, output, rows, reductionElements, columns);
+    GemmTestCase problem = makeProblem(a, b, output, rows, reductionElements, columns);
     problem.outputSelection =
         OutputSelection::primeStride(output.elementCount(), output.elementCount(), 128);
 
