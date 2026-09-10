@@ -881,6 +881,31 @@ TEST(TensileMxGenerationTranslation, MapsTypesAndInitializationPolicy)
     EXPECT_EQ(generated.scales.type(), ScalarType::E5M3);
 }
 
+TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
+{
+    using namespace roc::host_numerics;
+
+    const auto generateWithSeed = [](uint64_t seed) {
+        return dt::generateMxData(rocisa::DataType::Float4,
+                                  rocisa::DataType::E8,
+                                  Shape{32, 4},
+                                  32,
+                                  0,
+                                  32,
+                                  InitMode::Random,
+                                  InitMode::One,
+                                  seed);
+    };
+    const MxTensor first  = generateWithSeed(17);
+    const MxTensor replay = generateWithSeed(17);
+    const MxTensor other  = generateWithSeed(17 + (uint64_t{1} << 40));
+
+    EXPECT_TRUE(std::ranges::equal(first.data.rawEncodedBackingStorage(),
+                                   replay.data.rawEncodedBackingStorage()));
+    EXPECT_FALSE(std::ranges::equal(first.data.rawEncodedBackingStorage(),
+                                    other.data.rawEncodedBackingStorage()));
+}
+
 TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
     using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
