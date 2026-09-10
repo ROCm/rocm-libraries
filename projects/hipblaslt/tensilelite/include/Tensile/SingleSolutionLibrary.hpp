@@ -160,12 +160,30 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    problem.setGroupedGemm(true);
-                    if(!softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                          task,
-                                          hardware,
-                                          (*solution),
-                                          problem))
+                    // setGroupedGemm(true) is load-bearing for
+                    // uniformSummationOrderSupported(), but it also re-aims
+                    // GroupedGemmEqual / SynchronizerSizeCheck / the free-size-B
+                    // clause on this (local) problem copy. Pre-USO it was not set
+                    // here, so it stays behind the USO check together with the
+                    // softwarePredicate() call. streamKDynamicQueueSupported()
+                    // stays unconditional.
+                    bool swMatch;
+                    if(problem.getParams().uniformSummationOrder())
+                    {
+                        problem.setGroupedGemm(true);
+                        swMatch = softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                    task,
+                                                    hardware,
+                                                    (*solution),
+                                                    problem);
+                    }
+                    else
+                    {
+                        swMatch = (*solution->problemPredicate)(problem)
+                                  && (*solution->taskPredicate)(task)
+                                  && solution->streamKDynamicQueueSupported(problem, hardware);
+                    }
+                    if(!swMatch)
                     {
                         if(debug)
                             PredicateDebugger::printFooter(std::cout, false);
@@ -259,8 +277,24 @@ namespace TensileLite
                         Task task(hardware, problem, (*solution));
                         problem.setWorkspaceSizeGroupedGemm(ws);
                         problem.setGroupedGemmCount(problems.size());
-                        problem.setGroupedGemm(true);
-                        if(!softwarePredicate(searchType, task, hardware, (*solution), problem))
+                        // See the note in findBestSolution(): setGroupedGemm(true)
+                        // and the taskPredicate/softwarePredicate widening are
+                        // USO-stack additions and stay behind the USO check;
+                        // streamKDynamicQueueSupported() stays unconditional.
+                        bool swMatch;
+                        if(problem.getParams().uniformSummationOrder())
+                        {
+                            problem.setGroupedGemm(true);
+                            swMatch
+                                = softwarePredicate(searchType, task, hardware, (*solution), problem);
+                        }
+                        else
+                        {
+                            swMatch = (*solution->problemPredicate)(problem)
+                                      && (*solution->taskPredicate)(task)
+                                      && solution->streamKDynamicQueueSupported(problem, hardware);
+                        }
+                        if(!swMatch)
                             useSolution = false;
                     }
                 }

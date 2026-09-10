@@ -244,12 +244,31 @@ namespace TensileLite
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            problem.setGroupedGemm(true);
-                            if(!softwarePredicate(searchType,
-                                                  task,
-                                                  hardware,
-                                                  *(row.second),
-                                                  problem))
+                            // setGroupedGemm(true) is load-bearing for
+                            // uniformSummationOrderSupported(), but it also
+                            // re-aims GroupedGemmEqual / SynchronizerSizeCheck /
+                            // the free-size-B clause on this (local) problem copy.
+                            // Pre-USO it was not set here, so it stays behind the
+                            // USO check together with the softwarePredicate()
+                            // call. streamKDynamicQueueSupported() is unconditional.
+                            bool swMatch;
+                            if(problem.getParams().uniformSummationOrder())
+                            {
+                                problem.setGroupedGemm(true);
+                                swMatch = softwarePredicate(searchType,
+                                                            task,
+                                                            hardware,
+                                                            *(row.second),
+                                                            problem);
+                            }
+                            else
+                            {
+                                swMatch = (*row.second->problemPredicate)(problem)
+                                          && (*row.second->taskPredicate)(task)
+                                          && row.second->streamKDynamicQueueSupported(problem,
+                                                                                      hardware);
+                            }
+                            if(!swMatch)
                                 useSolution = false;
                         }
                     }

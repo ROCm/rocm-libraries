@@ -9778,6 +9778,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
         "StreamKHybridMode",
+        # No persistent SGPR for the uniform-summation-order selector: bit 29 of
+        # MagicShiftItersPerTile is tested in place with s_bitcmp1_b32 at each of
+        # the three K-split divergence sites (StreamK.py emitUsoBranchToGlobal),
+        # which costs the same one SALU per site as comparing a held copy. Some
+        # SK5 configurations sit right at gfx950's 102-SGPR ceiling and cannot
+        # afford a kernel-lifetime register for one bit.
       ]
       # SK5 keeps StreamKHybridMode holding ONLY the mode bit (its SCmpEQU32==0
       # dispatch must stay a plain compare). The per-XCD queue index reuses the
@@ -9812,6 +9818,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       requiredUnalignedSgprVar += [
         "StreamKIter",
         "StreamKIterEnd",
+        # No persistent SGPR for the uniform-summation-order selector: bit 29 of
+        # MagicShiftItersPerTile is tested in place with s_bitcmp1_b32 at each of
+        # the three K-split divergence sites (StreamK.py emitUsoBranchToGlobal).
+        # On the gfx1250 VGPR-cache path the readfirstlane target is a transient
+        # released before skTiles/skGrid are acquired, so the peak count at those
+        # sites is unchanged.
       ]
       # Under StreamKForceDPOnly every WG processes complete tiles, so the
       # per-tile local iteration bounds are compile-time constants

@@ -24,12 +24,12 @@ from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GLOBALModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister, DSModifiers, MemTokenData
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
     SEndpgm, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SXorB32, \
-    SWaitAlu, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
+    SWaitAlu, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VAndB32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
@@ -44,6 +44,53 @@ from ..AsmAddressCalculation import AddrCalculation
 import abc
 
 from copy import deepcopy
+
+
+# ----------------------------------------------------------------------------
+# Uniform-summation-order (USO) runtime bit
+#
+# USO is host-side runtime state and defaults OFF. The kernel therefore carries
+# BOTH Stream-K K-split mappings and picks one at runtime:
+#
+#   USO off -> historical global "first-E" mapping (pre-USO baseline): a flat
+#              split of skTiles*itersPerTile iterations across skGrid WGs where
+#              the first E workgroups get one extra iteration. WG ranges may
+#              straddle a tile boundary.
+#   USO on  -> per-tile extra-iters mapping: each tile's iterations are split
+#              among exactly F = skGrid/skTiles workgroups, so no range straddles
+#              a tile boundary (required for row-uniform summation order).
+#
+# The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument.
+# That bit is free: magicNumberAlg2 (ContractionSolution.cpp) packs
+# abit(31) | shift, and the shift field never exceeds 5 bits (bits 0..4).
+# Bit 30 is already taken by the SK5 hybrid mode bit (see _extract_hybrid_mode).
+#
+#   31 = magic "add" bit | 30 = SK5 mode | 29 = USO | 28..5 = zero | 4..0 = shift
+#
+# The host sets bit 29 iff internalArgsSupport.perTileExtraIters &&
+# problem.getParams().uniformSummationOrder().
+#
+# The bit is tested IN PLACE at each of the three divergence sites with a single
+# s_bitcmp1_b32 (see emitUsoBranchToGlobal); it is never extracted into a
+# dedicated SGPR and never cleared. That costs the same one SALU per site as a
+# compare against a held copy while freeing a kernel-lifetime SGPR, which some
+# SK5 configurations on gfx950 (MaxSgpr=102) cannot spare.
+#
+# Leaving the bit resident is safe for every other reader of the register:
+#   * sMagicDiv2 (rocisa f_math.hpp) masks with 0x7fffffff and feeds the result
+#     to s_lshr_b32 as the SHIFT AMOUNT operand. s_lshr_b32 is architecturally
+#     defined as D.u = S0.u >> S1.u[4:0], so bits above 4 of the shift operand
+#     are ignored by hardware on every supported target. Both magic-div
+#     consumers (skTileIndex and the linear-reduction fixup start-iteration calc
+#     in storeBranches) are of this form; SK5's skTileIndex additionally
+#     pre-masks with 0x8000001F for the SKTiles-overlay reason below.
+#   * SK5 aliases sgprSKTiles onto sgprMagicShiftItersPerTile. Every SKTiles
+#     read is on the dynamic (SK4-style) arm, and the host never sets bit 29 on
+#     the dynamic sub-path -- it packs skTiles | 0x40000000 and asserts
+#     (skTiles & 0xE0000000) == 0 (ContractionSolution.cpp). So the alias only
+#     ever sees a clean tile count.
+#   * _emitModeExtraction touches bit 30 only.
+_SK_USO_BIT = 29
 
 
 def _mailboxLds0Token(writer):
@@ -436,6 +483,50 @@ class StreamK(Component):
     def _skv(self, writer, name):
         """Return the VGPR index holding a StreamK constant."""
         return writer.states.skConstVgprs[name]
+
+    def emitUsoBranchToGlobal(self, writer, kernel, module, globalLabelName, comment):
+        """Emit the single runtime USO predicate AND its branch to the global path.
+
+        Tests bit 29 of MagicShiftItersPerTile in place:
+            s_bitcmp1_b32 <magicShift>, 29   ; SCC = 1 <=> USO ON
+            s_cbranch_scc0 <globalLabel>     ; USO off -> historical global mapping
+
+        The test and the branch are emitted together, by design: s_bitcmp1 sets
+        SCC on the USO-ON sense, which is the opposite of the branch we want, so
+        splitting them invites a call site that branches the wrong way. Callers
+        pass the label of their global-mapping path and get the correct sense for
+        free.
+
+        The full device predicate is
+            perTileActive = (bit29 != 0) && (skTiles != 0) && (skGrid % skTiles == 0)
+        with this USO test OUTERMOST so a USO-off run never executes the divide.
+
+        EVERY mapping divergence site must use this one predicate. Partial
+        application is the worst failure mode: if the iteration assignment uses
+        one mapping while the fixup's partial-slot index uses the other, the
+        fixup reads the WRONG partials and produces silently wrong numerics.
+        There are exactly three call sites (skAssignIters, skPeerChunkSize, and
+        the storeBranches partialIdx computation); the storeBranches past-tile
+        termination check is slaved to the third via sCoopEnd == 0 and must NOT
+        get a fourth test.
+
+        On the VGPR-cache path (gfx1250 SK3) the kernarg lives only in a VGPR, so
+        one transient SGPR is checked out for the readfirstlane and checked back
+        in immediately. It is released before the caller acquires skTiles/skGrid,
+        so it does not raise the peak SGPR count at any of the three sites. In
+        the SGPR case acquireStreamKConstSgpr returns the persistent name and the
+        whole test is a single instruction with no register cost.
+        """
+        sMagicShift = writer.acquireStreamKConstSgpr(kernel, "MagicShiftItersPerTile")
+        if writer.isStreamKConstantsToVgprEnabled(kernel):
+            module.add(VReadfirstlaneB32(
+                dst=sgpr(sMagicShift),
+                src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"]),
+                comment="USO: read MagicShiftItersPerTile from VGPR cache"))
+        module.add(SBitcmp1B32(src0=sgpr(sMagicShift), src1=_SK_USO_BIT, comment=comment))
+        writer.releaseStreamKConstSgpr(sMagicShift)
+        module.add(SCBranchSCC0(labelName=globalLabelName,
+                                comment="USO off -> historical global mapping"))
 
     # ------------------------------------------------------------------
     # Single-hop next-neighbor work stealing (codegen-time, off by default)
@@ -934,8 +1025,13 @@ class StreamK(Component):
     def skAssignIters(self, writer, kernel, module, sSkExtraIters, sIter, skConstsInVgprs):
         """Choose per-tile or global extra-iters mapping.
 
-        When skTiles != 0 and skGrid % skTiles == 0, distribute extras within
-        each tile; otherwise keep the historical global first-E mapping.
+        Divergence site 1 of 3. When USO is on AND skTiles != 0 AND
+        skGrid % skTiles == 0, distribute extras within each tile; otherwise
+        keep the historical global first-E mapping. USO off must reproduce the
+        pre-USO baseline exactly, so its test is outermost and the USO-off run
+        never executes the gate divide.
+
+        This runs once per tile transition, never per K-iteration.
 
         Gate divide reuses the caller sIter pair (F, rem) instead of checking
         out extra SGPRs. sIdx / SKItersPerWG are acquired per path so they do
@@ -944,6 +1040,12 @@ class StreamK(Component):
         perTileLabel = Label(writer.labels.getNameInc("SK_PerTileExtraIters"), "")
         globalLabel = Label(writer.labels.getNameInc("SK_GlobalExtraIters"), "")
         doneLabel = Label(writer.labels.getNameInc("SK_AssignItersDone"), "")
+
+        # USO test outermost: with USO off we take the historical mapping without
+        # even reading skTiles/skGrid or running the gate divide.
+        # Divergence site 1 of 3.
+        self.emitUsoBranchToGlobal(writer, kernel, module, globalLabel.getLabelName(),
+                                   "USO on? (bit 29 of MagicShiftItersPerTile); off -> historical global first-E mapping")
 
         sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
         sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
@@ -995,6 +1097,12 @@ class StreamK(Component):
         perTileLabel = Label(writer.labels.getNameInc("SK_PeerPerTile"), "")
         globalLabel = Label(writer.labels.getNameInc("SK_PeerGlobal"), "")
         doneLabel = Label(writer.labels.getNameInc("SK_PeerDone"), "")
+
+        # Divergence site 2 of 3. This sits inside the fixup peer loop, so the
+        # test costs 1 SALU per peer -- negligible against the SMEM flag spin
+        # that dominates that loop. Deliberately NOT hoisted out of the loop.
+        self.emitUsoBranchToGlobal(writer, kernel, module, globalLabel.getLabelName(),
+                                   "USO on? (bit 29 of MagicShiftItersPerTile); off -> historical global peer size")
 
         sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
         sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
@@ -1348,11 +1456,18 @@ class StreamK(Component):
             # Start Tree Fixup
             module.add(skFixupTreeLabel)
 
-            # partialIdx / coop-group start. When skGrid % skTiles == 0 the WGs
-            # of each tile are contiguous, so partialIdx = StreamKIdx % F and
-            # coopEnd = StreamKIdx - partialIdx + F. Otherwise reverse-engineer
-            # under the historical global first-E mapping.
+            # partialIdx / coop-group start. Divergence site 3 of 3. When USO is
+            # on and skGrid % skTiles == 0 the WGs of each tile are contiguous,
+            # so partialIdx = StreamKIdx % F and coopEnd = StreamKIdx - partialIdx + F.
+            # Otherwise reverse-engineer under the historical global first-E mapping.
             sCoopEnd = writer.sgprPool.checkOut(1, "SK_CoopEnd")
+            # LOAD-BEARING COUPLING: sCoopEnd is pre-zeroed unconditionally and only
+            # the per-tile arm below writes it. The past-tile termination check
+            # further down therefore needs NO separate USO test -- its
+            # SCmpEQU32(sCoopEnd, 0) already routes to SK_Fixup_PastTileGlobal
+            # whenever this site took the global arm. Adding a fourth USO test
+            # there would be redundant; removing this pre-zero would silently
+            # desync the two.
             module.add(SMovB32(dst=sgpr(sCoopEnd), src=0, comment="0 => use global past-tile check"))
 
             tmpVgpr = writer.vgprPool.checkOutAligned(4, 2, tag="StreamKCommon_storeBranches_tmpVgpr")
@@ -1362,6 +1477,12 @@ class StreamK(Component):
             perTilePartialLabel = Label(writer.labels.getNameInc("SK_Fixup_PerTilePartial"), "")
             globalPartialLabel = Label(writer.labels.getNameInc("SK_Fixup_GlobalPartial"), "")
             partialDoneLabel = Label(writer.labels.getNameInc("SK_Fixup_PartialDone"), "")
+
+            # USO test outermost, exactly as in skAssignIters / skPeerChunkSize:
+            # the mapping used here MUST match the one used for the iteration
+            # assignment, or the fixup reads the wrong partials.
+            self.emitUsoBranchToGlobal(writer, kernel, module, globalPartialLabel.getLabelName(),
+                                       "USO on? (bit 29 of MagicShiftItersPerTile); off -> historical global partialIdx (leaves coopEnd == 0)")
 
             sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
             sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
@@ -3400,6 +3521,10 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
+        # No USO prologue: bit 29 of MagicShiftItersPerTile is tested in place at
+        # each divergence site (emitUsoBranchToGlobal), so nothing has to be
+        # extracted or cleared here and no SGPR is held live for it.
+
         # Cluster multicast: exit padded boundary-cluster peers here, before the
         # fold overwrites WorkGroup0 with the linear index and before the prologue
         # cluster-barrier arrive, so their WAVEDONE frees the -3 barrier slot for
@@ -4494,6 +4619,13 @@ class StreamKHybrid(StreamK):
 
         # ----- Extract the mode bit once for the whole kernel -----
         module.add(self._emitModeExtraction(writer, kernel))
+
+        # No USO prologue here either. The mode bit (30) still has to be
+        # extracted and cleared above because StreamKHybridMode's dispatch is a
+        # plain SCmpEQU32==0 and because the SKTiles alias must see a clean tile
+        # count; the USO bit (29) needs neither -- it is tested in place at the
+        # three divergence sites and the alias never carries it (see the module
+        # header comment).
 
         def emitDynamicPreLoop(mod):
             sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")

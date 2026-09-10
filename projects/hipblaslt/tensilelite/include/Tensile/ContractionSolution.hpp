@@ -305,15 +305,26 @@ namespace TensileLite
      * @param tiles             The same batch-inclusive tile count fed to it.
      * @param itersPerTile      The same clamped iterations per tile fed to it.
      * @param skGrid            The resolved StreamK grid packed into the split.
-     * @param perTileExtraIters True when the selected kernel redistributes
+     * @param perTileCapable    True when the selected kernel CAN redistribute
      *                          Stream-K extras within each tile
-     *                          (InternalArgsSupport::perTileExtraIters).
+     *                          (InternalArgsSupport::perTileExtraIters). This is
+     *                          capability only -- the kernel branches on it at
+     *                          runtime.
+     * @param uniformSummationOrder
+     *                          ContractionProblemParameters::uniformSummationOrder(),
+     *                          the host-side bit the packer forwards to the
+     *                          device in MagicShiftItersPerTile bit 29. The
+     *                          per-tile mapping is performed only when this AND
+     *                          perTileCapable hold; with it clear the kernel runs
+     *                          the historical global first-E mapping.
      */
-    TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
-                                                            size_t                    tiles,
-                                                            size_t                    itersPerTile,
-                                                            size_t                    skGrid            = 0,
-                                                            bool                      perTileExtraIters = false);
+    TENSILELITEHOST_EXPORT bool
+        streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
+                                     size_t                    tiles,
+                                     size_t                    itersPerTile,
+                                     size_t                    skGrid                = 0,
+                                     bool                      perTileCapable        = false,
+                                     bool                      uniformSummationOrder = false);
 
     /**
      * Whether a resolved Stream-K launch may use parallel reduction under
@@ -336,9 +347,11 @@ namespace TensileLite
 
     /**
      * Iteration range [start, end) assigned to workgroup w under the static
-     * two-tile StreamK mapping. When perTileExtraIters is true and
-     * skGrid % tiles == 0, extras are distributed within each tile;
-     * otherwise the historical global first-E mapping is used.
+     * two-tile StreamK mapping. When the per-tile mapping is ACTIVE --
+     * perTileCapable (InternalArgsSupport::perTileExtraIters) AND
+     * uniformSummationOrder, which is exactly the runtime condition the kernel
+     * branches on -- and skGrid % tiles == 0, extras are distributed within each
+     * tile; otherwise the historical global first-E mapping is used.
      */
     struct StreamKWorkgroupIterRange
     {
@@ -351,7 +364,8 @@ namespace TensileLite
         size_t tiles,
         size_t itersPerTile,
         size_t skGrid,
-        bool   perTileExtraIters);
+        bool   perTileCapable,
+        bool   uniformSummationOrder);
 
     /**
      * Thrown when a launch requests uniform summation order but the resolved
@@ -477,15 +491,22 @@ namespace TensileLite
         // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
         // grid / tiles) instead of partialTileSize(grid).
         //
-        // The two could in principle disagree about WHETHER a workspace is needed,
-        // not just about how many bytes: at a k-split factor grid / tiles of 1,
+        // The two can disagree about WHETHER a workspace is needed, not just about
+        // how many bytes: at a k-split factor grid / tiles of 1,
         // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
         // does not, so a parallel reduction whose grid came back equal to tiles
-        // would reserve here and not there. That case is unreachable -- both call
-        // sites run streamKReconcileReduction() on the same (reduction, grid, tiles)
-        // triple immediately after getSKGridImpl(), and it demotes parallel to tree
-        // whenever the split factor is below 2, so neither sizing ever sees parallel
-        // at a split of 1. The formulas differ; the reserve-or-not answer does not.
+        // reserves here and not there. Both call sites run
+        // streamKReconcileReduction() on the same (reduction, grid, tiles) triple
+        // immediately after getSKGridImpl(), which demotes parallel to tree whenever
+        // the split factor is below 2 -- but that helper is gated on uniform
+        // summation order, so it only closes the gap when the mode is on. With the
+        // mode off (the default, and the behaviour that predates it) the split-of-1
+        // parallel triple survives into both sizings, and they agree only because
+        // the snapshot's workspace-fit guard then demotes the launch itself
+        // whenever partialTileSize(grid) does not fit. The formulas differ; the
+        // reserve-or-not answer coincides on every shape reachable through
+        // allocate-then-launch, where the allocated workspace is exactly
+        // requiredWorkspaceSize()'s zero.
         //
         // That agreement is load-bearing rather than incidental: it is what lets the
         // allocate-then-launch flow close. The allocator sizes from

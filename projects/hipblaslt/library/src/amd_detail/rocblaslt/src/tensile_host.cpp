@@ -5123,19 +5123,36 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             tensile_prob.gemms[i].setWorkspaceSize(algo->max_workspace_bytes);
             tensile_prob.gemms[i].setWorkspaceSizeGroupedGemm(problemWs);
             tensile_prob.gemms[i].setGroupedGemmCount(tensile_prob.gemms.size());
-            tensile_prob.gemms[i].setGroupedGemm(true);
+            // setGroupedGemm(true) here persists on the caller's problem, so it
+            // is only applied under uniform summation order, which is the only
+            // consumer that needs it (uniformSummationOrderSupported()).
+            if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
             tensile_prob.gemms[i].setParams().setFallbackStatus(isCUFallback);
         }
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
             TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
-            if(!((*solution->hardwarePredicate)(*hardware)
-                 && TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                                   task,
-                                                   *hardware,
-                                                   *solution,
-                                                   tensile_prob.gemms[i])))
+            // With uniform summation order OFF this must reproduce the pre-USO
+            // check, which was hardwarePredicate && problemPredicate (no
+            // taskPredicate). streamKDynamicQueueSupported() is unconditional.
+            bool match = (*solution->hardwarePredicate)(*hardware);
+            if(match)
+            {
+                if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                    match = TensileLite::softwarePredicate(
+                        TensileLite::SolutionLibrarySearchType::DEFAULT,
+                        task,
+                        *hardware,
+                        *solution,
+                        tensile_prob.gemms[i]);
+                else
+                    match = (*solution->problemPredicate)(tensile_prob.gemms[i])
+                            && solution->streamKDynamicQueueSupported(tensile_prob.gemms[i],
+                                                                      *hardware);
+            }
+            if(!match)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
@@ -5355,7 +5372,12 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         {
             data->problem.gemms[i].setWorkspaceSize(workspaceBytes);
             data->problem.gemms[i].setGroupedGemmCount(data->problem.gemms.size());
-            data->problem.gemms[i].setGroupedGemm(true);
+            // setGroupedGemm(true) persists on data->problem, so it is only
+            // applied under uniform summation order, which is the only consumer
+            // that needs it (uniformSummationOrderSupported()). Pre-USO this
+            // call was not here.
+            if(data->problem.gemms[i].getParams().uniformSummationOrder())
+                data->problem.gemms[i].setGroupedGemm(true);
         }
 
         auto solutions = library->findTopSolutionsGroupedGemm(

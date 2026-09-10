@@ -173,8 +173,20 @@ namespace TensileLite
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                const bool swMatch = softwarePredicate(
-                    SolutionLibrarySearchType::DEFAULT, task, hardware, *solution, problem);
+                // With uniform summation order OFF this must reproduce the
+                // pre-USO filter, which was hardwarePredicate && problemPredicate.
+                // taskPredicate is a real filter (LaunchLimits / WorkspaceCheck)
+                // that the USO stack added here, so it stays behind the USO check.
+                // streamKDynamicQueueSupported() stays unconditional.
+                const bool swMatch
+                    = problem.getParams().uniformSummationOrder()
+                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                              task,
+                                              hardware,
+                                              *solution,
+                                              problem)
+                          : ((*(solution->problemPredicate))(problem)
+                             && solution->streamKDynamicQueueSupported(problem, hardware));
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
