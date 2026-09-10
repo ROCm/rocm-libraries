@@ -8,9 +8,9 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "SdpaGraphMutators.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -19,6 +19,7 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestAsmSdpaEngine : public ::testing::Test
 {
@@ -85,18 +86,19 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    auto builder = withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-                                         dims,
-                                         strides,
-                                         dims,
-                                         strides,
-                                         dims,
-                                         strides,
-                                         dims,
-                                         strides,
-                                         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
-                                     {"q", "k", "v", "o"});
+    auto builder
+        = sdpa::withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      dims,
+                                      strides,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
+                                  {"q", "k", "v", "o"});
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());

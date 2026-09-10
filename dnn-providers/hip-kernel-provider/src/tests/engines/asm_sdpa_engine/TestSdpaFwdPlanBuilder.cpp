@@ -7,11 +7,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
-#include "SdpaGraphMutators.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -29,6 +29,7 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
@@ -265,20 +266,20 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
                                   /*withStats=*/true);
     };
 
-    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
-        = {{GraphTest{withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v", "o"}),
-                      "All of Q, K, V, O ragged -> group mode"},
-            true},
-           {GraphTest{withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
-                      "Q, K, V ragged but not O"},
-            false},
-           {GraphTest{withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
-           {GraphTest{withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
-                      "K, V, O ragged but not Q"},
-            false},
-           {GraphTest{withRaggedTensors(withStatsGraph(), {"q", "k", "v", "o", "stats"}),
-                      "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
-            false}};
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v", "o"}),
+                   "All of Q, K, V, O ragged -> group mode"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
+                   "Q, K, V ragged but not O"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
+                   "K, V, O ragged but not Q"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(withStatsGraph(), {"q", "k", "v", "o", "stats"}),
+                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
+         false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
@@ -289,13 +290,13 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
 {
-    const GraphTest test{withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
+    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
 {
-    const GraphTest test{withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
+    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 

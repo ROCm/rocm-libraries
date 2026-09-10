@@ -40,6 +40,7 @@
 #endif
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
@@ -49,34 +50,6 @@ using namespace hipdnn_sdk_test_utils;
 
 namespace
 {
-
-// Re-serializes a graph with its first non-virtual tensor marked ragged. The
-// applicability check keys on ragged_offset_tensor_uid being set, so we point
-// it at another existing tensor uid to keep the value plausible.
-flatbuffers::DetachedBuffer makeGraphWithRaggedTensor(const std::vector<uint8_t>& serializedGraph)
-{
-    const Graph* graph = GetGraph(serializedGraph.data());
-    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
-
-    TensorAttributesT* target = nullptr;
-    for(auto& tensor : graphT->tensors)
-    {
-        if(!tensor->virtual_)
-        {
-            target = tensor.get();
-            break;
-        }
-    }
-    EXPECT_NE(target, nullptr) << "Test graph has no non-virtual tensor to mark ragged";
-    if(target != nullptr)
-    {
-        target->ragged_offset_tensor_uid = graphT->tensors.back()->uid;
-    }
-
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(CreateGraph(builder, graphT.get()));
-    return builder.Release();
-}
 
 // Validates and serializes a frontend graph.
 std::vector<uint8_t> serialize(const std::shared_ptr<hipdnn_frontend::graph::Graph>& graph)
@@ -100,8 +73,8 @@ void expectRaggedTensorRejected(const std::vector<uint8_t>& serializedGraph)
         executor.isApplicable(const_cast<uint8_t*>(serializedGraph.data()), serializedGraph.size()))
         << "Baseline (non-ragged) graph should be applicable";
 
-    auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph);
-    EXPECT_FALSE(executor.isApplicable(raggedGraph.data(), raggedGraph.size()))
+    auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph.data(), serializedGraph.size());
+    EXPECT_FALSE(executor.isApplicable(raggedGraph.GetBufferPointer(), raggedGraph.GetSize()))
         << "Graph containing a ragged tensor must be rejected";
 }
 

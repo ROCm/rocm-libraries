@@ -6,13 +6,14 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
 #include "mocks/MockPlanBuilder.hpp"
-#include "mocks/RaggedTensorMapFixture.hpp"
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
@@ -128,22 +129,38 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
-TEST(TestHipMlopsEngine, IsApplicableReturnsFalseForRaggedGraph)
+TEST(TestHipMlopsEngine, RaggedTensorFlipsApplicableGraphToRejected)
 {
-    // An otherwise-applicable plan builder must be short-circuited by the ragged
-    // guard, so its isApplicable is never consulted.
-    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+    // Start from a graph an accepting plan builder would take, then add a ragged
+    // tensor: the flip to rejected must come from the engine's ragged guard, not the
+    // plan builder. The baseline proves the graph is otherwise accepted; the ragged
+    // case asserts the plan builder is never consulted (Times(0)).
+    auto baseBuilder = createValidMatmulGraph();
+    const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
-    HipMlopsEngine engine(0);
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
 
-    const RaggedTensorMapFixture raggedTensors;
-    const MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, getTensorMap())
-        .WillRepeatedly(::testing::ReturnRef(raggedTensors.tensorMap()));
-    Handle dummyHandle;
-    EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
+    }
+
+    auto raggedBuilder = makeGraphWithRaggedTensor(createValidMatmulGraph());
+    const GraphWrapper raggedGraph(raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
+
+    {
+        auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+        HipMlopsEngine engine(0);
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        Handle dummyHandle;
+        EXPECT_FALSE(engine.isApplicable(dummyHandle, raggedGraph));
+    }
 }
 
 TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)

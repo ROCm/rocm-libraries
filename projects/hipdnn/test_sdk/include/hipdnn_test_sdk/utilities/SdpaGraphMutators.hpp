@@ -15,15 +15,14 @@
 #include <string>
 #include <unordered_map>
 
-namespace asm_sdpa_engine
+namespace hipdnn_test_sdk::utilities::sdpa
 {
 
-// Test graph mutators that post-process a serialized SDPA graph (e.g. one built
-// by createSdpaFwdGraph/createSdpaBwdGraph) by unpacking, editing the native
-// GraphT, and re-emitting. This keeps ragged/seq-len wiring local to the
-// asm_sdpa_engine tests instead of adding parameters to the shared
-// createValidSdpaFwdGraph helper. Mirrors makeGraphWithRaggedTensor in
-// test_sdk/.../TestCpuReferenceRaggedRejection.cpp.
+// SDPA-specific graph mutators that post-process a serialized SDPA graph (e.g. one
+// built by createValidSdpaFwdGraph/createSdpaBwdGraph) by unpacking, editing the native
+// GraphT, and re-emitting. This keeps ragged/seq-len wiring out of the shared
+// createValidSdpaFwdGraph helper. For a domain-agnostic ragged mutator see
+// makeGraphWithRaggedTensor in FlatbufferGraphTestUtils.hpp.
 
 namespace detail
 {
@@ -136,4 +135,4 @@ inline flatbuffers::FlatBufferBuilder withSeqLenKv(flatbuffers::FlatBufferBuilde
     return detail::repack(*graph);
 }
 
-} // namespace asm_sdpa_engine
+} // namespace hipdnn_test_sdk::utilities::sdpa

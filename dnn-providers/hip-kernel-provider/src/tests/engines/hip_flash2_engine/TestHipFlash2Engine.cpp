@@ -11,19 +11,19 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
 #include "mocks/MockPlanBuilder.hpp"
-#include "mocks/RaggedTensorMapFixture.hpp"
 
 namespace hip_flash2_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestHipFlash2Engine : public ::testing::Test
 {
@@ -130,38 +130,41 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
     EXPECT_FALSE(_engine->isApplicable(_handle, graph));
 }
 
-// Device-independent guard tests: a mocked plan builder that would accept the
-// graph proves the ragged guard short-circuits before any plan builder runs.
+// Device-independent guard test: start from an SDPA graph an accepting plan builder
+// would take, then mark Q/K/V/O ragged. The flip to rejected must come from the
+// engine's ragged guard, not the plan builder -- the baseline proves the graph is
+// otherwise accepted, and the ragged case asserts the plan builder is never consulted.
+// The engine's isApplicable inspects no dims, so the default SDPA graph suffices.
 
-TEST_F(TestHipFlash2Engine, IsApplicableTrueWhenPlanBuilderApplicableAndNoRagged)
+TEST_F(TestHipFlash2Engine, RaggedTensorFlipsApplicableGraphToRejected)
 {
-    auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
+    auto baseBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baseGraph(
+        baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
-    HipFlash2Engine engine;
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+            .WillRepeatedly(::testing::Return(true));
 
-    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_TRUE(engine.isApplicable(_handle, baseGraph));
+    }
 
-    EXPECT_TRUE(engine.isApplicable(_handle, mockGraph));
-}
+    auto raggedBuilder = sdpa::withRaggedTensors(
+        hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(), {"q", "k", "v", "o"});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper raggedGraph(
+        raggedBuilder.GetBufferPointer(), raggedBuilder.GetSize());
 
-TEST_F(TestHipFlash2Engine, IsApplicableFalseForRaggedGraph)
-{
-    auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
-    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+    {
+        auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+        EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
 
-    HipFlash2Engine engine;
-    engine.addPlanBuilder(std::move(mockPlanBuilder));
-
-    const hip_kernel_provider::RaggedTensorMapFixture raggedTensors;
-    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, getTensorMap())
-        .WillRepeatedly(::testing::ReturnRef(raggedTensors.tensorMap()));
-
-    EXPECT_FALSE(engine.isApplicable(_handle, mockGraph));
+        HipFlash2Engine engine;
+        engine.addPlanBuilder(std::move(mockPlanBuilder));
+        EXPECT_FALSE(engine.isApplicable(_handle, raggedGraph));
+    }
 }
 
 // -- ID and name tests ---------------------------------------------------------
