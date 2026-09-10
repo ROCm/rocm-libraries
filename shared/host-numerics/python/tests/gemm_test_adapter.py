@@ -147,9 +147,11 @@ def reference_gemm(
 ):
     output = hn.Tensor(
         output_type,
-        output_layout
-        if output_layout is not None
-        else hn.Shape([a.shape[0], b.shape[1]]),
+        (
+            output_layout
+            if output_layout is not None
+            else hn.Shape([a.shape[0], b.shape[1]])
+        ),
     )
     reference_gemm_into(
         a,
@@ -216,7 +218,9 @@ def reference_gemm_into(
 ):
     if backend not in (hn.GemmBackend.Automatic, hn.GemmBackend.Blocked):
         raise ValueError("Python matmul exposes the built-in blocked backend")
-    selection = hn.OutputSelection.all() if output_selection is None else output_selection
+    selection = (
+        hn.OutputSelection.all() if output_selection is None else output_selection
+    )
     product = _product(
         a,
         b,

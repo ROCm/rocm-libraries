@@ -287,13 +287,11 @@ int main() {
         checkReference(fp6PackingTail, result);
         const size_t physicalElements = static_cast<size_t>(leadingDimension);
         require(result.data.rawEncodedBackingStorage().size() == (physicalElements * 6 + 7) / 8,
-                    "FP6 packing-tail storage size mismatch.");
+                "FP6 packing-tail storage size mismatch.");
     }
 
-    for (const auto& [shape, blockAxis] :
-         std::array<std::pair<Shape, size_t>, 3>{{{Shape{0, 5}, 0},
-                                                  {Shape{5, 0}, 1},
-                                                  {Shape{0, 0}, 0}}}) {
+    for (const auto& [shape, blockAxis] : std::array<std::pair<Shape, size_t>, 3>{
+             {{Shape{0, 5}, 0}, {Shape{5, 0}, 1}, {Shape{0, 0}, 0}}}) {
         MxCase empty = defaultMxCase(shape);
         empty.dataType = ScalarType::Float4E2M1;
         empty.scaleType = ScalarType::E8M0;

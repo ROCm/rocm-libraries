@@ -383,8 +383,8 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
 // nonzero imaginary component in complex-to-real conversion.
 template <typename Target, typename Source>
 Target convertScalar(Source source) {
-    return detail::convertScalarValue<Target>(
-        std::move(source), detail::implicitNativeConversionOptions());
+    return detail::convertScalarValue<Target>(std::move(source),
+                                              detail::implicitNativeConversionOptions());
 }
 
 template <typename Target, typename Source>

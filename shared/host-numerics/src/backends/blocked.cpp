@@ -404,7 +404,8 @@ GemmExecutionInfo detail::runBlockedGemmToSelectedOutput(const GemmInvocation& p
         throw std::invalid_argument("Streaming blocked GEMM requires a partial selection.");
     const size_t selectedCount =
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
-    if (selectedOutput.type() != problem.d.type() || selectedOutput.shape() != Shape{1, selectedCount})
+    if (selectedOutput.type() != problem.d.type() ||
+        selectedOutput.shape() != Shape{1, selectedCount})
         throw std::invalid_argument("Streaming blocked GEMM output shape or type mismatch.");
 
     switch (problem.accumulatorType) {

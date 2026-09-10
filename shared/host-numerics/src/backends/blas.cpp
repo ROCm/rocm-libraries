@@ -341,8 +341,8 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         MatmulOptions stagedOptions(nativeScalarType<Accumulator>);
         stagedOptions.conjugateA = conjugateA;
         stagedOptions.conjugateB = conjugateB;
-        GemmInvocation stagedProblem(
-            std::move(stagedA), std::move(stagedB), stagedOutput, stagedOptions);
+        GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
+                                     stagedOptions);
 
         blas.run(stagedProblem);
     }
@@ -351,13 +351,13 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     const RuntimeMatrixWriter<Accumulator> output(problem.d);
     const size_t rows = problem.d.shape()[0];
     const size_t outputElementCount = problem.d.shape().elementCount();
-    detail::forEachParallelIndex(
-        outputElementCount, outputElementCount, detail::canParallelizeGemmOutput(problem), 500'000,
-        [&](size_t linearIndex) {
-            const size_t column = linearIndex / rows;
-            const size_t row = linearIndex % rows;
-            output.store(row, column, stagedOutputReader(row, column));
-        });
+    detail::forEachParallelIndex(outputElementCount, outputElementCount,
+                                 detail::canParallelizeGemmOutput(problem), 500'000,
+                                 [&](size_t linearIndex) {
+                                     const size_t column = linearIndex / rows;
+                                     const size_t row = linearIndex % rows;
+                                     output.store(row, column, stagedOutputReader(row, column));
+                                 });
 
     return {
         .backendUsed = GemmBackend::Blas,

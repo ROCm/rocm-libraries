@@ -66,8 +66,8 @@ inline GemmSupportInfo queryGemmSupportWithBlasBackend(
         backend);
 }
 
-inline GemmTestRunInfo referenceGemmWithBlasBackend(
-    const GemmTestCase& request, GemmBackend backend = GemmBackend::Automatic) {
+inline GemmTestRunInfo referenceGemmWithBlasBackend(const GemmTestCase& request,
+                                                    GemmBackend backend = GemmBackend::Automatic) {
     return detail::executeBlasGemm(
         detail::GemmInvocation(request.a, request.b, request.d, testMatmulOptions(request),
                                request.outputSelection),
