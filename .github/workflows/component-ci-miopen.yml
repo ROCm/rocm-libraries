@@ -28,7 +28,7 @@ jobs:
   miopen-build:
     name: ${{ matrix.name }}
     container:
-      image: rocm/miopen-dev:latest
+      image: rocm/miopen-dev:multiarch_dev_20260910
     strategy:
       fail-fast: false
       matrix:
