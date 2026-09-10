@@ -142,8 +142,10 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
             if source_kernels != wheel_kernels:
                 problems.append("custom-kernel resource set does not match the source tree")
             rocisa = [req for req in requirements if canonicalize_name(req.name) == "rocisa"]
-            if len(rocisa) != 1 or str(rocisa[0]) != "rocisa":
-                problems.append(f"canonical Requires-Dist must contain exact rocisa, got {rocisa}")
+            if rocisa:
+                problems.append(
+                    f"canonical wheel must not declare source-provisioned rocisa, got {rocisa}"
+                )
             extras = set(metadata.get_all("Provides-Extra", []))
             for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
                 matches = [req for req in requirements if canonicalize_name(req.name) == dependency]
