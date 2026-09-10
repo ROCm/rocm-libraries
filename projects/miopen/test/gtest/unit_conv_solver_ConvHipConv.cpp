@@ -7,7 +7,7 @@
 //   - 2D convolution only
 //   - fp16 or bf16
 //   - NHWC, or NCHW with packed tensors (served by transposing through NHWC scratch)
-//   - architectures recognised by hipconv (gfx950)
+//   - architectures recognised by hipconv (gfx950, gfx1250)
 //   - the hipconv library must have a valid kernel for the (params, direction) tuple
 
 #include "unit_conv_solver.hpp"
