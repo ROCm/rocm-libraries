@@ -4,6 +4,7 @@
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
@@ -34,6 +35,45 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
         &nodes);
     builder.Finish(graphOffset);
     return builder;
+}
+
+/// Re-serializes a graph with its first non-virtual tensor marked ragged. The
+/// applicability check keys on ragged_offset_tensor_uid being set, so we point it
+/// at another existing tensor uid to keep the value plausible. Throws if the graph
+/// has no non-virtual tensor to mark.
+inline flatbuffers::FlatBufferBuilder makeGraphWithRaggedTensor(const void* serializedGraph,
+                                                                size_t size)
+{
+    (void)size;
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serializedGraph);
+
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT* target = nullptr;
+    for(auto& tensor : graph->tensors)
+    {
+        if(!tensor->virtual_)
+        {
+            target = tensor.get();
+            break;
+        }
+    }
+    if(target == nullptr)
+    {
+        throw std::runtime_error(
+            "makeGraphWithRaggedTensor: graph has no non-virtual tensor to mark ragged");
+    }
+    target->ragged_offset_tensor_uid = graph->tensors.back()->uid;
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
+/// Builder-consuming overload mirroring sdpa::withRaggedTensors, so a freshly built
+/// graph can be marked ragged inline: makeGraphWithRaggedTensor(createValidMatmulGraph()).
+inline flatbuffers::FlatBufferBuilder
+    makeGraphWithRaggedTensor(flatbuffers::FlatBufferBuilder&& builder)
+{
+    return makeGraphWithRaggedTensor(builder.GetBufferPointer(), builder.GetSize());
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
