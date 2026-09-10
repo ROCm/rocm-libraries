@@ -170,9 +170,9 @@ jobs:
       # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
-      - name: Install pytest
+      - name: Install Python dependencies
         run: |
-          "$VENV_PYTHON" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
+          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
       - name: Configure superbuild
         run: |
@@ -226,12 +226,6 @@ jobs:
           # and every superbuild fix here goes untested.
           $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
           cmake --install build --prefix $librariesPath
-
-      - name: Install Python build dependencies
-        shell: pwsh
-        run: |
-          & $env:VENV_PYTHON -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
 
       - name: Pack frontend wheel
         shell: pwsh
@@ -391,9 +385,9 @@ jobs:
       # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
-      - name: Install pytest
+      - name: Install Python dependencies
         run: |
-          "$VENV_PYTHON" -m pip install -r .github/requirements-hipdnn-superbuild-ci-configure.txt
+          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
       - name: Configure superbuild
         run: |
@@ -445,11 +439,6 @@ jobs:
 
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"
-
-      - name: Install Python build dependencies
-        run: |
-          set -euo pipefail
-          "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci-wheel.txt
 
       - name: Pack frontend wheel
         run: |

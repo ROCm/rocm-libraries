@@ -1,6 +1,0 @@
-# Installed by hipdnn-superbuild-ci.yml before "Configure superbuild"; that step
-# explains why the ordering matters.
-#
-# Also serves the frontend wheel tests later in the same venv, which is why pytest
-# does not appear in the wheel manifest.
-pytest
