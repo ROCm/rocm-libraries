@@ -51,7 +51,9 @@
 #     numIter%G groups getting an extra iteration). Each group is verified
 #     against its *own* chunk rather than aggregated, so a group landing on the
 #     wrong K slice fails. The group index is fed from the grid z axis rather
-#     than split out of workgroup y as production does; see build_kernel.
+#     than split out of workgroup y as production does; see build_kernel. The
+#     GSU configs run without a cluster, since the default launch does not give
+#     a cluster's workgroups a shared GSU group; see the GSU block in CONFIGS.
 #   - Non-power-of-2 MacroTile (e.g. 384 for A/B, 192/96 for MX scales): exercises
 #     MT offset, non-POT gl2ncc (vectorStaticDivideAndRemainder), and non-POT
 #     perpendicular/coalesced extents. DepthU remains a multiple of MatrixInstK.
@@ -306,8 +308,10 @@ def _M(side, tlu, mt):    return TensorSpec("Metadata", tlu, mt, 1, is_m=True, s
 
 # gl2-prefetch is emitted whenever PrefetchGL2 is set (KernelWriter guards
 # gl2PrefetchCalcAddr on kernel["PrefetchGL2"] only, not ClusterDim). The
-# cooperative fan-out only kicks in for a real cluster, so most configs run with
-# ClusterDim != [1,1] to exercise it (one [1,1] case covers the degenerate path).
+# cooperative fan-out only kicks in for a real cluster, so the layout/sparse/edge
+# configs run ClusterDim != [1,1] to exercise it. The degenerate path has its own
+# [1,1] case, and the GSU block runs entirely at [1,1] (see there for why GSU is
+# not paired with a cluster).
 # ClusterDim = [cx, cy]: A/MXSA cooperate along cy and span cx macro-tiles; B/MXSB are the mirror. Shapes
 # include power-of-2 and non-POT MacroTile / cluster extents
 # (scalarStaticRemainder, ceil(gl2nl), ncc divide).
@@ -402,48 +406,66 @@ CONFIGS = [
     # address gains startIter*inc and the per-iteration step widens to the chunk
     # stride. The group index is the grid z axis and every group is verified
     # against its own chunk (never aggregated), so a group landing on the wrong
-    # slice of K fails. GSU rides alongside the cluster, so the cooperative
-    # fan-out is exercised at the same time. DepthU stays a power of 2 and the
-    # thread count a whole number of waves (see the asserts in build_kernel). ----
+    # slice of K fails. DepthU stays a power of 2 and the thread count a whole
+    # number of waves (see the asserts in build_kernel).
+    #
+    # These all run ClusterDim [1,1], deliberately. Pairing GSU with a cluster
+    # here would assert a fan-out that the default launch does not produce: the
+    # cluster owns ClusterDim[1] *consecutive raw* WorkGroup1 values (the WG-id
+    # decode sets WorkGroup1 = cluster_y*nwg_y + wg_y), and GSUOn.graWorkGroup
+    # then splits that raw value with WorkGroup1 /= GSU, GSUSumIdx = wg1 % GSU.
+    # With GlobalSplitUWorkGroupMappingRoundRobin off -- the default -- GSU is
+    # therefore the *fast* axis of raw y, so cluster peers get different
+    # GSUSumIdx and their post-divide WorkGroup1 collapses onto one tile. The
+    # cooperative slot is taken from that divided value (WorkGroup{i} % ClusterDim
+    # in calculateStartAddr), so peers would compute the same slot and prefetch
+    # the same slice. Only GSUWGMRR=1 makes a cluster share one group, which is
+    # the arrangement a z-driven group index reproduces. Keeping these at [1,1]
+    # tests the chunk math on a launch shape that is actually generated; the
+    # cooperative fan-out is covered on its own by the cluster configs above. ----
     # gsu=1: the identity case. The GSU paths are emitted but there is one group,
     # so startIter==0 and the stride is unscaled -- guards the GSU codegen against
     # perturbing a single-group launch.
-    GL2Config("gsu1_tlu", [_A(True, 256), _B(True, 256)], cluster=(2, 2), gsu=1),
+    GL2Config("gsu1_tlu", [_A(True, 256), _B(True, 256)], cluster=(1, 1), gsu=1),
     # Interleaved chunks (GSUC=0): group g starts at iteration g and every
     # increment steps a whole GSU round. Mixed TLU/non-TLU so the chunk offset is
     # checked against both K-axis layouts (K perpendicular vs K coalesced).
-    GL2Config("gsu4_interleaved", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+    GL2Config("gsu4_interleaved", [_A(True, 256), _B(False, 256)], cluster=(1, 1),
               gsu=4, k_iters=10),
     # Contiguous chunks (GSUC=1) with an uneven split: 10 iterations over 4 groups
     # is q=2 r=2, so groups 0/1 own 3 iterations and start at 0/3 while groups 2/3
     # own 2 and start at 6/8. Exercises the (q+1)*g vs q*g+r select.
-    GL2Config("gsu4_contiguous_rem", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
+    GL2Config("gsu4_contiguous_rem", [_A(True, 256), _B(False, 256)], cluster=(1, 1),
               gsu=4, gsuc=True, k_iters=10),
     # Non-POT group count with remainder 1 (10 = 3*3 + 1): only group 0 gets the
-    # extra iteration, so the select flips for exactly one group. Non-POT MT too.
-    GL2Config("gsu3_contiguous_rem", [_A(True, 384), _B(True, 384)], cluster=(2, 1),
+    # extra iteration, so the select flips for exactly one group. MT 768 carries
+    # the geometry the cluster used to supply: a non-POT ncc of 3 (the non-POT
+    # vectorStaticDivideAndRemainder) and gl2nl 3, so the widened increment has to
+    # reach every per-inst address register rather than only the first.
+    GL2Config("gsu3_contiguous_rem", [_A(True, 768), _B(True, 768)], cluster=(1, 1),
               gsu=3, gsuc=True, k_iters=10),
     # Exact split (no remainder, 9 = 3*3) on a non-POT group count: every group
     # gets q iterations and the select must never take the (q+1) side.
-    GL2Config("gsu3_contiguous_exact", [_A(False, 256), _B(False, 256)], cluster=(1, 3),
+    GL2Config("gsu3_contiguous_exact", [_A(False, 256), _B(False, 256)], cluster=(1, 1),
               gsu=3, gsuc=True, k_iters=9),
     # MX scales under GSU: the chunk offset is startIter * that tensor's own
     # increment, so MXSA/MXSB must shift by SizeFree*(DepthU/MXBlock) per iteration
     # while A/B shift by their (much larger) stride. A shared shift would fail here.
     GL2Config("gsu2_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
-              depth_u=256, mx_block=32, cluster=(2, 2), gsu=2, gsuc=True, k_iters=7),
+              depth_u=256, mx_block=32, cluster=(1, 1), gsu=2, gsuc=True, k_iters=7),
     # Sparse metadata under GSU: _DepthUA is halved and _DepthUMetadata differs
     # from DepthU, so each of the three tensors needs its own chunk offset even
     # though they all share one start iteration.
     GL2Config("gsu2_sparse", [_A(True, 256), _B(True, 256), _M("A", False, 256)],
-              cluster=(2, 2), sparse=1, depth_u_metadata=64, gsu=2, k_iters=6),
+              cluster=(1, 1), sparse=1, depth_u_metadata=64, gsu=2, k_iters=6),
     # Edge clamp + GSU: the K-direction chunk shift must stay orthogonal to the
     # free-dim clamp (it translates the clamped footprint, it does not re-clamp).
-    GL2Config("gsu2_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(2, 2),
+    GL2Config("gsu2_ntlu_edge", [_A(False, 256), _B(False, 256)], cluster=(1, 1),
               size_i=384, size_j=384, gsu=2, gsuc=True, k_iters=5),
-    # GSU without a cluster: the degenerate single-workgroup fan-out combined with
-    # a 4-way K split, so the chunk offset is the only thing distinguishing the wgs.
-    GL2Config("gsu4_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
+    # Both operands TLU under a 4-way interleaved split, so the chunk offset walks
+    # the K-perpendicular layout on A and B at once (the mixed-layout cases above
+    # only ever have one side that way).
+    GL2Config("gsu4_tlu", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
               gsu=4, k_iters=12),
 ]
 
