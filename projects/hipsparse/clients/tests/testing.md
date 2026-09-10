@@ -80,8 +80,10 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./hipsparse-test --gtest_filter='*checkin*-*known_
 
 **4. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**5. Open the PR** targeting `develop`. The pre-checkin GTest run (`*checkin*`, excluding
-`*known_bug*`) is the merge gate on the HIP backend; the CUDA backend has its own reduced lane.
+**5. Open the PR** targeting `develop`. The merge gate on the HIP backend is the TheRock CTest
+`standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`). Internal Jenkins
+`precheckin` still uses the narrower `*checkin*` filter. The CUDA backend has its own reduced
+Jenkins lane (`*checkin*csrmv*`), not part of TheRock.
 
 ---
 
@@ -282,8 +284,8 @@ runs the narrow `*checkin*csrmv*`, `extended.groovy` runs `*nightly*`, and `code
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | TheRock CI `standard` category on the HIP backend (changed projects), excluding `*known_bug*`; plus the CUDA `*checkin*csrmv*` lane |
-| Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results |
+| Trusted gate | TheRock CI `standard` category on the HIP backend (changed projects), excluding `*known_bug*` |
+| Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results; legacy Jenkins CUDA `*checkin*csrmv*` lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
 **Flaky / known-bug policy:** hipSPARSE has no `known_bugs.yaml`. A known bug is declared as a

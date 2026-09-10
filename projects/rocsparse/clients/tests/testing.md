@@ -43,15 +43,17 @@ What a developer does between making a change and getting it merged.
 cd projects/rocsparse
 # -c builds samples + tests + benchmarks; -d fetches build dependencies (incl. googletest)
 ./install.sh -dc -a gfx942
-# equivalently, configure directly:
-CXX=/opt/rocm/bin/amdclang++ cmake -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON ../..
+# equivalently, out-of-source from this directory:
+cmake -B build/release -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON
+cmake --build build/release --parallel
 ```
 
 Out-of-source builds land in `build/<release|debug|release-debug>/clients/staging/`.
 
 The functional suites that read `.csr` inputs need the SuiteSparse test matrices, but you don't need a separate step to get them: the build above downloads and converts them automatically into `build/<release|debug|release-debug>/clients/matrices`.
 
-> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_o_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
+> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
 >
 > ```bash
 > ./install.sh -c -a gfx942 --matrices-dir <my_matrix_folder>
@@ -100,7 +102,7 @@ reviews and approves.
 building blocks (primitives, algorithm-selection logic, info structs), and hardware-independent logic
 such as argument validation, error-code propagation, and type/format bookkeeping.
 
-rocSPARSE has a dedicated unit-test layer under `clients/unittests/` on `develop`, kept
+rocSPARSE has a dedicated unit-test layer under `clients/unittests/`, kept
 deliberately separate from the YAML/Arguments-driven integration suite (`rocsparse-test`). It does
 **not** use the `gentest` data pipeline, and it compiles selected library translation units
 directly into the test binaries — because `librocsparse` is built with hidden symbol visibility, the
@@ -127,10 +129,10 @@ split into two binaries:
 In addition, the integration binary `rocsparse-test` carries the hardware-independent cases that are
 naturally expressed through its YAML pipeline rather than as standalone units:
 
-* **Bad-argument tests** — every routine has a `testing_<routine>_bad_arg` implementation
-  (`clients/testings/testing_<routine>.cpp`) exercised through YAML `function: <routine>_bad_arg`
-  entries. These validate null-pointer handling, invalid sizes, unsupported types, and status-code
-  propagation, and do not require a kernel launch.
+* **Bad-argument tests** — routines in the YAML suite have a `testing_<routine>_bad_arg`
+  implementation (`clients/testings/testing_<routine>.cpp`) exercised through YAML
+  `function: <routine>_bad_arg` entries. These validate null-pointer handling, invalid sizes,
+  unsupported types, and status-code propagation, and do not require a kernel launch.
 * **Auxiliary API tests** — `clients/tests/test_auxiliary.cpp` (`TEST(auxiliary_pre_checkin, ...)`)
   covers handle create/destroy and descriptor management directly.
 
@@ -401,7 +403,9 @@ this. Nightly adds:
 
 ## Supported Configurations
 
-Default GPU targets come from `DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt`.
+`DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt` is the **compile** list (when
+`rocm_check_target_ids` succeeds it includes gfx803 through gfx1250, including gfx1030 / gfx110x /
+gfx1200). The table below is **CI validation**, not that compile list.
 
 | Configuration | Linux | Windows | Notes |
 |---|---|---|---|
@@ -410,10 +414,10 @@ Default GPU targets come from `DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt`
 | gfx1151 (Strix Halo) | Not tested | Full — PR / Nightly / Release | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
 | ASAN (gfx908 / gfx90a / gfx942 `xnack+`) | Partial — Dedicated lane / Nightly | Not tested | AddressSanitizer build, xnack+ only |
 | gfx900 / gfx906 | Not tested | Not tested | Older CDNA/GCN |
-| gfx1030 / gfx110x / gfx1200 | Not tested | Not tested | RDNA |
+| gfx1030 / gfx110x / gfx1200 / gfx1250 | Not tested | Not tested | In `DEFAULT_GPU_TARGETS`; no dedicated validation lane |
 
 **Explicitly not tested / guaranteed:** non-listed gfx targets; any
-configuration marked "Not tested" above (including gfx900 / gfx906 and most RDNA parts). Note that
+configuration marked "Not tested" above (including gfx900 / gfx906, gfx1250, and most RDNA parts). Note that
 Linux and Windows validation cover disjoint sets of targets — the CDNA parts and gfx1201 are validated
 on Linux only, while gfx1151 is validated on Windows only. Configurations are guarded at runtime by the
 "Insufficient memory" skip on small cards.
@@ -472,6 +476,7 @@ device configurations are not ASAN-covered.
 
 **Review this document when:**
 * A new test tier, CTest category, or CI lane is added.
+* Unit-test CTest labels or TheRock wiring for `rocsparse-unit-test*` change.
 * A regression escapes to a downstream consumer (e.g. hipSPARSE) — direct evidence of a gap here.
 * Before a major release, alongside the known-gap review.
 
