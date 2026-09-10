@@ -126,6 +126,17 @@ static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileK == 64 ||
               "gfx1250 8-bit WMMA fragments are 16x16x64 and 16x16x128 only: "
               "warp_tile_k must be 64 or 128.");
 
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileN == 16,
+              "gfx1250 8-bit WMMA fragments are 16x16xK: warp_tile_n must be 16.");
+
+// warp_k > 1 is rejected separately from the warps-per-block cap below. The [1,2,2]
+// map has a product of 4 and would pass that cap on its own, but it is measured to
+// compile and then return wrong results (max_rel 1.37). It is the corrupting case,
+// not merely an undependable one, so it gets its own rule.
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpPerBlock_K == 1,
+              "gfx1250: warp_k must be 1. A warp_k of 2 (the [1,2,2] map) compiles "
+              "and then returns wrong results.");
+
 static_assert(!kCompiledForGfx1250 ||
                   (SelectedKernel::WarpPerBlock_M * SelectedKernel::WarpPerBlock_N *
                    SelectedKernel::WarpPerBlock_K) <= 4,

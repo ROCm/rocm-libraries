@@ -328,7 +328,12 @@ def validate_warp_configuration(
 
     current_combination = [warp_m, warp_n, warp_k]
 
-    allowed_combinations = WARP_SUPPORTED_COMBINATIONS.get(gpu_name, {})
+    # Normalize first: a device reports "gfx1250:xnack-", and an unrecognized key
+    # falls through permissively below, which would disable this restriction on the
+    # very target it exists for.
+    allowed_combinations = WARP_SUPPORTED_COMBINATIONS.get(
+        gpu_name.split(":")[0] if gpu_name else gpu_name, {}
+    )
     if not allowed_combinations:
         # If GPU not recognized, try to be permissive but log warning
         logging.warning(f"No warp_[m/n/k] combinations found for GPU: {gpu_name}")
@@ -1419,7 +1424,7 @@ def _validate_fp8_mfma_warp_tile_k(
         #   gfx950 doubles the K-block:
         #                  MFMA_F32_16x16x256_F8 (warp_tile_m=16) → warp_tile_k=128
         #                  MFMA_F32_32x32x128_F8 (warp_tile_m=32) → warp_tile_k=64
-        if gpu_target == "gfx1250":
+        if (gpu_target.split(":")[0] if gpu_target else gpu_target) == "gfx1250":
             # gfx1250 is wave32 RDNA-style WMMA, not MFMA. The only 8-bit fragments
             # are V_WMMA_*_16x16x64 and 16x16x128; there is no 32x32 WMMA, so a
             # 32x32xK warp tile compiles and then returns garbage. This is the sole
