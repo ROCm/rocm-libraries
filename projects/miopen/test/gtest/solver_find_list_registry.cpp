@@ -42,8 +42,6 @@ TEST(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
     }
 }
 
-// Regression guard for the opposite direction of the same drift.
-//
 // Every convolution solver in the Id registry (solver.cpp) must also appear in
 // one of the Find solver lists in mlo_dir_conv.cpp. A solver that is registered
 // but absent from every list is dead code: Find never enumerates it, so it never
