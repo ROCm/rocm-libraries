@@ -83,6 +83,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_spec_preflight,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
@@ -221,6 +222,21 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             or self.sliding_window > 0
         )
 
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The three shape fields this body emits as kernel params when
+        ``runtime_shape`` holds -- see ``build_attention_dense``, which appends
+        ``batch`` / ``seqlen_q`` / ``seqlen_kv`` to the signature and reads them
+        for the K/V buffer bound and the k-tile trip count.
+
+        Kept in sync with that signature by hand. A future per-batch
+        specialization would narrow this (bake ``batch``, keep the seqlens
+        runtime) -- the cache key follows automatically, but the body's
+        ``runtime_shape`` branches and the symbol name would have to derive from
+        this tuple first. Neither does today.
+        """
+        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+
     def _layout_name_parts(self) -> tuple[str, ...]:
         if (
             self.head_size == 128
@@ -262,15 +278,18 @@ def supports_attention_dense(
             "gfx950 attention_dense requires Gfx950AttentionDenseSpec, got "
             f"{type(spec).__name__}"
         )
-    try:
-        Gfx950AttentionDenseSpec(
-            **{
-                f.name: getattr(spec, f.name)
-                for f in _dataclass_fields(Gfx950AttentionDenseSpec)
-            }
-        )
-    except ValueError as e:
-        return False, str(e)
+    # Shared preflight: dataclass re-validation (which reconstructs THIS subclass, so
+    # the gfx950-private knob validators run too), positive extents, block_n dividing
+    # the query tile, and the 32-bit extent bounds. All four are base-spec properties
+    # with the same verdict for every dense body, so they live in kernels.common
+    # rather than being replicated here and in gfx942. The 32-bit check is what the
+    # runtime-shape path leans on: the extent is a device-side mul of two kernargs
+    # there, and batch/seqlen no longer split the launcher-cache key, so this is the
+    # only place an oversized launch can be caught -- and it runs per launch, since
+    # run_attention_dense calls supports() before the cache lookup.
+    ok, why = check_dense_spec_preflight(spec)
+    if not ok:
+        return False, why
     supported_block_m = {
         int(geometry["block_m"]) for geometry in DENSE_TILE_GEOMETRIES.values()
     }
@@ -278,11 +297,6 @@ def supports_attention_dense(
         return False, (
             f"gfx950 block_m must be one of {sorted(supported_block_m)}, "
             f"got {spec.block_m}"
-        )
-    if spec.block_m % spec.block_n != 0:
-        return False, (
-            f"block_n={spec.block_n} must divide block_m={spec.block_m} "
-            "for the causal KV partition"
         )
     if spec.block_n % spec.num_waves != 0:
         return False, (
@@ -2230,8 +2244,10 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # The concrete frozen spec is the cache identity. New IR-live fields cannot
-    # silently collide merely because kernel_name() forgot to append a token.
+    # Cache identity is the spec minus the fields it declares in
+    # runtime_param_fields, so every shape on the runtime path shares one
+    # compiled binary. Every field the body still bakes participates, whether or
+    # not kernel_name() remembered to append a token for it.
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
