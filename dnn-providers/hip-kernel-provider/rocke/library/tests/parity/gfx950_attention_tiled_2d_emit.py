@@ -847,6 +847,28 @@ _CONFIGS = {
         use_softmax_mfma_interleave=True,
         softmax_interleave_mode=1,
     ),
+    # fp16 + sinks combo (D64/b32/GQA-8): the shipping spec for the fp16-sink
+    # combo path. Mirrors idx42 (bf16 combo) with dtype=fp16 + use_sinks; fp16
+    # cannot set use_fast_paged_kv_desc (bf16-only), so it stays off.
+    54: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=4,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        block_m_per_warp=32,
+        tile_size=64,
+    ),
 }
 
 

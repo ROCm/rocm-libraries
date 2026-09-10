@@ -251,6 +251,7 @@ def _reference_gfx942_generic(problem):
         use_early_v_schedule=_enable_early_v_schedule(problem),
         use_fast_paged_kv_desc=(
             combo_no_sw
+            and problem.dtype == "bf16"
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
@@ -318,6 +319,7 @@ def _reference_gfx950_generic(problem):
         use_early_v_schedule=_enable_early_v_schedule(problem),
         use_fast_paged_kv_desc=(
             combo_no_sw
+            and problem.dtype == "bf16"
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
@@ -466,6 +468,11 @@ _COHORTS = [
             ),
             lambda: _problem(
                 num_query_heads=64, num_kv_heads=8, dtype="bf16", sliding_window=128
+            ),
+            # fp16 + sinks: the only fp16 path that currently enables combo; exercises the
+            # dtype-scoped widening and the use_fast_paged_kv_desc bf16 guard.
+            lambda: _problem(
+                num_query_heads=64, num_kv_heads=8, dtype="fp16", use_sinks=True
             ),
         ],
         reference=_reference_gfx950_generic,

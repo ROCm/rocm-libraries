@@ -140,8 +140,18 @@ static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(strcmp(p->dtype, "bf16") != 0 && strcmp(p->dtype, "fp16") != 0)
+    if(strcmp(p->dtype, "fp16") == 0)
     {
+        /* fp16 combo is sink-prefill only (the fp16 widening was measured on
+         * sinks); non-sink fp16 stays on its existing path. */
+        if(!p->use_sinks)
+        {
+            return false;
+        }
+    }
+    else if(strcmp(p->dtype, "bf16") != 0)
+    {
+        /* bf16 admits the whole combo cohort; every other dtype is rejected. */
         return false;
     }
     if(p->use_alibi || p->use_qq_bias || p->softcap > 0)
@@ -1000,9 +1010,11 @@ rocke_attention_tiled_2d_spec_t
      * V-double-buffer cohort AND head_size==128. */
     s.use_sched_barrier = s.use_v_double_buffer && (p->head_size == 128);
 
-    /* fast_paged_kv_desc: combo_no_sw + no-fp8 + exact 64/8 head counts */
-    s.use_fast_paged_kv_desc
-        = combo_no_sw && !p->use_fp8 && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
+    /* fast_paged_kv_desc: combo_no_sw + bf16 + no-fp8 + exact 64/8 head counts.
+     * The bf16 guard mirrors the Python spec builder -- the descriptor is bf16-only
+     * (the spec validator enforces it), so an fp16 combo spec must not set it. */
+    s.use_fast_paged_kv_desc = combo_no_sw && (strcmp(p->dtype, "bf16") == 0) && !p->use_fp8
+                               && (p->num_query_heads == 64) && (p->num_kv_heads == 8);
 
     s.use_register_pv = enable_register_pv(p);
     /* i64_kv_addr: mirrors Python _enable_i64_kv_addr -- fires when the paged KV

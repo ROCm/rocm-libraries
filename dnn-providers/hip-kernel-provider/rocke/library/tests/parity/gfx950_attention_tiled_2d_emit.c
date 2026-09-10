@@ -860,6 +860,30 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->softmax_interleave_mode = 1;
         break;
 
+    /* fp16 + sinks combo (D64/b32/GQA-8): shipping spec for the fp16-sink combo
+     * path. Mirrors case 42 with dtype=fp16 + use_sinks; fp16 cannot set
+     * use_fast_paged_kv_desc (bf16-only), so it stays off. */
+    case 54:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+
     default:
         return -1;
     }
