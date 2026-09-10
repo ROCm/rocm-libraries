@@ -33,7 +33,7 @@ from pathlib import Path
 
 # Pinned rocjitsu source (ROCm/rocm-systems). Bump deliberately.
 ROCJITSU_REPO = "https://github.com/ROCm/rocm-systems.git"
-ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a" # 2026-09-10
+ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a"  # 2026-09-10
 
 # family -> (arch, rocjitsu KMD config, [CU counts to validate]). The CU list is the arch's real
 # per-SKU CU counts; each = a StaticFDBSync param and drives one CU-corrected run. gfx94X-dcgpu
