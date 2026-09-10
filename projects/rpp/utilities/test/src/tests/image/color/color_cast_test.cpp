@@ -121,9 +121,9 @@ TEST_P(ColorCastTest, Correctness) {
 INSTANTIATE_TEST_SUITE_P(Image_Color, ColorCastTest,
                          ::testing::ValuesIn(with_params<ColorCastParams>(
                              concat_configs({
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3ChConv,
                                               {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
+                                 make_configs(presets::kDefaultDTypes, presets::kLayouts3Ch,
                                               {Roi::Full, Roi::Partial},
                                               {presets::kDefaultSize, presets::kSubVectorSize}),
                              }),
