@@ -45,7 +45,11 @@ def get_warp_size_for_gpu(gpu_target: str) -> int:
 
 
 WARP_SUPPORTED_COMBINATIONS = {
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    # gfx1250 is wave32: a block of >4 warps has no launchable kernel entry (every
+    # 8-warp map -- [2,4,1] [4,2,1] [1,8,1] [8,1,1] -- aborts at launch with
+    # "cannot find symbol", 3,220/3,220 rows in a GPU sweep), and [1,2,2] (warp_k=2)
+    # compiles and then returns wrong results (GPU-measured max_rel 1.37).
+    "gfx1250": [[1, 4, 1], [2, 1, 1], [2, 2, 1], [4, 1, 1]],
     "gfx90a": [
         [1, 4, 1],
         [2, 2, 1],
@@ -1411,6 +1415,23 @@ def _validate_fp8_mfma_warp_tile_k(
         #   gfx950 doubles the K-block:
         #                  MFMA_F32_16x16x256_F8 (warp_tile_m=16) → warp_tile_k=128
         #                  MFMA_F32_32x32x128_F8 (warp_tile_m=32) → warp_tile_k=64
+        if gpu_target == "gfx1250":
+            # gfx1250 is wave32 RDNA-style WMMA, not MFMA. The only 8-bit fragments
+            # are V_WMMA_*_16x16x64 and 16x16x128; there is no 32x32 WMMA, so a
+            # 32x32xK warp tile compiles and then returns garbage (GPU-measured:
+            # 2,908/2,908 wrong-result rows were 32x32x32). Both K depths are
+            # GPU-validated for RowColQuant / TensorQuant.
+            if warp_tile_m != 16:
+                return False, (
+                    f"On {gpu_target} the only 8-bit WMMA warp tile is 16x16xK, "
+                    f"got warp_tile_m={warp_tile_m}{suffix}"
+                )
+            if warp_tile_k not in (64, 128):
+                return False, (
+                    f"For {a_datatype} on {gpu_target}, warp_tile_m=16 requires "
+                    f"warp_tile_k in (64, 128), got warp_tile_k={warp_tile_k}{suffix}"
+                )
+            return True, ""
         if gpu_target == "gfx950":
             expected_k = 64 if warp_tile_m == 32 else 128
         else:
