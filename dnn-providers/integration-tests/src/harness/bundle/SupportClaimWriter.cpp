@@ -9,6 +9,7 @@
 #include <map>
 #include <ostream>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -354,10 +355,6 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
             continue;
         }
 
-        // Counted per outcome, so the number says what reached a file.
-        // All four WriteOutcome arms are listed; -Wswitch catches a future addition.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wswitch-default"
         switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
         {
         case WriteOutcome::WRITTEN:
@@ -376,8 +373,9 @@ WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>&
             summary.errors.push_back("write failed: " + sidecarPath.string());
             ++summary.filesSkipped;
             break;
+        default:
+            throw std::logic_error("unhandled WriteOutcome");
         }
-#pragma GCC diagnostic pop
     }
 
     return summary;
