@@ -91,6 +91,45 @@ static bool is_supported_arch(const std::string& arch)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Compile-time gfx1250 tile guard.
+//
+// The runtime helper in grouped_gemm_*_utils.py picks an arch-correct tile, but the
+// CMake/codegen path does not: unified_grouped_gemm_*_codegen.py::_default_config()
+// takes no arch and hard-codes the gfx9 tile. Listing gfx1250 in kSupportedArchs above
+// therefore means a CMake-built gfx1250 library would initialize cleanly and then run a
+// tile that does not exist on the device -- which compiles and returns garbage rather
+// than failing.
+//
+// Rather than trust the build to pick correctly, refuse to produce such a library at
+// all. gfx1250 is wave32 with RDNA-style WMMA: the only 8-bit fragments are 16x16x64
+// and 16x16x128 (there is no 32x32 WMMA), and a block of more than four warps has no
+// launchable kernel entry. These are the same rules the Python validator enforces.
+//
+// The test is exact-gfx1250, not gfx12-family: gfx1200/gfx1201 have a different 8-bit
+// fragment (16x16x16) and are not in kSupportedArchs anyway.
+static constexpr bool ct_starts_with(const char* s, const char* prefix)
+{
+    return *prefix == '\0' ? true : (*s == *prefix && ct_starts_with(s + 1, prefix + 1));
+}
+
+static constexpr bool kCompiledForGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
+
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileM == 16,
+              "gfx1250 has no 32x32 WMMA fragment: warp_tile_m must be 16. This kernel "
+              "would compile and then return wrong results on the device.");
+
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileK == 64 ||
+                  SelectedKernel::WarpTileK == 128,
+              "gfx1250 8-bit WMMA fragments are 16x16x64 and 16x16x128 only: "
+              "warp_tile_k must be 64 or 128.");
+
+static_assert(!kCompiledForGfx1250 ||
+                  (SelectedKernel::WarpPerBlock_M * SelectedKernel::WarpPerBlock_N *
+                   SelectedKernel::WarpPerBlock_K) <= 4,
+              "gfx1250 is wave32: a block of more than four warps has no launchable "
+              "kernel entry and aborts at launch with a missing device symbol.");
+
 extern "C" {
 
 /**
