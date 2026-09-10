@@ -113,10 +113,10 @@ void RMSnormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // dimension of 2, outerSize of N, stride of C, and innerSize of HxW.
     // The kernel will therefore consist of NxC workgroups with each workgroup normalizing
     // over HxW elements using a fixed number of threads.
-    const unsigned normalizeDim = getNormalizeDim(_params.x()->dims(), _params.scale()->dims());
-    const int64_t stride = getStride(_params.x(), normalizeDim);
-    const int64_t outerSize = getOuterSize(_params.x()->dims(), normalizeDim, stride);
-    const int64_t innerSize = getInnerSize(_params.x()->dims(), normalizeDim);
+    const ProblemDescription problem(_params.x(), _params.scale(), Direction::FORWARD);
+    const int64_t stride = problem.stride();
+    const int64_t outerSize = problem.outerSize();
+    const int64_t innerSize = problem.innerSize();
     if(outerSize * stride >= UINT32_MAX)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
