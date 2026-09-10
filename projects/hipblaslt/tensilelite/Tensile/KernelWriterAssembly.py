@@ -7805,7 +7805,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(self.argLoader.loadKernArg("A2ACounterPtr", "KernArgAddress",
         sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["counter_ptr"]), dword=2))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedNumCu and counter_ptr"))
-    tmpVgpr = self.vgprPool.checkOut(4, tag="a2aBatchSpan_divide")
+    tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="a2aBatchSpan_divide")
     vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
     ww      = kernel["WavefrontSize"]
     iB      = self.sgprPool.checkOut(1, tag="a2aBatchSpan_iB", preventOverflow=False)
@@ -7825,8 +7825,9 @@ class KernelWriterAssembly(KernelWriter):
         divReg="NumWorkGroups0", rReg=-1, tmpVgprRes=vgprRes, wavewidth=ww,
         doRemainder=False, comment="bLo = ceil(iB * numCu / F)"))
 
-    module.add(SAddU32(dst=sgpr(iB), src0=sgpr(iB), src1=1, comment="iB + 1"))
-    module.add(SMulI32(dst=sgpr(acc), src0=sgpr(iB), src1=sgpr(numCu), comment="(iB+1) * numCu"))
+    module.add(SMulI32(dst=sgpr(acc), src0=sgpr(iB), src1=sgpr(numCu), comment="iB * numCu"))
+    module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr(numCu),
+                       comment="(iB+1) * numCu"))
     module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr("NumWorkGroups0"),
                        comment="(iB+1) * numCu + F"))
     module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="(iB+1) * numCu + F - 1"))

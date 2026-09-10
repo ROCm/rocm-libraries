@@ -245,6 +245,42 @@ class TestA2AGemmElection:
             self._atomic(src).group(0),
         ), "the election atomic does not sit at the flag block offset"
 
+    def test_the_election_slot_reads_the_batch_index_the_divide_produced(self):
+        """a2aBatchSpan derives bHi from iB + 1; the slot must still use iB."""
+        import re
+
+        # These read their first operand rather than writing it.
+        readers = ("s_cmp", "v_cmp", "s_cbranch", "s_branch", "s_waitcnt", "s_nop", "s_setpc")
+
+        lines = self._src().splitlines()
+        last_div = max(i for i, l in enumerate(lines) if "// iB = b * F / numCu" in l)
+        quotient = next(
+            (i, m)
+            for i, m in (
+                (i, re.match(r"\s*v_readfirstlane_b32 (s\d+),", lines[i]))
+                for i in range(last_div + 1, len(lines))
+            )
+            if m
+        )
+        iB = quotient[1].group(1)
+
+        slot = next(i for i, l in enumerate(lines) if "// iB * 4" in l)
+        assert re.match(r"\s*s_lshl_b32 s\d+, %s, 2\b" % iB, lines[slot]), (
+            "the election slot does not shift the divide's quotient register %s:\n%s"
+            % (iB, lines[slot])
+        )
+
+        clobbers = [
+            l.strip()
+            for l in lines[quotient[0] + 1 : slot]
+            if not l.strip().startswith(readers)
+            and re.match(r"\s*\w+ %s\s*," % iB, l)
+        ]
+        assert not clobbers, (
+            "%s carries the batch index into the election, but these write it first:\n%s"
+            % (iB, "\n".join(clobbers))
+        )
+
 
 class TestA2AGemmEnqueueLoops:
     """The enqueuer's packing pass: one reservation and one submit per queue."""
@@ -726,3 +762,35 @@ class TestA2AGemmPerRoundState:
 
     def test_transition_phase_writes_gsu_sum_idx(self, config):
         assert "GSUSumIdx" in self._transition(config)
+
+
+class TestA2AGemmF64PairAlignment:
+    """f64 operands are register pairs the assembler requires to start even.
+
+    scalarUInt24DivideAndRemainder, which a2aBatchSpan drives, raises only on
+    tmpVgprRes.size < 4 and never on its alignment.
+    """
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def test_every_f64_vgpr_pair_starts_on_an_even_register(self):
+        import re
+
+        emitted = [
+            line.strip()
+            for line in self._src().splitlines()
+            if "f64" in line.split(" ", 1)[0]
+        ]
+        assert emitted, "no f64 instruction in the kernel; the check is vacuous"
+        odd = [
+            line
+            for line in emitted
+            if any(int(lo) % 2 for lo in re.findall(r"\bv\[(\d+):\d+\]", line))
+        ]
+        assert not odd, (
+            "f64 vgpr tuples must be 64 bit aligned; the assembler rejects these:\n"
+            + "\n".join(odd)
+        )
