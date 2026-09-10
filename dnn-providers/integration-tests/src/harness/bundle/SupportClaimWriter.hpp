@@ -35,7 +35,7 @@ struct AuthoringResult
 /// A struct rather than four positional std::size_t parameters: the counts are the
 /// same type, they are filled in one place in main.cpp, and a transposition there
 /// would compile and change the process exit code.
-struct AuthoringInputs
+struct AuthoringRunSummary
 {
     /// Graphs that reached the observer and got an answer from the engines.
     std::size_t graphsObserved = 0;
@@ -59,7 +59,7 @@ struct AuthoringInputs
 };
 
 AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
-                                    const AuthoringInputs& inputs,
+                                    const AuthoringRunSummary& inputs,
                                     std::ostream& log);
 
 /// Whether a run that selected this much of the suite can be expected to account

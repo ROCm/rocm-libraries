@@ -404,7 +404,7 @@ bool selectionWasNarrowed()
 }
 
 AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
-                                    const AuthoringInputs& inputs,
+                                    const AuthoringRunSummary& inputs,
                                     std::ostream& log)
 {
     AuthoringResult result;

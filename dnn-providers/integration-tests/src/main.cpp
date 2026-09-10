@@ -467,16 +467,17 @@ int main(int argc, char** argv) noexcept
             auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
 
             // Named field assignment, not designated initializers: this is C++17.
-            hipdnn_integration_tests::bundle::AuthoringInputs inputs;
-            inputs.graphsObserved = observationLog.graphsObserved();
-            inputs.graphsUnobserved = observationLog.graphsUnobserved();
-            inputs.graphsSkippedBeforeObservation = observationLog.graphsSkippedBeforeObservation();
-            inputs.graphsRegistered
+            hipdnn_integration_tests::bundle::AuthoringRunSummary runSummary;
+            runSummary.graphsObserved = observationLog.graphsObserved();
+            runSummary.graphsUnobserved = observationLog.graphsUnobserved();
+            runSummary.graphsSkippedBeforeObservation
+                = observationLog.graphsSkippedBeforeObservation();
+            runSummary.graphsRegistered
                 = hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound;
-            inputs.selectionNarrowed = hipdnn_integration_tests::bundle::selectionWasNarrowed();
+            runSummary.selectionNarrowed = hipdnn_integration_tests::bundle::selectionWasNarrowed();
 
             const auto authoring = hipdnn_integration_tests::bundle::authorSupportClaims(
-                observationLog.all(), inputs, std::cerr);
+                observationLog.all(), runSummary, std::cerr);
 
             if(authoring.shouldFail)
             {
