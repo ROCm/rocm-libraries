@@ -615,4 +615,27 @@ def tdmCrossRejectReason(ks):
                 "fewer than two there is nothing to cross"
                 % (tdmCross(ks), tdmGrouping(ks).name, len(groups),
                    " + ".join("{%s}" % ",".join(g) for g in liveGroups(ks)) or "none"))
+    if tdmFusePaired(ks):
+        return ("TDMCross=%d over the paired grouping is not implemented. The "
+                "paired sets are {A,MXSA} and {MXSB,B}, one member of each on "
+                "either parity, and crossing asks for both data tensors on one "
+                "parity and both scales on the other. _tdmPairedParityOrder "
+                "answers within its own argument pair, so it cannot express "
+                "that arrangement and invents an even/odd pair from argument "
+                "position; initialisation and the tail then program different "
+                "descriptors. Verified under FFM: crossed paired is correct "
+                "while K divides DepthU and wrong at every K that leaves a "
+                "tail (640, 1152, 8320 at 64x512), for StaggerU 0 and 32 alike"
+                % tdmCross(ks))
+    pgrA, pgrB = ks.get("PrefetchGlobalReadA"), ks.get("PrefetchGlobalReadB")
+    if pgrA is not None and pgrB is not None and pgrA != pgrB:
+        return ("TDMCross=%d with decoupled prefetch depths (PrefetchGlobalReadA=%s "
+                "!= PrefetchGlobalReadB=%s) computes wrong results at every size. "
+                "Crossing moves a scale onto the wave that carries the other data "
+                "tensor, and the decoupled per-tensor prefetch depth is still "
+                "applied by the pre-crossing pairing, so the two disagree about "
+                "which scale belongs to which data tensor. Verified under FFM: "
+                "equal depths cross correctly up to K=16384, unequal depths fail "
+                "in both directions (PGRA<PGRB and PGRB<PGRA)"
+                % (tdmCross(ks), pgrA, pgrB))
     return None
