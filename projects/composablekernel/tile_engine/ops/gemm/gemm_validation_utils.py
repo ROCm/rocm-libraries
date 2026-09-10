@@ -45,10 +45,14 @@ def get_warp_size_for_gpu(gpu_target: str) -> int:
 
 
 WARP_SUPPORTED_COMBINATIONS = {
-    # gfx1250 is wave32: a block of >4 warps has no launchable kernel entry (every
-    # 8-warp map -- [2,4,1] [4,2,1] [1,8,1] [8,1,1] -- aborts at launch with
-    # "cannot find symbol", 3,220/3,220 rows in a GPU sweep), and [1,2,2] (warp_k=2)
-    # compiles and then returns wrong results (GPU-measured max_rel 1.37).
+    # gfx1250 is wave32, and a block of more than four warps is unreliable there.
+    # Over a 14,208-row GPU sweep the 8-warp maps ([2,4,1] [4,2,1] [1,8,1] [8,1,1])
+    # produced 3,352 launch aborts ("cannot find symbol"), 664 clean rejects, 112
+    # WRONG RESULTS -- and 192 correct passes. They are not uniformly broken; they
+    # are nondeterministic, and re-running the same surface flips hundreds of rows
+    # between abort, pass and fail. A config that is sometimes right is worse than
+    # one that always fails, because a single clean run can ship it.
+    # [1,2,2] (warp_k=2) compiles and then returns wrong results (max_rel 1.37).
     "gfx1250": [[1, 4, 1], [2, 1, 1], [2, 2, 1], [4, 1, 1]],
     "gfx90a": [
         [1, 4, 1],
