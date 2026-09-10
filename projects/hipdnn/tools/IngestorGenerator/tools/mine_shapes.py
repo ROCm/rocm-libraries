@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -93,6 +94,14 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     f"windowed graph gets served as plain causal."
                 )
             head_dim = int(row["head_dim"])
+            window = 0
+            if mask_type == _MASK_TYPE["swin"]:
+                raw_window = (row.get("window_size") or "").strip()
+                if not raw_window.isdigit() or int(raw_window) <= 0:
+                    raise SystemExit(
+                        f"FAIL: {path}: windowed CSV row requires a positive window_size width"
+                    )
+                window = int(raw_window)
             shapes.append(
                 {
                     "batch": int(row["batch"]),
@@ -104,6 +113,8 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     "hdim_v": head_dim,
                     "dtype": _normalise_dtype(row.get("dtype"), path, "bf16"),
                     "mask_type": mask_type,
+                    "sliding_window": window,
+                    "use_sinks": False,
                     # Provenance, carried not computed. `_provenance` is stripped
                     # before the request is constructed and kept for reporting.
                     "_provenance": {
@@ -119,59 +130,39 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
     return shapes
 
 
-def _mask_type_from_graph(graph: dict, path: Path) -> int:
-    """Causality from the graph's OWN attributes, never from its filename.
-
-    The first version read `"causal" in path.stem.lower()`. Against this repo's real
-    bundle tree that is wrong for every causal graph there is: 25 of them carry
-    `causal` in a PARENT DIRECTORY (`.../hd128_causal_batch/Small/Small.json`) and
-    none carry it in the leaf name, so the miner reported a corpus with zero causal
-    graphs. `causal` is not cosmetic -- the dispatcher does `causal=(mask_type != 0)`,
-    so it selects which branch resolves and which kernels get built. A corpus that
-    reports no causal graphs sizes a variant set that cannot serve them.
-
-    Reading the attributes is also the only correct derivation, independent of naming.
-    hipDNN has NO `causal` boolean: the deprecated `causal_mask` /
-    `causal_mask_bottom_right` pair takes precedence WHEN SET, and otherwise causality
-    comes from (`left_bound`, `right_bound`, `diagonal_alignment`). Every shipped
-    causal bundle in this tree leaves both booleans false and expresses causality as
-    `left_bound=-1, right_bound=0` -- so a reader that trusts only the booleans
-    computes "not causal" for all of them. That derivation is the single
-    highest-value paragraph in this skill's own graph contract, and the filename
-    heuristic bypassed it entirely.
-
-    A windowed graph is NOT causal-with-a-tweak: a finite `left_bound` is a sliding
-    window, a different mask kind, and folding it onto causal is how one gets served
-    as plain causal -- a wrong answer rather than a decline.
-    """
-    for node in graph.get("nodes") or []:
-        attrs = node.get("attributes") or {}
-        if not any(
-            k in attrs
-            for k in ("causal_mask", "causal_mask_bottom_right", "left_bound")
-        ):
-            continue
-        if attrs.get("causal_mask") or attrs.get("causal_mask_bottom_right"):
-            return _MASK_TYPE["causal"]
-        left = attrs.get("left_bound")
-        right = attrs.get("right_bound")
-        if left is None and right is None:
-            return _MASK_TYPE["full"]
-        if left is not None and not isinstance(left, (int, float)):
+def _mask_from_attributes(
+    attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
+) -> dict:
+    """Normalize the graph dialect to AttentionRequest's top-left causal/window form."""
+    alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
+    if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
+        raise SystemExit(f"FAIL: {path}: unsupported diagonal_alignment {alignment!r}")
+    for flag in ("causal_mask", "causal_mask_bottom_right"):
+        if flag in attrs and type(attrs[flag]) is not bool:
+            raise SystemExit(f"FAIL: {path}: {flag} must be boolean")
+    left, right = attrs.get("left_bound"), attrs.get("right_bound")
+    for name, value in (("left_bound", left), ("right_bound", right)):
+        if value is not None and (type(value) is not int or value < -1):
             raise SystemExit(
-                f"FAIL: non-numeric left_bound {left!r} in {path}. Refusing rather "
-                f"than defaulting -- an unresolvable bound falling through to "
-                f"'causal' is exactly the wrong-answer-not-a-decline failure this "
-                f"reader exists to refuse."
+                f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
-        # left_bound < 0 means "all history": causal. A finite left_bound is a
-        # sliding window, which is its own mask kind.
-        if isinstance(left, (int, float)) and left >= 0:
-            return _MASK_TYPE["swin"]
-        return _MASK_TYPE["causal"]
-    # No mask attributes at all: the graph does not describe one. Say so by falling
-    # back to the path, and only then -- a directory name is a hint, not a contract.
-    return _MASK_TYPE["causal"] if "causal" in str(path).lower() else _MASK_TYPE["full"]
+    if attrs.get("causal_mask"):
+        left, right, alignment = -1, 0, "TOP_LEFT"
+    elif attrs.get("causal_mask_bottom_right"):
+        left, right, alignment = -1, 0, "BOTTOM_RIGHT"
+    left = -1 if left is None else left
+    right = -1 if right is None else right
+    if left == -1 and right == -1:
+        return {"mask_type": 0, "sliding_window": 0}
+    if right != 0 or (alignment == "BOTTOM_RIGHT" and seqlen_q != seqlen_k):
+        raise SystemExit(
+            f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
+            f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
+        )
+    return {
+        "mask_type": 1 if left == -1 else 2,
+        "sliding_window": 0 if left == -1 else left + 1,
+    }
 
 
 #: Every spelling a source uses for a dtype -> the spelling the rocKE spec takes.
@@ -246,14 +237,69 @@ def from_graph_corpus(root: Path) -> list[dict]:
             continue
         if BACKWARD_GRADIENT_TENSOR_NAMES & set(tensors):
             continue
-        query = tensors.get("query") or tensors.get("q")
-        key = tensors.get("key") or tensors.get("k")
-        if not query or not key:
+        sdpa = [
+            n
+            for n in graph.get("nodes", [])
+            if n.get("type") == "SdpaAttributes"
+            or "q_tensor_uid" in (n.get("attributes") or {})
+        ]
+        if len(sdpa) > 1:
+            raise SystemExit(
+                f"FAIL: {path}: multiple SDPA nodes cannot form one request"
+            )
+        attrs = (
+            (sdpa[0].get("attributes") or {})
+            if sdpa
+            else next(
+                (
+                    n["attributes"]
+                    for n in graph.get("nodes", [])
+                    if n.get("attributes")
+                ),
+                {},
+            )
+        )
+        by_uid = {t["uid"]: t for t in graph.get("tensors", []) if "uid" in t}
+        selected = []
+        for short, long in (("q", "query"), ("k", "key"), ("v", "value")):
+            uid_key = f"{short}_tensor_uid"
+            tensor = (
+                by_uid.get(attrs[uid_key])
+                if uid_key in attrs
+                else (tensors.get(long) or tensors.get(short))
+            )
+            selected.append(tensor)
+        query, key, value = selected
+        if not query and not key and not sdpa:
             continue
-        qdims = query.get("dims") or []
-        kdims = key.get("dims") or []
-        if len(qdims) != 4 or len(kdims) != 4:
-            continue
+        if any(t is None for t in selected):
+            raise SystemExit(
+                f"FAIL: {path}: SDPA requires independent Q, K and V tensors"
+            )
+        dimensions = [t.get("dims") or [] for t in selected]
+        if any(
+            len(d) != 4 or any(type(x) is not int or x <= 0 for x in d)
+            for d in dimensions
+        ):
+            raise SystemExit(
+                f"FAIL: {path}: SDPA requires positive logical BHSD dimensions"
+            )
+        qdims, kdims, vdims = dimensions
+        if qdims[0] != kdims[0] or kdims[:3] != vdims[:3] or qdims[3] != kdims[3]:
+            raise SystemExit(
+                f"FAIL: {path}: incompatible independent Q/K/V dimensions {dimensions}"
+            )
+        dtypes = [_normalise_dtype(t.get("data_type"), path, "bf16") for t in selected]
+        if len(set(dtypes)) != 1:
+            raise SystemExit(
+                f"FAIL: {path}: mixed Q/K/V dtypes cannot form one request"
+            )
+        mask = _mask_from_attributes(attrs, path, qdims[2], kdims[2])
+        sink_uid = attrs.get("sink_token_tensor_uid")
+        if sink_uid is not None and sink_uid not in by_uid:
+            raise SystemExit(
+                f"FAIL: {path}: sink_token_tensor_uid names a missing tensor"
+            )
         shapes.append(
             {
                 "batch": int(qdims[0]),
@@ -262,52 +308,34 @@ def from_graph_corpus(root: Path) -> list[dict]:
                 "seqlen_q": int(qdims[2]),
                 "seqlen_k": int(kdims[2]),
                 "hdim_q": int(qdims[3]),
-                "hdim_v": int(qdims[3]),
-                "dtype": _normalise_dtype(query.get("data_type"), path, "bf16"),
-                "mask_type": _mask_type_from_graph(graph, path),
+                "hdim_v": int(vdims[3]),
+                "dtype": dtypes[0],
+                **mask,
+                "use_sinks": sink_uid is not None,
                 "_provenance": {
                     "source": "graphs",
                     "suite": str(path.parent.name),
-                    "graph": path.stem,
+                    "graph": graph.get("name", path.stem),
+                    "path": str(path),
+                    "mask": {
+                        k: attrs.get(k)
+                        for k in (
+                            "left_bound",
+                            "right_bound",
+                            "diagonal_alignment",
+                            "causal_mask",
+                            "causal_mask_bottom_right",
+                        )
+                    },
                 },
             }
         )
     return shapes
 
 
-def _bench_graph_name(path: Path, record: dict) -> str:
-    """A stable, human-readable name for one rocKE benchmark trace record.
-
-    Exists because `graph` is the key a `--declines` file is written against, and the
-    only alternative the reconciler accepts is the corpus INDEX. An index is a
-    position, not an identity: re-mine with a different flag, or land a new trace
-    upstream, and every key after the insertion point now marks a DIFFERENT shape.
-    The reconciler hard-fails a key matching nothing -- which is right, and does not
-    help here, because a shifted index still matches something.
-
-    So the name is built from what the record says about itself rather than where it
-    sits: the trace file it came from, its own `variant` label when the suite records
-    one, and `call_idx` as the tiebreak for suites that do not. Prefixed with the
-    source so it can never collide with a dnn-benchmarking graph stem, which shares
-    this field.
-    """
-    parts = [path.stem]
-    variant = str(record.get("variant") or "").strip()
-    if variant:
-        parts.append(variant)
-    # ALWAYS append the shape, even when a variant label exists. A name that does not
-    # identify exactly one shape is not usable as a declines key: the `aiter` suite
-    # records no `variant` at all, so a name built from the trace stem alone collapsed
-    # 82 records onto one key. `call_idx` is deliberately NOT used -- it is a position
-    # in a capture, which is the very instability this function exists to avoid.
-    # Two records that agree on every one of these fields ARE the same shape and are
-    # merged by deduplicate() anyway, so collisions here are correct rather than lossy.
-    parts.append(
-        f"b{record.get('num_seqs')}_hq{record.get('num_query_heads')}"
-        f"_kv{record.get('num_kv_heads')}_d{record.get('head_size')}"
-        f"_sq{record.get('max_seqlen_q')}_sk{record.get('max_seqlen_k')}"
-    )
-    return "rocke_bench__" + "__".join(parts)
+def _bench_graph_name(shape: dict) -> str:
+    """A stable runtime identity from the complete request, never capture position."""
+    return "rocke_bench__" + hashlib.sha256(_shape_key(shape).encode()).hexdigest()
 
 
 def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
@@ -381,15 +409,17 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             sliding_window = 0
             if int(left) < 0 and int(right) < 0:
                 mask_type = _MASK_TYPE["causal"]
-            elif int(left) >= 0:
+            elif int(left) >= 0 and int(right) == 0:
                 mask_type = _MASK_TYPE["swin"]
                 # `[W, 0]` is a banded causal window of left-context W. The spec
                 # counts the window in TOKENS including the current one, matching
                 # the kernel's `q-W+1 <= k <= q` band, so a recorded left bound of
                 # 127 is a 128-token window.
                 sliding_window = int(left) + 1
-            else:
+            elif int(left) == -1 and int(right) == 0:
                 mask_type = _MASK_TYPE["causal"]
+            else:
+                raise SystemExit(f"FAIL: {path}: unsupported trace window {window!r}")
             head_size = record.get("head_size")
             seqlen_q = record.get("max_seqlen_q")
             seqlen_k = record.get("max_seqlen_k")
@@ -423,17 +453,9 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                         "source": "rocke_bench",
                         "suite": str(path.parent.name),
                         "trace": path.stem,
-                        # A STABLE NAME for this shape, because `graph` is the key a
-                        # --declines file is written against and the alternative is a
-                        # corpus INDEX. An index shifts the moment the corpus is
-                        # re-mined with different flags or a new trace lands, and the
-                        # same declines file then marks a DIFFERENT shape -- silently,
-                        # since a key that matches nothing is only a hard error, not a
-                        # correction. Derived from the trace and the record's own
-                        # variant/call_idx so it survives re-mining, and prefixed with
-                        # the source so it cannot collide with a dnn-benchmarking
-                        # graph stem.
-                        "graph": _bench_graph_name(path, record),
+                        # The runtime key binds all request semantics, independently
+                        # of trace labels and capture position.
+                        "graph": "",
                         "model": str(record.get("model") or ""),
                         "variant": str(record.get("variant") or ""),
                         # Recorded, and load-bearing for scope: a sink trace is a
@@ -444,6 +466,7 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                     },
                 }
             )
+            shapes[-1]["_provenance"]["graph"] = _bench_graph_name(shapes[-1])
     if skipped_unknown_mask:
         print(
             f"  NOTE: {skipped_unknown_mask} rocKE trace record(s) skipped -- no "
@@ -453,21 +476,13 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
     return shapes
 
 
-def _shape_key(shape: dict) -> tuple:
-    return tuple(
-        shape[k]
-        for k in (
-            "batch",
-            "nhead_q",
-            "nhead_k",
-            "seqlen_q",
-            "seqlen_k",
-            "hdim_q",
-            "hdim_v",
-            "dtype",
-            "mask_type",
-        )
+def _shape_key(shape: dict) -> str:
+    """All request semantics participate; provenance never does."""
+    fields = {"sliding_window": 0, "use_sinks": False}
+    fields.update(
+        {key: value for key, value in shape.items() if not key.startswith("_")}
     )
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def deduplicate(shapes: list[dict]) -> tuple[list[dict], int]:
@@ -483,13 +498,16 @@ def deduplicate(shapes: list[dict]) -> tuple[list[dict], int]:
         key = _shape_key(shape)
         if key in seen:
             duplicates += 1
-            seen[key]["_provenance"].setdefault("also", []).append(
-                shape["_provenance"].get("suite")
-                or shape["_provenance"].get("model")
-                or shape["_provenance"].get("source")
+            seen[key]["_provenance_occurrences"].extend(
+                shape.get("_provenance_occurrences", [shape.get("_provenance", {})])
             )
             continue
-        seen[key] = shape
+        seen[key] = {
+            **shape,
+            "_provenance_occurrences": list(
+                shape.get("_provenance_occurrences", [shape.get("_provenance", {})])
+            ),
+        }
     return list(seen.values()), duplicates
 
 
