@@ -38,16 +38,6 @@ vocabulary:
     bf16: BF16
     fp16: FP16
 
-policies:
-  # `use_exp2_fast` is tri-state: True, False, or None meaning "ask the policy".
-  # None is NOT False -- the policy is seqlen-dependent and returns True in most of
-  # the range, so pinning the field discards it. Args are spec keys, passed
-  # positionally in the order the kernel's own resolver takes them.
-  use_exp2_fast:
-    module: kernels.gfx942.attention_dense
-    function: _use_exp2_fast
-    args: [head_size, dtype, seqlen_q]
-
 # ---------------------------------------------------------------------------
 # Stage-1 parity (tools/dispatch_parity.py). One profile drives both tools: the
 # gate and the generator must agree about which kernel they are talking about,

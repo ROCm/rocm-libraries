@@ -59,13 +59,43 @@ kmd_fields:
   default_value: 304
 - name: use_exp2_fast
   type: int
-  default_value: -1
 graph_match:
   shape: shared_shape
   discriminator: none
 kernel_source_kind: rocke
 workspace_policy: none
 delegates_to_existing_plan: false
+# Ledger: Results/worktrees/rocm-libraries/ingestor-config-factorisation/remediation/
+# specialization-audit.json, builder gfx942_attention_dense. Every KMD field is
+# consumed by build_attention_dense, so the partition is 14 metadata fields and no
+# matcher-only exemption. Two fields bind to the effective accessor rather than the
+# raw field, because the accessor is what the builder body reads.
+specialization:
+  metadata_fields: [dtype, batch, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv,
+                    head_size, causal, block_m, block_n, waves_per_eu, persistent,
+                    num_persistent, use_exp2_fast]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    batch: {field: batch}
+    num_query_heads: {field: num_query_heads}
+    num_kv_heads: {field: num_kv_heads}
+    seqlen_q: {field: seqlen_q}
+    seqlen_kv: {field: seqlen_kv}
+    head_size: {field: head_size}
+    causal: {field: causal}
+    block_m: {field: block_m}
+    block_n: {field: block_n}
+    # attention_dense.py:1176 sets amdgpu-waves-per-eu from the accessor, not the field.
+    waves_per_eu: {method: resolved_waves_per_eu}
+    persistent: {field: persistent}
+    num_persistent: {field: num_persistent}
+    # attention_dense.py:1656 selects b.exp2_fast vs b.exp2 through this accessor; the
+    # raw field is tri-state and None is the common case.
+    use_exp2_fast: {method: resolved_use_exp2_fast}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}
+
 packs:
 - name: attention_dense
   arch:

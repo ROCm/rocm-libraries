@@ -1045,7 +1045,10 @@ endfunction()
 # silent `return()` is what kept this registration dead and green.
 # ---------------------------------------------------------------------------
 function(hkp_register_census_tests python census_tool descriptor_build_dir arches)
-    set(HKP_CENSUS_TEST_SUITES)
+    # This branch's own generated engine. Without this row the suite compiles into the
+    # test binary and nothing ever selects it, which is what the deleted
+    # --native-source certification used to stand in for.
+    set(HKP_CENSUS_TEST_SUITES TestGfx942AttentionDensePacks)
 
     if(NOT HKP_CENSUS_TEST_SUITES)
         return()
