@@ -40,7 +40,7 @@ target_include_directories(hipblaslt-rocroller
 )
 target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
 
-if(NOT HIPBLASLT_BUILD_SHARED_LIBS)
+if(NOT BUILD_SHARED_LIBS)
     install(TARGETS hipblaslt-rocroller
         EXPORT hipblaslt-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel)

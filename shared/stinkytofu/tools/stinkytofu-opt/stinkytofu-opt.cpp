@@ -178,6 +178,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
+                arg.starts_with("--ds-read-throttle-transition-factor=") ||
+                arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
@@ -511,6 +513,12 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
         } else if (a.starts_with("--ds-read-throttle-latency=")) {
             passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
+        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
+                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
+        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
+                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
         } else if (a.starts_with("--tensor-load-wmma-space=")) {

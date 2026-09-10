@@ -1,0 +1,9 @@
+{% extends "device_select.cpp.jinja2" %}
+
+{% block type_definitions %}
+using data_type = {{ data_type }};
+{% endblock %}
+
+{% block benchmark_type %}
+using benchmark_type = device_select_unique_benchmark<data_type, config>;
+{% endblock %}

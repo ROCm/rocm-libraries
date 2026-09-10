@@ -35,7 +35,7 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "4.7.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
 set(HIPCUB_CCCL_VERSION_MINOR 8)

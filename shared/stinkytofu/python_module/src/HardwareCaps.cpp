@@ -285,6 +285,12 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     else if (checkInList(v, {{12, 5, 0}}))
         deviceLDS = 327680;
     rv["DeviceLDS"] = deviceLDS;
+    // LDS allocation granule: a workgroup occupies a whole number of granules, so this
+    // rounding can cost a resident workgroup at a boundary. gfx11 allocates 1024 bytes
+    // at a time, other targets 256. Keep in lock-step with rocisa hardware_caps.hpp
+    // (KernelWriterAssembly.getOccupancy indexes archCaps["LdsGranularity"]).
+    // TODO: gfx10/gfx12 might also need a different granularity.
+    rv["LdsGranularity"] = v[0] == 11 ? 1024 : 256;
 
     rv["CMPXWritesSGPR"] = checkMajorNotIn(v[0], {10, 11, 12});
     rv["HasWave32"] = checkMajorIn(v[0], {10, 11, 12});

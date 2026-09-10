@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,6 +51,14 @@ constexpr const char* WINNER_LINE_KERNEL_ID_FIELD = "kernel_id";
 constexpr const char* WINNER_LINE_PACK_ID_FIELD = "pack_id";
 constexpr const char* WINNER_LINE_DISPATCH_ID_FIELD = "dispatch_id";
 constexpr const char* WINNER_LINE_TIME_MS_FIELD = "time_ms";
+constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
+/// Bump when a record line's fields keep their shape but a meaning underneath one of them
+/// changes (decode would still succeed, just on a different interpretation than what was
+/// written). A change to GraphContentKey's own shape does not need a bump: it changes the key
+/// fromJson() produces, so an old line simply misses lookup instead of being misparsed --
+/// self-correcting. This field is the independent per-line stamp: a foreign line (wrong
+/// version) appended to an otherwise valid shard is skipped instead of parsed.
+constexpr int WINNER_LINE_FORMAT_VERSION = 1;
 
 /// True if @p arch is usable verbatim as a path component: a non-empty run of ASCII
 /// letters, digits, '_' and '-'.
@@ -67,6 +76,23 @@ inline bool isPlainArchComponent(std::string_view arch)
     });
 }
 
+/// A JSON integer within int's range, or nullopt. nlohmann's get<int>() accepts a float and an
+/// out-of-range value and static-casts both, which is UB for the out-of-range case.
+inline std::optional<int> readBoundedInt(const nlohmann::json& parent, const char* field)
+{
+    const auto found = parent.find(field);
+    if(found == parent.end() || !found->is_number_integer())
+    {
+        return std::nullopt;
+    }
+    const auto raw = found->get<int64_t>();
+    if(raw < 0 || raw > static_cast<int64_t>(std::numeric_limits<int>::max()))
+    {
+        return std::nullopt;
+    }
+    return static_cast<int>(raw);
+}
+
 } // namespace detail
 
 /// The version string every winner-cache shard is stamped with and checked against;
@@ -79,9 +105,8 @@ inline std::string_view winnerCacheVersion()
 /// Where @p engineName's shard for @p gcnArchName lives:
 /// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<base-arch>/winners.jsonl`.
 ///
-/// The arch component is the stripped base target id VERBATIM, which ALMIOPEN-2451's
-/// design record requires: a user has to be able to find and delete one arch's cache by
-/// eye, so `gfx942` must read as `gfx942`. It is validated rather than sanitized --
+/// The arch component is the stripped base target id VERBATIM: a user has to be able to
+/// find and delete one arch's cache by eye, so `gfx942` must read as `gfx942`. It is
 /// sanitizeForPath() would append its unconditional hash suffix and cost exactly that
 /// readability, and the arch has nothing to disambiguate, being drawn from a small set of
 /// known-good identifiers. An arch that is not a plain component is a driver anomaly:
@@ -158,6 +183,7 @@ inline std::string encodeWinnerRecordLine(const WinnerKey& key, const WinnerReco
     }
 
     nlohmann::json line;
+    line[detail::WINNER_LINE_FORMAT_FIELD] = detail::WINNER_LINE_FORMAT_VERSION;
     line[detail::WINNER_LINE_GRAPH_FIELD] = key.graph.toJson();
     line[detail::WINNER_LINE_DEVICE_FIELD] = std::move(device);
     line[detail::WINNER_LINE_ENTRIES_FIELD] = std::move(entries);
@@ -178,6 +204,13 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
     {
         const auto json = nlohmann::json::parse(std::string(line));
         if(!json.is_object())
+        {
+            return std::nullopt;
+        }
+
+        const auto formatField = json.find(detail::WINNER_LINE_FORMAT_FIELD);
+        if(formatField == json.end() || !formatField->is_number_integer()
+           || formatField->get<int64_t>() != detail::WINNER_LINE_FORMAT_VERSION)
         {
             return std::nullopt;
         }
@@ -203,9 +236,16 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         DeviceProperties properties;
         properties.gcnArchName
             = deviceField->at(detail::WINNER_LINE_GCN_ARCH_NAME_FIELD).get<std::string>();
-        properties.warpSize = deviceField->at(detail::WINNER_LINE_WARP_SIZE_FIELD).get<int>();
-        properties.multiProcessorCount
-            = deviceField->at(detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD).get<int>();
+        const auto warpSize
+            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_WARP_SIZE_FIELD);
+        const auto multiProcessorCount
+            = detail::readBoundedInt(*deviceField, detail::WINNER_LINE_MULTI_PROCESSOR_COUNT_FIELD);
+        if(!warpSize.has_value() || !multiProcessorCount.has_value())
+        {
+            return std::nullopt;
+        }
+        properties.warpSize = *warpSize;
+        properties.multiProcessorCount = *multiProcessorCount;
 
         const auto entriesField = json.find(detail::WINNER_LINE_ENTRIES_FIELD);
         if(entriesField == json.end() || !entriesField->is_array())

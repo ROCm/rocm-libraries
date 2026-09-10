@@ -42,9 +42,16 @@ def build_arch(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        f"{config.CK_PY_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    ).rstrip(os.pathsep)
+    lib_root = config.CK_PY_ROOT.parent.parent / "library"
+    env["PYTHONPATH"] = os.pathsep.join(
+        p
+        for p in (
+            str(config.CK_PY_ROOT),
+            str(lib_root),
+            env.get("PYTHONPATH", ""),
+        )
+        if p
+    )
 
     cmd: List[str] = [
         sys.executable,

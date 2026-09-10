@@ -36,6 +36,10 @@ function(hipdnn_setup_version COMPONENT_NAME)
 
     if(NOT GIT_RESULT EQUAL 0 OR ${COMPONENT_NAME_UPPER}_VERSION_TWEAK STREQUAL "")
         set(${COMPONENT_NAME_UPPER}_VERSION_TWEAK "unknown")
+        message(STATUS
+            "${COMPONENT_NAME}: could not resolve a git commit hash (no .git directory, git "
+            "not installed, or not a git checkout) -- version tweak falls back to 'unknown', "
+            "so on-disk caches keyed by this version string stop distinguishing commits.")
     endif()
 
     # Full version string

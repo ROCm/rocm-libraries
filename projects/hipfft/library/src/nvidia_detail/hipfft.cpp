@@ -639,6 +639,16 @@ catch(...)
     return handle_exception();
 }
 
+hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea)
+try
+{
+    return cufftResultToHipResult(cufftXtSetWorkArea(plan, workArea));
+}
+catch(...)
+{
+    return handle_exception();
+}
+
 /*===========================================================================*/
 
 hipfftResult

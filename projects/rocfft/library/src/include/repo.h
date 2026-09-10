@@ -66,9 +66,12 @@ class Repo
     // key structure for 2D twiddles
     struct repo_twd_key_2D_t
     {
-        size_t              length0   = 0;
-        size_t              length1   = 0;
-        rocfft_precision    precision = rocfft_precision_single;
+        size_t           length0   = 0;
+        size_t           length1   = 0;
+        rocfft_precision precision = rocfft_precision_single;
+        // changes the table twiddles_create_2D generates, so it belongs in the
+        // key. attach_halfN2 does not: it is always false at the only call site.
+        bool                attach_halfN1 = false;
         std::vector<size_t> radices1;
         std::vector<size_t> radices2;
         // buffers are in device memory, so we need per-device
@@ -83,6 +86,8 @@ class Repo
                 return length1 < other.length1;
             if(precision != other.precision)
                 return precision < other.precision;
+            if(attach_halfN1 != other.attach_halfN1)
+                return attach_halfN1 < other.attach_halfN1;
             if(radices1 != other.radices1)
                 return radices1 < other.radices1;
             if(radices2 != other.radices2)

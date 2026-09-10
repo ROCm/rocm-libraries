@@ -137,16 +137,7 @@ public:
 
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
-        for(const auto mode : modes)
-        {
-            if(mode != HeurMode_t::FALLBACK)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
-                                   << hipdnn_frontend::to_string(mode)
-                                   << " is accepted but not honored; hipDNN uses fallback "
-                                      "selection. Plan choice may differ from cuDNN.");
-            }
-        }
+        warnUnhonoredHeuristicModes(modes);
 
         HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
 
@@ -177,6 +168,31 @@ public:
     {
         static_cast<void>(handle);
         return check_support();
+    }
+
+    // hipDNN extension, no upstream cuDNN frontend equivalent: probes whether any
+    // engine can run the graph, without creating or building plans. Mirrors the
+    // native method, which auto-builds the operation graph, so a successful probe
+    // leaves the graph built. Never regresses a later stage; the probe neither
+    // creates nor invalidates plans.
+    error_t is_supported_ext(cudnnHandle_t handle,
+                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    {
+        warnUnhonoredHeuristicModes(modes);
+
+        HIPDNN_CUDNN_SHIM_RETURN_RECORDED_ERROR();
+
+        CHECK_CUDNN_FRONTEND_ERROR(validateOwnedTensors());
+        if(hasOperationGraphState())
+        {
+            CHECK_CUDNN_FRONTEND_ERROR(_graph->is_supported_ext(handle, modes));
+        }
+
+        if(!stageAtLeast(Stage::OpGraphBuilt))
+        {
+            _stage = Stage::OpGraphBuilt;
+        }
+        return {};
     }
 
     error_t build_plans(BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
@@ -1808,6 +1824,20 @@ private:
             }
         }
         return {};
+    }
+
+    static void warnUnhonoredHeuristicModes(const std::vector<HeurMode_t>& modes)
+    {
+        for(const auto mode : modes)
+        {
+            if(mode != HeurMode_t::FALLBACK)
+            {
+                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
+                                   << hipdnn_frontend::to_string(mode)
+                                   << " is accepted but not honored; hipDNN uses fallback "
+                                      "selection. Plan choice may differ from cuDNN.");
+            }
+        }
     }
 
     static error_t unsupportedDevicelessBuildError()

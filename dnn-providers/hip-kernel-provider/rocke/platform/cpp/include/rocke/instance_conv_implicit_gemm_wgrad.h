@@ -47,6 +47,16 @@
 #define ROCKE_INSTANCE_CONV_IMPLICIT_GEMM_WGRAD_H
 
 #include <stdbool.h>
+
+/* Column pad (in elements) for the K-outer wgrad LDS tile. Keeps the row stride
+ * off a multiple of the LDS bank period while staying 16-byte aligned for the
+ * wide store. Mirrors _KOUTER_PAD in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_KOUTER_PAD 8
+
+/* The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+ * Emitting it for an older target produces IR the assembler will reject.
+ * Mirrors _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_WGRAD_LDS_K_OUTER_ARCH "gfx950"
 #include <stddef.h>
 
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h" /* rocke_conv_problem_t */
@@ -114,6 +124,11 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     const char* epilogue; /* default "default" */
     bool async_dma; /* default false */
     bool unroll_k; /* default false */
+    /* Store the A/B tiles K-outer (LDS[k][m] / LDS[k][n]) and feed the MFMA with
+     * gfx950 ds_read_b64_tr_b16 transpose reads instead of transposing on store.
+     * Mirrors WgradConvSpec.lds_k_outer. Default false: strictly additive, so
+     * every existing config emits byte-identical IR. */
+    bool lds_k_outer; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
@@ -140,6 +155,21 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
 
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
+
+    /* two_stage: when true and split_k > 1, Stage 1 writes f32 partial sums
+     * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
+     * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
+     * reduces the workspace slices into dW in a fixed sequential order.
+     * This guarantees bit-exact, deterministic output.
+     * Set automatically by the builder when force_deterministic=true and
+     * split_k > 1; prefer force_deterministic over setting this directly. */
+    bool two_stage; /* default false */
+
+    /* force_deterministic: semantic intent flag.  When true and split_k > 1
+     * (or split_k=-1 auto), the builder sets two_stage=true so the kernel
+     * uses the workspace-store epilogue instead of atomic adds.
+     * For split_k == 1 this flag is a no-op (output is always deterministic). */
+    bool force_deterministic; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -165,8 +195,25 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 /* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
+/* Returns true when the kernel output is guaranteed bit-exact deterministic:
+ * either split_k <= 1 (plain store, no atomics) or two_stage=true
+ * (workspace-reduce path).  false means the kernel uses atomic adds and
+ * output order is non-deterministic across runs. */
+bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
+/* Returns the workspace buffer size in bytes required for the two-stage
+ * deterministic wgrad path.  Formula: groups * split_k * wg_M * wg_N * 4.
+ * Returns 0 when two_stage=false or split_k <= 1 (no workspace needed).
+ * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
+size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
 /* spec.wg_K: output spatial positions (N * Ho * Wo [* Do]). */
 int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
+
+/* Max K iterations the Python-unrolled loops (pipeline="basic" and async_dma)
+ * may unroll to. Build-practicality bound (code size / compile time), not a
+ * hardware limit. Mirrors _MAX_UNROLLED_K_ITERS in conv_implicit_gemm_wgrad.py. */
+#define ROCKE_MAX_UNROLLED_K_ITERS 128
 
 /* spec.wg_K_padded(): wg_K rounded up to tile_k * split_k. */
 int rocke_wgrad_conv_spec_wg_K_padded(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

@@ -35,9 +35,18 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Addressed a cache-reuse issue with RCCL communicators by giving each communicator its own set of streams.
+* Fixed multi-dimensional real transforms returning wrong results when a complex
+  transform that shares the same internal 2D kernel had been planned earlier in the
+  process and its plan was still alive.  A real transform's kernel needs extra
+  twiddle values for its fused real pre/post-processing step, but the 2D twiddle
+  table cache key did not distinguish the two, so the real transform could be handed
+  the complex transform's shorter table.
 * Fixed `rocfft_plan_create` hanging when given a zero FFT length, zero batch, or zero dimensions; these
   now return `rocfft_status_invalid_dimensions` or `rocfft_status_invalid_arg_value`.
 * Fixed `rocfft_execution_info_set_stream` to derive the device from the stream itself instead of assuming the current device.
+
+* Fixed a potential issue where rocFFT could terminate the calling process if a HIP module failed to load during plan
+  creation.
 
 ### Known issues
 

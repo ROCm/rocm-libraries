@@ -363,6 +363,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd)),
                          GraphTestCase::getName);
 
+INSTANTIATE_TEST_SUITE_P(SmokeStats,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd,
+                                                                       /*withStats=*/true)),
+                         GraphTestCase::getName);
+
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)
 {
     auto tolerance = 1e-2f;

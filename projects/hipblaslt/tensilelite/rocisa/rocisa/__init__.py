@@ -39,6 +39,32 @@ def _candidate_dll_dirs(dep_dlls, ext_dir):
     return ordered
 
 
+def _installed_dll_dirs(ext_dir):
+    """Windows dependency dirs for an installed _rocisa (no _dll_dirs.py present).
+
+    A build tree gets exact dependency paths from _dll_dirs.py; an install does
+    not, and since Python 3.8 the extension loader ignores PATH. The installed
+    extension sits at <prefix>/lib/hipblaslt/rocisa while its dependency DLLs
+    (HIP runtime, comgr, origami, stinkytofu) live in the merged ROCm
+    <prefix>/bin. Return that bin/ (three levels up) plus the bin/ of any standard
+    ROCM_PATH/HIP_PATH/ROCM_HOME, mirroring hipdnn_frontend. Callers guard each
+    entry with os.path.isdir, so a wrong guess is a harmless no-op. Pure and
+    host-agnostic so it can be unit-tested off Windows.
+    """
+    import os
+
+    dirs = [
+        os.path.normpath(
+            os.path.join(ext_dir, os.pardir, os.pardir, os.pardir, "bin")
+        )
+    ]
+    for var in ("ROCM_PATH", "HIP_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root:
+            dirs.append(os.path.join(root, "bin"))
+    return dirs
+
+
 def _register_win_dll_dirs() -> None:
     """Register _candidate_dll_dirs via os.add_dll_directory on Windows.
 
@@ -49,12 +75,16 @@ def _register_win_dll_dirs() -> None:
     """
     import os
 
+    ext_dir = os.path.dirname(__file__)
     try:
         # Source/integrated build: CMake emits the resolved dependency DLL paths.
         from ._dll_dirs import DEP_DLLS
     except ImportError:
         DEP_DLLS = []  # Installed package: deps resolve via the merged layout.
-    for d in _candidate_dll_dirs(DEP_DLLS, os.path.dirname(__file__)):
+    dll_dirs = _candidate_dll_dirs(DEP_DLLS, ext_dir)
+    if not DEP_DLLS:
+        dll_dirs = dll_dirs + _installed_dll_dirs(ext_dir)
+    for d in dll_dirs:
         if os.path.isdir(d):
             try:
                 os.add_dll_directory(d)
@@ -87,31 +117,13 @@ def _import_rocisa():
 # stinkytofu Python binding ``_stinkytofu.so``). Anything else (or unset)
 # keeps the original nanobind bindings in ``_rocisa``.
 #
-# When ``ROCISA_BACKEND`` is unset, gfx1250 platforms automatically default
-# to the stinkytofu backend. Set ``ROCISA_BACKEND=rocisa`` to explicitly
-# force the native path on gfx1250.
-
-def _detect_default_backend() -> str:
-    """Return ``"stinkytofu"`` if gfx1250 hardware is detected, else ``""``."""
-    import subprocess as _sp
-    rocmpath = os.environ.get(
-        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
-    )
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    if not os.path.exists(enumerator):
-        return ""
-    try:
-        output = _sp.check_output(
-            [enumerator, "-t", "GPU"], timeout=5, stderr=_sp.DEVNULL
-        )
-        if "gfx1250" in output.decode():
-            return "stinkytofu"
-    except Exception:
-        pass
-    return ""
+# The default is ALWAYS the native rocisa backend -- there is no hardware
+# auto-detection. Even on gfx1250 the stinkytofu backend is selected only when
+# it is *explicitly* requested via ``ROCISA_BACKEND=stinkytofu``.
 
 _BACKEND_RAW = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-_BACKEND = _BACKEND_RAW if _BACKEND_RAW else _detect_default_backend()
+# No hardware auto-detection: unset (or anything != "stinkytofu") -> native rocisa.
+_BACKEND = _BACKEND_RAW
 
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
@@ -301,7 +313,7 @@ def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn,
 
 
 if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter,
-                    auto_detected=(not _BACKEND_RAW)):
+                    auto_detected=False):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
