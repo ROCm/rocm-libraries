@@ -705,6 +705,13 @@ class TensorAndGemmTests(unittest.TestCase):
             hv.to_numpy(hv.clip(activation_input, -1.0, 1.0)),
             np.clip(activation_values, -1.0, 1.0),
         )
+        np.testing.assert_array_equal(
+            hv.to_numpy(activation_input.relu()), np.maximum(activation_values, 0.0)
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(activation_input.clip(-1.0, 1.0)),
+            np.clip(activation_values, -1.0, 1.0),
+        )
 
     def test_matmul_matches_numpy_and_supports_empty_reduction(self):
         a_values = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)

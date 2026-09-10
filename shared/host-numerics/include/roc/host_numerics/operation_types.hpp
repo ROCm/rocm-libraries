@@ -101,7 +101,7 @@ enum class OutputSelectionKind {
 namespace detail {
 // Tests divisors only through floor(sqrt(value)). The quotient comparison is
 // equivalent to divisor * divisor <= value and cannot overflow size_t.
-inline bool isPrimeStride(size_t value) {
+inline bool isPrime(size_t value) {
     if (value < 2) return false;
     if (value % 2 == 0) return value == 2;
     if (value % 3 == 0) return value == 3;
@@ -115,7 +115,7 @@ inline bool isPrimeStride(size_t value) {
 inline size_t nextPrimeStride(size_t value) {
     if (value <= 2) return 2;
     size_t candidate = value % 2 == 0 ? value + 1 : value;
-    while (!isPrimeStride(candidate)) {
+    while (!isPrime(candidate)) {
         if (candidate > std::numeric_limits<size_t>::max() - 2)
             throw std::overflow_error("Prime-stride output selection overflow.");
         candidate += 2;

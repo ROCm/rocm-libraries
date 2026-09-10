@@ -50,7 +50,7 @@ void forEachIndex(const Shape& shape, Function&& function) {
 
 template <typename Value, typename Tag>
 Value loadTensorValue(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return detail::decodeScalarKnown<Tag::type, Value>(storage, logicalOffset);
+    return detail::decodeScalarKnown<Tag, Value>(storage, logicalOffset);
 }
 
 template <typename Value>
@@ -516,6 +516,14 @@ NB_MODULE(_roc_host_numerics, module) {
         .def("clone", [](const Tensor& tensor) { return tensor.deepCopy(); })
         .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::copyConvertedTo),
              "type"_a)
+        .def("absolute", &Tensor::absolute)
+        .def("relu", &Tensor::relu)
+        .def("gelu", &Tensor::gelu)
+        .def("sigmoid", &Tensor::sigmoid)
+        .def("tanh", &Tensor::tanh, "input_scale"_a = 1.0, "output_scale"_a = 1.0)
+        .def("silu", &Tensor::silu)
+        .def("swish", &Tensor::swish, "beta"_a = 1.0)
+        .def("clip", &Tensor::clip, "minimum"_a, "maximum"_a)
         .def(
             "__add__",
             [](const Tensor& tensor, nb::handle value) {

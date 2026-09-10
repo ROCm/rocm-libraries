@@ -595,6 +595,17 @@ class Tensor {
         return copyEncodedBackingStorage(m_type, m_layout, rawEncodedBackingStorage());
     }
 
+    // Elementwise activation conveniences. The named free functions remain
+    // available for callers that prefer functional composition.
+    [[nodiscard]] Tensor absolute() const;
+    [[nodiscard]] Tensor relu() const;
+    [[nodiscard]] Tensor gelu() const;
+    [[nodiscard]] Tensor sigmoid() const;
+    [[nodiscard]] Tensor tanh(double inputScale = 1.0, double outputScale = 1.0) const;
+    [[nodiscard]] Tensor silu() const;
+    [[nodiscard]] Tensor swish(double beta = 1.0) const;
+    [[nodiscard]] Tensor clip(double minimum, double maximum) const;
+
     // Copies only logical tensor elements into their encoded destination
     // locations. Bytes and bits used only for layout gaps remain unchanged.
     void copyLogicalElementsToEncodedStorage(std::span<std::byte> destination) const {
@@ -904,25 +915,25 @@ inline Tensor Tensor::copyConvertedTo(ScalarType destinationType, Layout destina
                 constexpr ScalarCategory sourceCategory = scalarTypeInfo(SourceTag::type).category;
                 if constexpr (sourceCategory == ScalarCategory::Boolean ||
                               sourceCategory == ScalarCategory::UnsignedInteger) {
-                    const uint64_t value = detail::decodeScalarKnown<SourceTag::type, uint64_t>(
-                        sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(
+                    const uint64_t value =
+                        detail::decodeScalarKnown<SourceTag, uint64_t>(sourceStorage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag>(
                         destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
-                    const int64_t value = detail::decodeScalarKnown<SourceTag::type, int64_t>(
-                        sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(
+                    const int64_t value =
+                        detail::decodeScalarKnown<SourceTag, int64_t>(sourceStorage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag>(
                         destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::Complex) {
                     const std::complex<double> value =
-                        detail::decodeScalarKnown<SourceTag::type, std::complex<double>>(
-                            sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(
+                        detail::decodeScalarKnown<SourceTag, std::complex<double>>(sourceStorage,
+                                                                                   sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag>(
                         destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 } else {
-                    const double value = detail::decodeScalarKnown<SourceTag::type, double>(
-                        sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(
+                    const double value =
+                        detail::decodeScalarKnown<SourceTag, double>(sourceStorage, sourceOffset);
+                    detail::encodeScalarKnown<DestinationTag>(
                         destination.rawEncodedBackingStorage(), destinationOffset, value, options);
                 }
             });

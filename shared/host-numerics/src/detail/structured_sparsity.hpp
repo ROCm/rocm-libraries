@@ -697,9 +697,9 @@ inline Shape validateTwoOfFourMetadataProblem(const TwoOfFourMetadataArguments& 
         for (size_t group = 0; group < sparsityGroups; ++group) {
             const ptrdiff_t firstOffset =
                 retainedBase + static_cast<ptrdiff_t>(group * 2) * retainedAxisStride;
-            const uint8_t first = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+            const uint8_t first = decodeScalarKnown<UInt8Tag, uint8_t>(
                 problem.retainedIndices.rawEncodedBackingStorage(), firstOffset);
-            const uint8_t second = decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+            const uint8_t second = decodeScalarKnown<UInt8Tag, uint8_t>(
                 problem.retainedIndices.rawEncodedBackingStorage(),
                 firstOffset + retainedAxisStride);
             (void)twoOfFourMetadataNibble(first, second);
@@ -824,7 +824,7 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
                         retainedIndexBase +
                         static_cast<ptrdiff_t>(group * retainedElements + retainedIndex) *
                             retainedIndexAxisStride;
-                    detail::encodeScalarKnown<ScalarType::UInt8>(
+                    detail::encodeScalarKnown<detail::UInt8Tag>(
                         problem.retainedIndices->rawEncodedBackingStorage(), retainedIndexOffset,
                         static_cast<uint8_t>(position));
                 }
@@ -837,13 +837,13 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
                 const ptrdiff_t metadataOffset =
                     metadataBase + static_cast<ptrdiff_t>(group / 2) * metadataAxisStride;
                 if (group % 2 == 0) {
-                    detail::encodeScalarKnown<ScalarType::UInt8>(
+                    detail::encodeScalarKnown<detail::UInt8Tag>(
                         problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset,
                         nibble);
                 } else {
-                    const uint8_t previous = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+                    const uint8_t previous = detail::decodeScalarKnown<detail::UInt8Tag, uint8_t>(
                         problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset);
-                    detail::encodeScalarKnown<ScalarType::UInt8>(
+                    detail::encodeScalarKnown<detail::UInt8Tag>(
                         problem.twoOfFourMetadata->rawEncodedBackingStorage(), metadataOffset,
                         static_cast<uint8_t>(previous | static_cast<uint8_t>(nibble << 4)));
                 }
@@ -937,18 +937,18 @@ detail::TwoOfFourMetadataWorkCounts encodeTwoOfFourMetadataInvocation(
             const size_t firstGroup = metadataGroup * 2;
             const ptrdiff_t firstOffset =
                 retainedBase + static_cast<ptrdiff_t>(firstGroup * 2) * retainedAxisStride;
-            const uint8_t first0 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+            const uint8_t first0 = detail::decodeScalarKnown<detail::UInt8Tag, uint8_t>(
                 problem.retainedIndices.rawEncodedBackingStorage(), firstOffset);
-            const uint8_t first1 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+            const uint8_t first1 = detail::decodeScalarKnown<detail::UInt8Tag, uint8_t>(
                 problem.retainedIndices.rawEncodedBackingStorage(),
                 firstOffset + retainedAxisStride);
             uint8_t encoded = detail::twoOfFourMetadataNibble(first0, first1);
 
             if (firstGroup + 1 < sparsityGroups) {
                 const ptrdiff_t secondOffset = firstOffset + 2 * retainedAxisStride;
-                const uint8_t second0 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+                const uint8_t second0 = detail::decodeScalarKnown<detail::UInt8Tag, uint8_t>(
                     problem.retainedIndices.rawEncodedBackingStorage(), secondOffset);
-                const uint8_t second1 = detail::decodeScalarKnown<ScalarType::UInt8, uint8_t>(
+                const uint8_t second1 = detail::decodeScalarKnown<detail::UInt8Tag, uint8_t>(
                     problem.retainedIndices.rawEncodedBackingStorage(),
                     secondOffset + retainedAxisStride);
                 encoded = static_cast<uint8_t>(
@@ -956,7 +956,7 @@ detail::TwoOfFourMetadataWorkCounts encodeTwoOfFourMetadataInvocation(
                     static_cast<uint8_t>(detail::twoOfFourMetadataNibble(second0, second1) << 4));
             }
 
-            detail::encodeScalarKnown<ScalarType::UInt8>(
+            detail::encodeScalarKnown<detail::UInt8Tag>(
                 problem.metadata.rawEncodedBackingStorage(),
                 metadataBase + static_cast<ptrdiff_t>(metadataGroup) * metadataAxisStride, encoded);
         }

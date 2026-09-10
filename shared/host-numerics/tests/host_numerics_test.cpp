@@ -1136,6 +1136,9 @@ void testTensorOperations() {
             "Named ReLU operation mismatch.");
     require(clippedOutput.loadAs<float>({0}) == -1.0f && clippedOutput.loadAs<float>({3}) == 1.0f,
             "Named clip operation mismatch.");
+    require(compare(activationInput.relu(), reluOutput).passed() &&
+                compare(activationInput.clip(-1.0, 1.0), clippedOutput).passed(),
+            "Tensor activation methods differ from the named operations.");
 }
 
 void testReferenceSoftmax() {
