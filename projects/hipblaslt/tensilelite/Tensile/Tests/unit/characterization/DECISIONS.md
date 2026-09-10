@@ -387,3 +387,13 @@ scope it is NOT recorded as a new rise.
 **Classification:** baseline-maintenance only; no behavior pinned, so no ADR. The
 baseline write and this DECISIONS entry land as two separate atomic commits per
 the MUTCOV-004 delivery rule. No push; David reviews the baseline diff.
+
+## D27 — Refresh config-driven emit results after develop changes
+
+**ADR:** [`adr/0014-refresh-config-emit-results-after-develop.md`](adr/0014-refresh-config-emit-results-after-develop.md)
+
+**Decision:** Re-record the 75 set-cover emit nodes against current `develop`
+and an in-tree `rocisa` build. Seventy-one nodes retain their kernel counts and
+emitter return codes. Four reviewed nodes change count, and every retained
+kernel still emits with return code `0`; ADR 0014 records those cases and the
+upstream cause.
