@@ -55,11 +55,27 @@ struct LayoutAlias
 };
 
 /// Every layout name the language knows, and the array each expands to.
-inline constexpr std::array<LayoutAlias, 5> LAYOUT_ALIAS_TABLE = {{{"nchw", {3, 2, 1, 0}, 4},
-                                                                   {"nhwc", {3, 0, 2, 1}, 4},
-                                                                   {"ncdhw", {4, 3, 2, 1, 0}, 5},
-                                                                   {"ndhwc", {4, 0, 3, 2, 1}, 5},
-                                                                   {"bhsd", {3, 2, 1, 0}, 4}}};
+///
+/// The convolution and attention names are RFC 0018 A.4's table, and match the
+/// TensorLayout constants the data SDK generates strides from
+/// (data_sdk/utilities/Tensor.hpp). The matmul names follow the same reading:
+/// the letters list the logical axes slowest-varying first, so "mk" is a
+/// row-major (M, K) and "km" the column-major spelling of the same pair.
+///
+/// Every entry is one fixed array, which is what lets the pass expand a name
+/// without knowing anything about the tensor. A packing that means a different
+/// array at each rank, such as a column-major operand above rank 3, is written
+/// as an array literal rather than named here.
+inline constexpr std::array<LayoutAlias, 10> LAYOUT_ALIAS_TABLE = {{{"nchw", {3, 2, 1, 0}, 4},
+                                                                    {"nhwc", {3, 0, 2, 1}, 4},
+                                                                    {"ncdhw", {4, 3, 2, 1, 0}, 5},
+                                                                    {"ndhwc", {4, 0, 3, 2, 1}, 5},
+                                                                    {"bhsd", {3, 2, 1, 0}, 4},
+                                                                    {"bshd", {3, 1, 2, 0}, 4},
+                                                                    {"mk", {1, 0}, 2},
+                                                                    {"km", {0, 1}, 2},
+                                                                    {"bmk", {2, 1, 0}, 3},
+                                                                    {"bkm", {2, 0, 1}, 3}}};
 
 inline const LayoutAlias* lookupLayoutAlias(const std::string& name)
 {
@@ -270,7 +286,7 @@ inline nlohmann::json resolveLayoutAlias(const nlohmann::json& aliasNode,
                                          + refPath + "; expected an integer array or one of: "
                                          + knownLayoutAliases());
     }
-    // Every alias has a fixed rank, so an alias compared against a tensor the
+    // A table entry has a fixed rank, so one compared against a tensor the
     // criteria pin to a different rank can never hold. Reject it here instead
     // of declining silently on every graph. The pin must name this same
     // tensor: $inputs[0] and $inputs[1] are two different ones.

@@ -212,13 +212,30 @@ single canonical form, and evaluation only ever compares arrays.
 
 | Alias   | Array         | | Alias   | Array           |
 | ------- | ------------- |-| ------- | --------------- |
-| `nchw`  | `[3,2,1,0]`   | | `ndhwc` | `[4,0,3,2,1]`   |
-| `nhwc`  | `[3,0,2,1]`   | | `bhsd`  | `[3,2,1,0]`     |
-| `ncdhw` | `[4,3,2,1,0]` | |         |                 |
+| `nchw`  | `[3,2,1,0]`   | | `bhsd`  | `[3,2,1,0]`     |
+| `nhwc`  | `[3,0,2,1]`   | | `bshd`  | `[3,1,2,0]`     |
+| `ncdhw` | `[4,3,2,1,0]` | | `mk`    | `[1,0]`         |
+| `ndhwc` | `[4,0,3,2,1]` | | `km`    | `[0,1]`         |
+|         |               | | `bmk`   | `[2,1,0]`       |
+|         |               | | `bkm`   | `[2,0,1]`       |
+
+The letters list a tensor's logical axes slowest-varying first, so `mk` is a
+row-major matmul operand `(M, K)` and `km` the column-major spelling of the same
+pair. `bmk` and `bkm` are their batched, rank-3 forms.
 
 ```jsonc
 {"==": ["$x.stride_order", "nhwc"]}                  // same as [3, 0, 2, 1]
-{"in": ["$q.stride_order", ["bhsd", [3, 1, 2, 0]]]}  // a set of accepted layouts
+{"==": ["$a.stride_order", "mk"]}                    // a row-major GEMM operand
+{"in": ["$q.stride_order", ["bhsd", "bshd"]]}        // a set of accepted layouts
+```
+
+Every alias is one fixed array, which is what lets a name expand before any
+tensor is in hand. A packing that means a different array at each rank has no
+name: write the array. A column-major operand is `mk` reversed at rank 2 (`km`)
+and `bkm` at rank 3, and above that it is spelled out.
+
+```jsonc
+{"==": ["$a.stride_order", [3, 2, 0, 1]]}            // column-major, two batch dims
 ```
 
 ### Where a name means an alias
@@ -242,8 +259,9 @@ alone. That lets you compare one tensor's layout against another's.
 ```
 
 An alias names an array, not a distinct layout. `bhsd` and `nchw` both expand to
-`[3,2,1,0]`, so either name accepts a tensor carrying that stride order. Treat
-aliases as spelling conveniences, not as narrowing checks.
+`[3,2,1,0]`, and so do `bmk` and a rank-3 channel-first convolution, so either
+name accepts a tensor carrying that stride order. Treat aliases as spelling
+conveniences, not as narrowing checks.
 
 ### Alias errors
 
@@ -561,12 +579,18 @@ declines: trailing garbage (`"5abc"`), interior whitespace (`"1 5"`), a bare
 sign, and a hexadecimal float (`"0x10"`, a typo in a descriptor rather than
 `16`).
 
-A magnitude outside the `double` range declines in **both** directions.
-Overflow (`"1e309"`) yields an infinity, which is not finite. Underflow
-(`"1e-999"`) is the subtler one: it would otherwise read as a clean `0` — a
-number the language never represented, which then compares equal to a literal
-`0` and divides as a zero divisor. A genuine denormal such as `"5e-324"` is
-representable and keeps its value.
+**A non-finite spelling is rejected too.** `from_chars` reads `"inf"`,
+`"infinity"`, `"nan"` and `"nan(char-seq)"` in any case, where `Number()`
+accepts none of them but `"Infinity"`. A dim, stride, or bound is a finite
+quantity, so all of them coerce to `NaN` rather than to a value no operator
+would accept anyway.
+
+A magnitude outside the `double` range declines in **both** directions, and for
+the same reason: `from_chars` reports it as out of range, so `"1e309"` never
+becomes an infinity. Underflow (`"1e-999"`) is the subtler one: it would
+otherwise read as a clean `0` — a number the language never represented, which
+then compares equal to a literal `0` and divides as a zero divisor. A genuine
+denormal such as `"5e-324"` is representable and keeps its value.
 
 ## Compile-time errors
 

@@ -252,7 +252,13 @@ TEST(TestJsonExpression, LayoutAliasesExpandToCanonicalArrays)
     const jexpr::JsonDataSource src{
         json{{"x", {{"rank", 4}, {"stride_order", {3, 0, 2, 1}}}},
              {"y", {{"rank", 4}, {"stride_order", {3, 2, 1, 0}}}},
-             {"vol", {{"rank", 5}, {"stride_order", {4, 0, 3, 2, 1}}}}}};
+             {"seq", {{"rank", 4}, {"stride_order", {3, 1, 2, 0}}}},
+             {"vol", {{"rank", 5}, {"stride_order", {4, 3, 2, 1, 0}}}},
+             {"vol_c_last", {{"rank", 5}, {"stride_order", {4, 0, 3, 2, 1}}}},
+             {"a", {{"rank", 2}, {"stride_order", {1, 0}}}},
+             {"a_t", {{"rank", 2}, {"stride_order", {0, 1}}}},
+             {"ba", {{"rank", 3}, {"stride_order", {2, 1, 0}}}},
+             {"ba_t", {{"rank", 3}, {"stride_order", {2, 0, 1}}}}}};
     const auto ev
         = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
 
@@ -260,7 +266,23 @@ TEST(TestJsonExpression, LayoutAliasesExpandToCanonicalArrays)
     EXPECT_EQ(ev(json({{"==", json::array({"$x.stride_order", "nhwc"})}})), V(true));
     EXPECT_EQ(ev(json({{"==", json::array({"$y.stride_order", "nchw"})}})), V(true));
     EXPECT_EQ(ev(json({{"==", json::array({"$y.stride_order", "bhsd"})}})), V(true));
-    EXPECT_EQ(ev(json({{"==", json::array({"$vol.stride_order", "ndhwc"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$seq.stride_order", "bshd"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$vol.stride_order", "ncdhw"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$vol_c_last.stride_order", "ndhwc"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$a.stride_order", "mk"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$a_t.stride_order", "km"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$ba.stride_order", "bmk"})}})), V(true));
+    EXPECT_EQ(ev(json({{"==", json::array({"$ba_t.stride_order", "bkm"})}})), V(true));
+
+    // BSHD and BHSD are different permutations, not two names for one. A
+    // sequence-major tensor is not accepted by the row-major name, nor the
+    // reverse: the pair is the one an attention family most easily conflates.
+    EXPECT_EQ(ev(json({{"==", json::array({"$seq.stride_order", "bhsd"})}})), V(false));
+    EXPECT_EQ(ev(json({{"==", json::array({"$y.stride_order", "bshd"})}})), V(false));
+
+    // As are the two matmul spellings of one operand pair.
+    EXPECT_EQ(ev(json({{"==", json::array({"$a.stride_order", "km"})}})), V(false));
+    EXPECT_EQ(ev(json({{"==", json::array({"$ba.stride_order", "bkm"})}})), V(false));
     // And against one that does not.
     EXPECT_EQ(ev(json({{"==", json::array({"$x.stride_order", "nchw"})}})), V(false));
     EXPECT_EQ(ev(json({{"!=", json::array({"$x.stride_order", "nchw"})}})), V(true));
@@ -273,8 +295,9 @@ TEST(TestJsonExpression, LayoutAliasesExpandToCanonicalArrays)
     EXPECT_EQ(ev(json({{"==", json::array({"nhwc", "$x.stride_order"})}})), V(true));
 
     // The array remains the canonical form and still works untouched.
-    EXPECT_EQ(ev(json({{"==", json::array({"$vol.stride_order", json::array({4, 0, 3, 2, 1})})}})),
-              V(true));
+    EXPECT_EQ(
+        ev(json({{"==", json::array({"$vol_c_last.stride_order", json::array({4, 0, 3, 2, 1})})}})),
+        V(true));
 }
 
 TEST(TestJsonExpression, LayoutAliasesOnlyExpandOppositeStrideOrder)
@@ -346,6 +369,22 @@ TEST(TestJsonExpression, LayoutAliasContradictingARankPinRejected)
     // A conditional pin cannot contradict the alias, so it is not collected.
     EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(
         json({{"and", json::array({{{"or", json::array({rankFour, false})}}, aliasRank5})}})));
+
+    // The check is not rank-4-or-5 specific: the matmul aliases carry ranks 2
+    // and 3, and a pin contradicts them the same way.
+    EXPECT_THROW(
+        jexpr::compile<jexpr::JsonDataSource>(json(
+            {{"and", json::array({rankFour, {{"==", json::array({"$x.stride_order", "mk"})}}})}})),
+        jexpr::JsonExpressionCompileError);
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(
+                     json({{"and",
+                            json::array({{{"==", json::array({"$x.rank", 2})}},
+                                         {{"==", json::array({"$x.stride_order", "bmk"})}}})}})),
+                 jexpr::JsonExpressionCompileError);
+    EXPECT_NO_THROW(jexpr::compile<jexpr::JsonDataSource>(
+        json({{"and",
+               json::array({{{"==", json::array({"$x.rank", 2})}},
+                            {{"==", json::array({"$x.stride_order", "km"})}}})}})));
 }
 
 TEST(TestJsonExpression, LayoutAliasRankPinAppliesOnlyToItsOwnTensor)
@@ -451,11 +490,18 @@ TEST(TestJsonExpression, LayoutAliasesInAMembershipSet)
     const auto ev
         = [&src](const json& rule) { return jexpr::compile<jexpr::JsonDataSource>(rule)(src); };
 
-    // BHSD or BSHD, the worked example's set. $q is BSHD, so an alias-only set
-    // of the two must accept it through the array arm.
-    const json bshd = json::array({3, 1, 2, 0});
-    EXPECT_EQ(ev(json({{"in", json::array({"$q.stride_order", json::array({"bhsd", bshd})})}})),
+    // BHSD or BSHD, the worked example's set. $q is BSHD, so a set naming both
+    // must accept it through the `bshd` arm.
+    EXPECT_EQ(ev(json({{"in", json::array({"$q.stride_order", json::array({"bhsd", "bshd"})})}})),
               V(true));
+    // The alias means exactly its array: the two spellings of the set agree.
+    EXPECT_EQ(ev(json({{"in",
+                        json::array({"$q.stride_order",
+                                     json::array({"bhsd", json::array({3, 1, 2, 0})})})}})),
+              V(true));
+    // A set naming only the other attention layout declines it.
+    EXPECT_EQ(ev(json({{"in", json::array({"$q.stride_order", json::array({"bhsd", "nhwc"})})}})),
+              V(false));
     // $x is NHWC and is accepted by a set of aliases.
     EXPECT_EQ(ev(json({{"in", json::array({"$x.stride_order", json::array({"nchw", "nhwc"})})}})),
               V(true));
@@ -768,9 +814,14 @@ TEST(TestJsonExpression, OrderingDeclinesOnNonFiniteCoercedOperands)
     EXPECT_TRUE(eval(nanCompare).isNull());
     EXPECT_TRUE(eval(json({{"!", json::array({nanCompare})}})).isNull());
 
-    const json infCompare = json({{"<", json::array({"1e309", 8})}});
-    EXPECT_TRUE(eval(infCompare).isNull());
-    EXPECT_TRUE(eval(json({{"!", json::array({infCompare})}})).isNull());
+    // A magnitude past the double range, and an infinity spelled out in full.
+    // Neither is a number this language holds, so ordering declines on both.
+    for(const char* operand : {"1e309", "inf", "Infinity", "-inf", "nan"})
+    {
+        const json nonFinite = json({{"<", json::array({operand, 8})}});
+        EXPECT_TRUE(eval(nonFinite).isNull()) << operand;
+        EXPECT_TRUE(eval(json({{"!", json::array({nonFinite})}})).isNull()) << operand;
+    }
 
     const json chain = json({{"<", json::array({1, "$name", 3})}});
     EXPECT_TRUE(eval(chain).isNull());

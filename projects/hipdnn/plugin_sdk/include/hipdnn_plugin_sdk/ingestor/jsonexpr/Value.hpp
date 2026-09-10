@@ -438,10 +438,19 @@ private:
     ///     as result_out_of_range, and reports it *without* flagging a genuine
     ///     denormal such as "5e-324", which errno would have.
     ///
-    /// The switch narrows two spellings, both deliberately. A hexadecimal
-    /// float ("0x10") is no longer read as 16: in a descriptor that is a typo,
-    /// not a value. One optional leading '+' is handled explicitly below, because
-    /// from_chars rejects it and "+5" is an ordinary way to write 5.
+    /// The spellings from_chars accepts are narrowed in three places, each
+    /// deliberately.
+    ///
+    ///   - A hexadecimal float ("0x10") is not read as 16: in a descriptor
+    ///     that is a typo, not a value. from_chars stops after the "0", and
+    ///     the full-consumption check below turns that into a decline.
+    ///   - One optional leading '+' is restored by hand, because from_chars
+    ///     rejects it and "+5" is an ordinary way to write 5.
+    ///   - A non-finite result is refused. from_chars reads "inf", "infinity",
+    ///     "nan" and "nan(char-seq)" in any case, where JS Number() answers NaN
+    ///     for all but "Infinity". A dim, stride or bound is a finite quantity,
+    ///     so every one of those spellings is a malformed descriptor rather
+    ///     than a value, and each declines the same way an overflow does.
     static double stringToNumber(const std::string& s)
     {
         std::size_t b = 0;
@@ -476,6 +485,13 @@ private:
             // the double range in either direction. NaN is unorderable, so the
             // enclosing predicate declines rather than answering from a value
             // that was never read.
+            return std::nan("");
+        }
+        if(!std::isfinite(d))
+        {
+            // An infinity or a NaN spelled out in full. Stated here rather than
+            // left to the finiteness gates each consumer applies, so the reason
+            // the string is not a number lives with the parser that read it.
             return std::nan("");
         }
         return d;

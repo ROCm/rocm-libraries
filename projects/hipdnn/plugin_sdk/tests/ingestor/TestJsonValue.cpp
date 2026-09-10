@@ -171,8 +171,44 @@ TEST(TestJsonValue, NumericStringUnderflowDeclinesInsteadOfReadingAsZero)
     EXPECT_EQ(asNumber("5e-324"), std::numeric_limits<double>::denorm_min());
     EXPECT_GT(asNumber("5e-324"), 0.0);
 
-    // Overflow was already caught downstream, because infinity is not finite.
-    EXPECT_FALSE(std::isfinite(asNumber("1e999")));
+    // Overflow is the same decline, and reads as NaN rather than an infinity.
+    EXPECT_TRUE(std::isnan(asNumber("1e999")));
+    EXPECT_TRUE(std::isnan(asNumber("-1e999")));
+}
+
+TEST(TestJsonValue, NonFiniteSpellingsAreNotNumbers)
+{
+    // from_chars reads "inf", "infinity", "nan" and "nan(char-seq)" in any
+    // case, where JS Number() answers NaN for every one of them but
+    // "Infinity". A dim, stride or bound is a finite quantity, so the parser
+    // refuses the lot: each is a malformed descriptor, not a value.
+    EXPECT_TRUE(std::isnan(asNumber("inf")));
+    EXPECT_TRUE(std::isnan(asNumber("INF")));
+    EXPECT_TRUE(std::isnan(asNumber("Inf")));
+    EXPECT_TRUE(std::isnan(asNumber("+inf"))); // the restored leading '+'
+    EXPECT_TRUE(std::isnan(asNumber("-inf")));
+    EXPECT_TRUE(std::isnan(asNumber("infinity")));
+    EXPECT_TRUE(std::isnan(asNumber("INFINITY")));
+    EXPECT_TRUE(std::isnan(asNumber("Infinity"))); // JS reads this one as +inf
+    EXPECT_TRUE(std::isnan(asNumber("nan")));
+    EXPECT_TRUE(std::isnan(asNumber("NAN")));
+    EXPECT_TRUE(std::isnan(asNumber("NaN")));
+    EXPECT_TRUE(std::isnan(asNumber("-nan")));
+    EXPECT_TRUE(std::isnan(asNumber("nan(1)"))); // the payload form
+    EXPECT_TRUE(std::isnan(asNumber("nan(abc)")));
+
+    // A prefix that merely starts like one. from_chars stops after "inf" and
+    // reports success, so only the full-consumption check declines these.
+    EXPECT_TRUE(std::isnan(asNumber("infx")));
+    EXPECT_TRUE(std::isnan(asNumber("infinit")));
+    EXPECT_TRUE(std::isnan(asNumber("nanq")));
+
+    // Refusing the numeric reading does not make the string vanish. It is
+    // still an ordinary string: equal to itself, ordered lexically against
+    // another string, and never coerced against a number by `==` or ordering.
+    EXPECT_EQ(V("inf"), V("inf"));
+    EXPECT_NE(V("inf"), V(0));
+    EXPECT_EQ(V::compare(V("inf"), V(0)), Ordering::UNORDERED);
 }
 
 TEST(TestJsonValue, NumericStringParsingIsLocaleIndependent)
