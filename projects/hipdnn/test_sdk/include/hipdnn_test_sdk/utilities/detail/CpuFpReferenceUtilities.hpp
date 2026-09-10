@@ -329,6 +329,55 @@ private:
     std::vector<Tap> _scratch;
 };
 
+/**
+ * @brief Row-major flat offsets for a dense walk of `extents` against `strides`.
+ *
+ * The normalization references walk a fixed sub-block of a tensor once per output
+ * position, and the walk is identical for every output position. Building an index
+ * vector per element - a heap allocation - and reducing it against the strides is
+ * therefore repeated work: hoist it into a table built once per call and index that.
+ *
+ * `strides` must have `extents.size()` entries. A zero stride is meaningful, and is
+ * how a broadcast axis contributes nothing to the address.
+ */
+inline std::vector<int64_t> buildDenseOffsets(const std::vector<int64_t>& extents,
+                                              const int64_t* strides)
+{
+    std::vector<int64_t> offsets{0};
+    std::vector<int64_t> scratch;
+
+    for(std::size_t dim = 0; dim < extents.size(); ++dim)
+    {
+        scratch.clear();
+        scratch.reserve(offsets.size() * static_cast<std::size_t>(extents[dim]));
+
+        // Prefixes outer, this dimension inner: keeps the product in row-major order.
+        for(const auto prefix : offsets)
+        {
+            for(int64_t index = 0; index < extents[dim]; ++index)
+            {
+                scratch.push_back(prefix + (index * strides[dim]));
+            }
+        }
+
+        offsets.swap(scratch);
+    }
+
+    return offsets;
+}
+
+/// Flat offset of the first `count` entries of `indices` against `strides`.
+inline int64_t flatOffset(const int64_t* indices, const int64_t* strides, std::size_t count)
+{
+    int64_t offset = 0;
+    for(std::size_t dim = 0; dim < count; ++dim)
+    {
+        offset += indices[dim] * strides[dim];
+    }
+
+    return offset;
+}
+
 template <typename F>
 auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {

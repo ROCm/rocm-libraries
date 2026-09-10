@@ -71,6 +71,27 @@ public:
             throw std::runtime_error("Scale and bias tensors must have the same rank.");
         }
 
+        // The passes address memory through hoisted base pointers and strides, which is the
+        // dense layout only; a ragged tensor rebases every batch at its own offset.
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, "x");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(y, PREFIX, "y");
+        if(scale != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*scale, PREFIX, "scale");
+        }
+        if(bias != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*bias, PREFIX, "bias");
+        }
+        if(mean != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*mean, PREFIX, "mean");
+        }
+        if(rstd != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*rstd, PREFIX, "rstd");
+        }
+
         // Split dimensions into batch dims and normalized dims
         std::vector<int64_t> batchDims;
         std::vector<int64_t> normalizedDims;
@@ -126,59 +147,109 @@ public:
             batchDims.push_back(1);
         }
 
+        // Raw pointers and strides are hoisted once. getHostValue/setHostValue each cost a
+        // virtual memory() call plus a stride reduction over an index vector built per
+        // element, which is pure heap traffic in a loop that visits every element twice.
+        const XDataType* xBase = x.memory().hostData();
+        YDataType* yBase = y.memory().hostData();
+        const ScaleBiasDataType* scaleBase
+            = (scale != nullptr) ? scale->memory().hostData() : nullptr;
+        const ScaleBiasDataType* biasBase = (bias != nullptr) ? bias->memory().hostData() : nullptr;
+        MeanRstdDataType* meanBase = (mean != nullptr) ? mean->memory().hostData() : nullptr;
+        MeanRstdDataType* rstdBase = (rstd != nullptr) ? rstd->memory().hostData() : nullptr;
+
+        const auto& xStrides = x.strides();
+        const auto& yStrides = y.strides();
+
+        // Every batch position walks the normalized dims the same way, so hoist that walk
+        // into flat offset tables built once. x and y are addressed by
+        // [batchIndices..., trailing normIndices...], so only the trailing normalizedDimCount
+        // axes of the walk move their address - the leading axes get a zero stride. scale and
+        // bias are addressed by the whole normIndices, so they use their own strides directly.
+        const auto batchDimCount = static_cast<size_t>(ndim - normalizedDimCount);
+        const auto normIndexCount = normalizedDims.size();
+        const auto normSuffixStart = normIndexCount - static_cast<size_t>(normalizedDimCount);
+
+        std::vector<int64_t> xWalkStrides(normIndexCount, 0);
+        std::vector<int64_t> yWalkStrides(normIndexCount, 0);
+        for(size_t axis = 0; axis < static_cast<size_t>(normalizedDimCount); ++axis)
+        {
+            xWalkStrides[normSuffixStart + axis] = xStrides[batchDimCount + axis];
+            yWalkStrides[normSuffixStart + axis] = yStrides[batchDimCount + axis];
+        }
+
+        const auto xNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, xWalkStrides.data());
+        const auto yNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, yWalkStrides.data());
+        const auto scaleOffsets = (scale != nullptr) ? hipdnn_test_sdk::detail::buildDenseOffsets(
+                                                           normalizedDims, scale->strides().data())
+                                                     : std::vector<int64_t>{};
+        const auto biasOffsets = (bias != nullptr) ? hipdnn_test_sdk::detail::buildDenseOffsets(
+                                                         normalizedDims, bias->strides().data())
+                                                   : std::vector<int64_t>{};
+
+        const auto normElementCount = xNormOffsets.size();
+
         auto layernormFpropFunc = [&](const std::vector<int64_t>& batchIndices) {
+            const int64_t xBatchOffset = hipdnn_test_sdk::detail::flatOffset(
+                batchIndices.data(), xStrides.data(), batchDimCount);
+            const int64_t yBatchOffset = hipdnn_test_sdk::detail::flatOffset(
+                batchIndices.data(), yStrides.data(), batchDimCount);
+
             // Pass 1: Welford's online algorithm for mean and variance
             int64_t count = 0;
             auto batchMean = static_cast<ComputeDataType>(0.0);
             auto m2 = static_cast<ComputeDataType>(0.0);
 
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
-                    auto fullIndices
-                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+            for(size_t element = 0; element < normElementCount; ++element)
+            {
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
 
-                    count++;
-                    auto delta = xVal - batchMean;
-                    batchMean += delta / static_cast<ComputeDataType>(count);
-                    auto delta2 = xVal - batchMean;
-                    m2 += delta * delta2;
-                });
+                count++;
+                auto delta = xVal - batchMean;
+                batchMean += delta / static_cast<ComputeDataType>(count);
+                auto delta2 = xVal - batchMean;
+                m2 += delta * delta2;
+            }
 
             auto batchVariance = m2 / static_cast<ComputeDataType>(count);
             auto invStd = static_cast<ComputeDataType>(1.0)
                           / hipdnn_data_sdk::types::sqrt(batchVariance + epsilonCompute);
 
             // Pass 2: normalize and apply scale/bias
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
-                    auto fullIndices
-                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    auto xHat = (xVal - batchMean) * invStd;
+            for(size_t element = 0; element < normElementCount; ++element)
+            {
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
+                auto xHat = (xVal - batchMean) * invStd;
 
-                    ComputeDataType yVal = xHat;
-                    if(scale != nullptr)
-                    {
-                        yVal
-                            = static_cast<ComputeDataType>(scale->getHostValue(normIndices)) * yVal;
-                    }
-                    if(bias != nullptr)
-                    {
-                        yVal = yVal + static_cast<ComputeDataType>(bias->getHostValue(normIndices));
-                    }
+                ComputeDataType yVal = xHat;
+                if(scaleBase != nullptr)
+                {
+                    yVal = static_cast<ComputeDataType>(scaleBase[scaleOffsets[element]]) * yVal;
+                }
+                if(biasBase != nullptr)
+                {
+                    yVal = yVal + static_cast<ComputeDataType>(biasBase[biasOffsets[element]]);
+                }
 
-                    y.setHostValue(static_cast<YDataType>(yVal), fullIndices);
-                });
+                yBase[yBatchOffset + yNormOffsets[element]] = static_cast<YDataType>(yVal);
+            }
 
             // Save mean and rstd for this batch position if requested
-            if(mean != nullptr)
+            if(meanBase != nullptr)
             {
-                mean->setHostValue(static_cast<MeanRstdDataType>(batchMean), batchIndices);
+                meanBase[hipdnn_test_sdk::detail::flatOffset(
+                    batchIndices.data(), mean->strides().data(), batchIndices.size())]
+                    = static_cast<MeanRstdDataType>(batchMean);
             }
-            if(rstd != nullptr)
+            if(rstdBase != nullptr)
             {
-                rstd->setHostValue(static_cast<MeanRstdDataType>(invStd), batchIndices);
+                rstdBase[hipdnn_test_sdk::detail::flatOffset(
+                    batchIndices.data(), rstd->strides().data(), batchIndices.size())]
+                    = static_cast<MeanRstdDataType>(invStd);
             }
         };
 
@@ -271,6 +342,23 @@ public:
             throw std::runtime_error("Mean and rstd tensors must have the same dimensions.");
         }
 
+        // The passes address memory through hoisted base pointers and strides, which is the
+        // dense layout only; a ragged tensor rebases every batch at its own offset.
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(dy, PREFIX, "dy");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, "x");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(scale, PREFIX, "scale");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(dx, PREFIX, "dx");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(dscale, PREFIX, "dscale");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(dbias, PREFIX, "dbias");
+        if(mean != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*mean, PREFIX, "mean");
+        }
+        if(rstd != nullptr)
+        {
+            hipdnn_test_sdk::detail::validateNoRaggedTensor(*rstd, PREFIX, "rstd");
+        }
+
         // Split dimensions into batch dims and normalized dims
         auto normalizedDims = scale.dims();
         const int64_t normalizedDimsSize = std::accumulate(
@@ -312,112 +400,207 @@ public:
             tmpRstd = std::vector<ComputeDataType>(static_cast<size_t>(batchDimsSize));
         }
 
-        // If batchDims is empty (entire tensor is normalized), use a single scalar iteration
+        // If batchDims is empty (entire tensor is normalized), use a single scalar iteration.
+        // batchStrides was generated before this, so keep it the same length as the walk.
         if(batchDims.empty())
         {
             batchDims.push_back(1);
         }
+        batchStrides.resize(batchDims.size(), 0);
+
+        // Raw pointers and strides are hoisted once; see fprop.
+        const DyDataType* dyBase = dy.memory().hostData();
+        const DxDataType* xBase = x.memory().hostData();
+        const ScaleBiasDataType* scaleBase = scale.memory().hostData();
+        DxDataType* dxBase = dx.memory().hostData();
+        ScaleBiasDataType* dscaleBase = dscale.memory().hostData();
+        ScaleBiasDataType* dbiasBase = dbias.memory().hostData();
+        const MeanRstdDataType* meanBase = (mean != nullptr) ? mean->memory().hostData() : nullptr;
+        const MeanRstdDataType* rstdBase = (rstd != nullptr) ? rstd->memory().hostData() : nullptr;
+
+        const auto& dyStrides = dy.strides();
+        const auto& xStrides = x.strides();
+        const auto& dxStrides = dx.strides();
+        const auto& scaleStrides = scale.strides();
+        const auto& dscaleStrides = dscale.strides();
+        const auto& dbiasStrides = dbias.strides();
+
+        // Each pass holds one index space fixed and walks the other, and the walk is identical
+        // every time, so hoist both into flat offset tables. dy/x/dx are addressed by
+        // [batchIndices..., trailing normIndices...]: the normalized walk moves only their
+        // trailing normalizedDimCount axes and the batch walk only their leading batchDimCount
+        // axes, so the axes the walk does not reach get a zero stride. scale/dscale/dbias are
+        // addressed by the whole normIndices and mean/rstd by the whole batchIndices, so those
+        // use their own strides directly.
+        const auto batchDimCount = static_cast<size_t>(ndim - normalizedDimCount);
+        const auto normIndexCount = normalizedDims.size();
+        const auto normSuffixStart = normIndexCount - static_cast<size_t>(normalizedDimCount);
+
+        std::vector<int64_t> dyNormWalk(normIndexCount, 0);
+        std::vector<int64_t> xNormWalk(normIndexCount, 0);
+        std::vector<int64_t> dxNormWalk(normIndexCount, 0);
+        for(size_t axis = 0; axis < static_cast<size_t>(normalizedDimCount); ++axis)
+        {
+            dyNormWalk[normSuffixStart + axis] = dyStrides[batchDimCount + axis];
+            xNormWalk[normSuffixStart + axis] = xStrides[batchDimCount + axis];
+            dxNormWalk[normSuffixStart + axis] = dxStrides[batchDimCount + axis];
+        }
+
+        std::vector<int64_t> dyBatchWalk(batchDims.size(), 0);
+        std::vector<int64_t> xBatchWalk(batchDims.size(), 0);
+        for(size_t axis = 0; axis < batchDimCount; ++axis)
+        {
+            dyBatchWalk[axis] = dyStrides[axis];
+            xBatchWalk[axis] = xStrides[axis];
+        }
+
+        const auto dyNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, dyNormWalk.data());
+        const auto xNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, xNormWalk.data());
+        const auto dxNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, dxNormWalk.data());
+        const auto scaleNormOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(normalizedDims, scaleStrides.data());
+
+        const auto dyBatchOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(batchDims, dyBatchWalk.data());
+        const auto xBatchOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(batchDims, xBatchWalk.data());
+        const auto meanBatchOffsets
+            = (mean != nullptr)
+                  ? hipdnn_test_sdk::detail::buildDenseOffsets(batchDims, mean->strides().data())
+                  : std::vector<int64_t>{};
+        const auto rstdBatchOffsets
+            = (rstd != nullptr)
+                  ? hipdnn_test_sdk::detail::buildDenseOffsets(batchDims, rstd->strides().data())
+                  : std::vector<int64_t>{};
+        // tmpMean/tmpRstd are indexed by the batch position's flat index under batchStrides.
+        const auto tmpBatchOffsets
+            = hipdnn_test_sdk::detail::buildDenseOffsets(batchDims, batchStrides.data());
+
+        const auto normElementCount = dyNormOffsets.size();
+        const auto batchElementCount = dyBatchOffsets.size();
 
         // Pass 1: backward values
         auto layernormBpropValuesFunc = [&](const std::vector<int64_t>& batchIndices) {
+            const int64_t dyBatchOffset = hipdnn_test_sdk::detail::flatOffset(
+                batchIndices.data(), dyStrides.data(), batchDimCount);
+            const int64_t xBatchOffset = hipdnn_test_sdk::detail::flatOffset(
+                batchIndices.data(), xStrides.data(), batchDimCount);
+            const int64_t dxBatchOffset = hipdnn_test_sdk::detail::flatOffset(
+                batchIndices.data(), dxStrides.data(), batchDimCount);
+
             auto sumDyScaleX = static_cast<ComputeDataType>(0.0);
             auto sumDyScale = static_cast<ComputeDataType>(0.0);
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
-                    auto fullIndices
-                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
-                    auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(normIndices));
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+            for(size_t element = 0; element < normElementCount; ++element)
+            {
+                auto dyVal
+                    = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
+                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
 
-                    sumDyScaleX += dyVal * scaleVal * xVal;
-                    sumDyScale += dyVal * scaleVal;
-                });
+                sumDyScaleX += dyVal * scaleVal * xVal;
+                sumDyScale += dyVal * scaleVal;
+            }
 
             ComputeDataType meanVal;
             ComputeDataType rstdVal;
-            if(mean == nullptr || rstd == nullptr)
+            if(meanBase == nullptr || rstdBase == nullptr)
             {
                 int64_t count = 0;
                 meanVal = static_cast<ComputeDataType>(0.0);
                 auto m2 = static_cast<ComputeDataType>(0.0);
 
-                hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                    normalizedDims, [&](const std::vector<int64_t>& normIndices) {
-                        auto fullIndices
-                            = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                        auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                for(size_t element = 0; element < normElementCount; ++element)
+                {
+                    auto xVal
+                        = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
 
-                        count++;
-                        auto delta = xVal - meanVal;
-                        meanVal += delta / static_cast<ComputeDataType>(count);
-                        auto delta2 = xVal - meanVal;
-                        m2 += delta * delta2;
-                    });
+                    count++;
+                    auto delta = xVal - meanVal;
+                    meanVal += delta / static_cast<ComputeDataType>(count);
+                    auto delta2 = xVal - meanVal;
+                    m2 += delta * delta2;
+                }
 
                 auto batchVariance = m2 / static_cast<ComputeDataType>(count);
                 rstdVal = static_cast<ComputeDataType>(1.0)
                           / hipdnn_data_sdk::types::sqrt(batchVariance
                                                          + static_cast<ComputeDataType>(epsilon));
 
-                auto idx = static_cast<size_t>(std::inner_product(
-                    batchIndices.begin(), batchIndices.end(), batchStrides.begin(), int64_t{0}));
+                auto idx = static_cast<size_t>(hipdnn_test_sdk::detail::flatOffset(
+                    batchIndices.data(), batchStrides.data(), batchIndices.size()));
                 tmpMean[idx] = meanVal;
                 tmpRstd[idx] = rstdVal;
             }
             else
             {
-                meanVal = static_cast<ComputeDataType>(mean->getHostValue(batchIndices));
-                rstdVal = static_cast<ComputeDataType>(rstd->getHostValue(batchIndices));
+                meanVal = static_cast<ComputeDataType>(meanBase[hipdnn_test_sdk::detail::flatOffset(
+                    batchIndices.data(), mean->strides().data(), batchIndices.size())]);
+                rstdVal = static_cast<ComputeDataType>(rstdBase[hipdnn_test_sdk::detail::flatOffset(
+                    batchIndices.data(), rstd->strides().data(), batchIndices.size())]);
             }
 
             auto a = rstdVal * rstdVal * rstdVal * (sumDyScaleX - sumDyScale * meanVal)
                      / static_cast<ComputeDataType>(normalizedDimsSize);
             auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize)
                      - a * meanVal;
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                normalizedDims, [&](const std::vector<int64_t>& normIndices) {
-                    auto fullIndices
-                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
-                    auto scaleVal = static_cast<ComputeDataType>(scale.getHostValue(normIndices));
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    auto dxVal = rstdVal * dyVal * scaleVal - a * xVal - b;
-                    dx.setHostValue(static_cast<DxDataType>(dxVal), fullIndices);
-                });
+            for(size_t element = 0; element < normElementCount; ++element)
+            {
+                auto dyVal
+                    = static_cast<ComputeDataType>(dyBase[dyBatchOffset + dyNormOffsets[element]]);
+                auto scaleVal = static_cast<ComputeDataType>(scaleBase[scaleNormOffsets[element]]);
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xBatchOffset + xNormOffsets[element]]);
+                auto dxVal = rstdVal * dyVal * scaleVal - a * xVal - b;
+                dxBase[dxBatchOffset + dxNormOffsets[element]] = static_cast<DxDataType>(dxVal);
+            }
         };
 
         // Pass 2: backward weights
         auto layernormBpropWeightsFunc = [&](const std::vector<int64_t>& normIndices) {
+            const int64_t dyNormOffset
+                = hipdnn_test_sdk::detail::flatOffset(normIndices.data() + normSuffixStart,
+                                                      dyStrides.data() + batchDimCount,
+                                                      static_cast<size_t>(normalizedDimCount));
+            const int64_t xNormOffset
+                = hipdnn_test_sdk::detail::flatOffset(normIndices.data() + normSuffixStart,
+                                                      xStrides.data() + batchDimCount,
+                                                      static_cast<size_t>(normalizedDimCount));
+
             auto dscaleVal = static_cast<ComputeDataType>(0.0);
             auto dbiasVal = static_cast<ComputeDataType>(0.0);
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                batchDims, [&](const std::vector<int64_t>& batchIndices) {
-                    auto fullIndices
-                        = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
-                    auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    ComputeDataType meanVal;
-                    ComputeDataType rstdVal;
-                    if(mean == nullptr || rstd == nullptr)
-                    {
-                        auto idx = static_cast<size_t>(std::inner_product(batchIndices.begin(),
-                                                                          batchIndices.end(),
-                                                                          batchStrides.begin(),
-                                                                          int64_t{0}));
-                        meanVal = tmpMean[idx];
-                        rstdVal = tmpRstd[idx];
-                    }
-                    else
-                    {
-                        meanVal = static_cast<ComputeDataType>(mean->getHostValue(batchIndices));
-                        rstdVal = static_cast<ComputeDataType>(rstd->getHostValue(batchIndices));
-                    }
-                    dscaleVal += dyVal * (xVal - meanVal) * rstdVal;
-                    dbiasVal += dyVal;
-                });
-            dscale.setHostValue(static_cast<ScaleBiasDataType>(dscaleVal), normIndices);
-            dbias.setHostValue(static_cast<ScaleBiasDataType>(dbiasVal), normIndices);
+            for(size_t element = 0; element < batchElementCount; ++element)
+            {
+                auto dyVal
+                    = static_cast<ComputeDataType>(dyBase[dyNormOffset + dyBatchOffsets[element]]);
+                auto xVal
+                    = static_cast<ComputeDataType>(xBase[xNormOffset + xBatchOffsets[element]]);
+                ComputeDataType meanVal;
+                ComputeDataType rstdVal;
+                if(meanBase == nullptr || rstdBase == nullptr)
+                {
+                    auto idx = static_cast<size_t>(tmpBatchOffsets[element]);
+                    meanVal = tmpMean[idx];
+                    rstdVal = tmpRstd[idx];
+                }
+                else
+                {
+                    meanVal = static_cast<ComputeDataType>(meanBase[meanBatchOffsets[element]]);
+                    rstdVal = static_cast<ComputeDataType>(rstdBase[rstdBatchOffsets[element]]);
+                }
+                dscaleVal += dyVal * (xVal - meanVal) * rstdVal;
+                dbiasVal += dyVal;
+            }
+
+            dscaleBase[hipdnn_test_sdk::detail::flatOffset(
+                normIndices.data(), dscaleStrides.data(), normIndices.size())]
+                = static_cast<ScaleBiasDataType>(dscaleVal);
+            dbiasBase[hipdnn_test_sdk::detail::flatOffset(
+                normIndices.data(), dbiasStrides.data(), normIndices.size())]
+                = static_cast<ScaleBiasDataType>(dbiasVal);
         };
 
         // Parallelize over batch dimensions
@@ -434,24 +617,7 @@ public:
     }
 
 private:
-    // Build full N-dimensional indices from batch indices and normalized indices.
-    // For a tensor of ndim dimensions with the last normalizedDimCount being normalized:
-    //   fullIndices = [batchIndices..., normIndices...]
-    // Handles the case where batchDims was padded with a leading 1 (scalar batch).
-    static std::vector<int64_t> buildFullIndices(const std::vector<int64_t>& batchIndices,
-                                                 const std::vector<int64_t>& normIndices,
-                                                 int64_t ndim,
-                                                 int64_t normalizedDimCount)
-    {
-        auto batchDimCount = ndim - normalizedDimCount;
-        std::vector<int64_t> fullIndices;
-        fullIndices.reserve(static_cast<size_t>(ndim));
-        fullIndices.insert(
-            fullIndices.end(), batchIndices.begin(), batchIndices.begin() + batchDimCount);
-        fullIndices.insert(
-            fullIndices.end(), normIndices.end() - normalizedDimCount, normIndices.end());
-        return fullIndices;
-    }
+    static constexpr auto PREFIX = "CpuFpReferenceLayernorm: ";
 };
 
 } // namespace hipdnn_test_sdk::utilities
