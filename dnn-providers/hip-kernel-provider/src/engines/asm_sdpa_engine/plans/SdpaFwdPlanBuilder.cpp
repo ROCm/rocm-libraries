@@ -12,8 +12,10 @@
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -43,13 +45,6 @@ static RoundingMode
         return RoundingMode::RTNA;
     }
     return getRoundingMode(attrs);
-}
-
-static BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
-{
-    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
-               ? BatchMode::GROUP
-               : BatchMode::BATCH;
 }
 
 static std::string getKernelNameKey(const std::string& archId,
@@ -235,6 +230,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::utilities;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
@@ -297,8 +293,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
     }
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
-                               "mma_core_mode must be unset");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET
+                                   && attrs.mma_core_mode() != DataType::FLOAT,
+                               "mma_core_mode must be unset or float");
 
     const auto& tensorMap = opGraph.getTensorMap();
 
@@ -311,6 +308,41 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    BatchMode batchMode;
+    // Batch mode checks
+    {
+
+        std::vector<std::string> unsupportedRaggedTensorStrings;
+        for(auto id : listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid}))
+        {
+            const std::string unsupportedString
+                = std::to_string(id) + " (" + tensorMap.at(id)->name()->str() + ")";
+            unsupportedRaggedTensorStrings.push_back(unsupportedString);
+        }
+
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !unsupportedRaggedTensorStrings.empty(),
+            "Only the Q, K, V and O tensors can be ragged. The following "
+            "tensors are ragged and not supported: "
+                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorStrings));
+
+        const int numberRagged
+            = static_cast<int>(qTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(kTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
+
+        HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
+                                       || attrs.seq_len_q_tensor_uid().has_value(),
+                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+
+        // TODO: Add support and checks for CU_SEQ_LENS_Q and CU_SEQ_LENS_KV
+
+        HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
+                                   "Either all or none of Q, K, V or O must be ragged");
+        batchMode = (numberRagged == 4) ? BatchMode::GROUP : BatchMode::BATCH;
+    }
 
     // Validate Q/K/V/O ranks before accessing their dims by index.
     HIP_KERNEL_RETURN_FALSE_IF(
@@ -466,7 +498,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
                                 getBf16ConvertMode(attrs, dataTypeId),
-                                getBatchMode(attrs),
+                                batchMode,
                                 &cfg_fmha_fwd);
 
     HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
@@ -534,46 +566,52 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
-    // Extract dimensions from Q tensor: [B, H_q, S_q, D_qk]
+    // Ragged (group-mode) tensors are canonical BSHD [B, S, H, D] per RFC 0014;
+    // batch-mode tensors are BHSD [B, H, S, D]. Only the heads and seq axes swap
+    // between the layouts — batch (0) and head-dim (3) are identical in both.
+    const unsigned int headAxis = 1U;
+    const unsigned int seqAxis = 2U;
+
+    // Extract dimensions from Q tensor
     auto* qDims = qTensor->dims();
     auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(headAxis));
+    auto seqLenQ = static_cast<unsigned int>(qDims->Get(seqAxis));
     auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
-    // Extract dimensions from K tensor: [B, H_kv, S_kv, D_qk]
+    // Extract dimensions from K tensor
     auto* kDims = kTensor->dims();
-    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(1));
-    auto seqLenKv = static_cast<unsigned int>(kDims->Get(2));
+    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(headAxis));
+    auto seqLenKv = static_cast<unsigned int>(kDims->Get(seqAxis));
 
     // Extract dimensions from V tensor: [B, H_kv, S_kv, D_v]
     auto* vDims = vTensor->dims();
     auto headDimV = static_cast<unsigned int>(vDims->Get(3));
 
-    // Extract strides (in elements) - Q: [B, H_q, S_q, D_qk]
+    // Extract strides (in elements) - Q
     auto* qStrides = qTensor->strides();
     auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(headAxis));
+    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(seqAxis));
     auto qStrideRow = qStrideSeq; // Same as sequence stride
 
-    // Extract strides - K: [B, H_kv, S_kv, D_qk]
+    // Extract strides - K
     auto* kStrides = kTensor->strides();
     auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(headAxis));
+    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(seqAxis));
 
-    // Extract strides - V: [B, H_kv, S_kv, D_v]
+    // Extract strides - V
     auto* vStrides = vTensor->strides();
     auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(headAxis));
+    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(seqAxis));
 
-    // Extract strides - O: [B, H_q, S_q, D_v]
+    // Extract strides - O
     auto* oStrides = oTensor->strides();
     auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(headAxis));
+    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(seqAxis));
 
     hipdnn_plugin_sdk::ScalarOperand attnScale{};
     if(sdpaAttrs.scale_tensor_uid().has_value())
@@ -592,7 +630,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
 
     // Extract optional LSE output metadata
-    int64_t lseUid = -1;
+    std::optional<int64_t> lseUid;
     unsigned int lseStrideHead = 0;
     const bool hasStats = hasStatsOutput(sdpaAttrs);
     if(hasStats)
@@ -604,8 +642,8 @@ void SdpaFwdPlanBuilder::buildPlan(
                 "SdpaFwdPlanBuilder::buildPlan: generate_stats is set but stats_tensor_uid "
                 "is missing");
         }
-        lseUid = sdpaAttrs.stats_tensor_uid().value();
-        const auto lseIt = tensorMap.find(lseUid);
+        lseUid = sdpaAttrs.stats_tensor_uid();
+        const auto lseIt = tensorMap.find(lseUid.value());
         if(lseIt == tensorMap.end())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -662,6 +700,16 @@ void SdpaFwdPlanBuilder::buildPlan(
                                                         sdpaAttrs.descale_v_tensor_uid().value()};
     }
 
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
+    const auto batchMode
+        = qTensor->ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
+
+    if(batchMode == BatchMode::GROUP)
+    {
+        params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),
+                                              kTensor->ragged_offset_tensor_uid().value()};
+    }
+
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
     auto kernelKey = getKernelNameKey(deviceString,
@@ -670,7 +718,7 @@ void SdpaFwdPlanBuilder::buildPlan(
                                       static_cast<int>(headDimV),
                                       params.maskType,
                                       getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      getBatchMode(sdpaAttrs),
+                                      batchMode,
                                       &cfg_fmha_fwd);
 
     if(kernelKey.empty())
