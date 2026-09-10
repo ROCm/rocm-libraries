@@ -93,6 +93,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_lasyf.cpp
     common/auxiliary/testing_sterf.cpp
     common/auxiliary/testing_stebz.cpp
+    common/auxiliary/testing_sb2st_hb2st.cpp
     common/auxiliary/testing_sy2sb_he2hb.cpp
     common/auxiliary/testing_orgxr_ungxr.cpp
     common/auxiliary/testing_orgxl_ungxl.cpp
@@ -104,6 +105,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_ormlx_unmlx.cpp
     common/auxiliary/testing_ormbr_unmbr.cpp
     common/auxiliary/testing_ormtr_unmtr.cpp
+    common/auxiliary/testing_ormtr_unmtr_hb2st.cpp
   )
 
   set(roclapack_inst_files

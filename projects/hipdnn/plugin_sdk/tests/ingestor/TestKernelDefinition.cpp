@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -30,13 +31,13 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 KernelDefinition makeKernelWithMetadata(MetadataValues metadata)
 {
-    return {testId(0x01),
-            PACK_ID,
-            DISPATCH_ID,
-            KernelSource{KernelSourceKind::EMBEDDED_SOURCE, "Test.cpp", "TestKernel"},
-            std::move(metadata),
-            /*priority=*/0,
-            /*arch=*/{}};
+    KernelDefinition kernel;
+    kernel.kernelId = testId(0x01);
+    kernel.packId = PACK_ID;
+    kernel.dispatchId = DISPATCH_ID;
+    kernel.source = makeEmbeddedSource();
+    kernel.metadata = std::move(metadata);
+    return kernel;
 }
 
 TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsTheValueWhenPresent)
@@ -77,6 +78,21 @@ TEST(TestIngestorKernelDefinition, GetIntListMetadataReturnsTheListValue)
         = makeKernelWithMetadata({{STRIDE_ORDER, MetadataValue{std::vector<int64_t>{3, 1, 2, 0}}}});
 
     EXPECT_EQ(kernel.getIntListMetadata(STRIDE_ORDER), (std::vector<int64_t>{3, 1, 2, 0}));
+}
+
+TEST(TestIngestorKernelDefinition, CarriesTheKpackCoordinates)
+{
+    const std::filesystem::path origin("/descriptors/gfx942");
+
+    const auto kernel = makeKpackDefinition(testId(0x02), 64, origin);
+
+    EXPECT_EQ(kernel.source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(kernel.source.library, "kpack/hip_kernel_provider_gfx942.kpack");
+    EXPECT_EQ(kernel.source.tocKey, "test-toc-key");
+    EXPECT_EQ(kernel.source.symbol, "TestKernel");
+    EXPECT_EQ(kernel.source.sha256, std::string(64, 'a'));
+    EXPECT_EQ(kernel.originDirectory, origin);
+    EXPECT_EQ(kernel.name, "kpack kernel");
 }
 
 // Throw matrix: each typed getter x field-absent/wrong-alternative.

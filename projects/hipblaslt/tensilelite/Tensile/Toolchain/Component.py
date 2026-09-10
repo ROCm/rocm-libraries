@@ -25,7 +25,7 @@
 from os import name as os_name
 from os import environ
 from pathlib import Path
-from re import search, sub, IGNORECASE
+from re import search, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
@@ -159,34 +159,6 @@ class Assembler(Component):
             "-c",
         ]
 
-    @staticmethod
-    def _retargetAssemblySource(targetGfx: str, srcPath: str):
-        path = Path(srcPath)
-        try:
-            src = path.read_text()
-        except (UnicodeDecodeError, OSError):
-            # Opportunistic rewrite: a source that can't be read here (missing,
-            # unreadable, not text) is left alone -- the assembler invocation
-            # right after this will raise its own clear error if srcPath is
-            # genuinely bad, rather than a confusing traceback from this helper.
-            return
-
-        target = f"amdgcn-amd-amdhsa--{targetGfx}"
-        updated = sub(
-            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^"]*")',
-            rf'\1{target}\2',
-            src,
-        )
-        updated = sub(
-            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^\s]*)',
-            rf'\1{target}\2',
-            updated,
-        )
-
-        if updated != src:
-            print2(f"Retargeting assembly source {path.name} to {targetGfx}")
-            path.write_text(updated)
-
     def __call__(self, targetGfx: str, wavefrontSize: int, srcPath: str, destPath: str):
         """Assemble an assembly source file into an object file.
         Args:
@@ -196,7 +168,6 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
-        self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 syntax on targets that support +real-true16.
         if targetGfx in ("gfx1250", "gfx1201", "gfx1200", "gfx1100"):

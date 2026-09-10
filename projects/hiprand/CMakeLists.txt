@@ -181,9 +181,11 @@ elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
-# HIP on Windows: xhip is required with clang++ to get __half defined
+# HIP on Windows: xhip is required with clang++ to get __half defined.
+# Scope it to C++ so it does not leak onto C sources (e.g. the C-compile
+# tests), where -xhip is both unnecessary and incompatible with -std=gnu11.
 if (WIN32)
-  add_compile_options(-xhip)
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-xhip>")
 endif()
 
 if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)

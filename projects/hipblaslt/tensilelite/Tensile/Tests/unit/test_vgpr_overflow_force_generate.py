@@ -209,32 +209,13 @@ class TestForceGenerateKernel:
         return namespace["_getKernelSource"]
 
     def _writer(self, error, forceGenerateKernel):
-        # _getKernelSource also records the kernel's own CustomKernel metadata, so a
-        # SimpleNamespace standing in for a real writer must carry what that path
-        # reads: the arg-registration hook, the kernel name and the collected arg
-        # definitions. A real KernelWriter always has all three.
         return SimpleNamespace(
             _initKernel=lambda kernel, tPA, tPB: None,
-            _registerKernelArgs=lambda kernel: None,
-            states=SimpleNamespace(kernelName="test_kernel"),
-            kernelArgDefs=[],
             stringIdx=0,
             kernelBody=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             kernelBodySubtile=lambda kernel, tPA, tPB: (error, "s_endpgm\n"),
             debugConfig=SimpleNamespace(forceGenerateKernel=forceGenerateKernel),
         )
-
-    def _kernel(self):
-        # The solution keys that same metadata is built from; a real Solution always
-        # has them. StreamK is off, so the Stream-K grid branch is not taken here.
-        return {
-            "UseSubtileImpl": False,
-            "StreamK": 0,
-            "MacroTile0": 128,
-            "MacroTile1": 128,
-            "DepthU": 32,
-            "NumThreads": 256,
-        }
 
     def test_overflowing_kernel_is_rejected_by_default(self):
         # Default behaviour is unchanged from before the fix: an overflowing
@@ -242,14 +223,14 @@ class TestForceGenerateKernel:
         getKernelSource = self._getKernelSource([])
         with pytest.raises(RuntimeError):
             getKernelSource(self._writer(error=1, forceGenerateKernel=False),
-                            self._kernel())
+                            {"UseSubtileImpl": False})
 
     def test_force_generate_kernel_keeps_the_source(self):
         # The behaviour the early raise made unreachable.
         warnings = []
         getKernelSource = self._getKernelSource(warnings)
         source = getKernelSource(self._writer(error=1, forceGenerateKernel=True),
-                                 self._kernel())
+                                 {"UseSubtileImpl": False})
         assert "s_endpgm" in source
         assert any("ForceGenerateKernel" in str(w) for w in warnings), (
             "saving the source of a rejected kernel must be announced"
@@ -259,6 +240,6 @@ class TestForceGenerateKernel:
         warnings = []
         getKernelSource = self._getKernelSource(warnings)
         source = getKernelSource(self._writer(error=0, forceGenerateKernel=False),
-                                 self._kernel())
+                                 {"UseSubtileImpl": False})
         assert "s_endpgm" in source
         assert warnings == []

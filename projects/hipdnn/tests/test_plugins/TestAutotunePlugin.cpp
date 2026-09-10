@@ -36,7 +36,7 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // device work on the profiling stream guarantees a positive, above-resolution
 // measured time. 4 MiB clears the timer resolution on all supported GPUs with
 // margin.
-constexpr size_t TIMING_SCRATCH_SIZE = 4UL * 1024 * 1024;
+constexpr size_t TIMING_SCRATCH_SIZE = size_t{4} * 1024 * 1024;
 
 struct AutotunePluginHandle final : HipdnnEnginePluginHandle
 {

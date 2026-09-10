@@ -225,8 +225,7 @@ std::optional<int> getDsWaitCount(const StinkyInstruction& inst) {
     const auto& srcs = inst.getSrcRegs();
     if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt) {
         const int imm = srcs[0].getLiteralInt();
-        // s_wait_loadcnt_dscnt packs {loadcnt << 8 | dscnt}.
-        if (op == GFX::s_wait_loadcnt_dscnt) return imm & 0xFF;
+        if (op == GFX::s_wait_loadcnt_dscnt) return unpackDsWaitCnt(imm);
         return imm;
     }
 
@@ -245,9 +244,8 @@ void setDsWaitCount(StinkyInstruction& inst, int newVal) {
         if (srcs[i].dataType != StinkyRegister::Type::LiteralInt) continue;
         int literal = newVal;
         if (op == GFX::s_wait_loadcnt_dscnt) {
-            // Preserve the packed loadcnt high byte; only replace the dscnt byte.
-            const int loadcnt = (srcs[i].getLiteralInt() >> 8) & 0xFF;
-            literal = (loadcnt << 8) | (newVal & 0xFF);
+            // Preserve the loadcnt field; only replace the dscnt one.
+            literal = packMemDsWaitCnt(unpackMemWaitCnt(srcs[i].getLiteralInt()), newVal);
         }
         inst.setSrcReg(i, StinkyRegister(literal));
         break;

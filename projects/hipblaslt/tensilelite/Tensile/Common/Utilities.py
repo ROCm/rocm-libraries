@@ -459,30 +459,6 @@ def choose_multiplier(d, N, p):
         shPost -=1
     return mhigh, shPost, l
 
-def deriveWaveParams(mi, num_threads, macrotile, wavefront_size=64):
-    """Derives MIWaveGroup and MIWaveTile from matrix-instruction geometry.
-
-    Args:
-        mi: MatrixInstruction list, at least [miM, miN, ...].
-        num_threads: Total thread count (product of workgroup dimensions).
-        macrotile: [MT0, MT1] or [MT0, MT1, depthU].
-        wavefront_size: Wavefront width (default 64).
-
-    Returns:
-        (wave_group, wave_tile) where each is a two-element list [M, N].
-    """
-    num_waves = max(1, num_threads // wavefront_size)
-    wgM = math.isqrt(num_waves)
-    while wgM > 0 and num_waves % wgM != 0:
-        wgM -= 1
-    wgM = max(1, wgM)
-    wgN = num_waves // wgM
-    wave_group = [wgM, wgN]
-    wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
-                 max(1, macrotile[1] // (mi[1] * wgN))]
-    return wave_group, wave_tile
-
-
 def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = None) -> Tuple[int]:
     # wmmaV3InputVgprLayout: (numReadsUnroll, numVecTile, numVecUnroll, NumElementPerRead)
     wmma = tuple(wmma)
@@ -501,3 +477,39 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
+
+# Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
+SWIZZLE_LOAD_BYTES = 16
+
+def swizzleGeometry(solution, tc: str) -> dict:
+    """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
+
+    The tensor is a sequence of swizzle blocks; a block is one wave's global load, of
+    MI_{M|N} rows each holding laneSize contiguous unroll elements.
+
+    dupFactor is 2 where the matrix instruction replicates operands across the wave
+    (gfx10/gfx11 WMMA), so only half the lanes are distinct; 1 for MFMA and gfx12.
+    loadsPerLane is >1 where a lane's operand exceeds one load (gfx11 fp16: 32 bytes);
+    the remainder sits in the next block along the unroll dimension.
+
+    `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
+    WavefrontSize and ProblemType.DataType{tc} are read.
+    """
+    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    miInput   = solution[f"MIInputPerThread{tc}"]
+    miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
+    # Pack several MI steps into one load when one operand is narrower than a dwordx4.
+    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    miOperand = miInput * packK
+    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the wave holds vs. distinct elements the instruction consumes.
+    dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
+    lanesUsed = solution["WavefrontSize"] // dupFactor
+    return {
+        "packK":        packK,
+        "laneSize":     laneSize,
+        "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        "lanesUsed":    lanesUsed,
+        "dupFactor":    dupFactor,
+        "loadsPerLane": miOperand // laneSize,
+    }

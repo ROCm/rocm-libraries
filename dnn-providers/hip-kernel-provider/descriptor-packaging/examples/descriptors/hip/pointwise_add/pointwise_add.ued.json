@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "id": "4ec4821e-bcc7-58eb-ab6a-323bf33e7739",
+  "name": "hkp_example:pointwise_add",
+  "graph_match": { "native": "hipkernel.pointwise.graph_match" },
+  "heuristic": "82ee7153-4bf4-5d98-8afb-cbbd81eb45b2",
+  "metadata": "1f6b9ff2-b690-5e8b-9491-f087eb1916f2",
+  "knobs": ["block_size"]
+}
