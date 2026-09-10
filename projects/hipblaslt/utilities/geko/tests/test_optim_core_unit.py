@@ -39,7 +39,8 @@ def test_configure_builds_config_and_calls_generator(monkeypatch: pytest.MonkeyP
 
     cfg = ocore.configure(hip, gc, out_dir, arch="gfx950", backend="ductile")
     assert cfg["ARCH"] == "gfx950"
-    assert cfg["GA"] is True
+    assert cfg["backend"] == "ductile"
+    assert cfg["search_space"] is None
     assert cfg["_defaults_applied"] is True
     assert seen["write_shell_scripts"] is False
     assert seen["target"] == out_dir

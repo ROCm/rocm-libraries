@@ -300,6 +300,7 @@ void rocke_dfcp_load_conv0_a_tile_specialized(rocke_ir_builder_t* b,
     loader.load_vec = load_vec;
     loader.use_buffer_rsrc = true;
     loader.oob_sentinel = 0x7fffffff; /* Python (1 << 31) - 1 */
+    loader.vector_axis_row = false; /* vector_axis="col" default */
     loader.has_inner_dim = false;
     loader.inner_dim = 0;
 

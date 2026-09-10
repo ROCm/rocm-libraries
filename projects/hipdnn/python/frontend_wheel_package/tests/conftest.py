@@ -88,6 +88,7 @@ def _load_test_good_plugin():
         [_attempted_plugin_path], hipdnn.PluginLoadingMode.ABSOLUTE
     )
     helpers.set_stub_engine_active(True)
+    helpers.set_stub_engine_path(_attempted_plugin_path)
 
 
 @pytest.fixture(autouse=True)

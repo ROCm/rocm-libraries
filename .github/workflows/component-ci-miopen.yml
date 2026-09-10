@@ -7,6 +7,11 @@
 # not exercise: the HIPNOGPU backend (used for offline kernel tuning without
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
 # no-CK UBSan debug build, and gtest binary naming convention validation.
+#
+# The HIP package job additionally carries the two gates on the public/private
+# split: a source-only cross-check of its five hand-maintained files, and the
+# public-ABI gate requiring libMIOpen.so's exported public C API to stay
+# identical to the committed baseline.
 
 name: "Component CI: MIOpen"
 
@@ -44,6 +49,8 @@ jobs:
 
           # Builds the HIP package and runs miopen_gtest_check via rocjitsu KMD interposer
           # to validate the gtest binary and test naming conventions without a physical GPU.
+          # Also hosts the public-ABI gate: this is the release, HIP-backend build, so it
+          # is the closest thing here to the artifact consumers actually link against.
           - name: MIOpen Build Hip Package
             job_id: hip-package-build
             cmake_extra_flags: >-
@@ -104,8 +111,26 @@ jobs:
             .dvc
             .github
             cmake
+            dnn-providers/miopen-provider
             projects/miopen
             shared/ctest
+
+      # The public/private split keeps five files in lockstep by hand: the
+      # public header, the private _impl declarations, the compile-time rename,
+      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
+      # The fifth lives outside projects/miopen, which is why the sparse
+      # checkout above includes the provider directory: the check can only
+      # compare files it can read. This cross-checks them from source alone, so
+      # unlike the ABI gate below it needs no build and runs in seconds -- hence
+      # its placement before the configure step, where it fails fast. It is the
+      # only check that can see signature drift; the symbol-set gate cannot,
+      # because a drifted signature leaves the exported names unchanged. It
+      # rides the same job as that gate to keep both split checks in one place.
+      - name: Public/private header consistency check
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-headers \
+            --require-provider
 
       - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
         run: |
@@ -147,6 +172,23 @@ jobs:
 
       - name: Build
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
+
+      # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
+      # exported public C API symbol set, and no _impl symbol leakage. This is a
+      # symbol-level check -- signatures, struct layout and behaviour are outside
+      # its reach. Globbing the output directory rather than searching all of
+      # build/ keeps --target package's staging copy under build/_CPack_Packages/
+      # from being picked instead; lib* covers distros where CMAKE_INSTALL_LIBDIR
+      # resolves to lib64.
+      - name: Public ABI check
+        if: matrix.job_id == 'hip-package-build'
+        run: |
+          lib=$(ls build/lib*/libMIOpen.so.1.0 2>/dev/null | head -1)
+          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/lib*/"; exit 1; }
+          echo "Checking $lib against committed baseline"
+          python3 projects/miopen/script/check_public_abi.py check \
+            "$lib" \
+            --baseline projects/miopen/test/public_abi/public_symbols.baseline
 
       - name: Configure Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'

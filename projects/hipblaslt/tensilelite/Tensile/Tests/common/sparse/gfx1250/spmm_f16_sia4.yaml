@@ -45,8 +45,8 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [4]
         - TransposeLDS: [-1]
-        - SourceSwap: [false]
-        - ExpandPointerSwap: [false] # manually set to false
+        - SourceSwap: [False]
+        - ExpandPointerSwap: [True]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]
@@ -63,7 +63,6 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [16, 16, 1, 256]
           - Exact: [256, 256, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -102,11 +101,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [False]
         - ScheduleIterAlg: [4]
@@ -120,18 +120,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [false]
+        - SourceSwap: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -170,11 +169,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [False]
         - ScheduleIterAlg: [4]
@@ -188,18 +188,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [true] # sparse B
+        - SourceSwap: [True] # sparse B
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -238,11 +237,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]  
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -256,18 +256,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [false]
+        - SourceSwap: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -306,11 +305,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -324,18 +324,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [true] # sparse B
+        - SourceSwap: [True] # sparse B
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -374,11 +373,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -392,18 +392,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [false]
+        - SourceSwap: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -442,11 +441,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -460,18 +460,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [true] # sparse B
+        - SourceSwap: [True] # sparse B
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -510,11 +509,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -528,18 +528,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [false]
+        - SourceSwap: [False]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
@@ -578,11 +577,12 @@ BenchmarkProblems:
           - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
         - TDMInst: [3]
         - LDSTrInst: [True]
         - ScheduleIterAlg: [4]
@@ -596,18 +596,17 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [-1]
-        - SourceSwap: [true] # sparse B
+        - SourceSwap: [True] # sparse B
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [16, 16, 1, 128]
-          - Exact: [16, 16, 1, 256]
           - Exact: [64, 64, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']

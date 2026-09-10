@@ -280,14 +280,62 @@ typedef struct rocke_conv_build_ctx
 
     /* ---- loaders (exactly one family populated; the other side NULL) ---- *
      * async_dma=True  : a_loader/b_loader are AsyncTileLoader.from_tile(...).
-     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...). */
+     * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...).
+     * pipeline="wavelet": a_wavelet_loader/b_wavelet_loader are
+     *   CoalescedTileLoader sized to num_load_waves * wave_size threads. */
     bool async_dma; /* spec.async_dma (cached)         */
+    /* spec.lds_k_outer (wgrad only). Zeroed by the ctx memset, so the forward
+     * and dgrad drivers keep their exact previous behaviour. */
+    bool lds_k_outer;
+    /* Optional override for the A-operand descriptor on the ASYNC load path.
+     * The sync path already has a_load_override; the async slot had no hook and
+     * always called rocke_conv_a_descriptor, which is the forward descriptor.
+     * NULL keeps that behaviour, so fwd/dgrad are unaffected. */
+    rocke_loads_descriptor_fn a_descriptor_fn;
+    /* Base added to every k offset the k-loop drivers hand to the load phase.
+     * The forward conv passes a bare const_i32(it*block_k); wgrad's Python
+     * emits b.add(k_lo, const_i32(...)) because its slice starts at the
+     * split-K lower bound. NULL keeps the bare-const form, so fwd/dgrad emit
+     * exactly what they emitted before. */
+    rocke_value_t* kloop_k_lo;
+    /* Iteration count for the unrolled / async k-loop drivers. 0 = derive from
+     * the problem's full K_gemm, which is what the forward conv wants. wgrad
+     * must override it: its stub problem carries the UNSLICED wg_K, while the
+     * Python emitter sizes the loop from wg_K_padded()/split_k. They agree only
+     * at split_k == 1, so without this the C engine emits a full-range
+     * reduction under split-K atomics. */
+    int kloop_num_iters;
+    /* Atom edge + fragment length used by the K-outer transpose-read feed. */
+    rocke_value_t* tr_lane_mod4;
+    rocke_value_t* tr_grp16;
     rocke_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
     rocke_async_tile_loader_t b_loader; /* async B loader                  */
     bool have_async_loaders; /* true => a_loader/b_loader valid */
     rocke_coalesced_tile_loader_t a_sync_loader; /* sync A loader (valid iff sync)*/
     rocke_coalesced_tile_loader_t b_sync_loader; /* sync B loader                 */
     bool have_sync_loaders; /* true => *_sync_loader valid     */
+    rocke_coalesced_tile_loader_t a_wavelet_loader; /* wavelet load-wave A loader     */
+    rocke_coalesced_tile_loader_t b_wavelet_loader; /* wavelet load-wave B loader     */
+    bool have_wavelet_loaders; /* true => *_wavelet_loader valid */
+
+    /* ---- wavelet pipeline local state (populated when pipeline=="wavelet") ---- *
+     * These mirror the variables the Python wavelet closure captures from the
+     * enclosing build_implicit_gemm_conv scope.
+     *
+     *   load_tid   = b.sub(tid, b.const_i32(spec.block_size))
+     *   is_math    = b.cmp_lt(warp_id, c_nmath)
+     *   n_math_warps = spec.warp_m * spec.warp_n
+     *   K_iters    = ceil(p.K_gemm / block_k) */
+    rocke_value_t* wavelet_load_tid; /* load-wave-relative tid in [0, nloads*ws) */
+    rocke_value_t* wavelet_is_math; /* i1: warp_id < n_math_warps             */
+    int wavelet_n_math_warps; /* warp_m * warp_n                        */
+    int wavelet_K_iters; /* ceil(K_gemm / block_k)                 */
+    int wavelet_epi_barriers; /* N_epi: extra barriers epilogue emits    */
+
+    /* Set to true by rocke_conv_emit_kloop_wavelet to tell the build driver
+     * that the epilogue has already been emitted inside the wavelet branches
+     * (it cannot be deferred outside the scf_if_else / exec-mask sections). */
+    bool epilogue_already_emitted;
 
     /* ---- schedule policy ---- */
     rocke_schedule_policy_t schedule; /* SchedulePolicy.for_pipeline(...)        */
@@ -343,6 +391,21 @@ rocke_value_t* rocke_conv_emit_smem_load(
 /* _emit_frag_smem_load(b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base,
  * frag_len): one frag_len-wide operand fragment from a row-major LDS tile
  * (8-wide chunked + vec_concat for wide WMMA frags). */
+/* K-outer transpose-read fragment feed. Takes lane and the two hoisted lane
+ * constants directly rather than a build ctx, so both the shared compute phase
+ * (wgrad, A and B) and dgrad's own operand fetch (B only) can call it without
+ * duplicating the lane mapping. See conv_implicit_gemm_conv_compute_phase.cpp. */
+rocke_value_t* rocke_conv_tr_frag(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  rocke_value_t* tr_lane_mod4,
+                                  rocke_value_t* tr_grp16,
+                                  rocke_value_t* smem,
+                                  rocke_value_t* mn_base,
+                                  rocke_value_t* k_base,
+                                  int mn_atom,
+                                  int n,
+                                  const rocke_type_t* dtype);
+
 rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
                                               rocke_value_t* src,
                                               rocke_value_t* mn_in_atom,
@@ -459,6 +522,12 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);
  * its run_ping_pong sequencing inline against ctx until that port lands.) */
 void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx);
 
+/* pipeline=="wavelet" branch (Python lines 1539-1797): dedicated load-wave /
+ * math-wave split. Requires ctx->have_wavelet_loaders and the wavelet_* fields
+ * to be populated by rocke_conv_build_ctx_init. Dispatches the WMMA
+ * (scf_if_else) or MFMA (exec-mask) sub-path based on ctx->is_wmma. */
+void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
+
 /* ----- epilogue (ctx-driven; reads ctx->final_accs) ----- */
 
 /* The epilogue phase (lines 1349-1377): apply the accumulator epilogue, then
@@ -500,7 +569,8 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
-                                       rocke_value_t* ir_c_K_pw);
+                                       rocke_value_t* ir_c_K_pw,
+                                       const rocke_mmaop_t* op);
 
 /* ----- driver-internal ctx population (the build prologue, lines 787-1032) ----
  * Splitting the long prologue out of the public entry keeps the glue TU small;

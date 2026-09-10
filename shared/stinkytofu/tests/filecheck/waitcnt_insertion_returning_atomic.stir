@@ -20,7 +20,7 @@ st.func @waitcnt_insertion_returning_atomic_before_consumer() {
   s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
 }
 
-#--- A returning atomic shares the CK_Buffer FIFO with an ordinary load: a
+#--- A returning atomic shares the CK_Load FIFO with an ordinary load: a
 #--- load issued after the atomic still gets drained correctly.
 # CHECK-LABEL: @waitcnt_insertion_returning_atomic_shares_queue_with_load
 # CHECK: global_atomic_inc_u32
@@ -41,7 +41,7 @@ st.func @waitcnt_insertion_returning_atomic_shares_queue_with_load() {
 }
 
 #--- A non-returning atomic (no real destination register) has no consumer
-#--- to drain for, so it must not be tracked as a CK_Buffer producer.
+#--- to drain for, so it must not be tracked as a CK_Load producer.
 # CHECK-LABEL: @waitcnt_insertion_non_returning_atomic_not_tracked
 # CHECK: global_atomic_inc_u32
 # CHECK-NEXT: v_add_f32

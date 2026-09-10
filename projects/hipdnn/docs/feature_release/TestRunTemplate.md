@@ -81,7 +81,7 @@ Use a GPU node matching the artifact family (e.g. `gfx94X-dcgpu` for MI300/MI325
 mkdir <feature>-validation
 cd <feature>-validation
 
-curl -O https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-<gpu-family>-tests-<version>.tar.gz
+curl -O https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-linux-<gpu-family>-tests-<version>.tar.gz
 
 mkdir rocm-artifacts
 tar -C rocm-artifacts -zxf therock-dist-linux-<gpu-family>-tests-<version>.tar.gz

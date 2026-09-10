@@ -20,16 +20,14 @@ tuning that actually ships lives in ``dispatch.attention.gfx942._dense_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a
-config nobody ships is worse than no harness: it once turned a real +79% into a
-reported -17%.
+config nobody ships is worse than no harness: it once reported a real speedup as a
+regression.
 
 So the flow here is:
 
 1. build an :class:`AttentionRequest` from the CLI *shape* arguments,
-2. resolve the shipped spec through
-   :func:`dispatch.attention.gfx942.dense_spec_for_request` (import it from the
-   ARCH module — the ``dispatch.attention`` package re-export of that name is
-   gfx950's and would hand back the untuned spec),
+2. resolve the shipped concrete spec through the architecture-routed
+   :func:`dispatch.attention.dense_spec_for_request`,
 3. apply only the tuning flags the user *explicitly passed* as a
    ``dataclasses.replace`` override on top of the resolved spec.
 
@@ -70,14 +68,12 @@ sys.path.insert(0, _RK + "/library")
 
 import torch  # noqa: E402
 
-from dispatch.attention.common import AttentionRequest  # noqa: E402
-
-# Import from the ARCH module, never from the ``dispatch.attention`` package: the
-# package-level re-export of this name is gfx950's and would silently hand a
-# gfx942 request the untuned spec (256 CTAs, no waves-per-eu bump).
-from dispatch.attention.gfx942 import dense_spec_for_request  # noqa: E402
+from dispatch.attention import (  # noqa: E402
+    AttentionRequest,
+    dense_spec_for_request,
+)
 from kernels.gfx942.attention_dense import (  # noqa: E402
-    AttentionDenseSpec,
+    Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
     attention_dense_signature,
@@ -243,7 +239,7 @@ def dense_spec_overrides(args: argparse.Namespace) -> dict:
 
 
 def assert_tracks_dispatch(
-    spec: AttentionDenseSpec,
+    spec: Gfx942AttentionDenseSpec,
     req: AttentionRequest,
     overrides: "dict | None" = None,
 ) -> None:
@@ -262,7 +258,7 @@ def assert_tracks_dispatch(
     shipped = dense_spec_for_request(req)
     drift = [
         f"{f.name}: harness={getattr(spec, f.name)!r} dispatch={getattr(shipped, f.name)!r}"
-        for f in dataclasses.fields(AttentionDenseSpec)
+        for f in dataclasses.fields(Gfx942AttentionDenseSpec)
         if f.name not in overrides and getattr(spec, f.name) != getattr(shipped, f.name)
     ]
     if drift:
@@ -275,10 +271,10 @@ def assert_tracks_dispatch(
 
 def resolve_dense_spec(
     req: AttentionRequest, overrides: "dict | None" = None
-) -> AttentionDenseSpec:
+) -> Gfx942AttentionDenseSpec:
     """The spec dispatch ships for ``req``, plus the caller's explicit overrides."""
     overrides = dict(overrides or {})
-    known = {f.name for f in dataclasses.fields(AttentionDenseSpec)}
+    known = {f.name for f in dataclasses.fields(Gfx942AttentionDenseSpec)}
     unknown = sorted(set(overrides) - known)
     if unknown:
         raise ValueError(
@@ -294,7 +290,7 @@ def resolve_dense_spec(
 
 
 def describe_dense_spec(
-    spec: AttentionDenseSpec, overrides: "dict | None" = None
+    spec: Gfx942AttentionDenseSpec, overrides: "dict | None" = None
 ) -> str:
     """One-line identity of what is actually about to be built and measured."""
     tag = gfx942_kernel_name(spec)
@@ -310,7 +306,7 @@ def describe_dense_spec(
 # --------------------------------------------------------------------------- #
 # compile + launch
 # --------------------------------------------------------------------------- #
-def _make_launcher(spec: AttentionDenseSpec):
+def _make_launcher(spec: Gfx942AttentionDenseSpec):
     """kernel-spec generation + compilation + ABI signature -> cached launcher."""
     ok, why = supports_attention_dense(spec, arch=_ARCH)
     if not ok:
@@ -328,7 +324,7 @@ def _make_launcher(spec: AttentionDenseSpec):
     )
 
 
-def _launch_config(spec: AttentionDenseSpec, stream) -> LaunchConfig:
+def _launch_config(spec: Gfx942AttentionDenseSpec, stream) -> LaunchConfig:
     # Geometry is owned by the kernel module (it also handles the persistent grid),
     # never re-derived here -- a third copy of BLOCK_M would defeat the import-time
     # binding in attention_dense.py.
@@ -340,7 +336,7 @@ def _launch_config(spec: AttentionDenseSpec, stream) -> LaunchConfig:
 
 
 def run(
-    spec: AttentionDenseSpec,
+    spec: Gfx942AttentionDenseSpec,
     *,
     warmup: int = 15,
     iters: int = 50,

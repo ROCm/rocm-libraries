@@ -29,6 +29,15 @@ target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_
 # installed hipdnn_plugin_sdkTargets.cmake, so in-tree and out-of-tree consumers agree.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hipdnn_plugin_sdk INTERFACE HIPDNN_ENABLE_KERNEL_INGESTOR)
+
+    # DescriptorLoader.hpp includes <nlohmann/json.hpp> directly. Today that only compiles
+    # because flatbuffers_sdk happens to add the includes transitively, and only
+    # conditionally (HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB can turn it off); this target
+    # needs its own dependency rather than relying on a sibling's implementation detail.
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    endif()
+    hipdnn_add_dependency_includes(hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
 endif()
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")

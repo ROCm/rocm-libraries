@@ -89,6 +89,7 @@ def _valid_solutions_from_dict(config):
     return valid
 
 
+@pytest.mark.xfail(reason="TDMSplit is currently disabled", strict=False)
 def test_tdmsplit_pap_mx_multiwave_accepts():
     """TDMSplit + StreamK=3 + PAP + MX multi-wave (gfx1250) yields a valid solution."""
     sols = _ch.solutions_from_config(_CONFIG, arch=_ARCH)
