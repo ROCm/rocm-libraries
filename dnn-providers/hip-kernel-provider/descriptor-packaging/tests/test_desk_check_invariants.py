@@ -362,6 +362,19 @@ class TestCliEndToEnd:
         assert "mode=full" in proc.stdout
         assert "resolves to no descriptor" in proc.stdout
 
+    def test_full_mode_refuses_the_unpacked_dialect(self, desk_check_fixture):
+        """A rocKE tree read BEFORE it was packed has no bytes, so no
+        producing-build record can bind and full mode has nothing to check. It must
+        refuse rather than report an unverified pass: this tree will carry a
+        compiled claim once packed, and reading "no claim" off it is how a stale or
+        pre-pack tree slips through. `verify_variant_sets` already refuses the same
+        artifact, so a pass here would make the two readers disagree."""
+        proc = _run_cli(str(desk_check_fixture / "attention.kdp.json"), mode="full")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "packed dialect" in proc.stdout
+        assert "'rocke'" in proc.stdout
+        assert "NOT VERIFIED HERE" not in proc.stdout
+
     def test_real_injected_drift_exits_nonzero(self, packed_desk_check, tmp_path):
         """The exact defect this whole tool exists for: a real packed tree
         with a genuine metadata/spec mismatch must fail the CLI, not just

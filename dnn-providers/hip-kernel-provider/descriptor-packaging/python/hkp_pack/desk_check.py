@@ -259,13 +259,20 @@ def compiled_agreement(
     and an artifact that cannot present a record is a failure, not an unchecked
     property, because the absence is exactly the state a forged or stale tree is in.
 
-    Returns `(failures, unclaimed, verified)`. A declaration with no
+    Only the packed dialect can be checked: before packing there are no bytes, so a
+    non-kpack kernel is a failure rather than a quiet pass. That is the same refusal
+    `verify_variant_sets` makes, so both readers agree about one artifact.
+
+    Returns `(failures, unclaimed, verified)`. A packed declaration with no
     `metadata_fields` states that the compiler specialized on nothing, which is the
     legitimate and mandatory declaration for a non-compiled source -- there is no
-    producing-build record for it to bind, so it is reported as making NO COMPILED
-    CLAIM and counted separately. Folding it into the pass would put "declaration
-    and producing-build record bind the archive bytes" behind a kernel for which no
-    record was ever read, which is a claim this check did not make.
+    producing-build record for it to bind, so it is reported as NOT VERIFIED HERE
+    and counted separately. Folding it into the pass would put "declaration and
+    producing-build record bind the archive bytes" behind a kernel for which no
+    record was ever read, which is a claim this check did not make. Only
+    rocKE-origin kernels carry that evidence today; a hip kernel AOT-built with
+    specializing preprocessor defines is a real compiled specialization this check
+    does not yet cover.
     """
     kdp_path = Path(kdp_path)
     doc = json.loads(kdp_path.read_text(encoding="utf-8"))
@@ -290,6 +297,13 @@ def compiled_agreement(
     for kernel in resolve_kernels(doc, tree, kdp_path.name):
         name = kernel.get("name")
         try:
+            kind = kernel.get("kernel_source", {}).get("kind")
+            if kind != "kpack":
+                raise HkpPackError(
+                    f"--mode full needs the packed dialect, and kernel_source.kind "
+                    f"is {kind!r}. The producing compiler's evidence exists only "
+                    f"once the bytes do; check the packed tree."
+                )
             declaration = agreement.select_declaration(
                 kernel, engine, kmd, {kmd["id"]: kmd}
             )
@@ -449,10 +463,11 @@ class DeskCheckReport:
     `agreement_failures` carries `compiled_agreement`'s failures and an empty list
     is the only clean outcome -- a missing or stale record arrives here as a
     failure message, never as an absent one. `agreement_unclaimed` carries the
-    kernels that declare no specialized metadata_fields: they are stated as making
-    NO COMPILED CLAIM rather than absorbed into the pass line, because no
+    packed kernels that declare no specialized metadata_fields: they are stated as
+    NOT VERIFIED HERE rather than absorbed into the pass line, because no
     producing-build record was read for them and a verdict that says otherwise is a
-    success this check never earned.
+    success this check never earned. Only rocKE-origin kernels carry that evidence
+    today, so the heading describes this tool's reach, not the kernel's nature.
     """
 
     def __init__(
@@ -533,17 +548,20 @@ class DeskCheckReport:
                 )
             else:
                 body = (
-                    "NO COMPILED CLAIM -- no kernel in this KDP declares a "
+                    "NOT VERIFIED HERE -- no kernel in this KDP declares a "
                     "specialized metadata field, so no producing-build record was "
-                    "read and nothing here was bound to a binary. This is not "
-                    "compiled agreement; a tree that should carry one is being read "
-                    "before it was packed, or its declarations are empty."
+                    "read and nothing here was bound to a binary. Only rocKE-origin "
+                    "kernels currently carry compiled-specialization evidence; a hip "
+                    "kernel AOT-compiled with specializing preprocessor defines is a "
+                    "real compiled specialization that this check does not yet "
+                    "verify, so absence of a claim is a limit of this tool, not a "
+                    "property of the kernel."
                 )
             lines.append("compiled specialization agreement: " + body)
             if self.agreement_unclaimed:
                 lines.append(
                     "\n  ? ".join(
-                        ["compiled specialization NO COMPILED CLAIM:"]
+                        ["compiled specialization NOT VERIFIED HERE:"]
                         + self.agreement_unclaimed
                     )
                 )

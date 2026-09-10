@@ -22,12 +22,19 @@ compiler observed. A missing, unsupported or mismatched record is a FAILURE, not
 unchecked property. Nothing here imports rocKE, so a valid packed artifact verifies
 on a machine that has never had the producer installed.
 
-A kernel whose declaration lists no specialized metadata field makes NO COMPILED
-CLAIM: there is no producing-build record for it to bind, so it is reported under
-that heading and never folded into the agreement line. A KDP in which no kernel
-makes a claim reports NO COMPILED CLAIM outright -- reading that as compiled
-agreement would be a success this tool never earned, which is the substitution the
-two modes exist to prevent.
+`--mode full` needs the packed dialect. Before packing there are no bytes, so
+there is no producing-build record for a declaration to bind and the mode has
+nothing to check; a non-kpack kernel is a failure here, the same refusal
+`verify_variant_sets` makes, so the two readers agree about one artifact.
+
+A packed kernel whose declaration lists no specialized metadata field is reported
+as NOT VERIFIED HERE and never folded into the agreement line. Only rocKE-origin
+kernels currently carry compiled-specialization evidence: a hip kernel AOT-built
+with specializing preprocessor defines is a real compiled specialization that this
+check does not yet verify, so the absence of a claim is a limit of this tool
+rather than a property of the kernel. Reading it as compiled agreement would be a
+success this tool never earned, which is the substitution the two modes exist to
+prevent.
 
 A KDP's `kernelDescriptors` may hold standalone-UKD id references as bare strings
 after packing; they are resolved against the shard, the same hop
