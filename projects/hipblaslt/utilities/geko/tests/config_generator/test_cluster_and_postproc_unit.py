@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 
+import pytest
+
 from geko.config_generator import cluster_sizes as cs
 from geko.config_generator.fork_params import post_processor as base_pp
 from geko.config_generator.fork_params.hw_profiles.gfx950 import post_processor as gfx950_pp
@@ -113,6 +115,8 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
     assert f2["UseCustomMainLoopSchedule"].values == [0]
 
 def test_load_cms_groups_uses_installed_tensilelite(monkeypatch) -> None:
+    pytest.importorskip("tensilelite", reason="requires an installed TensileLite")
+    pytest.importorskip("rocisa", reason="requires an importable rocisa")
     monkeypatch.setattr(
         os.path,
         "isdir",
