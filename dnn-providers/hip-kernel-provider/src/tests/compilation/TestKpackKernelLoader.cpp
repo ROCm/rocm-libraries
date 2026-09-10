@@ -39,6 +39,11 @@ constexpr const char* SCRATCH_LABEL = "kpackloader";
 /// the pinned reader meeting an archive it actually accepts. The parse-level cases
 /// need a real *container*, not a matching *device*; the device cases read this
 /// build's own packed archive -- see unitKpackRoot().
+///
+/// Its entries are placeholder payloads rather than HSA code objects, so KpackArchive
+/// turns them away at DECOMPRESS on the code-object magic check. Nothing past that stage
+/// -- the digest comparison, the device bind, the module load -- is reachable from here;
+/// those cases need a packed archive and therefore a device.
 constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
@@ -110,6 +115,10 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find(PACKED_SYMBOL), std::string::npos) << what;
         EXPECT_NE(what.find("does not exist"), std::string::npos) << what;
+        // An install that does not carry the archive is this machine's problem, not the
+        // descriptor author's, so the ingestor's candidate walk carries past it to the next
+        // kernel rather than stopping the build.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
@@ -174,6 +183,7 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
         EXPECT_NE(what.find("gfx942"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1100"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1101"), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
@@ -203,6 +213,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
         // signature of packer/descriptor skew, not of a mis-spelled entry point.
         EXPECT_NE(what.find("no entry for toc_key"), std::string::npos) << what;
         EXPECT_EQ(what.find("is not present in the loaded module"), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
@@ -343,6 +354,7 @@ TEST_F(TestKpackKernelLoader, RejectsACodeObjectThatDoesNotMatchItsDeclaredDiges
         // the two disagreed.
         EXPECT_NE(what.find(wrong), std::string::npos) << what;
         EXPECT_NE(what.find(packed.sha256), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
     }
 
     // Nothing was cached: the check runs before hipModuleLoadData, so no module was ever
@@ -393,6 +405,7 @@ TEST_F(TestKpackKernelLoader, RejectsASecondDescriptorThatDeclaresADifferentDige
         const std::string what = error.what();
         EXPECT_NE(what.find(wrong), std::string::npos) << what;
         EXPECT_NE(what.find(packed.sha256), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
     }
 
     // Still one entry. The rejected caller missed the key, loaded, and failed its own

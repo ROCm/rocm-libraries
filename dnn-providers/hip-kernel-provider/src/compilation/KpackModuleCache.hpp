@@ -30,7 +30,8 @@ namespace hip_kernel_provider::compilation
 /// entering the key.
 ///
 /// stage() is carried alongside the message so a failure can be told apart by machine
-/// rather than by matching message text; KpackKernelLoader itself rewraps on the message.
+/// rather than by matching message text; KpackKernelLoader branches on it when choosing
+/// the status it reports.
 class KpackModuleLoadFailure : public std::runtime_error
 {
 public:
