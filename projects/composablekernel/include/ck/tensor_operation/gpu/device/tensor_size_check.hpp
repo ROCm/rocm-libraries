@@ -17,10 +17,18 @@ bool tensor_exceeds_2gb(const Lengths& lengths)
     for(const auto& l : lengths)
         total *= l;
     long_index_t total_bytes = total * sizeof(DataType);
-    // tensor number of elements is stored in int32_t so max value is TwoGB - 1,
-    // while tensor number of bytes is stored in uint32_t so max value is TwoGB.
-    // This double check is actually needed only for DataType with size 1
+    // Element counts of 2^31 elements cannot be represented as int32_t (">=" check).
+    // A byte count of exactly 2^31 can be represented as uint32_t and is therefore valid (strict
+    // ">" check). The element-count limit is an additional constraint only for 1-byte DataTypes.
     return total >= TwoGB || total_bytes > TwoGB;
+}
+
+template <typename DataType, typename Desc>
+bool descriptor_exceeds_2gb(const Desc& desc)
+{
+    constexpr long_index_t TwoGB          = (long_index_t{1} << 31);
+    const long_index_t element_space_size = desc.GetElementSpaceSize();
+    return element_space_size * sizeof(DataType) > TwoGB || element_space_size >= TwoGB;
 }
 
 } // namespace device
