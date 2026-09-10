@@ -3,7 +3,7 @@
 
 """Chunkwise Kimi Delta Attention dispatcher family (path-level selection).
 
-Backed by :mod:`kernels.gfx942.kda_chunkwise`. This module owns only the
+Backed by the gfx942 and gfx950 KDA kernels. This module owns only the
 assembly -- the registry, the entry point, and the re-exports that make
 ``dispatch.kda`` one import for callers. What each candidate *is* lives in the
 arch module that owns it. See :mod:`.common` for the scope of the dispatch
@@ -29,7 +29,7 @@ from rocke.dispatch.core import (
     stable_json_hash,
 )
 
-from . import gfx942
+from . import gfx942, gfx950
 from .common import (
     FAMILY,
     KDA_ABI_VERSION,
@@ -40,7 +40,6 @@ from .common import (
     KDA_PARTITION_HEAD_V,
     KdaRequest,
     _request_errors,
-    _selector_matches,
 )
 
 _FAMILY = FAMILY
@@ -51,7 +50,7 @@ _FAMILY = FAMILY
 KDA_REGISTRY = CandidateRegistry(
     _FAMILY, dim_vocabulary=KDA_DIM_VOCABULARY, require_build=True
 )
-for _module in (gfx942,):
+for _module in (gfx942, gfx950):
     _module.register(KDA_REGISTRY)
 
 
@@ -124,6 +123,7 @@ def dispatch_kda(req: KdaRequest, *, ranker: Ranker | None = None) -> DispatchRe
             f"algorithm={candidate.algorithm}",
             f"spec_id={candidate.spec_id}",
             f"v_partitions={req.v_partitions} workgroups={req.workgroups}",
+            f"chunks={req.num_chunks}",
             f"spec_hash={kid.spec_hash}",
             f"request_hash={kid.request_hash}",
         ),

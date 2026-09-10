@@ -1,6 +1,7 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: False
@@ -66,7 +67,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -140,7 +141,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -214,7 +215,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -290,7 +291,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -367,7 +368,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -442,7 +443,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -516,7 +517,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -590,7 +591,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -622,6 +623,72 @@ BenchmarkProblems:
           # - Exact: [32, 32, 1, 128]
           - Exact: [64, 64, 1, 192]
           - Exact: [1024, 1024, 1, 1024]
+        - ActivationArgs:
+          - [Enum: none]
+
+########################################################
+# datatype = h (fp16), NN, MT256x256 wave4, ClusterDim[4,4], DepthU128 (metadata macrotile edge case)
+  -
+    - # ProblemType, NN
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+      MetadataLayout: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 8, 2, 2]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - ClusterDim: [[4, 4]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1024, 1, 1024]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -664,7 +731,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]

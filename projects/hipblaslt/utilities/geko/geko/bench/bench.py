@@ -29,7 +29,7 @@ from tqdm import tqdm
 from pathlib import Path
 from typing import Sequence
 
-from geko.bench.utils import parse_benchmark_output, update_lib_source
+from geko.bench.utils import parse_benchmark_output, update_lib_source, is_built_custom_library
 from geko import library
 from geko.constants import GEMM_FIELDS
 from geko.bench.log import verify_output, dump as dump_bench_yaml, read as read_bench_yaml
@@ -56,7 +56,6 @@ UNIQ_COLS = (
     "avg_MCLK", 
     "median_MCLK"
 )
-
 
 def run(
     hipblaslt_path: str | Path,
@@ -115,6 +114,11 @@ def run(
     output_file = Path(output_file)
     if custom_lib_dir:
         custom_lib_dir = Path(custom_lib_dir)
+        if not is_built_custom_library(custom_lib_dir):
+            raise ValueError(
+                f"Custom library in '{custom_lib_dir}' is not built. "
+                "Expected files matching 'library/**/TensileLibrary_lazy_gfx*.dat'."
+            )
 
     def hipblaslt_bench(_bench_file: Path, _output_file: Path, _device: int):
         cmd = hipblaslt_path / "build/release/clients/hipblaslt-bench"
@@ -355,6 +359,8 @@ def compare(
     hipblaslt_path: str | Path,
     lib_dir: str | Path,
     custom_lib_dir: str | Path = "build",
+    ref_custom_lib_dir: str | Path | None = None,
+    match_table_path: str | Path | None = None,
     benchmark_dir: str | Path = "benchmarks",
     verify: bool = True,
     cache: bool = False,
@@ -373,6 +379,12 @@ def compare(
         lib_dir (str | Path): Directory containing library YAML files to benchmark.
         custom_lib_dir (str | Path, optional): Directory for custom library creation.
             Defaults to "build".
+        ref_custom_lib_dir (str | Path | None, optional): Optional pre-built
+            reference custom library directory used for the reference pass.
+            If None, compare against the default shipped hipBLASLt library.
+        match_table_path (str | Path | None, optional): MatchTable.yaml path
+            used to annotate reference lib source in update_lib_source.
+            Defaults to hipBLASLt build MatchTable when None.
         benchmark_dir (str | Path, optional): Output directory for benchmark files.
             Defaults to "benchmarks".
         verify (bool, optional): Whether to run accuracy verification tests.
@@ -410,9 +422,17 @@ def compare(
 
     custom_lib_dir = Path(custom_lib_dir)
     benchmark_dir = Path(benchmark_dir)
+    ref_custom_lib_dir = Path(ref_custom_lib_dir) if ref_custom_lib_dir is not None else None
+    match_table_path = (
+        Path(match_table_path)
+        if match_table_path is not None
+        else Path(hipblaslt_path) / "build/release/device-library/MatchTable.yaml"
+    )
+    if ref_custom_lib_dir is not None and not is_built_custom_library(ref_custom_lib_dir):
+        raise ValueError(f"Reference custom library not built in '{ref_custom_lib_dir}'")
 
     # Build custom library with TensileCreateLibrary if not found
-    if not cache or len(list(custom_lib_dir.glob("library/**/TensileLibrary_lazy_gfx*.dat"))) == 0:
+    if not cache or not is_built_custom_library(custom_lib_dir):
         logger.debug(f"Creating custom library cache={cache} custom_lib_dir={custom_lib_dir}")
         library.operations.create(hipblaslt_path, lib_dir, custom_lib_dir)
 
@@ -439,13 +459,15 @@ def compare(
             log_file = benchmark_dir / (bench_file.stem + "-reference.out")
             res = run(
                 hipblaslt_path, bench_file, log_file,
-                custom_lib_dir=None, devices=devices, cache=cache, bench_freq=bench_freq,
+                custom_lib_dir=ref_custom_lib_dir,
+                devices=devices,
+                cache=cache,
+                bench_freq=bench_freq,
                 silent=True
             )
 
             # add lib_source column
-            matchtable_path = Path(hipblaslt_path / "build/release/device-library/MatchTable.yaml")
-            res = update_lib_source(res, matchtable_path)
+            res = update_lib_source(res, match_table_path)
 
             res.rename({c: c + "_reference" for c in UNIQ_COLS}, axis=1, inplace=True)
             res["lib"] = bench_file.stem.split("_bench")[0] + ".yaml"
