@@ -114,8 +114,11 @@ void run_warp_affine(const TestConfig& cfg, const WarpAffineParams& op) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI-sized output region at the destination origin.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roi.data(), XYWH,
+    // (4) Compare within tolerance over the ROI-sized output region at the destination origin,
+    // bounded by the caller's own ROI copy rather than the tensor handed to the op: the HIP path
+    // rewrites that tensor from XYWH to LTRB in place, so reusing roi[] here would walk a
+    // different region than the golden wrote.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                warp_affine_tolerance(cfg.dtype, op.interp)));
 }
 

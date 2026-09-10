@@ -111,8 +111,11 @@ void run_rotate(const TestConfig& cfg, const RotateParams& op) {
     handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
-    // (4) Compare within tolerance over the ROI-sized output region at the destination origin.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    // (4) Compare within tolerance over the ROI-sized output region at the destination origin,
+    // bounded by the caller's own ROI copy rather than the tensor handed to the op: rotate
+    // dispatches to the HIP warp-affine path, which rewrites that tensor from XYWH to LTRB in
+    // place, so reusing roi[] here would walk a different region than the golden wrote.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                rotate_tolerance(cfg.dtype, op.interp)));
 }
 

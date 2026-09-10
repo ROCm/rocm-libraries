@@ -103,8 +103,11 @@ void run_pixelate(const TestConfig& cfg, const PixelateParams& op) {
     handle.sync();
     dst.read(actual.data(), bytes);
 
-    // (3) Compare the ROI-sized region written at the destination origin.
-    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+    // (3) Compare the ROI-sized region written at the destination origin, bounded by the caller's
+    // own ROI copy rather than the tensor handed to the op: pixelate forwards that tensor into the
+    // HIP resize path, which rewrites it from XYWH to LTRB in place, so reusing roi[] here would
+    // walk a different region than the golden wrote.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                kPixelateTolerance(cfg.dtype)));
 }
 

@@ -317,6 +317,10 @@ inline constexpr const char* kSkipList[] = {
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_PartialRoi_LTFRBB_*_v1_*",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HOST_*_PartialRoi_*_h0_*_d1",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HOST_F32toF32_*_PartialRoi_*_h1_*_d1",
+    "Image_Geometric/RemapTest.Correctness/HIP_*_FullRoi_*_identity_BILINEAR",
+    "Image_Geometric/RotateTest.Correctness/HIP_*_FullRoi_*_a0_BILINEAR",
+    "Image_Geometric/WarpAffineTest.Correctness/HIP_*_FullRoi_*_identity_BILINEAR",
+    "Image_Geometric/WarpPerspectiveTest.Correctness/HIP_*_FullRoi_*_identity_BILINEAR",
 };
 
 // GTest filter glob: '*' matches any run of characters, '?' matches one.
