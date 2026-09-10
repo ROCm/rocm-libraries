@@ -230,9 +230,10 @@ def runTheRockDockerBuild() {
             withWorkingDir {
                 def result = utils.buildTheRockDockerImage()
                 // Expose values to subsequent stages via pipeline-scoped env vars.
-                env.THEROCK_CANDIDATE_IMAGE = result.image    ?: ""
-                env.THEROCK_FULL_HASH       = result.fullHash ?: ""
-                env.THEROCK_SHORT_HASH      = result.shortHash ?: ""
+                env.THEROCK_CANDIDATE_IMAGE = result.image       ?: ""
+                env.THEROCK_FULL_HASH       = result.fullHash    ?: ""
+                env.THEROCK_SHORT_HASH      = result.shortHash   ?: ""
+                env.THEROCK_ROCM_VERSION    = result.rocmVersion ?: ""
                 // "true" means the hash is already live on :therock - Promote stage is skipped.
                 env.THEROCK_SKIP_UPDATE     = result.skip ? "true" : "false"
             }
@@ -296,6 +297,15 @@ pipeline {
             name: "BUILD_THEROCK_DOCKER",
             defaultValue: false,
             description: "")
+        // Operational safety toggle: lets a build exercise the Build TheRock Docker +
+        // Package/Static Checks + Full Tests stages without pushing to the production
+        // rocm/miopen:therock / rocm/miopen-dev:latest tags. Defaults to true so the
+        // nightly cron promotes as usual; set false for a test-only build (e.g. from a
+        // PR) that validates the image but leaves production tags untouched.
+        booleanParam(
+            name: "THEROCK_DOCKER_PROMOTE",
+            defaultValue: true,
+            description: "Promote/publish the TheRock Docker build to production tags. Set false to test-build only.")
         booleanParam(
             name: "BUILD_FULL_TESTS",
             defaultValue: true,
@@ -402,7 +412,7 @@ pipeline {
         Build_timeout_minutes = 420
     }
     stages{
-        // Builds rocm/miopen:therock-<hash> if the pinned hash changed; sets THEROCK_CANDIDATE_IMAGE.
+        // Builds rocm/miopen:therock-<rocm-version> for the newest nightly; sets THEROCK_CANDIDATE_IMAGE.
         stage('Build TheRock Docker: Build') {
             when {
                 expression { params.BUILD_THEROCK_DOCKER }
@@ -457,11 +467,16 @@ pipeline {
                 }
             }
         }
-        // Promotes the candidate to :therock only after all CI stages pass.
+        // Promotes the candidate to :therock only after all CI stages pass. The stage ordering
+        // already gates this (a failed Package/Static or Full Tests stage aborts before here);
+        // the explicit currentResult == 'SUCCESS' check makes "publish only on green" auditable
+        // and also skips promotion when the build is merely UNSTABLE (e.g. flaky-test retries).
         stage('Build TheRock Docker: Promote') {
             when {
                 expression {
-                    params.BUILD_THEROCK_DOCKER && env.THEROCK_SKIP_UPDATE != 'true'
+                    params.BUILD_THEROCK_DOCKER && params.THEROCK_DOCKER_PROMOTE \
+                    && env.THEROCK_SKIP_UPDATE != 'true' \
+                    && currentBuild.currentResult == 'SUCCESS'
                 }
             }
             steps {
@@ -470,10 +485,14 @@ pipeline {
                 }
             }
         }
-        // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest after CI passes.
+        // Publishes rocm/miopen-dev:multiarch_dev_<date> and :latest, only on a green build
+        // (see the Promote stage above for why the explicit currentResult check is kept).
         stage('Publish Dev Image') {
             when {
-                expression { params.BUILD_THEROCK_DOCKER }
+                expression {
+                    params.BUILD_THEROCK_DOCKER && params.THEROCK_DOCKER_PROMOTE \
+                    && currentBuild.currentResult == 'SUCCESS'
+                }
             }
             steps {
                 script {
