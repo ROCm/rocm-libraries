@@ -23,8 +23,10 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
 #include <cstring>
 #include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -37,32 +39,78 @@
 #include "logger.hpp"
 #include "util.hpp"
 
-// The elementwise kernels walk a single index space defined by the output, so
-// every input has to carry exactly the same modes as the output and may only
-// differ in their order. An input holding a subset of the output modes would
-// have to be broadcast along the modes it lacks, which is not implemented and
-// used to surface as HIPTENSOR_STATUS_INTERNAL_ERROR at execution time rather
-// than as a rejection at descriptor creation.
-static hiptensorStatus_t checkElementwiseModes(char const*                 apiFuncName,
-                                               std::vector<int32_t> const& inModes,
-                                               char const*                 inName,
-                                               std::vector<int32_t> const& outModes,
-                                               char const*                 outName)
+// The elementwise kernels walk a single index space defined by the output, so an input may only
+// carry modes that the output also carries. Carrying fewer is allowed: the input is broadcast
+// along every output mode it lacks. Three things are rejected here:
+//  - a mode that appears in an input but not in the output, which would have to be reduced away
+//    rather than broadcast;
+//  - a mode repeated within one tensor, which leaves no unambiguous way to align that tensor to
+//    the output's mode order;
+//  - a mode shared with the output but with a different extent, which would send the walk over
+//    the output's index space past the end of the input.
+static hiptensorStatus_t checkElementwiseModes(char const*                     apiFuncName,
+                                               std::vector<int32_t> const&     inModes,
+                                               std::vector<std::size_t> const& inLengths,
+                                               char const*                     inName,
+                                               std::vector<int32_t> const&     outModes,
+                                               std::vector<std::size_t> const& outLengths,
+                                               char const*                     outName)
 {
-    if(std::set<int32_t>(inModes.cbegin(), inModes.cend())
-       == std::set<int32_t>(outModes.cbegin(), outModes.cend()))
+    auto& logger = *hiptensor::Logger::instance();
+    char  msg[256];
+
+    for(auto const& [modes, name] : {std::pair{&inModes, inName}, std::pair{&outModes, outName}})
     {
-        return HIPTENSOR_STATUS_SUCCESS;
+        auto seen = std::set<int32_t>();
+        for(auto mode : *modes)
+        {
+            if(!seen.insert(mode).second)
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Elementwise operation where mode '%c' is repeated within %s is not "
+                         "supported",
+                         mode,
+                         name);
+                logger.logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
     }
 
-    char msg[256];
-    snprintf(msg,
-             sizeof(msg),
-             "Elementwise operation where %s and %s carry different modes is not supported",
-             inName,
-             outName);
-    hiptensor::Logger::instance()->logError(apiFuncName, msg);
-    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    for(std::size_t i = 0; i < inModes.size(); i++)
+    {
+        auto outMode = std::find(outModes.cbegin(), outModes.cend(), inModes[i]);
+        if(outMode == outModes.cend())
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Elementwise operation where %s carries mode '%c' that %s does not carry is "
+                     "not supported",
+                     inName,
+                     inModes[i],
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
+        auto outExtent = outLengths[std::distance(outModes.cbegin(), outMode)];
+        if(inLengths[i] != outExtent)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Mode '%c' has extent %zu in %s but extent %zu in %s",
+                     inModes[i],
+                     inLengths[i],
+                     inName,
+                     outExtent,
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+    }
+
+    return HIPTENSOR_STATUS_SUCCESS;
 }
 
 hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
@@ -425,7 +473,13 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
     auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
     auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
 
-    if(auto status = checkElementwiseModes("hiptensorCreatePermutation", modeAV, "A", modeBV, "B");
+    if(auto status = checkElementwiseModes("hiptensorCreatePermutation",
+                                           modeAV,
+                                           descA->mLengths,
+                                           "A",
+                                           modeBV,
+                                           descB->mLengths,
+                                           "B");
        status != HIPTENSOR_STATUS_SUCCESS)
     {
         return status;
@@ -504,10 +558,16 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
     auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
     auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
 
-    for(auto const& [inModes, inName] : {std::pair{&modeAV, "A"}, std::pair{&modeCV, "C"}})
+    for(auto const& [inModes, inDesc, inName] :
+        {std::tuple{&modeAV, descA, "A"}, std::tuple{&modeCV, descC, "C"}})
     {
-        if(auto status = checkElementwiseModes(
-               "hiptensorCreateElementwiseBinary", *inModes, inName, modeDV, "D");
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseBinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
            status != HIPTENSOR_STATUS_SUCCESS)
         {
             return status;
@@ -593,11 +653,17 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
     auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
     auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
 
-    for(auto const& [inModes, inName] :
-        {std::pair{&modeAV, "A"}, std::pair{&modeBV, "B"}, std::pair{&modeCV, "C"}})
+    for(auto const& [inModes, inDesc, inName] : {std::tuple{&modeAV, descA, "A"},
+                                                 std::tuple{&modeBV, descB, "B"},
+                                                 std::tuple{&modeCV, descC, "C"}})
     {
-        if(auto status = checkElementwiseModes(
-               "hiptensorCreateElementwiseTrinary", *inModes, inName, modeDV, "D");
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseTrinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
            status != HIPTENSOR_STATUS_SUCCESS)
         {
             return status;
