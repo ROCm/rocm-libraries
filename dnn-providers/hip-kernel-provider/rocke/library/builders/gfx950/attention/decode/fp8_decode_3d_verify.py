@@ -8,9 +8,9 @@ decode cohort it builds the split-KV segment + reduce kernels
 fp32 partials workspace, and compares the merged output against an independent
 numpy paged decode-attention reference (GQA, optional sinks, fp8 e4m3fn KV).
 
-This is the on-GPU numeric gate for the fp8-long-KV-decode -> 3D routing change:
-the routing gate (``_enable_fp8_decode_3d``) moves this cohort onto the 3D
-kernels verified here, so a regression on them cannot ship green.
+This is the on-GPU numeric gate for the fp8-long-KV-decode 3D path + the gfx950
+``waves_per_eu=3`` tune: the cohort routes to the 3D kernels verified here (via
+the live-CU-count resolver, #10583), so a regression on them cannot ship green.
 
 Cohort (gpt-oss decode): D64, 64/8 GQA, block_size=16, Sq=1, flash + sink,
 kv_len in {2048, 8192}, batch in {1, 64}. e4m3fn is the gfx950-native (OCP) fp8
@@ -94,6 +94,18 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
     wave_size = 64  # gfx950 MFMA
 
     au._RESOLVED_ATTENTION_ARCH = arch
+    # Resolve num_cus the way production does (live device count on gfx950, #10583)
+    # so select_path routes this cohort to 3D exactly as it will at runtime -- not
+    # the UnifiedAttentionProblem default of 120, which would mis-route large batch.
+    from dispatch.attention.common import AttentionRequest, _resolve_num_cus
+
+    num_cus = _resolve_num_cus(
+        AttentionRequest(
+            batch=num_seqs, nhead_q=_NQH, nhead_k=_NKVH, seqlen_q=1, seqlen_k=kv_len,
+            hdim_q=_HD, hdim_v=_HD, arch=arch, kv_block_size=_BS, dtype="bf16",
+            use_sinks=use_sinks, use_fp8=True, num_cus=0,
+        )
+    )
     problem = au.UnifiedAttentionProblem(
         total_q=total_q,
         num_seqs=num_seqs,
@@ -108,16 +120,20 @@ def _verify_one(arch, *, num_seqs, kv_len, use_sinks, tol, seed):
         sliding_window=0,
         use_sinks=use_sinks,
         use_fp8=True,
+        num_cus=num_cus,
     )
-    # Guard: the routing gate must actually pick 3D for this cohort on gfx950.
-    assert problem.select_path() == "3d", "cohort did not route to 3D"
+    # Guard: at the production-resolved num_cus this cohort must route to 3D
+    # (via the live-CU-count resolver, #10583 -- no fp8-specific routing gate).
+    assert problem.select_path() == "3d", (
+        f"cohort routed to {problem.select_path()} at num_cus={num_cus}, not 3D"
+    )
     ok_support, why = au.supports_native_unified_attention_3d_tiled(problem)
     if not ok_support:
         raise SystemExit(f"[{arch}] decode3d UNSUPPORTED: {why}")
 
-    # Use the SHIPPED segmentation the dispatcher picks for this shape.
-    seg_cfg, _red_cfg = problem.select_3d()
-    num_segments = int(seg_cfg.NUM_SEGMENTS_PER_SEQ)
+    # Use the SHIPPED segmentation the launcher picks -- _num_segments applies the
+    # gfx950 pre-bump clamp, so select_3d's raw value would over-split vs production.
+    num_segments = au._num_segments(problem)
 
     Spec3D, ReduceSpec, build_seg, build_red, _ = au._tiled_3d_impl(arch)
     seg_spec = au._tiled_3d_spec_from_problem(problem)
