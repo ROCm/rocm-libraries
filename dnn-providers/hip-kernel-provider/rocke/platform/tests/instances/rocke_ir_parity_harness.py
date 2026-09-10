@@ -753,10 +753,10 @@ def build_deep(kind, arch, **kw):
 # spec and calls the appropriate build_direct_conv_* function.  The Python
 # lowerer is used exclusively (lower_case pins _lower_kernel_to_llvm_python).
 #
-# C++ engine parity: the direct grouped conv kernels are Python-lowerer-only.
-# There is no C++ implementation in platform/cpp/; byte-identity with the C++
-# engine is therefore not tracked here.  When a C++ port is added, wire it
-# into check_byte_identity.py under the "conv_direct" family.
+# C++ engine parity: direct-conv parity is gated via tools/check_byte_identity.py
+# (see tests/instances/parity/conv_direct_grouped_emit.* and the
+# conv_direct_grouped family in tests/instances/differential/golden/llvm_gfx_all.json).
+# If you extend parity coverage to new direct-conv variants, update the parity emitters and golden.
 # ---------------------------------------------------------------------------
 
 
