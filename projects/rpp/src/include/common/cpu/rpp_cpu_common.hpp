@@ -273,4 +273,29 @@ inline void saturate_pixel(Rpp32f& pixel, Rpp16f* dst) {
     *dst = static_cast<Rpp16f>(RPPPIXELCHECKF32(pixel));
 }
 
+// Compute the number of threads to use for intra-image parallelization
+// Based on batch size and image height
+inline Rpp32u GetIntraImageThreads(rpp::Handle& handle, Rpp32u batchSize, Rpp32u imageHeight) {
+    // If processing multiple images in batch, don't parallelize within image
+    // The outer loop will parallelize across batch items
+    if (batchSize > 1) {
+        return 1;
+    }
+
+    // For single image, determine threads based on height
+    Rpp32u availableThreads = handle.GetNumThreads();
+
+    // If image is too small, parallelization overhead outweighs benefits
+    // Require at least 4 rows per thread for effective parallelization
+    const Rpp32u minRowsPerThread = 4;
+    Rpp32u minHeightForParallelization = availableThreads * minRowsPerThread;
+
+    if (imageHeight < minHeightForParallelization) {
+        return 1;
+    }
+
+    // For large images, use all available threads
+    return availableThreads;
+}
+
 #endif  // RPP_CPU_COMMON_HPP
