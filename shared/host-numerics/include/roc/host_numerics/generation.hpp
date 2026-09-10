@@ -32,8 +32,10 @@ struct ConstantGenerationParameters {
 };
 
 struct ChoiceGenerationParameters {
-    // Values are selected deterministically from the list. Repeated entries
-    // make that value appear more often.
+    // Each logical tensor index makes a counter-based pseudorandom selection
+    // from this list. The seed and index determine the selection; values are
+    // not visited in round-robin order. Repeated entries weight that value
+    // more heavily.
     std::vector<double> values;
 };
 

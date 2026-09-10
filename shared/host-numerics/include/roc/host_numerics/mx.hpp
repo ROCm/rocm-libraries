@@ -82,6 +82,18 @@ struct MxGenerationOptions {
 };
 
 struct MxTensor {
+    // Example for shape {2, 64}, blockAxis 1, and blockSize 32:
+    //
+    //   data.shape()         == Shape{2, 64}
+    //   scales.shape()       == Shape{2, 2}
+    //   scaleIndices.shape() == Shape{2, 64}
+    //   reference.shape()    == Shape{2, 64}
+    //
+    // scales[block, row] stores one scale for each 32-column block of a row.
+    // The first row of scaleIndices contains 32 zeroes followed by 32 twos;
+    // the second contains 32 ones followed by 32 threes. Each reference value
+    // is the decoded data value multiplied by scales[scaleIndices[row, col]].
+
     // Packed data with the requested leading dimension.
     Tensor data;
 

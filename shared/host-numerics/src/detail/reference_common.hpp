@@ -182,7 +182,7 @@ using RuntimeStoreFunction = void (*)(std::span<std::byte>, ptrdiff_t, Accumulat
 
 template <typename Accumulator, typename Tag>
 Accumulator runtimeLoadScalar(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return decodeScalarKnown<Tag::type, Accumulator>(storage, logicalOffset);
+    return decodeScalarKnown<Tag, Accumulator>(storage, logicalOffset);
 }
 
 template <typename Accumulator, typename Tag>
@@ -196,14 +196,14 @@ void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset
             const ptrdiff_t sourceOffset =
                 sourceRow + static_cast<ptrdiff_t>(columnBase + column) * columnStride;
             destination[row * columns + column] =
-                decodeScalarKnown<Tag::type, Accumulator>(storage, sourceOffset);
+                decodeScalarKnown<Tag, Accumulator>(storage, sourceOffset);
         }
     }
 }
 
 template <typename Accumulator, typename Tag>
 void runtimeStoreScalar(std::span<std::byte> storage, ptrdiff_t logicalOffset, Accumulator value) {
-    encodeScalarKnown<Tag::type>(storage, logicalOffset, value);
+    encodeScalarKnown<Tag>(storage, logicalOffset, value);
 }
 
 template <typename Accumulator>
