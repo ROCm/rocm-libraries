@@ -23,6 +23,20 @@
 /* ----- shared small helper: copy a working acc array into ctx->final_accs ----
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
+/* k offset handed to the load phase: `const_i32(n)` for the forward conv, or
+ * `add(kloop_k_lo, const_i32(n))` when the instance supplies a slice base
+ * (wgrad). Sequenced so the SSA order matches the Python emitter. */
+static rocke_value_t*
+    kloop_k_off(rocke_ir_builder_t* b, const rocke_conv_build_ctx_t* ctx, int64_t n)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, n);
+    if(ctx->kloop_k_lo == NULL)
+    {
+        return c;
+    }
+    return rocke_b_add(b, ctx->kloop_k_lo, c);
+}
+
 static void
     rocke_conv_set_final_accs(rocke_conv_build_ctx_t* ctx, rocke_value_t* const* accs, int num_accs)
 {
@@ -46,7 +60,9 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int K_iters = (ctx->kloop_num_iters > 0)
+                      ? ctx->kloop_num_iters
+                      : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i;
 
@@ -76,15 +92,17 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
         if(it + 1 < K_iters)
         {
             int nxt = (it + 1) % 2;
-            /* emit_load_phase(b.const_i32((it + 1) * block_k), nxt[0], nxt[1]) */
-            rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)(it + 1) * block_k), buf_a[nxt], buf_b[nxt]);
+            /* emit_load_phase(b.add(k_lo, const((it+1)*block_k)), nxt[0], nxt[1]).
+             * Sequenced into a local: C leaves argument evaluation order
+             * unspecified, so a nested builder call would drift the SSA ids. */
+            rocke_value_t* nxt_k_off = kloop_k_off(b, ctx, (int64_t)(it + 1) * block_k);
+            rocke_conv_emit_load_phase(ctx, nxt_k_off, buf_a[nxt], buf_b[nxt]);
         }
         /* The prefetch above clobbered k_off_capture with tile it+1's offset.
          * Restore tile it's offset so an a_operand_override (if any) addresses
          * the tile actually consumed by this MFMA.
          *   k_off_capture[0] = b.const_i32(it * block_k) */
-        ctx->k_off_capture = rocke_b_const_i32(b, (int64_t)it * block_k);
+        ctx->k_off_capture = kloop_k_off(b, ctx, (int64_t)it * block_k);
         /* current_accs = emit_mfma_phase(cur[0], cur[1], current_accs) */
         rocke_conv_emit_mfma_phase(ctx, buf_a[cur], buf_b[cur], current_accs, num_accs, new_accs);
         for(i = 0; i < num_accs; ++i)
@@ -117,7 +135,9 @@ void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int K_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int K_iters = (ctx->kloop_num_iters > 0)
+                      ? ctx->kloop_num_iters
+                      : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i;
 
@@ -142,7 +162,10 @@ void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
     /* Prologue: global read for tile 0 then write to LDS immediately.
      *   staged0 = emit_global_read(b.const_i32(0))
      *   emit_lds_write(staged0, A_smem, B_smem) */
-    k0_val = rocke_b_const_i32(b, 0);
+    /* wgrad slices the reduction, so the prologue tile starts at kloop_k_lo,
+     * not 0.  kloop_k_off returns the bare const when kloop_k_lo is NULL, so
+     * the forward conv is unchanged. */
+    k0_val = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : rocke_b_const_i32(b, 0);
     rocke_conv_emit_global_read(ctx, k0_val, &staged_a0, &staged_b0);
     rocke_conv_emit_lds_write(ctx, k0_val, &staged_a0, &staged_b0, ctx->A_smem, ctx->B_smem);
 
@@ -154,14 +177,14 @@ void rocke_conv_emit_kloop_basic(rocke_conv_build_ctx_t* ctx)
         /* Issue buffer_load for tile it+1 BEFORE the sync. */
         if(it + 1 < K_iters)
         {
-            pending_k_off = rocke_b_const_i32(b, (int64_t)(it + 1) * block_k);
+            pending_k_off = kloop_k_off(b, ctx, (int64_t)(it + 1) * block_k);
             rocke_conv_emit_global_read(ctx, pending_k_off, &pending_a, &pending_b);
             has_pending = 1;
         }
         /* Drain prior ds_write then barrier. */
         rocke_b_sync(b);
         /* Set k offset for mfma descriptors. */
-        ctx->k_off_capture = rocke_b_const_i32(b, (int64_t)it * block_k);
+        ctx->k_off_capture = kloop_k_off(b, ctx, (int64_t)it * block_k);
         /* ds_read + mfma for the current tile. */
         rocke_conv_emit_mfma_phase(ctx, ctx->A_smem, ctx->B_smem, current_accs, num_accs, new_accs);
         for(i = 0; i < num_accs; ++i)
@@ -263,7 +286,9 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
     rocke_ir_builder_t* b = ctx->b;
     const rocke_conv_problem_t* p = ctx->p;
     int block_k = ctx->block_k;
-    int num_iters = (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int num_iters = (ctx->kloop_num_iters > 0)
+                        ? ctx->kloop_num_iters
+                        : (rocke_conv_problem_k_gemm(p) + block_k - 1) / block_k;
     int num_accs = ctx->num_accs;
     int it, i, pp;
 
@@ -330,7 +355,7 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
         {
             int slot = pp % nb;
             rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)pp * block_k), buf_a[slot], buf_b[slot]);
+                ctx, kloop_k_off(b, ctx, (int64_t)pp * block_k), buf_a[slot], buf_b[slot]);
         }
     }
 
@@ -352,7 +377,7 @@ void rocke_conv_emit_kloop_async(rocke_conv_build_ctx_t* ctx)
             }
             /* issue_load(issue_idx, nxt) */
             rocke_conv_emit_load_phase(
-                ctx, rocke_b_const_i32(b, (int64_t)issue_idx * block_k), buf_a[nxt], buf_b[nxt]);
+                ctx, kloop_k_off(b, ctx, (int64_t)issue_idx * block_k), buf_a[nxt], buf_b[nxt]);
         }
 
         if(wait_vmcnt)

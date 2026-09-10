@@ -87,6 +87,7 @@ test_categories:
       - "quick/csrmv.*"
       - "quick/csrsv.*"
       - "quick/coomv.*"
+      - "quick/csric0.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -100,6 +101,7 @@ test_categories:
       - "quick/bsrsv.*"
       - "quick/csrmv.*"
       - "quick/csrsv.*"
+      - "quick/csric0.*"
       - "quick/coomv.*"
       - "quick/bsrmm.*"
       - "quick/csrmm.*"
@@ -117,6 +119,7 @@ test_categories:
       - "quick/csrmv.*"
       - "quick/csrsv.*"
       - "quick/coomv.*"
+      - "quick/csric0.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -131,6 +134,7 @@ test_categories:
       - "quick/csrmv.*"
       - "quick/csrsv.*"
       - "quick/coomv.*"
+      - "quick/csric0.*"
       - "quick/bsrmm.*"
       - "quick/csrmm.*"
     exclude:

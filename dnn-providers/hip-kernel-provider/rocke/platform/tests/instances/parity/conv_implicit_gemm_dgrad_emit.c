@@ -115,6 +115,35 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->chiplet_chunk_size = 64;
         *arch = "gfx950";
         return 0;
+    case 11:
+        /* K-outer B tile + ds_read_tr16_b64 transpose read, 32x32x16 atom.
+         * cshuffle deliberately: the validator rejects 16-bit dtype_d with the
+         * default epilogue, and a rejected config lands as BOTH_REJECTED, which
+         * the gate counts as a pass -- it would compare nothing. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* Same path on the 16x16x16 atom, where b_frag_len is 4 rather than 8. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->tile_k = 32;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

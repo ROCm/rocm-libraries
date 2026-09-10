@@ -116,36 +116,56 @@ static bool isMi308Device(hipStream_t stream)
     return chipId == 0x74a2 || chipId == 0x74a8 || chipId == 0x74b6 || chipId == 0x74bc;
 }
 
+// True when the SDPA attributes request stats (LSE) output.
+// Shared by isApplicable and buildPlan so the predicate never drifts.
+static bool hasStatsOutput(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
+{
+    return attrs.generate_stats().value_or(false);
+}
+
 // Validate that every forward-pass byte stride fits in uint32_t.  The ASM
 // kernarg struct stores strides as uint32 so values that overflow silently
 // truncate, producing wrong results.  Checked early in isApplicable so the
 // engine declines rather than dispatching with bad strides.
-static bool
-    wouldFwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
-                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
-                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
-                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+static bool wouldFwdByteStridesFitUint32(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats)
 {
     constexpr int64_t K_BF16_BYTES = 2;
+    constexpr int64_t K_FP32_BYTES = 4;
 
-    auto checkTensor
-        = [](const char* prefix, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
-              const auto* s = t.strides();
-              bool ok = true;
-              ok &= plan_utils::byteStrideFitsU32(
-                  (std::string("batch_stride_") + prefix).c_str(), s->Get(0), K_BF16_BYTES);
-              ok &= plan_utils::byteStrideFitsU32(
-                  (std::string("nhead_stride_") + prefix).c_str(), s->Get(1), K_BF16_BYTES);
-              ok &= plan_utils::byteStrideFitsU32(
-                  (std::string("stride_") + prefix).c_str(), s->Get(2), K_BF16_BYTES);
-              return ok;
-          };
+    auto checkTensor = [](const char* prefix,
+                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
+                          int64_t elementBytes) {
+        const auto* s = t.strides();
+        bool ok = true;
+        ok &= plan_utils::byteStrideFitsU32(
+            (std::string("batch_stride_") + prefix).c_str(), s->Get(0), elementBytes);
+        ok &= plan_utils::byteStrideFitsU32(
+            (std::string("nhead_stride_") + prefix).c_str(), s->Get(1), elementBytes);
+        ok &= plan_utils::byteStrideFitsU32(
+            (std::string("stride_") + prefix).c_str(), s->Get(2), elementBytes);
+        return ok;
+    };
 
     bool ok = true;
-    ok &= checkTensor("q", q);
-    ok &= checkTensor("k", k);
-    ok &= checkTensor("v", v);
-    ok &= checkTensor("o", o);
+    ok &= checkTensor("q", q, K_BF16_BYTES);
+    ok &= checkTensor("k", k, K_BF16_BYTES);
+    ok &= checkTensor("v", v, K_BF16_BYTES);
+    ok &= checkTensor("o", o, K_BF16_BYTES);
+
+    if(stats != nullptr)
+    {
+        // LSE/stats: rank 3 [B, H_q, S_q] or rank 4 [B, H_q, S_q, 1] in FP32;
+        // only batch and head strides reach the kernel.
+        const auto* statsStrides = stats->strides();
+        ok &= plan_utils::byteStrideFitsU32("batch_stride_lse", statsStrides->Get(0), K_FP32_BYTES);
+        ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
+    }
+
     return ok;
 }
 
@@ -232,8 +252,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
     }
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
-
     HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
                                "mma_core_mode must be unset");
 
@@ -249,6 +267,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
+    // Validate Q/K/V/O ranks before accessing their dims by index.
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->dims()->size() != 4,
         "q tensor must be rank 4 (Actual rank: " + std::to_string(qTensor->dims()->size()) + ")");
@@ -261,6 +280,50 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         oTensor->dims()->size() != 4,
         "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
+
+    // Validate optional stats (LSE) output tensor.
+    // Gate purely on generate_stats; the UID is required when the flag is set.
+    const bool hasStats = hasStatsOutput(attrs);
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statsTensor = nullptr;
+    if(hasStats)
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(!attrs.stats_tensor_uid().has_value(),
+                                   "generate_stats is set but stats_tensor_uid is missing");
+
+        const auto statsIt = tensorMap.find(attrs.stats_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(statsIt == tensorMap.end(),
+                                   "stats_tensor_uid not found in tensor map");
+
+        statsTensor = statsIt->second;
+
+        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->virtual_(), "stats tensor must not be virtual");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(statsTensor),
+            "stats tensor must not be pass-by-value");
+
+        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
+                                   "stats tensor datatype must be FP32 (Actual type: "
+                                       + EnumNameDataType(statsTensor->data_type()) + ")");
+
+        const auto statsRank = statsTensor->dims()->size();
+        HIP_KERNEL_RETURN_FALSE_IF(
+            statsRank != 3 && statsRank != 4,
+            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+                + std::to_string(statsRank) + ")");
+
+        if(statsRank == 4)
+        {
+            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
+                                       "stats tensor rank-4 last dim must be 1 (Actual: "
+                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
+        }
+
+        // Shape comparison is safe now — Q rank-4 is validated above.
+        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
+                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
+                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
+                                   "stats tensor shape [B,H,Sq] must match Q tensor");
+    }
 
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->data_type() != kTensor->data_type()
                                    || qTensor->data_type() != vTensor->data_type(),
@@ -311,7 +374,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "Could not find matching kernel for parameter combination");
 
     HIP_KERNEL_RETURN_FALSE_IF(
-        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor),
+        !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
         "Forward byte strides overflow uint32_t kernarg fields");
 
     return true;
@@ -433,11 +496,25 @@ void SdpaFwdPlanBuilder::buildPlan(
     // Extract optional LSE output metadata
     int64_t lseUid = -1;
     unsigned int lseStrideHead = 0;
-    if(sdpaAttrs.generate_stats().value_or(false))
+    const bool hasStats = hasStatsOutput(sdpaAttrs);
+    if(hasStats)
     {
+        if(!sdpaAttrs.stats_tensor_uid().has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "SdpaFwdPlanBuilder::buildPlan: generate_stats is set but stats_tensor_uid "
+                "is missing");
+        }
         lseUid = sdpaAttrs.stats_tensor_uid().value();
-        auto* lseTensor = tensorMap.at(lseUid);
-        lseStrideHead = static_cast<unsigned int>(lseTensor->strides()->Get(1));
+        const auto lseIt = tensorMap.find(lseUid);
+        if(lseIt == tensorMap.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "SdpaFwdPlanBuilder::buildPlan: stats_tensor_uid not found in tensor map");
+        }
+        lseStrideHead = static_cast<unsigned int>(lseIt->second->strides()->Get(1));
     }
 
     // Create params struct with all metadata

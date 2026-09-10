@@ -313,6 +313,7 @@ void testing_sptrsm_csc_bad_arg(const Arguments& arg)
                     }
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
                     case rocsparse_sptrsm_input_solve_mode:
+                    case rocsparse_sptrsm_input_diagonal_modifier:
                     {
                         break;
                     }

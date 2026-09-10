@@ -27,6 +27,7 @@
 #define CK_ASM_IMPLICITGEMM_HPP_
 
 #include <miopen/config.h>
+#include <miopen/conv/problem_description.hpp>
 
 #include <string>
 #include <cmath>
@@ -232,6 +233,24 @@ HeuristicInitMacroTileNoPadGemmK(size_t gemm_m,
         return std::make_tuple(m_per_block, n_per_block, k_per_block);
     else
         return std::make_tuple(0, 0, 0);
+}
+
+// The ASM-GTC NHWC solvers originate in the (now unmaintained) MISA project and address
+// global tensor memory with 32-bit BYTE offsets. AllTensorsDimsFitIntoInt() only validates
+// that each individual length/stride fits in int32; it does NOT bound the flattened tensor
+// size. A tensor whose total size in bytes exceeds the addressable range therefore overflows
+// the kernel's 32-bit addressing and silently returns wrong results, so gate the solver off
+// such shapes and let a large-tensor-capable solver be selected instead.
+//
+// The bound is expressed in BYTES, not elements: these kernels index memory by byte offset,
+// so an element-count bound would admit shapes up to sizeof(T) times the addressable size.
+static inline bool
+igemm_tensor_size_exceeds_asm_gtc_addressing(const miopen::conv::ProblemDescription& problem)
+{
+    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32;
 }
 
 // This is to support big tensor > 4G. Need to decide how many splits needed.

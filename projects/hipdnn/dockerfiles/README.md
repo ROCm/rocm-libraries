@@ -81,7 +81,7 @@ https://github.com/ROCm/TheRock/issues/2179
 | `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a nightly version such as `7.12.0a20260202` or a commit-addressed dev version such as `7.15.0.dev0+<sha>`. TheRock selects the appropriate multi-arch feed. |
 | `THEROCK_ASIC` | `gfx94X` | GPU architecture family prefix. Combined with `THEROCK_ASIC_VARIANT` to form the artifact group. |
 | `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
-| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://rocm.nightlies.amd.com/tarball-multi-arch/). |
+| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://nightly.repo.amd.com/rocm/core/tarball/). |
 
 #### Version Logging
 

@@ -612,7 +612,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     keyPathPrefix = f"BenchmarkProblems[{outerBenchmarkIdx}][{1 + problemSizeGroupIdx}]"
     benchmarkProcess = BenchmarkProcess(
         problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo,
-        keyPathPrefix=keyPathPrefix, srcFile=configPath,
+        keyPathPrefix=keyPathPrefix, srcFile=configPath, gfxName=gfxName,
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]

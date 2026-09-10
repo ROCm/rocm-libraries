@@ -14,6 +14,19 @@ invoke rocisa
 This compiles the C++ extension and installs it into your active venv so that
 `import rocisa` works from anywhere — no `PYTHONPATH` required.
 
+For compatibility, the editable install still rebuilds on rocisa's first
+import in each Python process by default, but an import performing a native
+build is discouraged. The recommended approach, available now, is to opt out
+explicitly:
+
+```bash
+invoke rocisa --no-rebuild-on-import
+```
+
+A future release will flip the default so rebuild-on-import is off by
+default; at that point, use `--rebuild-on-import` only when that automatic
+incremental rebuild is explicitly desired.
+
 > **Linux only.** The `invoke` dev workflow (`invoke rocisa`, `invoke build-client`)
 > is supported on Linux (a ROCm dev container) only: it uses `amdclang`, defaults to
 > `/opt/rocm`, and resolves dependencies via RPATH — none of which apply on Windows.
@@ -40,4 +53,13 @@ scikit-build-core handles the cmake configuration and compilation automatically.
 Requires the ROCm SDK (`amdclang++`) and `/opt/rocm` on the default search path,
 or set `ROCM_PATH`.
 
-For more information, see `docs/`.
+For a direct editable install, disable the deprecated import rebuild with:
+
+```bash
+SKBUILD_EDITABLE_REBUILD=false pip install -e .
+```
+
+For more information, see the internal contributor notes in
+[`docs/`](docs/) (how to add a class or function, and how rocisa is used
+from TensileLite). These are developer-facing implementation notes, not
+part of the published [hipBLASLt documentation](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html).

@@ -112,13 +112,37 @@ if(BUILD_TESTING)
                  rocke_tiled_attention_2d_reentrancy)
   endif()
 
+  # Spec-validation parity for the two C++ fused-MoE mega builders: the
+  # whole-kernel LDS budget, the scaled-f8f6f4 arch gate and the fp8 wave-size
+  # gate. The byte-identity gate only compares specs both engines accept, so an
+  # acceptance divergence from the Python validators is invisible to it.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp")
+    add_executable(rocke_moe_fused_mega_spec_guards
+                   instances/moe_fused_mega_spec_guards.cpp)
+    target_link_libraries(rocke_moe_fused_mega_spec_guards PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_moe_fused_mega_spec_guards PRIVATE m)
+    endif()
+    add_test(NAME rocke_moe_fused_mega_spec_guards
+             COMMAND rocke_moe_fused_mega_spec_guards)
+    set_tests_properties(rocke_moe_fused_mega_spec_guards
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_moe_fused_mega_spec_guards)
+    set_target_properties(rocke_moe_fused_mega_spec_guards
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_moe_fused_mega_spec_guards
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_moe_fused_mega_spec_guards)
+  endif()
+
   # Apply YAML-driven quick/standard/comprehensive/full tier labels to the
-  # three tests above. Must run in THIS directory scope: CMake (pre-3.28,
+  # tests above. Must run in THIS directory scope: CMake (pre-3.28,
   # which this project's cmake_minimum_required predates) only allows
   # set_property(TEST ...)/set_tests_properties() on a test from the
   # directory that add_test()'d it, so calling this from a parent scope
   # (e.g. hip-kernel-provider/src/CMakeLists.txt) would silently do
-  # nothing for these three. Guarded because rocke/platform also builds
+  # nothing for them. Guarded because rocke/platform also builds
   # standalone (outside hip-kernel-provider), where neither the shared
   # parser (apply_ctest_category_labels) nor
   # ROCKE_ENGINE_CTEST_CATEGORIES_YAML/HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED

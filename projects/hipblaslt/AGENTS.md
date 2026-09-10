@@ -104,13 +104,17 @@ JIRA ID : <JIRA key or N/A>
 <outcome of the test plan: passing suites, benchmark numbers, before/after>
 
 ## Submission Checklist
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md#pull-requests.
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
 ```
 
 Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.
+
+For what to put in **Test Plan**/**Test Result** — which suites gate a PR, which are informational,
+and which run nowhere yet — see [`TESTING.md`](TESTING.md) (TensileLite specifics are in
+[`tensilelite/TESTING.md`](tensilelite/TESTING.md)).
 
 ## When working in `tensilelite/`
 

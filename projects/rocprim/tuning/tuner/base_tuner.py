@@ -210,7 +210,7 @@ class BaseTuner(ABC):
         cls(defaults).tune_all()
 
     @abstractmethod
-    def _get_tune_params(self) -> OrderedDict:
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         pass
@@ -295,8 +295,8 @@ class BaseTuner(ABC):
             (
                 c
                 for c in arch_config
-                if c["key_type"] == key_type
-                and c["value_type"] == (value_type or "empty_type")
+                if c[self._get_key_type_name()] == key_type
+                and (not self._get_value_type_name() in c or c[self._get_value_type_name()] == (value_type or "empty_type"))
             ),
             None,
         )
@@ -307,7 +307,7 @@ class BaseTuner(ABC):
             return
 
         default_tune_params = {
-            k: [v] for k, v in config.items() if k not in ["key_type", "value_type"]
+            k: [v] for k, v in config.items() if k not in [self._get_key_type_name(), self._get_value_type_name()]
         }
 
         # Get the base tuning archs and force set the range of the tune parameters
@@ -358,7 +358,7 @@ class BaseTuner(ABC):
 
     def generate_wrapper(
         self,
-        tune_params: OrderedDict,
+        config: OrderedDict,
         key_type: str,
         value_type: Optional[str] = None,
     ) -> str:
@@ -377,10 +377,12 @@ class BaseTuner(ABC):
         context = {
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
-            "config": dict(zip(tune_params.keys(), tune_params.keys())),
-            "key_type": key_type,
-            "value_type": value_type,
+            "config": config,
+            self._get_key_type_name(): key_type,
         }
+
+        if self._get_value_type_name():
+            context[self._get_value_type_name()] = value_type
 
         content = template.render(**context)
 
@@ -394,18 +396,19 @@ class BaseTuner(ABC):
         """Returns base arguments for kernel_tuner.tune_kernel()."""
         np.random.seed(self.seed)
 
-        wrapper_string = self.generate_wrapper(
-            tune_params=self._get_tune_params(),
+        wrapper_string = lambda config: self.generate_wrapper(
+            config=config,
             key_type=key_type,
             value_type=value_type,
         )
 
         tune_kernel_args = {
+            "defines": {},
             "kernel_name": f"{self.algo_full_name}_wrapper",
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(key_type, value_type),
             "arguments": [np.uint64(self.bytes_size)],
-            "tune_params": self._get_tune_params(),
+            "tune_params": self._get_tune_params(key_type, value_type),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
             "cache": str(self._get_cache_file_path(key_type, value_type)),
@@ -440,6 +443,12 @@ class BaseTuner(ABC):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
 
+    def _get_key_type_name(self) -> str:
+        return "key_type"
+
+    def _get_value_type_name(self) -> str:
+        return "value_type"
+
     def _save_output(
         self,
         cache_file: str | pathlib.Path,
@@ -455,7 +464,7 @@ class BaseTuner(ABC):
             )
             cache_file.mkdir(parents=True, exist_ok=True)
             cache_file = cache_file / self._get_cache_file_name(key_type, value_type)
-            store_output_file(str(cache_file), results, self._get_tune_params())
+            store_output_file(str(cache_file), results, self._get_tune_params(key_type, value_type))
 
         with open(cache_file, "r") as f:
             cache_dict = json.load(f)
@@ -466,9 +475,10 @@ class BaseTuner(ABC):
             new_content = "{\n"
             new_content += f'"arch_name": "{self.arch_name}",\n'
             new_content += f'"algo_name": "{self.algo_full_name}",\n'
-            new_content += f'"key_type": "{key_type}",\n'
+            new_content += f'"{self._get_key_type_name()}": "{key_type}",'
             value_type_string = f"{value_type}" if value_type else "empty_type"
-            new_content += f'"value_type": "{value_type_string}",'
+            if self._get_value_type_name():
+                new_content += f'\n"{self._get_value_type_name()}": "{value_type_string}",'
             new_content += content.lstrip()[1:]
 
             with open(cache_file, "w") as f:

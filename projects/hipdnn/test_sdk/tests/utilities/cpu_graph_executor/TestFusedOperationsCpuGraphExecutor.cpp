@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -189,6 +191,182 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     for(size_t i = 0; i < elementCount; ++i)
     {
         finalOutputData[i] = addOutputData[i] * multiplyConstant;
+    }
+
+    // Validate results
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
+}
+
+TEST_F(TestFusedOperationsCpuGraphExecutor, ConvMaxMinFusedGraph)
+{
+    auto tolerance = pointwise::getTolerance<float>();
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilation = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
+
+    // Conv output = x * w with x, w drawn from [0, 1), so the output lies in [0, 1).
+    // These constants form a clamp window inside that range so max/min actually
+    // discriminate between the clamped-low, passthrough, and clamped-high cases
+    // instead of both stages collapsing to a fixed constant.
+    const float maxConstant = 0.25f;
+    const float minConstant = 0.75f;
+    const unsigned int seed = getGlobalTestSeed();
+
+    // DIRECT TENSOR MANAGEMENT - Expert Architecture
+    // Graph execution tensors
+    Tensor<float> xTensor(xDims, TensorLayout::NHWC);
+    Tensor<float> wTensor(wDims, TensorLayout::NHWC);
+    Tensor<float> maxConstantTensor({1}, TensorLayout::NHWC);
+    Tensor<float> minConstantTensor({1}, TensorLayout::NHWC);
+    Tensor<float> yTensor(yDims, TensorLayout::NHWC);
+
+    // Reference computation tensors (separate copy for validation)
+    Tensor<float> refXTensor(xDims, TensorLayout::NHWC);
+    Tensor<float> refWTensor(wDims, TensorLayout::NHWC);
+    Tensor<float> refYTensor(yDims, TensorLayout::NHWC);
+
+    // Initialize tensors with consistent values
+    xTensor.fillWithRandomValues(0.0f, 1.0f, seed);
+    wTensor.fillWithRandomValues(0.0f, 1.0f, seed);
+    refXTensor.fillWithRandomValues(0.0f, 1.0f, seed);
+    refWTensor.fillWithRandomValues(0.0f, 1.0f, seed);
+
+    // Set constant values
+    static_cast<float*>(maxConstantTensor.memory().hostData())[0] = maxConstant;
+    static_cast<float*>(minConstantTensor.memory().hostData())[0] = minConstant;
+
+    // BUILD 3-STEP FUSED GRAPH MANUALLY
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("ConvolutionMaxMinFusedTest");
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    int64_t uid = 1;
+
+    // Create tensor attributes for all tensors
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "X", hipdnn_frontend::DataType::FLOAT, xTensor);
+    xAttr.set_uid(uid++);
+    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+
+    auto wAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "W", hipdnn_frontend::DataType::FLOAT, wTensor);
+    wAttr.set_uid(uid++);
+    auto wTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(wAttr));
+
+    auto maxConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "MaxConstant", hipdnn_frontend::DataType::FLOAT, maxConstantTensor);
+    maxConstantAttr.set_uid(uid++);
+    auto maxConstantTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(maxConstantAttr));
+
+    auto minConstantAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "MinConstant", hipdnn_frontend::DataType::FLOAT, minConstantTensor);
+    minConstantAttr.set_uid(uid++);
+    auto minConstantTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(minConstantAttr));
+
+    // Step 1: CONVOLUTION OPERATION
+    hipdnn_frontend::graph::ConvFpropAttributes convAttrs;
+    convAttrs.set_name("Convolution_fwd_inference");
+    convAttrs.set_stride(strides);
+    convAttrs.set_dilation(dilation);
+    convAttrs.set_pre_padding(padding);
+    convAttrs.set_post_padding(padding);
+    convAttrs.set_convolution_mode(hipdnn_frontend::ConvolutionMode::CROSS_CORRELATION);
+
+    auto convOutputTensorAttr = graph->conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
+
+    if(!convOutputTensorAttr->has_uid())
+    {
+        convOutputTensorAttr->set_uid(uid++);
+    }
+    convOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    convOutputTensorAttr->set_dim(yDims);
+    convOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
+
+    // Step 2: POINTWISE MAX OPERATION (max(conv, 0.25))
+    hipdnn_frontend::graph::PointwiseAttributes maxAttrs;
+    maxAttrs.set_name("PointwiseMax");
+    maxAttrs.set_mode(hipdnn_frontend::PointwiseMode::MAX);
+
+    auto maxOutputTensorAttr
+        = graph->pointwise(convOutputTensorAttr, maxConstantTensorAttr, maxAttrs);
+
+    if(!maxOutputTensorAttr->has_uid())
+    {
+        maxOutputTensorAttr->set_uid(uid++);
+    }
+    maxOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    maxOutputTensorAttr->set_dim(yDims);
+    maxOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
+
+    // Step 3: POINTWISE MIN OPERATION (min(max(conv, 0.25), 0.75))
+    hipdnn_frontend::graph::PointwiseAttributes minAttrs;
+    minAttrs.set_name("PointwiseMin");
+    minAttrs.set_mode(hipdnn_frontend::PointwiseMode::MIN);
+
+    auto finalOutputTensorAttr
+        = graph->pointwise(maxOutputTensorAttr, minConstantTensorAttr, minAttrs);
+
+    if(!finalOutputTensorAttr->has_uid())
+    {
+        finalOutputTensorAttr->set_uid(uid++);
+    }
+    finalOutputTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
+    finalOutputTensorAttr->set_dim(yDims);
+    finalOutputTensorAttr->set_stride(generateStrides(yDims, TensorLayout::NHWC.strideOrder));
+
+    // Create variant pack for input/output tensors (virtual tensors auto-allocated by executor)
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[xTensorAttr->get_uid()] = xTensor.memory().hostData();
+    variantPack[wTensorAttr->get_uid()] = wTensor.memory().hostData();
+    variantPack[maxConstantTensorAttr->get_uid()] = maxConstantTensor.memory().hostData();
+    variantPack[minConstantTensorAttr->get_uid()] = minConstantTensor.memory().hostData();
+    variantPack[finalOutputTensorAttr->get_uid()] = yTensor.memory().hostData();
+
+    auto validationResult = graph->validate();
+    ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    // Execute the graph using CPU graph executor
+    // Serialize the frontend graph to flatbuffer format
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    // Compute reference result manually: min(max(conv(X, W), 0.25), 0.75)
+    // Step 1: Perform convolution
+    Tensor<float> tempConvOutput(yDims, TensorLayout::NHWC);
+    CpuFpReferenceConvolution::fprop<float, float, float, float>(
+        refXTensor, refWTensor, tempConvOutput, strides, dilation, padding);
+
+    // Step 2: Max with constant (0.25) applied to convolution result
+    Tensor<float> tempMaxOutput(yDims, TensorLayout::NHWC);
+    auto* convOutputData = static_cast<float*>(tempConvOutput.memory().hostData());
+    auto* maxOutputData = static_cast<float*>(tempMaxOutput.memory().hostData());
+    const size_t elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
+                                * static_cast<size_t>(tempConvOutput.dims()[1])
+                                * static_cast<size_t>(tempConvOutput.dims()[2])
+                                * static_cast<size_t>(tempConvOutput.dims()[3]);
+
+    for(size_t i = 0; i < elementCount; ++i)
+    {
+        maxOutputData[i] = std::max(convOutputData[i], maxConstant);
+    }
+
+    // Step 3: Min with constant (0.75)
+    auto* finalOutputData = static_cast<float*>(refYTensor.memory().hostData());
+    for(size_t i = 0; i < elementCount; ++i)
+    {
+        finalOutputData[i] = std::min(maxOutputData[i], minConstant);
     }
 
     // Validate results

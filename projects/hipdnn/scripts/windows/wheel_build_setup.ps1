@@ -147,7 +147,7 @@ if (-not $SkipInstall) {
             "$BaseUrl/rocm_sdk_devel-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl"
     } else {
         Write-Host "  Source: ROCm multi-arch nightlies (device: $DeviceTarget)" -ForegroundColor Yellow
-        pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DeviceTarget]"
+        pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$DeviceTarget]"
     }
 
     if ($LASTEXITCODE -ne 0) {
