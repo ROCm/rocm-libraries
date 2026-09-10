@@ -22,6 +22,9 @@ ARCH = "gfx942"
 OTHER_ARCH = "gfx90a"
 KEY = "kernels/PointwiseAdd.cpp"
 LABEL = "unit_pointwise"
+# HKP_PACK_STAMP_NAME. The tool takes the stamp as a path and never derives the
+# name, so the two are coupled only through the argument the build passes.
+STAMP_NAME = ".hkp-packed.stamp"
 
 
 def _kernel_source(key):
@@ -134,9 +137,10 @@ def _drop_anchor(path):
     return Path(path).relative_to(Path(path).anchor).as_posix()
 
 
-def _run(manifest, roots, source_roots, target=TARGET):
+def _run(manifest, roots, source_roots, target=TARGET, stamps=()):
     """Invoke the tool. `manifest=None` omits the flag, as a target that
-    registers no kernel for embedding does."""
+    registers no kernel for embedding does. `stamps` names the wired packs, so
+    an empty one is the dormant shape: a root the build never packs."""
     argv = [
         sys.executable,
         str(TOOL),
@@ -147,6 +151,8 @@ def _run(manifest, roots, source_roots, target=TARGET):
         argv += ["--key-manifest", str(manifest)]
     for root in roots:
         argv += ["--staged-descriptor-root", str(root)]
+    for stamp in stamps:
+        argv += ["--pack-stamp", str(stamp)]
     for label, source_root in sorted(source_roots.items()):
         argv += ["--source-root", f"{label}={source_root}"]
     return subprocess.run(argv, capture_output=True, text=True)
@@ -633,3 +639,77 @@ def test_each_inline_entry_of_a_kdp_is_read_with_its_own_provenance(tmp_path):
     # provenance would report the latter for every entry, including the matching one.
     assert "embeds no source under the key" in result.stderr
     assert "provenance" not in result.stderr
+
+
+# --- A stamped pack root holds at least one descriptor ----------------------
+
+
+def _stamp(root):
+    """The stamp a pack writes inside the root it filled."""
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / STAMP_NAME
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+@pytest.mark.quick
+def test_a_stamped_root_that_holds_no_descriptor_fails(tmp_path):
+    pack_root = tmp_path / "unit" / "pointwise"
+    stamp = _stamp(pack_root)
+
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "unit"],
+        _labels(tmp_path),
+        stamps=[stamp],
+    )
+
+    assert result.returncode == 1
+    assert "holds no descriptor" in result.stderr
+    assert str(pack_root) in result.stderr
+    assert str(stamp) in result.stderr
+
+
+@pytest.mark.quick
+def test_a_stamped_root_that_holds_a_descriptor_passes(tmp_path):
+    pack_root = tmp_path / "unit" / "pointwise"
+    stamp = _stamp(pack_root)
+    _ukd(pack_root / ARCH, "pointwise_add", KEY)
+    manifest = _manifest(
+        tmp_path, [(KEY, _source(tmp_path, "kernels", "PointwiseAdd.cpp"))]
+    )
+
+    result = _run(manifest, [tmp_path / "unit"], _labels(tmp_path), stamps=[stamp])
+
+    assert result.returncode == 0, result.stderr
+    # The stamp file is not a descriptor and is not counted as one.
+    assert result.stdout.strip() == _count_line(1, 1)
+
+
+@pytest.mark.quick
+def test_a_dormant_root_passes(tmp_path):
+    """An unwired pack contributes no stamp. Keying on 'the root was named'
+    instead would fail every build that leaves production off."""
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "arch_content"],
+        _labels(tmp_path),
+        stamps=[],
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.quick
+def test_a_wired_pack_that_has_not_run_passes(tmp_path):
+    """No stamp on disk is a root the next build packs, not a corrupted one."""
+    pack_root = tmp_path / "unit" / "pointwise"
+
+    result = _run(
+        _manifest(tmp_path, []),
+        [tmp_path / "unit"],
+        _labels(tmp_path),
+        stamps=[pack_root / STAMP_NAME],
+    )
+
+    assert result.returncode == 0, result.stderr
