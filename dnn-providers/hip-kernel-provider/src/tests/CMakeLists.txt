@@ -27,7 +27,6 @@ add_executable(
     compilation/TestModuleCache.cpp
     device/TestScopedDevice.cpp
     utilities/TestDigest.cpp
-    utilities/TestScratchDirectory.cpp
 )
 
 # Add the dummy kernel for running the tests
