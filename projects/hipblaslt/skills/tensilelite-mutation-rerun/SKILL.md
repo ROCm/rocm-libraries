@@ -28,14 +28,25 @@ ordinary TensileLite builds and tests do not depend on them.
 4. Do not push, edit pull requests, or update external trackers unless the user
    explicitly authorizes that action.
 
+## Choose the next target
+
+When the user has not selected a module, read
+[references/prioritization.md](references/prioritization.md). First make a
+fixed list of modules to compare. Use measured test coverage, mutation results,
+and run time. Mark missing measurements instead of inventing values. Record
+which module a person selected and why. Do not present a weighted score as
+objective fact unless the team has reviewed its inputs and formula.
+
 ## Run one investigation
 
-1. Choose one source module and a focused candidate test set. Follow
-   [references/covering-set.md](references/covering-set.md) to assemble the
-   set and measure its coverage of that exact file. Treat the threshold as a
-   scheduling heuristic, not as evidence that the tests detect each mutation.
-   A run whose selected tests do not meet the reviewed threshold is deferred,
-   not started.
+1. Define the slice, following
+   [references/slice-planning.md](references/slice-planning.md): record the
+   source version, target module, selected tests, container, worker limit, and
+   output directory before editing any configuration. Assemble the test set
+   with [references/covering-set.md](references/covering-set.md) and measure
+   its coverage of that exact file. Treat the threshold as a scheduling
+   heuristic, not as evidence that the tests detect each mutation. A run whose
+   selected tests do not meet the reviewed threshold is deferred, not started.
 2. Record the source and container state with `scripts/slice-preflight.sh`.
 3. Use `scripts/pyproject-mutmut.sh backup` and `set` to configure the bounded
    campaign.
@@ -54,12 +65,22 @@ ordinary TensileLite builds and tests do not depend on them.
    timeout, transport, interruption, and restoration failures are inconclusive;
    they never prove a kill.
 8. Run `scripts/tests/run-selftests.sh` after changing any bundled helper.
+9. Compare a report against an earlier one only when their inputs are
+   compatible, following
+   [references/regression-comparison.md](references/regression-comparison.md).
+   Require nonempty, unique mutant identities and an explicit decision for
+   every missing or new mutant. Comparison does not block any automated GitHub
+   check today; the repository has neither a standard report generator nor a
+   workflow that consumes one.
 
 ## Report the outcome
 
-Record the source commit, container image, mutmut version, selected source and
-tests, complete result counts, characterization tests added, and any unresolved
-survivors or infrastructure failures. End with one explicit state:
+Follow [references/reporting.md](references/reporting.md). Build the report from
+saved mutmut output, the complete review table, verifier output, and the
+restoration result, keeping mutmut's original statuses separate from review
+decisions. Record the source commit, container image, mutmut version, selected
+source and tests, complete result counts, characterization tests added, and any
+unresolved survivors or infrastructure failures. End with one explicit state:
 
 - **Unresolved survivor:** the exact mutation has not yet been classified;
   preserve its ID and evidence without calling it a coverage gap.
