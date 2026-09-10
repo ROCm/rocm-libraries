@@ -2963,7 +2963,7 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "TDMFuse=2 dispatches its shared descriptor three ways -- two waves on A, one on "
                  "MXSA, one on MXSB -- and all remaining waves on B, which names four waves "
-                 "explicitly; 4 does not divide by 3, so the 1/1/2 split is a remainder policy "
+                 "explicitly; 4 does not divide by 3, so the 2/1/1 split is a remainder policy "
                  "rather than an even partition and does not generalise, got NumWaves=%d"
                  % state["NumWaves"])
           return
@@ -6260,10 +6260,16 @@ class Solution(collections.abc.Mapping):
       state["ValidDepthU"] = False
       return
 
-    # Per-wave LDS accounting. Crossing moves items between waves, so a wave's
-    # share is only well defined once the arrangement is known -- which is why
-    # this is asked here and not from the tile shape: a block's size depends on
-    # MacroTile *and* element size *and* MX scale block *and* pad *and* align.
+    # Per-wave LDS accounting, measured against the whole-workgroup cap because
+    # there is no per-wave ceiling to measure against: MaxLDS is the budget for
+    # the workgroup, not for one wave's share of it. So this check is weaker than
+    # its reject message reads -- it names a wave, but only fires when that one
+    # wave's share alone exceeds what every wave together is allowed.
+    #
+    # Crossing moves items between waves, so a wave's share is only well defined
+    # once the arrangement is known -- which is why this is asked here and not
+    # from the tile shape: a block's size depends on MacroTile *and* element size
+    # *and* MX scale block *and* pad *and* align.
     #
     # Crossing is byte-preserving (every member lands on exactly one wave, and
     # the sum over waves is the same total whatever the arrangement), so the

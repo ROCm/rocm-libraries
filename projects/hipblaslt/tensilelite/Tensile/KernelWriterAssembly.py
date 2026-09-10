@@ -80,7 +80,9 @@ from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
 from .Components.TDMFuse import tdmWaveComponents, tdmFuseAMx, tdmFusePaired, \
-                                tdmWavePartition, tdmGroupPartner
+                                tdmWavePartition, tdmGroupPartner, \
+                                tdmSeparateABDescriptors, tdmWaveSeparated, \
+                                tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -365,7 +367,8 @@ class KernelWriterAssembly(KernelWriter):
     return sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
 
   def isTdmWaveSeparated(self, kernel) -> bool:
-    return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
+    """True when the TDM moves both tensors and there is more than one wave."""
+    return tdmWaveSeparated(kernel)
 
   def tdmEmitWaveCompId(self, dstSgprIdx, compShift, waveIdxSgpr, comment):
     """Materialise a tensor's TDM wave-component id from WaveIdx.
@@ -390,8 +393,16 @@ class KernelWriterAssembly(KernelWriter):
     return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
 
   def tdmSeparateABDescriptors(self, kernel) -> bool:
-    """True when A's and B's TDM descriptors are distinct register sets."""
-    return self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel)
+    """True when A's and B's TDM descriptors are distinct register sets.
+
+    Delegates to the single owner in Components/TDMFuse.py, which reads the
+    resolved grouping row. Spelled `tdmFuseAMx or tdmFusePaired` this named the
+    two wired TDMFuse values instead of asking the table: it agreed with the
+    owner on every shipped kernel and disagreed on `B_MX`, a row that separates
+    A from B and that no TDMFuse integer selects yet. Two definitions of one
+    question, kept in step by hand.
+    """
+    return tdmSeparateABDescriptors(kernel)
 
   def tdmDescriptorSetOwner(self, kernel, tc: str) -> str:
     """The tensor whose name programs the descriptor set that carries `tc`.
@@ -19862,7 +19873,25 @@ class KernelWriterAssembly(KernelWriter):
     De-aliasing separates the descriptors, not the work: parity still decides
     which tensor a wave fills and `wId // 2` which K-slice of it, so a wave that
     carries B must not also issue A. Even waves carry A, odd waves carry B.
+
+    That parity is a literal, not the partition's answer, and this branch was
+    unreachable while `tdmSeparateABDescriptors` named only TDMFuse=1 and 2 --
+    the caller's outer guard and inner test were the same predicate, so the
+    `else` never ran. Now that the predicate reads the grouping row the branch
+    goes live for any row that separates A from B without pairing them onto
+    alternating waves, and `B_MX` is exactly that: it puts A in a one-member
+    group, which every wave issues, not the even ones. So check the literal
+    against the partition and refuse if they disagree, rather than guarding the
+    fill with the wrong waves.
     """
+    numWaves = kernel.get("NumWaves", 1)
+    _, waves = tdmWavePartition(kernel, tc)
+    parity = tuple(w for w in range(numWaves) if (w % 2 == 0) == (tc == "A"))
+    if waves != parity:
+      raise RuntimeError(
+        "the de-aliased TDM fill gates %s on wave parity, which expects waves "
+        "%s, but the grouping puts it on waves %s; emit the partition's wave "
+        "set here before wiring a row with that arrangement" % (tc, parity, waves))
     skip = SCBranchSCC1 if tc == "A" else SCBranchSCC0
     other = "B" if tc == "A" else "A"
     lbl = Label(self.labels.getNameInc(f"TdmDealiasedFill{tc}End"), "")
@@ -21344,6 +21373,15 @@ class KernelWriterAssembly(KernelWriter):
         return mod
       # A's increment is what every arm falls through to, since waves 0-1 carry A.
       fallthrough = sgpr("GlobalReadIncsA")
+      # The wave each member rides is the partition's to say, and this spells it
+      # as a literal. Kept deliberately rather than routed: A_MX has one
+      # partitioned group, crossing reverses groups after the first, so crossing
+      # is refused for this row and no reachable arrangement makes 2 and 3 wrong.
+      # Reading tdmWavePartition here would also make this dispatch depend on
+      # solution keys that several stub-driven tests do not supply. So the
+      # duplication is explicit and checked instead: TDMFuse.tdmSoleWave is the
+      # table's answer, and test_TDMWaveRuleOwnership pins these literals to it,
+      # so a row that moves MXSA or MXSB fails a test rather than miscompiling.
       if mxA:
         mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=2, comment="wave 2 carries MXSA"))
         mod.add(SCSelectB32(dst=sgpr(incSgprName), src0=sgpr("GlobalReadIncsMXSA"),

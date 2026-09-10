@@ -292,7 +292,7 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
         (1, {"MatrixInstruction": _ONE_WAVE_MI, "WorkGroup": _ONE_WAVE_WG},
          "TDMFuse=1 splits each of its two descriptor sets by wave parity"),
         (2, {"MatrixInstruction": _ONE_WAVE_MI, "WorkGroup": _ONE_WAVE_WG},
-         "1/1/2 split is a remainder policy"),
+         "2/1/1 split is a remainder policy"),
         (2, {"MatrixInstruction": [16, 16, 128, 1, 1, 2, 16, 2, 1], "WorkGroup": [32, 2, 1]},
          "got NumWaves=2"),
         (1, {"ProblemType": _NO_MX_ON_B},
