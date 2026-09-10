@@ -766,7 +766,10 @@ struct UniversalGemmKernel
                     index_t kFlatK =
                         GemmPipeline::BlockGemmShape::flatKPerWarp *
                         (k_size / GemmPipeline::BlockGemmShape::WarpTile::at(number<2>{}));
-                    index_t kFlatN = N * K / kFlatK;
+                    // Widen before the divide so N*K does not overflow int32 for B tensors
+                    // whose element count exceeds 2^31.
+                    index_t kFlatN = static_cast<index_t>(static_cast<long_index_t>(N) *
+                                                          static_cast<long_index_t>(K) / kFlatK);
 
                     return make_naive_tensor_descriptor(make_tuple(kFlatN, kFlatK),
                                                         make_tuple(kFlatK, 1),
