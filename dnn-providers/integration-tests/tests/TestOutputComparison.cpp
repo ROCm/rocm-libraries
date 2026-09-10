@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -21,8 +22,10 @@
 using hipdnn_integration_tests::bundle::compareOutputs;
 using hipdnn_integration_tests::bundle::compareTensor;
 using hipdnn_integration_tests::bundle::ComparisonTolerance;
+using hipdnn_integration_tests::bundle::makeValidator;
 using hipdnn_integration_tests::bundle::OutputTensors;
 using hipdnn_integration_tests::bundle::tensorLabel;
+using hipdnn_integration_tests::bundle::ValidatorKind;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -449,6 +452,20 @@ TEST(TestOutputComparison, AllcloseStillGradesIntegerOutputs)
 
     EXPECT_FALSE(compareTensor(K_UID_INT, attrs, *expected, *matching, exact(), "b").has_value());
     EXPECT_TRUE(compareTensor(K_UID_INT, attrs, *expected, *drifted, exact(), "b").has_value());
+}
+
+// A ValidatorKind with no case in makeValidator must not be graded by whichever branch
+// happens to fall through. Silently comparing a tensor with a validator nobody chose is
+// the failure mode this whole mechanism exists to prevent, so the unhandled kind is
+// refused outright rather than defaulted.
+TEST(TestOutputComparison, UnhandledValidatorKindIsRefused)
+{
+    ComparisonTolerance bogus = ComparisonTolerance::allClose(0.0f, 0.0f);
+    bogus.kind = static_cast<ValidatorKind>(99);
+
+    EXPECT_THROW(
+        makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, "y_out", bogus),
+        std::invalid_argument);
 }
 
 // NOLINTEND(readability-identifier-naming)

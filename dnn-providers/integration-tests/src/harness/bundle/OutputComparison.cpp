@@ -5,7 +5,7 @@
 
 #include <exception>
 #include <sstream>
-#include <utility>
+#include <stdexcept>
 
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
@@ -34,33 +34,44 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
                                  const std::string& label,
                                  const ComparisonTolerance& tolerance)
 {
-    if(tolerance.kind != ValidatorKind::RMS)
+    switch(tolerance.kind)
     {
+    case ValidatorKind::ALLCLOSE:
         return {hipdnn_test_sdk::utilities::createAllCloseValidator(
                     dataType, tolerance.atol, tolerance.rtol),
                 {}};
-    }
 
-    try
-    {
-        return {hipdnn_test_sdk::utilities::createRmsValidator(dataType, tolerance.rmsThreshold),
+    case ValidatorKind::RMS:
+        // Only RMS is caught. It is the one kind a [[validator_overrides]] glob can
+        // select, so an unsupported data type here is an operator's config mistake and
+        // deserves a legible answer. allclose is the default that nothing selects, so
+        // there is no glob to blame and its own throw stays a throw.
+        try
+        {
+            return {
+                hipdnn_test_sdk::utilities::createRmsValidator(dataType, tolerance.rmsThreshold),
                 {}};
-    }
-    catch(const std::exception& e)
-    {
-        // An over-broad [[validator_overrides]] 'tensors' glob, not a numerical failure:
-        // say which tensor it caught and what to narrow, rather than unwinding the test.
-        std::ostringstream error;
-        error << "\nValidator override NOT APPLICABLE\n"
-              << "  Tensor: " << label << "\n"
-              << "  Data type: " << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType)
-              << "\n"
-              << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n"
-                 "  rms validator for this tensor, but it does not support this data type ("
-              << e.what()
-              << ").\n"
-                 "  Narrow that entry's 'tensors' glob so it no longer matches this tensor.\n";
-        return {nullptr, error.str()};
+        }
+        catch(const std::exception& e)
+        {
+            std::ostringstream error;
+            error << "\nValidator override NOT APPLICABLE\n"
+                  << "  Tensor: " << label << "\n"
+                  << "  Data type: "
+                  << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType) << "\n"
+                  << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n"
+                     "  rms validator for this tensor, but it does not support this data type ("
+                  << e.what()
+                  << ").\n"
+                     "  Narrow that entry's 'tensors' glob so it no longer matches this tensor.\n";
+            return {nullptr, error.str()};
+        }
+
+    default:
+        // A kind that is neither, i.e. a new ValidatorKind whose case was never written.
+        // Grading it as allclose by omission is exactly the silent miscompare this whole
+        // mechanism exists to prevent, so refuse instead.
+        throw std::invalid_argument("makeValidator: unhandled ValidatorKind");
     }
 }
 
@@ -85,12 +96,9 @@ std::string formatMismatchReport(int64_t uid,
     ctx.rtol = tolerance.rtol;
     if(useRms)
     {
-        // atol/rtol did not decide this failure, so do not print them as if they had.
-        std::ostringstream summary;
-        summary << "relative RMS <= " << tolerance.rmsThreshold
-                << "  (aggregate check — the element counts below are elements that "
-                   "differ at all, not elements that failed)";
-        ctx.toleranceSummary = summary.str();
+        // Carry the threshold, not a rendered sentence: the report module owns how a
+        // tolerance is worded, and atol/rtol did not decide this failure.
+        ctx.rmsThreshold = tolerance.rmsThreshold;
     }
 
     std::ostringstream report;

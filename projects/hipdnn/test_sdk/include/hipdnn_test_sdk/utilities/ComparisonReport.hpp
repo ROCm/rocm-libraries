@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -22,9 +23,10 @@ struct ComparisonContext
     std::string dtypeName;
     float atol = 0.0f;
     float rtol = 0.0f;
-    /// Replaces the "atol=… rtol=…" line when set, for checks that atol/rtol do not
-    /// describe (e.g. an aggregate relative-RMS comparison).
-    std::string toleranceSummary;
+    /// Set when the verdict came from an aggregate relative-RMS check rather than a
+    /// per-element one. atol/rtol did not decide it and are not printed; this threshold
+    /// is. Unset means an ordinary allclose comparison.
+    std::optional<float> rmsThreshold;
 };
 
 inline std::string formatComparisonHeader(const ComparisonContext& ctx,
@@ -35,13 +37,18 @@ inline std::string formatComparisonHeader(const ComparisonContext& ctx,
        << "  " << ctx.contextLine << "\n"
        << "  Tensor: " << ctx.tensorLabel << "\n"
        << "  Shape:  " << StreamVec(tensor.dims()) << "  " << ctx.dtypeName << "\n";
-    if(ctx.toleranceSummary.empty())
+    if(ctx.rmsThreshold.has_value())
     {
-        os << "  Tolerance: atol=" << ctx.atol << " rtol=" << ctx.rtol << "\n";
+        // The element listing below counts every element that differs at all, because an
+        // aggregate check has no per-element budget to fail against. Say so, or the
+        // counts read as failures.
+        os << "  Tolerance: relative RMS <= " << *ctx.rmsThreshold
+           << "  (aggregate check — the element counts below are elements that differ at "
+              "all, not elements that failed)\n";
     }
     else
     {
-        os << "  Tolerance: " << ctx.toleranceSummary << "\n";
+        os << "  Tolerance: atol=" << ctx.atol << " rtol=" << ctx.rtol << "\n";
     }
     return os.str();
 }
