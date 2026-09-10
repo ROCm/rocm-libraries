@@ -108,7 +108,9 @@ std::string wavesOf(GfxArchID arch, uint32_t vgprs) {
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
-                         const AllocationRules& rules, const char* allocator) {
+                         const AllocationRules& rules,
+                         std::span<const AllocationScope::HeldRange> unbankable,
+                         const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -148,6 +150,19 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
             text += (i > 0 ? " %" : "%") + std::to_string(undefined[i]);
             if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
                 text += "=" + regKeyToString(*hint);
+        }
+        text += "]";
+    }
+    // Registers frozen because an operand cannot name a bank for them. Named
+    // because they are the reason the high-water mark cannot fall below them,
+    // which otherwise reads as the allocator failing to compact.
+    if (!unbankable.empty()) {
+        text += " unbankable[";
+        for (size_t i = 0; i < unbankable.size(); ++i) {
+            const AllocationScope::HeldRange& range = unbankable[i];
+            if (i > 0) text += " ";
+            text += regTypeToString(range.regClass) + std::to_string(range.start);
+            if (range.end != range.start) text += ":" + std::to_string(range.end);
         }
         text += "]";
     }
@@ -246,6 +261,15 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
         scope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
     }
 
+    // Before the requested holds, so a register in both reports the constraint
+    // rather than the request. An operand that cannot name a bank is a property
+    // of the encoding, and the producer already gave it a register it can name,
+    // so holding that register is a known-good answer rather than a limit the
+    // allocator has to find room under.
+    const std::vector<AllocationScope::HeldRange> unbankable =
+        AllocationScope::unbankableOperandRegisters(function, target);
+    if (!unbankable.empty()) scope.holdUnbankableOperands(constraints, unbankable);
+
     if (!options.pinRegisters.empty()) {
         // A backwards pair holds nothing, which reads as "holding made no
         // difference". Hold nothing by passing nothing instead.
@@ -278,7 +302,7 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
     // Before destruction, which clears the attached SSA the report reads.
     if (options.report && report != nullptr) {
         *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
-                               allocator.name());
+                               unbankable, allocator.name());
     }
 
     if (options.applyToOperands) {
