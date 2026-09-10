@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -24,13 +25,11 @@ namespace TensileLite::Client
 {
     std::uint64_t stableDataInitializationStream(std::string_view semanticName)
     {
-        using namespace HostNumerics;
-
-        std::uint64_t hash = dataInitializationFnvLikeOffsetBasis;
+        std::uint64_t hash = HostNumerics::dataInitializationFnvLikeOffsetBasis;
         for(const unsigned char character : semanticName)
         {
             hash ^= character;
-            hash *= dataInitializationFnvLikePrime;
+            hash *= HostNumerics::dataInitializationFnvLikePrime;
         }
         return hash;
     }
@@ -48,18 +47,15 @@ namespace TensileLite::Client
         using roc::host_numerics::StructuredSparsitySliceRange;
         using roc::host_numerics::Tensor;
 
-        std::optional<GenerationRecipe> generationRecipe(rocisa::DataType      dataType,
-                                                         InitMode              mode,
-                                                         bool                  problemDependent,
-                                                         std::uint64_t         seed,
-                                                         std::uint64_t         sequence,
-                                                         std::optional<double> freeValue
-                                                         = std::nullopt)
+        GenerationRecipe generationRecipe(rocisa::DataType      dataType,
+                                          InitMode              mode,
+                                          bool                  problemDependent,
+                                          std::uint64_t         seed,
+                                          std::uint64_t         sequence,
+                                          std::optional<double> freeValue = std::nullopt)
         {
-            using namespace roc::host_numerics;
-            using namespace HostNumerics;
-
-            const GenerationRecipeSettings settings = dataInitializationSettings(seed, sequence);
+            const GenerationRecipeSettings settings
+                = HostNumerics::dataInitializationSettings(seed, sequence);
             auto realOnly = [settings](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(std::move(component), settings);
             };
@@ -194,28 +190,33 @@ namespace TensileLite::Client
                 {
                     return cartesian(GenerationRecipe::uniformReal({.lower = -7.5, .upper = 7.5}));
                 }
-                return std::nullopt;
+                throw std::invalid_argument(
+                    "Uniform-low-precision initialization requires Float4, Float6, or BFloat6.");
             case InitMode::Free:
                 if(!freeValue)
-                    return std::nullopt;
+                    throw std::invalid_argument(
+                        "Free initialization requires an explicit scalar value.");
                 return realOnly(GenerationRecipe::constant({.value = *freeValue}));
             case InitMode::SerialIdx:
                 return replicated(GenerationRecipe::serialIndex());
             case InitMode::SerialDim0:
                 if(!problemDependent)
-                    return std::nullopt;
+                    throw std::invalid_argument(
+                        "Serial-dimension initialization requires a tensor descriptor.");
                 if(dataType == rocisa::DataType::Half)
                     return realOnly(GenerationRecipe::rawSerialDimension({.dimension = 0}));
                 return replicated(GenerationRecipe::serialDimension({.dimension = 0}));
             case InitMode::SerialDim1:
                 if(!problemDependent)
-                    return std::nullopt;
+                    throw std::invalid_argument(
+                        "Serial-dimension initialization requires a tensor descriptor.");
                 if(dataType == rocisa::DataType::Half)
                     return realOnly(GenerationRecipe::rawSerialDimension({.dimension = 1}));
                 return replicated(GenerationRecipe::serialDimension({.dimension = 1}));
             case InitMode::Identity:
                 if(!problemDependent)
-                    return std::nullopt;
+                    throw std::invalid_argument(
+                        "Identity initialization requires a tensor descriptor.");
                 return replicated(GenerationRecipe::identity());
             case InitMode::TrigSin:
             case InitMode::TrigIndSin:
@@ -230,8 +231,17 @@ namespace TensileLite::Client
             case InitMode::TrigIndAbsCos:
                 return replicated(GenerationRecipe::absoluteCosine());
             default:
-                return std::nullopt;
+                throw std::invalid_argument("Unsupported TensileLite initialization mode.");
             }
+        }
+
+        Tensor mutableTensorView(ScalarType type, Layout layout, std::span<std::byte> storage)
+        {
+            std::shared_ptr<void> lifetimeAnchor;
+            if(!storage.empty())
+                lifetimeAnchor = std::shared_ptr<void>(storage.data(), [](void*) {});
+            return Tensor::shareExternalMutableBackingStorage(
+                type, std::move(layout), std::move(lifetimeAnchor), storage);
         }
 
         Layout logicalSparseMetadataLayout(const TensorDescriptor& dense,
@@ -320,15 +330,11 @@ namespace TensileLite::Client
                                                DataInitializationKey key,
                                                std::optional<double> freeValue = std::nullopt)
         {
-            const std::optional<GenerationRecipe> recipe = generationRecipe(
-                dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue);
-            if(!recipe)
-                throw std::invalid_argument(
-                    "TensileLite initialization mode is not representable by host-numerics.");
-
-            Tensor generated = Tensor::copyEncodedBackingStorage(type, std::move(layout), storage);
-            roc::host_numerics::generate(generated, *recipe);
-            std::ranges::copy(generated.rawEncodedBackingStorage(), storage.begin());
+            Tensor destination = mutableTensorView(type, std::move(layout), storage);
+            roc::host_numerics::generate(
+                destination,
+                generationRecipe(
+                    dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue));
         }
     } // namespace
 
@@ -449,12 +455,10 @@ namespace TensileLite::Client
         const Layout         compressedLayout     = hostNumericsLayout(tensorC);
         const Layout         metadataTensorLayout = logicalSparseMetadataLayout(
             tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
-        Tensor prunedTensor
-            = Tensor::copyEncodedBackingStorage(scalarType, denseLayout, prunedStorage);
-        Tensor compressedTensor
-            = Tensor::copyEncodedBackingStorage(scalarType, compressedLayout, compressedStorage);
-        Tensor metadataTensor = Tensor::copyEncodedBackingStorage(
-            ScalarType::UInt8, metadataTensorLayout, metadataStorage);
+        Tensor prunedTensor = mutableTensorView(scalarType, denseLayout, prunedStorage);
+        Tensor compressedTensor = mutableTensorView(scalarType, compressedLayout, compressedStorage);
+        Tensor metadataTensor
+            = mutableTensorView(ScalarType::UInt8, metadataTensorLayout, metadataStorage);
         if(tensorC.totalAllocatedElements() > tensorC.totalLogicalElements())
             std::ranges::fill(compressedTensor.rawEncodedBackingStorage(), std::byte{0});
         if(tensorMeta.totalAllocatedElements() > tensorMeta.totalLogicalElements())
@@ -465,8 +469,5 @@ namespace TensileLite::Client
                                    .compressed        = compressedTensor,
                                    .twoOfFourMetadata = metadataTensor},
             sparsePattern(mode, dim));
-        std::ranges::copy(prunedTensor.rawEncodedBackingStorage(), prunedStorage.begin());
-        std::ranges::copy(compressedTensor.rawEncodedBackingStorage(), compressedStorage.begin());
-        std::ranges::copy(metadataTensor.rawEncodedBackingStorage(), metadataStorage.begin());
     }
 } // namespace TensileLite::Client
