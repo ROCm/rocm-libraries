@@ -105,8 +105,23 @@ def get_rocm_version() -> SemanticVersion:
                 except OSError:
                     continue
     if not version_str:
+        # Fallback: derive ROCm root from PATH (e.g. TheRock builds where
+        # amdclang++ is on PATH but ROCM_PATH is not set and /opt/rocm doesn't exist).
+        import shutil
+        for exe in ["amdclang++", "rocm-smi", "amd-smi"]:
+            exe_path = shutil.which(exe)
+            if exe_path:
+                candidate_root = Path(exe_path).parent.parent
+                version_file = candidate_root / ".info" / "version"
+                try:
+                    version_str = version_file.read_text().strip()
+                    break
+                except OSError:
+                    continue
+    if not version_str:
         raise RuntimeError("Failed to get ROCm version: ROCM_VERSION not set and "
-                           ".info/version not found in ROCM_PATH, HIP_PATH, or /opt/rocm")
+                           ".info/version not found in ROCM_PATH, HIP_PATH, /opt/rocm, "
+                           "or any PATH-derived ROCm root")
     # Strip pre-release suffixes before parsing (e.g. "0a20260813" -> "0", "1rc2" -> "1")
     # so that nightly/alpha version strings like "10.1.0a20260813" parse correctly.
     return SemanticVersion(*[int(match(r'\d+', c.split("-")[0]).group())
