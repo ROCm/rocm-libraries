@@ -211,6 +211,10 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
+# With offload LTO the same diagnostic is emitted by lld instead of clang, where
+# -Wno-pass-failed does not apply.
+add_compile_options("SHELL: -Xoffload-linker -w")
+
 find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
 rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 

@@ -126,6 +126,35 @@ namespace hiptensor
         return indices;
     }
 
+    // Reorders `strides`, which are given in `modes` order, into `refModes` order, so that
+    // entry i of the result is the stride of the mode `refModes[i]`. This lets a set of
+    // tensors whose modes are ordered differently be indexed against one common iteration
+    // space. Every mode in `refModes` must appear in `modes`; an empty return means one
+    // didn't, which the caller must treat as an unsupported layout.
+    template <typename T>
+    std::vector<T> alignStridesToModes(std::vector<int32_t> const& refModes,
+                                       std::vector<int32_t> const& modes,
+                                       std::vector<T> const&       strides)
+    {
+        if(modes.size() != strides.size())
+        {
+            return {};
+        }
+
+        std::vector<T> aligned;
+        aligned.reserve(refModes.size());
+        for(auto mode : refModes)
+        {
+            auto it = std::find(modes.cbegin(), modes.cend(), mode);
+            if(it == modes.cend())
+            {
+                return {};
+            }
+            aligned.push_back(strides[std::distance(modes.cbegin(), it)]);
+        }
+        return aligned;
+    }
+
     inline void printErrorMessage(hiptensor::Logger& logger,
                                   hiptensorStatus_t  errorCode,
                                   const std::string& paramName)
