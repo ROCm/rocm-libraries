@@ -621,7 +621,7 @@ class TestRunNewClient:
 
 class TestGetClientExecutablePath:
     def test_raises_when_file_not_found(self, monkeypatch):
-        """Forwards the runtime error when no client can be selected."""
+        """Runtime lookup failures remain visible to the caller."""
         def client_not_found():
             raise _runtime.TensileLiteRuntimeError("tensilelite-client was not found")
 
@@ -631,10 +631,10 @@ class TestGetClientExecutablePath:
             CW.getClientExecutablePath()
 
     def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
-        """Returns the client path selected by the runtime binding."""
+        """The client path is supplied by the initialized runtime binding."""
         fake_exe = tmp_path / "tensile_client"
         fake_exe.write_text("#!/bin/bash\necho fake")
-        monkeypatch.setattr(_runtime, "_client", fake_exe)
+        monkeypatch.setattr(_runtime, "client_executable", lambda: fake_exe)
 
         result = CW.getClientExecutablePath()
         assert result == str(fake_exe)
