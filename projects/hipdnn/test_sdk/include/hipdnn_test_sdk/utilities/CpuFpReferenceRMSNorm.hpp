@@ -94,6 +94,21 @@ public:
         {
             throw std::runtime_error("RMSNorm forward requires scale rank to equal input rank.");
         }
+        if(y.dims().size() != xDims.size())
+        {
+            throw std::runtime_error("RMSNorm forward requires y rank to equal input rank.");
+        }
+        // invRms and bias are indexed against their own strides at a reductionStart offset,
+        // so a short stride vector is read past its end. TensorBase::getIndex used to catch a
+        // rank mismatch on every access; indexing flat offsets skips it.
+        if(invRms != nullptr && invRms->dims().size() != xDims.size())
+        {
+            throw std::runtime_error("RMSNorm forward requires invRms rank to equal input rank.");
+        }
+        if(bias != nullptr && bias->dims().size() != xDims.size())
+        {
+            throw std::runtime_error("RMSNorm forward requires bias rank to equal input rank.");
+        }
 
         // The kernel below addresses memory through hoisted base pointers and flat offset
         // tables, which assumes a dense layout; a ragged tensor rebases each batch at its
@@ -251,6 +266,19 @@ public:
         {
             throw std::runtime_error("RMSNorm backward requires dy, scale, and invRms to all have "
                                      "the same rank as input.");
+        }
+
+        // dx, dscale and dbias are indexed against their own strides at a reductionStart
+        // offset, so a short stride vector is read past its end. TensorBase::getIndex used to
+        // catch a rank mismatch on every access; indexing flat offsets skips it.
+        if(dx.dims().size() != xDims.size() || dscale.dims().size() != xDims.size())
+        {
+            throw std::runtime_error(
+                "RMSNorm backward requires dx and dscale to have the same rank as input.");
+        }
+        if(dbias != nullptr && dbias->dims().size() != xDims.size())
+        {
+            throw std::runtime_error("RMSNorm backward requires dbias rank to equal input rank.");
         }
 
         // The kernel below addresses memory through hoisted base pointers and flat offset

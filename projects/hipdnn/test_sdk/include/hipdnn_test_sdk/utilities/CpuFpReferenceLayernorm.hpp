@@ -139,6 +139,33 @@ public:
             }
         }
 
+        // Rank guards. The kernels address x and y as [batchIndices..., trailing
+        // normIndices...] through hoisted base pointers, so both index spaces have to be at
+        // least as deep as the region they cover. TensorBase::getIndex used to catch a rank
+        // mismatch on every access; indexing flat offsets skips it, and without these the
+        // walk-stride construction below underflows and writes out of bounds.
+        if(y.dims().size() != dims.size())
+        {
+            throw std::runtime_error("Layernorm fprop requires y rank to equal input rank.");
+        }
+        if(static_cast<int64_t>(normalizedDims.size()) < normalizedDimCount)
+        {
+            throw std::runtime_error("Layernorm fprop requires the scale/bias rank to be at least "
+                                     "normalizedDimCount.");
+        }
+        if(static_cast<int64_t>(batchDims.size()) < ndim - normalizedDimCount)
+        {
+            throw std::runtime_error(
+                "Layernorm fprop requires the mean/rstd rank to cover the batch dimensions.");
+        }
+        // A rank-0 mean or rstd survives the check above when every dimension is normalized,
+        // but the scalar-batch padding below then walks it with one index against no strides.
+        if((mean != nullptr && mean->dims().empty()) || (rstd != nullptr && rstd->dims().empty()))
+        {
+            throw std::runtime_error(
+                "Layernorm fprop requires mean/rstd to have at least one dimension.");
+        }
+
         auto epsilonCompute = static_cast<ComputeDataType>(epsilon);
 
         // If batchDims is empty (entire tensor is normalized), use a single scalar iteration
@@ -386,6 +413,27 @@ public:
             {
                 batchDims[i] = dims[i];
             }
+        }
+
+        // Rank guards; see fprop for why the hoisted base pointers need them.
+        if(x.dims().size() != dims.size() || dx.dims().size() != dims.size())
+        {
+            throw std::runtime_error("Layernorm bprop requires x and dx rank to equal dy rank.");
+        }
+        if(static_cast<int64_t>(normalizedDims.size()) < normalizedDimCount)
+        {
+            throw std::runtime_error("Layernorm bprop requires the scale rank to be at least "
+                                     "normalizedDimCount.");
+        }
+        if(static_cast<int64_t>(batchDims.size()) < ndim - normalizedDimCount)
+        {
+            throw std::runtime_error(
+                "Layernorm bprop requires the mean/rstd rank to cover the batch dimensions.");
+        }
+        if((mean != nullptr && mean->dims().empty()) || (rstd != nullptr && rstd->dims().empty()))
+        {
+            throw std::runtime_error(
+                "Layernorm bprop requires mean/rstd to have at least one dimension.");
         }
         auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x.strides());
         auto batchStrides = hipdnn_data_sdk::utilities::generateStrides(batchDims, strideOrder);

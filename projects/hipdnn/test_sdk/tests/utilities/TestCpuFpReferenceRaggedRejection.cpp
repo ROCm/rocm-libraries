@@ -196,3 +196,164 @@ TEST(TestCpuFpReferenceRaggedRejection, RmsNormBackwardRejectsRaggedGradient)
         },
         "dx");
 }
+
+// ============================================================================
+// Rank validation
+// ============================================================================
+//
+// Hoisting raw base pointers past TensorBase::getIndex also skipped its argument-count
+// guard, which used to reject rank-mismatched inputs on every access. These cover the
+// reachable instances: without the guards the references read or write out of bounds,
+// and in the RMSNorm backward case return success with plausible but wrong numbers.
+
+namespace
+{
+
+template <typename Callable>
+void expectRejectedWith(Callable&& call, const std::string& needle)
+{
+    try
+    {
+        call();
+        ADD_FAILURE() << "expected a rejection mentioning \"" << needle << "\"";
+    }
+    catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find(needle), std::string::npos)
+            << "rejected, but not for the expected reason: " << message;
+    }
+}
+
+} // namespace
+
+TEST(TestCpuFpReferenceRankValidation, LayernormFpropRejectsScaleRankBelowNormalizedDimCount)
+{
+    // normSuffixStart = scale.rank() - normalizedDimCount underflows size_t, and the walk
+    // strides are then written far out of bounds.
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> scale({4});
+    Tensor<float> bias({4});
+    Tensor<float> y({2, 3, 4});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceLayernorm::fprop<float, float, float, float, float>(
+                x, &scale, &bias, y, 1e-5, 2);
+        },
+        "at least normalizedDimCount");
+}
+
+TEST(TestCpuFpReferenceRankValidation, LayernormBpropRejectsScaleRankBelowNormalizedDimCount)
+{
+    Tensor<float> dy({2, 3, 4});
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> dx({2, 3, 4});
+    Tensor<float> scale({4});
+    Tensor<float> dscale({4});
+    Tensor<float> dbias({4});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceLayernorm::bprop<float, float, float, float, float>(
+                dy, x, scale, dx, dscale, dbias, 1e-5, nullptr, nullptr, 2);
+        },
+        "at least normalizedDimCount");
+}
+
+TEST(TestCpuFpReferenceRankValidation, LayernormFpropRejectsRankZeroStats)
+{
+    // Every dimension is normalized, so the scalar-batch padding kicks in; a rank-0 mean
+    // is then walked with one index against an empty stride vector.
+    Tensor<float> x({4});
+    Tensor<float> scale({4});
+    Tensor<float> bias({4});
+    Tensor<float> y({4});
+    Tensor<float> mean({});
+    Tensor<float> rstd({});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceLayernorm::fprop<float, float, float, float, float>(
+                x, &scale, &bias, y, 1e-5, 1, &mean, &rstd);
+        },
+        "at least one dimension");
+}
+
+TEST(TestCpuFpReferenceRankValidation, LayernormFpropRejectsMismatchedOutputRank)
+{
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> scale({4});
+    Tensor<float> bias({4});
+    Tensor<float> y({2, 3, 4, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceLayernorm::fprop<float, float, float, float, float>(
+                x, &scale, &bias, y, 1e-5, 1);
+        },
+        "y rank to equal input rank");
+}
+
+TEST(TestCpuFpReferenceRankValidation, RmsNormBackwardRejectsShortWeightGradientRank)
+{
+    // The silent one: pre-guard this returned exit 0 with plausible dscale/dbias values,
+    // having read past the end of their stride vectors.
+    Tensor<float> dy({2, 3, 4});
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> dx({2, 3, 4});
+    Tensor<float> scale({1, 3, 4});
+    Tensor<float> invRms({2, 1, 1});
+    Tensor<float> dscale({3, 4});
+    Tensor<float> dbias({3, 4});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceRMSNorm::backward<float, float, float, float, float>(
+                dy, x, scale, invRms, dx, dscale, &dbias);
+        },
+        "dx and dscale");
+}
+
+TEST(TestCpuFpReferenceRankValidation, RmsNormBackwardRejectsShortBiasGradientRank)
+{
+    Tensor<float> dy({2, 3, 4});
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> dx({2, 3, 4});
+    Tensor<float> scale({1, 3, 4});
+    Tensor<float> invRms({2, 1, 1});
+    Tensor<float> dscale({1, 3, 4});
+    Tensor<float> dbias({3, 4});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceRMSNorm::backward<float, float, float, float, float>(
+                dy, x, scale, invRms, dx, dscale, &dbias);
+        },
+        "dbias rank");
+}
+
+TEST(TestCpuFpReferenceRankValidation, RmsNormForwardRejectsShortOptionalRanks)
+{
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> scale({1, 3, 4});
+    Tensor<float> y({2, 3, 4});
+    Tensor<float> invRms({2, 1});
+
+    expectRejectedWith(
+        [&] {
+            CpuFpReferenceRMSNorm::forward<float, float, float, float>(x, scale, y, 1e-5, &invRms);
+        },
+        "invRms rank");
+}
+
+TEST(TestCpuFpReferenceRankValidation, RmsNormForwardRejectsMismatchedOutputRank)
+{
+    Tensor<float> x({2, 3, 4});
+    Tensor<float> scale({1, 3, 4});
+    Tensor<float> y({2, 3, 4, 1});
+
+    expectRejectedWith(
+        [&] { CpuFpReferenceRMSNorm::forward<float, float, float, float>(x, scale, y, 1e-5); },
+        "y rank to equal input rank");
+}
