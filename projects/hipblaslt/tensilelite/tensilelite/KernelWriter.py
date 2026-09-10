@@ -3283,7 +3283,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
-        module.add(self.openA2AShardLoop(kernel))
+        module.add(self.openA2AShardLoop(kernel, tensorParametersB))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -10971,7 +10971,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # Open A2A-GEMM Shard Loop
   ##############################################################################
   @abc.abstractmethod
-  def openA2AShardLoop(self, kernel):
+  def openA2AShardLoop(self, kernel, tPB):
     return ""
 
   ##############################################################################
