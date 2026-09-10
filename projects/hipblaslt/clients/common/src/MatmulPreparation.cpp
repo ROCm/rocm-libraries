@@ -228,13 +228,7 @@ namespace hipblaslt::client
     MatmulPreparation
         prepareMatmulProblems(const Arguments&               arguments,
                               std::span<const MatmulProblem> matmulProblems,
-                              hipDataType                    inputTypeA,
-                              hipDataType                    inputTypeB,
-                              hipDataType                    inputTypeC,
-                              hipDataType                    outputType,
-                              hipDataType                    computeScalarType,
-                              hipDataType                    coefficientType,
-                              hipDataType                    biasType,
+                              const MatmulDataTypes&         dataTypes,
                               bool                           swizzleA,
                               bool                           swizzleB,
                               roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
@@ -248,17 +242,20 @@ namespace hipblaslt::client
             const auto& problem         = matmulProblems[index];
             auto&       preparedProblem = preparation.problems[index];
 
-            set_alpha_type(preparedProblem.alpha, arguments, computeScalarType, inputTypeA);
-            set_beta_type(preparedProblem.beta, arguments, computeScalarType, inputTypeA);
+            set_alpha_type(
+                preparedProblem.alpha, arguments, dataTypes.computeScalar, problem.a.apiType);
+            set_beta_type(
+                preparedProblem.beta, arguments, dataTypes.computeScalar, problem.a.apiType);
             if(arguments.scaleAlpha_vector)
                 set_compute_type_value_from_double(
-                    preparedProblem.alpha, 1.0, computeScalarType, inputTypeA);
+                    preparedProblem.alpha, 1.0, dataTypes.computeScalar, problem.a.apiType);
 
             preparedProblem.a.elements    = problem.a.allocationElements;
             preparedProblem.a.batchStride = problem.a.batchStride();
             if(swizzleA)
             {
-                const auto parameters = matmulSwizzleParameters(inputTypeA, arguments.compute_type);
+                const auto parameters
+                    = matmulSwizzleParameters(problem.a.apiType, arguments.compute_type);
                 constexpr int64_t microRows      = 16;
                 const int64_t     reductionBlock = parameters.innerBlock * parameters.packingFactor;
                 const int64_t swizzledStride = ((problem.m + microRows - 1) / microRows) * microRows
@@ -281,7 +278,8 @@ namespace hipblaslt::client
             preparedProblem.b.batchStride = problem.b.batchStride();
             if(swizzleB)
             {
-                const auto parameters = matmulSwizzleParameters(inputTypeB, arguments.compute_type);
+                const auto parameters
+                    = matmulSwizzleParameters(problem.b.apiType, arguments.compute_type);
                 constexpr int64_t microColumns   = 16;
                 const int64_t     reductionBlock = parameters.innerBlock * parameters.packingFactor;
                 const int64_t     swizzledStride
@@ -361,37 +359,48 @@ namespace hipblaslt::client
                     preparedProblem.b.scaleElements = 1;
             }
 
-            const size_t biasBytes = preparedProblem.biasElements * realDataTypeSize(biasType);
+            const size_t biasBytes
+                = preparedProblem.biasElements * realDataTypeSize(dataTypes.biasStorage);
             const size_t inputCBytes
-                = compute_type_value_as_double(preparedProblem.beta, computeScalarType) == 0
+                = compute_type_value_as_double(preparedProblem.beta, dataTypes.computeScalar) == 0
                       ? 0
-                      : problem.c.allocationElements * realDataTypeSize(inputTypeC);
+                      : problem.c.allocationElements * realDataTypeSize(problem.c.apiType);
+            const auto scaleBytes = [&](const PreparedMatmulOperand& operand,
+                                        hipblaslt_scaling_format      format) {
+                return isBlockScaling(format)
+                           ? operand.scaleElements * static_cast<size_t>(problem.batchCount)
+                           : operand.scaleElements * realDataTypeSize(dataTypes.coefficient);
+            };
             if(problem.batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
             {
                 preparation.rotatingBytes
-                    += preparedProblem.a.elements * realDataTypeSize(inputTypeA)
-                       + preparedProblem.b.elements * realDataTypeSize(inputTypeB) + inputCBytes
-                       + problem.d.allocationElements * realDataTypeSize(outputType)
-                       + problem.auxiliaryAllocationElements() * realDataTypeSize(outputType)
+                    += preparedProblem.a.elements * realDataTypeSize(problem.a.apiType)
+                       + preparedProblem.b.elements * realDataTypeSize(problem.b.apiType)
+                       + inputCBytes
+                       + problem.d.allocationElements * realDataTypeSize(problem.d.apiType)
+                       + problem.auxiliaryAllocationElements()
+                             * realDataTypeSize(dataTypes.auxiliary)
                        + biasBytes
-                       + preparedProblem.scaleAlphaElements * realDataTypeSize(coefficientType)
-                       + preparedProblem.a.scaleElements * realDataTypeSize(coefficientType)
-                       + preparedProblem.b.scaleElements * realDataTypeSize(coefficientType);
+                       + preparedProblem.scaleAlphaElements
+                             * realDataTypeSize(dataTypes.coefficient)
+                       + scaleBytes(preparedProblem.a, arguments.scaleA)
+                       + scaleBytes(preparedProblem.b, arguments.scaleB);
             }
             else
             {
                 preparation.rotatingBytes
-                    += preparedProblem.a.elements * realDataTypeSize(inputTypeA)
+                    += preparedProblem.a.elements * realDataTypeSize(problem.a.apiType)
                            * problem.batchCount
-                       + preparedProblem.b.elements * realDataTypeSize(inputTypeB)
+                       + preparedProblem.b.elements * realDataTypeSize(problem.b.apiType)
                              * problem.batchCount
                        + inputCBytes * problem.batchCount
-                       + problem.d.allocationElements * realDataTypeSize(outputType)
+                       + problem.d.allocationElements * realDataTypeSize(problem.d.apiType)
                              * problem.batchCount
                        + biasBytes
-                       + preparedProblem.scaleAlphaElements * realDataTypeSize(coefficientType)
-                       + preparedProblem.a.scaleElements * realDataTypeSize(coefficientType)
-                       + preparedProblem.b.scaleElements * realDataTypeSize(coefficientType);
+                       + preparedProblem.scaleAlphaElements
+                             * realDataTypeSize(dataTypes.coefficient)
+                       + scaleBytes(preparedProblem.a, arguments.scaleA)
+                       + scaleBytes(preparedProblem.b, arguments.scaleB);
             }
         }
 
