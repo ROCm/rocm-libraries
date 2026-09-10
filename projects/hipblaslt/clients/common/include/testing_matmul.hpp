@@ -2990,12 +2990,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                         = hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha);
                     epilogueOptions.auxiliaryScale
                         = hipblaslt::host_numerics::scalarValue(scaleEValue, Talpha);
-                    epilogueOptions.accumulateAmax = true;
 
                     if(arg.amaxD)
+                    {
                         epilogueOutputs.amax = hAmaxD_gold[gemmIdx].tensor(
                             hipblaslt::host_numerics::scalarType(Talpha),
                             Layout::contiguousLastDimensionFastest(Shape{1}));
+                        epilogueOptions.accumulateAmax = true;
+                    }
 
                     std::vector<HipHostBuffer>& auxiliaryBuffers = arg.gradient ? hE : hE_gold;
                     if(auxiliaryBuffers.size() > static_cast<size_t>(gemmIdx))
