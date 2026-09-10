@@ -184,8 +184,19 @@ float expectedBinaryDecode(ScalarType type, uint32_t raw) {
 
 void testScalarTypeInfoContract() {
     static_assert(nativeScalarType<bool> == ScalarType::Boolean);
+    static_assert(nativeScalarType<uint8_t> == ScalarType::UInt8);
+    static_assert(nativeScalarType<int8_t> == ScalarType::Int8);
+    static_assert(nativeScalarType<uint16_t> == ScalarType::UInt16);
+    static_assert(nativeScalarType<int16_t> == ScalarType::Int16);
+    static_assert(nativeScalarType<uint32_t> == ScalarType::UInt32);
+    static_assert(nativeScalarType<int32_t> == ScalarType::Int32);
+    static_assert(nativeScalarType<uint64_t> == ScalarType::UInt64);
+    static_assert(nativeScalarType<int64_t> == ScalarType::Int64);
     static_assert(nativeScalarType<float> == ScalarType::Float32);
+    static_assert(nativeScalarType<double> == ScalarType::Float64);
+    static_assert(nativeScalarType<std::complex<float>> == ScalarType::ComplexFloat32);
     static_assert(nativeScalarType<std::complex<double>> == ScalarType::ComplexFloat64);
+    static_assert(nativeScalarType<const float&> == ScalarType::Float32);
 
     require(scalarTypeCount == scalarTypeInfos.size(),
             "Scalar type count and metadata table size differ.");
@@ -307,6 +318,21 @@ void testIntegerConversionPrimitives() {
     require(convertScalar<int32_t>(3.75, rejectTowardZero) == 3 &&
                 convertScalar<int32_t>(-3.75, rejectTowardZero) == -3,
             "Toward-zero integer rounding mismatch.");
+    require(convertScalar<int8_t>(128.0) == -128,
+            "No-options scalar conversion did not use modulo overflow semantics.");
+
+    requireThrows<std::overflow_error>(
+        [&] { (void)Tensor::scalar(ScalarType::Int4, 9, rejectTowardZero); },
+        "Explicit-policy rank-zero construction accepted integer overflow.");
+    const Tensor saturatedInt4
+        = Tensor::scalar(ScalarType::Int4, 9, saturateNearestEven);
+    const Tensor wrappedInt4 = Tensor::scalar(ScalarType::Int4, 9, wrapNearestEven);
+    require(saturatedInt4.item<int>() == 7 && wrappedInt4.item<int>() == -7,
+            "Explicit-policy rank-zero integer construction mismatch.");
+    const Tensor explicitlyTruncatedBFloat16
+        = Tensor::scalar(ScalarType::BFloat16, bfloat16RoundingBoundary, truncateBFloat16);
+    require(tensorRaw(explicitlyTruncatedBFloat16) == 0x3f80,
+            "Explicit-policy rank-zero BFloat16 construction did not truncate.");
 
     struct TieCase {
         double value;

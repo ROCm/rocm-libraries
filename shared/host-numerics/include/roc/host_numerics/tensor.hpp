@@ -415,6 +415,15 @@ class Tensor {
         return result;
     }
 
+    template <typename Source>
+        requires NativeScalar<Source>
+    static Tensor scalar(ScalarType type, Source value,
+                         const ScalarConversionOptions& options) {
+        Tensor result(type, Shape{});
+        detail::encodeScalar(type, result.rawEncodedBackingStorage(), 0, std::move(value), options);
+        return result;
+    }
+
     // Copies the complete encoded backing storage. The span may include
     // product-required padding beyond the elements addressed by layout.
     static Tensor copyEncodedBackingStorage(ScalarType type, Layout layout,

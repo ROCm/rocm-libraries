@@ -220,7 +220,7 @@ struct NativeScalarType<std::complex<double>> {
 };
 
 template <typename T>
-inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cv_t<T>>::value;
+inline constexpr ScalarType nativeScalarType = NativeScalarType<std::remove_cvref_t<T>>::value;
 
 template <typename T>
 concept NativeScalar = requires { NativeScalarType<std::remove_cvref_t<T>>::value; };
@@ -355,6 +355,8 @@ decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... arg
 }
 
 namespace detail {
+inline constexpr ScalarConversionOptions implicitNativeConversionOptions();
+
 template <typename Target, typename Source>
 Target convertScalarValue(Source source, const ScalarConversionOptions& options);
 
@@ -374,11 +376,19 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
                   Source source, const ScalarConversionOptions& options);
 }  // namespace detail
 
-// Convert one native numeric value without encoding it. Complex-to-real conversion rejects a
-// nonzero imaginary component. Integer conversion applies the supplied rounding and overflow
-// policy after complex validation.
+// Convert one native numeric value without encoding it. The no-options overload
+// uses the same deterministic implicit policy as Tensor::item(): integer
+// conversion truncates toward zero and wraps modulo the destination width.
+// The option-bearing overload applies its explicit policy after rejecting a
+// nonzero imaginary component in complex-to-real conversion.
 template <typename Target, typename Source>
-Target convertScalar(Source source, const ScalarConversionOptions& options = {}) {
+Target convertScalar(Source source) {
+    return detail::convertScalarValue<Target>(
+        std::move(source), detail::implicitNativeConversionOptions());
+}
+
+template <typename Target, typename Source>
+Target convertScalar(Source source, const ScalarConversionOptions& options) {
     return detail::convertScalarValue<Target>(std::move(source), options);
 }
 
