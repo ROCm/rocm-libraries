@@ -261,8 +261,6 @@ namespace TensileLite::Client
             if(metadataAxis >= metadata.dimensions())
                 throw std::out_of_range(
                     "TensileLite metadata axis exceeds the metadata tensor rank.");
-            if(dense.sizes()[sparseAxis] == 0)
-                throw std::invalid_argument("TensileLite sparse axis extent must be nonzero.");
             if(dense.sizes()[sparseAxis] % 4 != 0)
                 throw std::invalid_argument(
                     "TensileLite sparse axis extent must be divisible by four.");
@@ -443,6 +441,12 @@ namespace TensileLite::Client
                 "TensileLite sparse data and compressed tensor types differ.");
         if(tensorMeta.dataType() != rocisa::DataType::Int8)
             throw std::invalid_argument("TensileLite sparse metadata must use byte storage.");
+        const Layout denseLayout      = hostNumericsLayout(tensor);
+        const Layout compressedLayout = hostNumericsLayout(tensorC);
+        const Layout metadataTensorLayout
+            = logicalSparseMetadataLayout(tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
+        if(tensor.totalLogicalElements() == 0)
+            return;
         if(dstPruned == nullptr && tensor.totalAllocatedBytes() != 0)
             throw std::invalid_argument("Null TensileLite sparse input buffer.");
         if(dstCompressed == nullptr && tensorC.totalAllocatedBytes() != 0)
@@ -456,10 +460,6 @@ namespace TensileLite::Client
                                                tensorC.totalAllocatedBytes());
         std::span<std::byte> metadataStorage(static_cast<std::byte*>(dstMeta),
                                              tensorMeta.totalAllocatedBytes());
-        const Layout         denseLayout          = hostNumericsLayout(tensor);
-        const Layout         compressedLayout     = hostNumericsLayout(tensorC);
-        const Layout         metadataTensorLayout = logicalSparseMetadataLayout(
-            tensor, tensorMeta, dim, static_cast<size_t>(metadataLayout));
         Tensor prunedTensor = mutableTensorView(scalarType, denseLayout, prunedStorage);
         Tensor compressedTensor = mutableTensorView(scalarType, compressedLayout, compressedStorage);
         Tensor metadataTensor
