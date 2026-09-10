@@ -334,8 +334,8 @@ class TestBuildTaskCommandLine:
         assert self._short_flags("--asic-revision") == ()
 
     @_needs_tensilelite_tasks
-    def test_build_client_explicitly_skips_python_dependency_bundling(self, tmp_path):
-        """The focused client build must not expand into Python code generation."""
+    def test_build_client_does_not_configure_rocisa_python_extension(self, tmp_path):
+        """The focused client build must not select the code-generation extension."""
 
         class RecordingContext:
             def __init__(self):
@@ -352,8 +352,9 @@ class TestBuildTaskCommandLine:
             build=False,
         )
 
-        assert any(
-            "-DHIPBLASLT_BUNDLE_PYTHON_DEPS=OFF" in command
+        assert all(
+            "HIPBLASLT_BUNDLE_PYTHON_DEPS" not in command
+            and "ROCISA_BUILD_PYTHON" not in command
             for command in context.commands
         )
 
