@@ -12,6 +12,14 @@
 //   +256  counter1  W * tokenTiles * u32  counter1[dst_rank*tokenTiles + j]
 //   ...   guard tail
 //
+// FusedA2AMode=1 shares the cursor region and lays out two regions of its own
+// past it:
+//
+//   +0    cursors   MAX_RANKS * 2 * u64   SDMA cursor pair per queue
+//   +128  flag      tokenBlocks*(W-1)*u32 flag[b][queue], rounded to a line
+//   ...   counter   batches * u32         counter[iB]
+//   ...   guard tail
+//
 // Each region starts on a 64-byte line; the trailing variable-size region gets
 // no tail padding. The three leading regions are sized by FUSED_A2A_MAX_RANKS
 // rather than the runtime world size. The guard tail catches an overrun of
@@ -39,8 +47,9 @@ namespace TensileLite
         constexpr size_t FUSED_A2A_CURSORS_PER_QUEUE = 2;
 
         // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
-        constexpr size_t FUSED_A2A_COUNTER2_OFFSET = fusedA2AAlignLine(
+        constexpr size_t FUSED_A2A_CURSOR_REGION_BYTES = fusedA2AAlignLine(
             (size_t)FUSED_A2A_MAX_RANKS * FUSED_A2A_CURSORS_PER_QUEUE * sizeof(uint64_t));
+        constexpr size_t FUSED_A2A_COUNTER2_OFFSET = FUSED_A2A_CURSOR_REGION_BYTES;
         constexpr size_t FUSED_A2A_COUNTER3_OFFSET = fusedA2AAlignLine(
             FUSED_A2A_COUNTER2_OFFSET + (size_t)FUSED_A2A_MAX_RANKS * sizeof(uint32_t));
         constexpr size_t FUSED_A2A_COUNTER1_OFFSET
@@ -61,6 +70,32 @@ namespace TensileLite
         constexpr size_t fusedA2ACounterAllocBytes(uint32_t worldSize, uint32_t tokenTiles)
         {
             return fusedA2ACounterPayloadBytes(worldSize, tokenTiles)
+                   + FUSED_A2A_COUNTER_SENTINEL_BYTES;
+        }
+
+        // Twinned with FUSED_A2A_MODE1_FLAG_OFFSET in Tensile/Components/Signature.py.
+        constexpr size_t FUSED_A2A_MODE1_FLAG_OFFSET = FUSED_A2A_CURSOR_REGION_BYTES;
+
+        // The one region reset per launch, sized as the kernel rounds it in
+        // a2aElect. worldSize must be >= 1.
+        constexpr size_t fusedA2AMode1FlagBytes(uint32_t worldSize, uint32_t tokenBlocks)
+        {
+            return fusedA2AAlignLine((size_t)tokenBlocks * (worldSize - 1) * sizeof(uint32_t));
+        }
+
+        // Live mode-1 bytes. `batches` is the number of distinct iB the kernel
+        // can compute, not the world size.
+        constexpr size_t
+            fusedA2AMode1PayloadBytes(uint32_t worldSize, uint32_t tokenBlocks, uint32_t batches)
+        {
+            return FUSED_A2A_MODE1_FLAG_OFFSET + fusedA2AMode1FlagBytes(worldSize, tokenBlocks)
+                   + (size_t)batches * sizeof(uint32_t);
+        }
+
+        constexpr size_t
+            fusedA2AMode1AllocBytes(uint32_t worldSize, uint32_t tokenBlocks, uint32_t batches)
+        {
+            return fusedA2AMode1PayloadBytes(worldSize, tokenBlocks, batches)
                    + FUSED_A2A_COUNTER_SENTINEL_BYTES;
         }
 
