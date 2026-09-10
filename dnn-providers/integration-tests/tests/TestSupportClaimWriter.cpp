@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -23,12 +24,14 @@
 #include "ScratchDirectory.hpp"
 #include "SupportClaimTestUtils.hpp"
 
+using hipdnn_integration_tests::bundle::AuthoringInputs;
 using hipdnn_integration_tests::bundle::authorSupportClaims;
 using hipdnn_integration_tests::bundle::dumpCanonical;
 using hipdnn_integration_tests::bundle::ObservedGraphSupport;
 using hipdnn_integration_tests::bundle::parseSupportClaimsJson;
 using hipdnn_integration_tests::bundle::parseSweepSupportClaimsJson;
-using hipdnn_integration_tests::bundle::SupportObservation;
+using hipdnn_integration_tests::bundle::selectionIsNarrowed;
+using hipdnn_integration_tests::bundle::selectionWasNarrowed;
 using hipdnn_integration_tests::bundle::writeObservedSupportClaims;
 using hipdnn_integration_tests::bundle::test_utils::readFile;
 using hipdnn_integration_tests::bundle::test_utils::singleGraphObservation;
@@ -695,16 +698,44 @@ TEST(TestSupportClaimWriter, ReadOnlyDirectoryReportsOpenFailedAndSkips)
 // authorSupportClaims: extracted logic from main.cpp
 // ---------------------------------------------------------------------------
 
+namespace
+{
+
+// Five same-typed fields is exactly the transposition AuthoringInputs exists to
+// prevent, so the tests below never fill it positionally either; this spells the
+// order once, next to the tests that read it.
+AuthoringInputs authoringInputs(const std::size_t observed,
+                                const std::size_t unobserved,
+                                const std::size_t skippedBeforeObservation,
+                                const std::size_t registered,
+                                const bool narrowed)
+{
+    AuthoringInputs inputs;
+    inputs.graphsObserved = observed;
+    inputs.graphsUnobserved = unobserved;
+    inputs.graphsSkippedBeforeObservation = skippedBeforeObservation;
+    inputs.graphsRegistered = registered;
+    inputs.selectionNarrowed = narrowed;
+    return inputs;
+}
+
+bool logContains(const std::ostringstream& log, const std::string& needle)
+{
+    return log.str().find(needle) != std::string::npos;
+}
+
+} // namespace
+
 TEST(TestSupportClaimAuthoring, ZeroObservationsFailsWithDiagnostic)
 {
     std::ostringstream log;
     const std::vector<ObservedGraphSupport> observations;
 
-    const auto result = authorSupportClaims(observations, 0, 0, 10, log);
+    const auto result = authorSupportClaims(observations, authoringInputs(0, 0, 0, 10, false), log);
 
     EXPECT_TRUE(result.shouldFail);
     EXPECT_EQ(result.writeSummary.filesWritten, 0u);
-    EXPECT_NE(log.str().find("no graphs were observed"), std::string::npos);
+    EXPECT_TRUE(logContains(log, "no graphs were observed"));
 }
 
 TEST(TestSupportClaimAuthoring, AllObservedSuccessDoesNotFail)
@@ -717,11 +748,11 @@ TEST(TestSupportClaimAuthoring, AllObservedSuccessDoesNotFail)
     };
 
     std::ostringstream log;
-    const auto result = authorSupportClaims(observations, 1, 0, 1, log);
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 0, 1, false), log);
 
     EXPECT_FALSE(result.shouldFail);
     EXPECT_EQ(result.writeSummary.filesWritten, 1u);
-    EXPECT_NE(log.str().find("SUPPORT CLAIM WRITE SUMMARY"), std::string::npos);
+    EXPECT_TRUE(logContains(log, "SUPPORT CLAIM WRITE SUMMARY"));
 }
 
 TEST(TestSupportClaimAuthoring, UnobservedGraphsCauseFail)
@@ -734,10 +765,10 @@ TEST(TestSupportClaimAuthoring, UnobservedGraphsCauseFail)
     };
 
     std::ostringstream log;
-    const auto result = authorSupportClaims(observations, 1, 2, 3, log);
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 2, 0, 3, false), log);
 
     EXPECT_TRUE(result.shouldFail);
-    EXPECT_NE(log.str().find("unobserved graph(s) were left as-is"), std::string::npos);
+    EXPECT_TRUE(logContains(log, "unobserved graph(s) were left as-is"));
 }
 
 TEST(TestSupportClaimAuthoring, NeverReachedGraphsCauseFail)
@@ -750,11 +781,12 @@ TEST(TestSupportClaimAuthoring, NeverReachedGraphsCauseFail)
     };
 
     std::ostringstream log;
-    // 1 observed + 0 unobserved but 5 registered → 4 never reached
-    const auto result = authorSupportClaims(observations, 1, 0, 5, log);
+    // 1 observed, nothing unobserved, nothing declared a skip, 5 registered -> 4
+    // graphs went missing with no reason on record.
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 0, 5, false), log);
 
     EXPECT_TRUE(result.shouldFail);
-    EXPECT_NE(log.str().find("never reached the observer"), std::string::npos);
+    EXPECT_TRUE(logContains(log, "never reached the observer"));
 }
 
 TEST(TestSupportClaimAuthoring, WriteErrorsCauseFail)
@@ -769,11 +801,225 @@ TEST(TestSupportClaimAuthoring, WriteErrorsCauseFail)
     };
 
     std::ostringstream log;
-    const auto result = authorSupportClaims(observations, 1, 0, 1, log);
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 0, 1, false), log);
 
     EXPECT_TRUE(result.shouldFail);
     EXPECT_FALSE(result.writeSummary.errors.empty());
-    EXPECT_NE(log.str().find("ERROR:"), std::string::npos);
+    EXPECT_TRUE(logContains(log, "ERROR:"));
+}
+
+// ---------------------------------------------------------------------------
+// authorSupportClaims: declared skips vs. silent disappearance
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimAuthoring, GuardSkippedGraphsAreNamedAndDoNotFail)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // The single-arch box: 6 bundles register, 5 carry a guard this arch does not
+    // satisfy, 1 runs. Nothing is wrong, so nothing may fail.
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 5, 6, false), log);
+
+    EXPECT_FALSE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "skipped in SetUp"));
+    EXPECT_TRUE(logContains(log, "unaccounted for: 0"));
+}
+
+TEST(TestSupportClaimAuthoring, GuardSkipsAreNotBlamedOnTheResidue)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 5, 6, false), log);
+
+    // A skip that was declared is not a graph that went missing, and the log must
+    // not describe it as one -- the exit code is not the only consumer.
+    EXPECT_FALSE(logContains(log, "never reached the observer"));
+}
+
+TEST(TestSupportClaimAuthoring, UnexplainedResidueStillFailsAlongsideGuardSkips)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // 1 + 0 + 2 explained out of 6 registered: 3 remain. Explaining some of the
+    // shortfall does not excuse the rest.
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 2, 6, false), log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "skipped in SetUp"));
+    EXPECT_TRUE(logContains(log, "never reached the observer"));
+}
+
+TEST(TestSupportClaimAuthoring, EveryGraphSkippedByGuardsStillFails)
+{
+    std::ostringstream log;
+    const std::vector<ObservedGraphSupport> observations;
+
+    // Every registered bundle declared a skip, so the residue is 0 and the new
+    // arithmetic has nothing to complain about. The zero-observation branch must
+    // still fail: an authoring run that wrote nothing at all is not a success,
+    // however well-explained it is.
+    const auto result = authorSupportClaims(observations, authoringInputs(0, 0, 4, 4, false), log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "no graphs were observed"));
+}
+
+TEST(TestSupportClaimAuthoring, AccountedForAboveRegisteredDoesNotUnderflow)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // 6 accounted for against 1 registered. std::size_t would wrap to an enormous
+    // residue and fail a run that observed more than it was told to expect.
+    const auto result = authorSupportClaims(observations, authoringInputs(3, 1, 2, 1, false), log);
+
+    EXPECT_TRUE(logContains(log, "unaccounted for: 0"));
+    // graphsUnobserved is 1, so this still fails -- on the unobserved graph, not on
+    // a wrapped subtraction.
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_FALSE(logContains(log, "never reached the observer"));
+}
+
+// ---------------------------------------------------------------------------
+// authorSupportClaims: a narrowed selection cannot account for what it dropped
+// ---------------------------------------------------------------------------
+
+TEST(TestSupportClaimAuthoring, NarrowedSelectionSuppressesTheResidueFailure)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // --gtest_filter deselected 4 of 5 before SetUp could count them, so the
+    // shortfall has an explanation this process cannot enumerate per bundle.
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 0, 5, true), log);
+
+    EXPECT_FALSE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "--gtest_filter"));
+    EXPECT_FALSE(logContains(log, "gave no reason"));
+}
+
+TEST(TestSupportClaimAuthoring, NarrowedSelectionStillFailsOnUnobservedGraphs)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Small.json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    // A filter explains a graph that never ran. It does not explain a graph that
+    // ran, reached the engines, and came back with nothing.
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 2, 0, 10, true), log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "unobserved graph(s) were left as-is"));
+}
+
+TEST(TestSupportClaimAuthoring, NarrowedSelectionStillFailsOnWriteErrors)
+{
+    const ScopedDirectory dir = makeDir("test_authoring_");
+    const auto bundlePath = dir.path() / "Corrupt.json";
+    const auto sidecarPath = dir.path() / "Corrupt.support.json";
+    std::ofstream(sidecarPath) << "not valid json";
+
+    const std::vector<ObservedGraphSupport> observations = {
+        singleGraphObservation(bundlePath, "MIOPEN_ENGINE", "gfx942", "linux", true),
+    };
+
+    std::ostringstream log;
+    const auto result = authorSupportClaims(observations, authoringInputs(1, 0, 0, 1, true), log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_FALSE(result.writeSummary.errors.empty());
+}
+
+TEST(TestSupportClaimAuthoring, NarrowedSelectionStillFailsWhenNothingWasObserved)
+{
+    std::ostringstream log;
+    const std::vector<ObservedGraphSupport> observations;
+
+    // A filter that selected only bundles this arch skips writes nothing. The user
+    // asked for claims and got none, which is worth an exit code whatever the cause.
+    const auto result = authorSupportClaims(observations, authoringInputs(0, 0, 3, 3, true), log);
+
+    EXPECT_TRUE(result.shouldFail);
+    EXPECT_TRUE(logContains(log, "no graphs were observed"));
+}
+
+// ---------------------------------------------------------------------------
+// selectionIsNarrowed: the rule, pinned without touching process-wide state
+// ---------------------------------------------------------------------------
+
+TEST(TestSelectionNarrowing, UniversalFilterIsNotNarrowing)
+{
+    EXPECT_FALSE(selectionIsNarrowed("*", false));
+}
+
+TEST(TestSelectionNarrowing, AnyOtherFilterIsNarrowing)
+{
+    EXPECT_TRUE(selectionIsNarrowed("Foo*", false));
+    EXPECT_TRUE(selectionIsNarrowed("-Bar*", false));
+    // Selects everything in practice, but is called narrowed anyway: the cost of
+    // guessing wrong here is one suppressed check, and the cost of guessing wrong
+    // the other way is a correct run that exits 1.
+    EXPECT_TRUE(selectionIsNarrowed("*.*", false));
+}
+
+TEST(TestSelectionNarrowing, EmptyFilterIsNarrowing)
+{
+    EXPECT_TRUE(selectionIsNarrowed("", false));
+}
+
+TEST(TestSelectionNarrowing, ShardingNarrowsEvenUnderTheUniversalFilter)
+{
+    // A shard split drops tests exactly like a filter and leaves the filter string
+    // at its default, so reading the filter alone would miss it.
+    EXPECT_TRUE(selectionIsNarrowed("*", true));
+}
+
+TEST(TestSelectionNarrowing, ProcessSelectionIsReadFromTheGTestFlag)
+{
+    // Only the true direction is asserted against the live flag: whether an
+    // unfiltered run reports false depends on how this binary was invoked, and
+    // ShardingNarrowsEvenUnderTheUniversalFilter already pins the false direction
+    // of the rule itself.
+    const std::string savedFilter = GTEST_FLAG_GET(filter);
+    GTEST_FLAG_SET(filter, "Some.Specific.Test");
+
+    const bool narrowed = selectionWasNarrowed();
+
+    GTEST_FLAG_SET(filter, savedFilter);
+
+    EXPECT_TRUE(narrowed);
 }
 
 // NOLINTEND(readability-identifier-naming)

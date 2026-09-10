@@ -1,15 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "SupportClaimTestUtils.hpp"
 #include "harness/bundle/GraphSession.hpp"
@@ -19,8 +24,10 @@
 #include "harness/bundle/SupportObservationLog.hpp"
 
 using hipdnn_frontend::ErrorCode;
+using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
 using namespace hipdnn_integration_tests::bundle::testing_support;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -154,6 +161,148 @@ TEST_F(TestSupportObservationLogAccounting, ObservedAndUnobservedGraphsAreCounte
     EXPECT_EQ(log.graphsObserved(), 1u);
     EXPECT_EQ(log.graphsUnobserved(), 2u);
     EXPECT_EQ(log.all().size(), 2u);
+}
+
+// A graph skipped in SetUp never reaches recordGraph(), so it must not land in
+// either observation bucket -- authorSupportClaims() subtracts all three from the
+// registered count and would double-count it.
+TEST_F(TestSupportObservationLogAccounting, SkipsBeforeObservationAreCountedApartFromObservations)
+{
+    auto& log = SupportObservationLog::get();
+    log.recordGraph(
+        {test_utils::singleGraphObservation("dir/good.json", "ENGINE_A", "gfx942", "linux", true)});
+    log.recordSkipBeforeObservation();
+    log.recordSkipBeforeObservation();
+
+    EXPECT_EQ(log.graphsSkippedBeforeObservation(), 2u);
+    EXPECT_EQ(log.graphsObserved(), 1u);
+    EXPECT_EQ(log.graphsUnobserved(), 0u);
+    EXPECT_EQ(log.all().size(), 1u);
+}
+
+TEST_F(TestSupportObservationLogAccounting, ResetClearsTheSkipCount)
+{
+    auto& log = SupportObservationLog::get();
+    log.recordSkipBeforeObservation();
+    ASSERT_EQ(log.graphsSkippedBeforeObservation(), 1u);
+
+    log.reset();
+
+    EXPECT_EQ(log.graphsSkippedBeforeObservation(), 0u);
+}
+
+// Every SetUp() path that returns before observeSupportOnly() runs has to tell the
+// log, or authorSupportClaims() sees the shortfall and calls a correct run a bug.
+//
+// Three gaps this fixture does not close, none of them fixable here:
+//
+//   - The [[test_skips]] path is untestable. checkTomlSkip() looks up the *unit
+//     test's own* name in a TestConfig that ensureTestConfigInitialized() built from
+//     defaults, and TestConfig::initialize() throws on a second call, so no test can
+//     supply a skip list. The site is one line identical to the three covered below,
+//     which is why all five route through the same helper.
+//   - The no-device path is untestable. It only runs under a DEVICE policy, where the
+//     outcome depends on whether the build machine has a GPU.
+//   - Nothing here can key on ::testing::Test::IsSkipped(). driveHarness() installs a
+//     ScopedFakeTestPartResultReporter(INTERCEPT_ALL_THREADS, ...), which diverts
+//     dispositions away from the real TestResult, so IsSkipped() stays false. That is
+//     why the counter is bumped by an explicit call at each site rather than by an
+//     RAII object in SetUp() or a TearDown() hook -- either would be invisible here.
+class TestSkipsBeforeObservation : public ::testing::Test
+{
+protected:
+    std::optional<ScopedDirectory> _scopedDir;
+    std::filesystem::path _tempDir;
+
+    void SetUp() override
+    {
+        ensureTestConfigInitialized();
+        _scopedDir.emplace(scratch::makeDir("skips_before_observation_"));
+        _tempDir = _scopedDir->path();
+        SupportObservationLog::get().reset();
+    }
+
+    void TearDown() override
+    {
+        SupportObservationLog::get().reset();
+    }
+
+    std::shared_ptr<IntegrationTestBundle> bundle() const
+    {
+        return fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    }
+};
+
+TEST_F(TestSkipsBeforeObservation, ArchGuardSkipIsCounted)
+{
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
+
+    auto guarded = bundle();
+    guarded->metadata.gpuArchitecture = "gfx1100"; // hostPolicy() runs gfx942
+    harness.setBundle(guarded, _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    ASSERT_TRUE(anySkipped(results));
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
+    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 0u);
+    EXPECT_EQ(SupportObservationLog::get().graphsUnobserved(), 0u);
+}
+
+TEST_F(TestSkipsBeforeObservation, VramGuardSkipIsCounted)
+{
+    // checkVramRequirement() is inert while deviceVramMb is hostPolicy()'s 0 -- an
+    // unknown device size cannot be too small -- so the guard has to be given a real
+    // number before it will fire.
+    auto policy = hostPolicy();
+    policy.deviceVramMb = 1024;
+
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(policy), ENGINE_A);
+
+    auto guarded = bundle();
+    guarded->metadata.minimumVramMb = 16000;
+    harness.setBundle(guarded, _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    ASSERT_TRUE(anySkipped(results));
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
+    EXPECT_EQ(SupportObservationLog::get().graphsObserved(), 0u);
+    EXPECT_EQ(SupportObservationLog::get().graphsUnobserved(), 0u);
+}
+
+// Harness wiring, not policy: the counter records that a reason was filed, not that
+// the reason was a good one. Left uncounted it would read as a vanished bundle.
+TEST_F(TestSkipsBeforeObservation, NullBundleSkipIsCounted)
+{
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
+    harness.setBundle(nullptr, _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    ASSERT_TRUE(anySkipped(results));
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 1u);
+}
+
+// The other direction: a SetUp() that runs to the end files nothing, so an ordinary
+// run's residue is not quietly padded with skips that never happened.
+TEST_F(TestSkipsBeforeObservation, SetUpThatCompletesCountsNothing)
+{
+    HarnessMocks mocks;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(hostPolicy()), ENGINE_A);
+    harness.setBundle(bundle(), _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_FALSE(anySkipped(results));
+    EXPECT_EQ(SupportObservationLog::get().graphsSkippedBeforeObservation(), 0u);
 }
 
 } // namespace

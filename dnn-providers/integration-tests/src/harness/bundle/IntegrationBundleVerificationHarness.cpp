@@ -48,11 +48,13 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
     if(auto reason = checkVramRequirement(_bundle->metadata, _deps.policy.deviceVramMb))
     {
+        noteSkipBeforeObservation();
         GTEST_SKIP() << *reason;
     }
 
     if(auto reason = checkArchCompatibility(_bundle->metadata, _deps.policy.arch))
     {
+        noteSkipBeforeObservation();
         GTEST_SKIP() << *reason;
     }
 }
