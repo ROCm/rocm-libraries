@@ -255,3 +255,102 @@ def test_assign_derived_parameters_rerun(real_state, isa_info_map, assembler, sn
             "EnableF32XdlMathOp", "UseF32XEmulation", "NumThreads",
             "MacroTile0", "MacroTile1", "DepthU"]
     assert {k: real_state.get(k) for k in keys} == snapshot
+
+
+@pytest.mark.parametrize("grvw", [16, 32])
+def test_set_grvw_accepts_wide_members(grvw):
+    state = _grvw_state()
+    assert Solution.setGlobalReadVectorWidth(
+        state, "A", totalVectors=512, grvw=grvw, printRejectionReason=False
+    ) is True
+    assert state["GlobalReadVectorWidthA"] == grvw
+
+
+@pytest.mark.parametrize(
+    "tc,dtype,sparse,expected",
+    [
+        ("A", "Float4", 0, 2),
+        ("A", "Float6", 0, 4),
+        ("A", "Half", 1, 4),
+        ("A", "Half", 0, 1),
+        ("B", "Half", 2, 4),
+        ("B", "Half", 1, 1),
+    ],
+)
+def test_set_grvw_tdm_dtype_and_sparse_rules(tc, dtype, sparse, expected):
+    state = {
+        "UseSubtileImpl": False,
+        "TDMInst": 3,
+        "NumThreads": 256,
+        "ProblemType": {"DataType" + tc: DataType(dtype), "Sparse": sparse},
+    }
+    assert Solution.setGlobalReadVectorWidth(
+        state, tc, totalVectors=512, grvw=4, printRejectionReason=False
+    ) is True
+    assert state["GlobalReadVectorWidth" + tc] == expected
+
+
+def _classic_tile_state(tlu, coalesced=2, macro_tile=127):
+    return {
+        "WaveSeparateGlobalReadA": 0,
+        "NumThreads": 256,
+        "WavefrontSize": 64,
+        "enableGLTrA": 0,
+        "NumLoadsCoalescedA": coalesced,
+        "DirectToVgprA": 0,
+        "ProblemType": {"TLUA": tlu},
+        "MIWaveTileA": 1,
+        "GlobalReadVectorWidthA": 4,
+        "MatrixInstK": 1,
+        "LocalSplitU": 1,
+        "MIInputPerThread": 1,
+        "NumLoadsA": 4,
+        "UseGeneralizedNLCOneA": False,
+        "MacroTileA": macro_tile,
+    }
+
+
+@pytest.mark.parametrize(
+    "tlu,expected",
+    [
+        (True, (63, 9)),
+        (False, (9, 63)),
+    ],
+)
+def test_set_global_load_tile_dim_classic_orients_axes(tlu, expected):
+    state = _classic_tile_state(tlu)
+    assert Solution.setGlobalLoadTileDimClassic(
+        state, "A", 0, 8, 8, 17, False
+    ) is True
+    assert (state["LSCA"], state["LSPA"]) == expected
+    assert state["NumLoadsPerpendicularA"] == 2
+
+
+def test_set_global_load_tile_dim_classic_rejects_excess_coalescing():
+    state = _classic_tile_state(True, coalesced=8, macro_tile=128)
+    assert Solution.setGlobalLoadTileDimClassic(
+        state, "A", 0, 8, 8, 16, False
+    ) is False
+    assert state["Valid"] is False
+
+
+@pytest.mark.parametrize(
+    "cluster_dim,expected",
+    [([1, 1], False), ([2, 1], True)],
+)
+def test_problem_independent_derivation_sets_multicast(
+    real_state, isa_info_map, cluster_dim, expected
+):
+    real_state["AssignedProblemIndependentDerivedParameters"] = False
+    real_state["ClusterDim"] = cluster_dim
+    Solution.assignProblemIndependentDerivedParameters(real_state, False, isa_info_map)
+    assert real_state["Multicast"] is expected
+
+
+def test_problem_independent_derivation_enables_f32x_emulation(real_state, isa_info_map):
+    real_state["AssignedProblemIndependentDerivedParameters"] = False
+    real_state["UseF32XEmulation"] = True
+    Solution.assignProblemIndependentDerivedParameters(real_state, False, isa_info_map)
+    assert real_state["UseDirect32XEmulation"] is True
+    assert real_state["UseMFMAF32XEmulation"] is True
+    assert real_state["UseDot2F32XEmulation"] is False
