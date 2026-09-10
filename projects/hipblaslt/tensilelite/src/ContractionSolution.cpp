@@ -4646,10 +4646,6 @@ namespace TensileLite
         const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                           ? streamK5EffectiveDynamic(problem, hardware)
                                           : false;
-        const bool dynamicQueuePath
-            = (sizeMapping.streamK == 4)
-              || (sizeMapping.streamK == 5 && effectiveDynamic);
-
         if(sizeMapping.streamK == 4)
             sk.reduction = origami::reduction_t::tree;
         else if(sizeMapping.streamK == 5)
@@ -4676,18 +4672,11 @@ namespace TensileLite
            && (sk.reduction == origami::reduction_t::parallel
                || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
         {
+            // The workspace holds the partial tiles only. The per-XCD work-queue
+            // counters live at the base of the flag buffer (AddressFlags), not
+            // here, so they need no room in it. Same expression as
+            // requiredWorkspaceSize(), which is what the caller allocated from.
             size_t idealWorkspace = partialTileSize(sk.grid);
-            // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-            // sizes like standalone SK3. The region is sized as (per-queue
-            // stride) * (baked per-XCD queue count), both sourced from origami:
-            // the stride is the L2 cache-line size (get_default_cache_line_bytes,
-            // 128 B for gfx942/gfx950) so each counter owns its line (no false
-            // sharing), and the queue count is the per-arch XCD count. The
-            // acceptance guard requires runtime NUM_XCD == baked, so this equals
-            // cacheLineBytes * NUM_XCD for every device that reaches here.
-            if(dynamicQueuePath)
-                idealWorkspace
-                    += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
