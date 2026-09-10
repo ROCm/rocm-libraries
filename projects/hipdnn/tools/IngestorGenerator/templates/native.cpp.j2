@@ -40,7 +40,9 @@ namespace
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "{{ config.graph_match_symbol }}";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "{{ config.kernel_match_symbol }}";
+{% if config.engine.has_heuristic %}
 constexpr std::string_view SCORE_SYMBOL = "{{ config.score_symbol }}";
+{% endif %}
 constexpr std::string_view DISPATCH_SYMBOL = "{{ config.dispatch_symbol }}";
 {% if config.is_multi_pack %}
 {% for pack in config.packs %}
@@ -105,6 +107,7 @@ bool kernelMatches(const MatchContext& /*context*/,
     return false;
 }
 
+{% if config.engine.has_heuristic %}
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& /*kernel*/)
@@ -112,6 +115,7 @@ double scoreKernel(const MatchContext& /*context*/,
     // TODO - FILL THIS OUT: a stand-in for a trained model.
     return 0.0;
 }
+{% endif %}
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -204,7 +208,9 @@ void {{ config.register_symbols_fn }}(SymbolScope<Handle>& scope)
 {% endfor %}
 {% endif %}
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
+{% if config.engine.has_heuristic %}
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
+{% endif %}
     scope.add(std::string(DISPATCH_SYMBOL), &{{ config.engine.camel_name }}DispatchHandler());
 }
 

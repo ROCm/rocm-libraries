@@ -206,7 +206,7 @@ _GOOD_STUB = """
 def test_adapter_import_build_capture(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB)
     name, data, seen = _patch_compiler(monkeypatch)
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         src, "build_stub", {"n": 3, "label": "y"}, ARCH, tmp_path / "co"
     )
     assert symbol == name
@@ -223,7 +223,7 @@ def test_adapter_source_dotted_derivation(tmp_path, monkeypatch):
     # source path with a nested folder resolves via the derived dotted module.
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg2", sub="deep", mod="k")
     _patch_compiler(monkeypatch)
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
     )
     assert symbol == "stub_symbol"
@@ -511,7 +511,7 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
         build_attention_dense,
     )
 
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         rocke_ukd.source,
         rocke_ukd.builder,
         dict(rocke_ukd.spec),

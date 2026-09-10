@@ -17,7 +17,17 @@ import json
 
 import pytest
 
-from codegen.generator import build_kdp, build_ued, mint_ids
+from codegen.generator import (
+    _dedup_key,
+    build_kdp,
+    build_kdp_documents,
+    build_kmd,
+    build_ued,
+    emitted_inventory,
+    mint_ids,
+)
+from codegen.models import KmdField
+from tests.helpers import make_kernel, make_minimal_config, make_pack
 
 
 class TestRequiredTrapAssertions:
@@ -473,6 +483,7 @@ class TestAllowListedKeys:
         "metadata",
         "priority",
         "arch",
+        "provenance",
     }
     _KERNEL_SOURCE_KEYS = {
         "kind",
@@ -640,3 +651,438 @@ class TestFragmentsNameRealFiles:
         }
         listed = set(self._fragment_descriptor_paths(tmp_path))
         assert on_disk == listed
+
+
+class TestEngineSdkVersion:
+    """Every UED states the SDK version its engine was written against.
+
+    The runtime parses ``sdk_version`` onto ``EngineDescriptor::sdkVersion`` and
+    ``GenericPlanBuilder::understandsGraph()`` gates on it at match time. A bundle
+    that omits the key is matched against whatever baseline the loader carries, so
+    a configured value that never reached the descriptor changes which graphs the
+    engine admits -- with nothing anywhere saying so.
+    """
+
+    def test_a_nonbaseline_configured_version_reaches_the_ued(self, scale_add_config):
+        import copy
+
+        config = copy.deepcopy(scale_add_config)
+        config.engine.sdk_version = "1.2.0"
+        assert build_ued(config, mint_ids(config))["sdk_version"] == "1.2.0"
+
+    def test_the_baseline_version_is_emitted_rather_than_omitted(
+        self, scale_add_config
+    ):
+        """The default is a STATED default, not an absence.
+
+        Omitting it at ``1.0.0`` would leave the loader substituting its own
+        baseline, so a later change to that baseline would silently re-target every
+        bundle already shipped -- and only for the engines whose author never
+        thought to state a version.
+        """
+        import copy
+
+        config = copy.deepcopy(scale_add_config)
+        config.engine.sdk_version = "1.0.0"
+        ued = build_ued(config, mint_ids(config))
+        assert "sdk_version" in ued
+        assert ued["sdk_version"] == "1.0.0"
+
+
+class TestSpecializationContractEmission:
+    """Every UKD carries the declaration a later check verifies it against.
+
+    The bundle is checked on a machine that does not have the rocKE that compiled
+    it. The contract riding on the descriptor is the whole input to that check:
+    which metadata fields the compiler consumed, how each is read back off the
+    builder object, and which are the matcher's alone.
+    """
+
+    @staticmethod
+    def _consumers(kdp):
+        return [
+            k["provenance"]["specialization_contract"] for k in kdp["kernelDescriptors"]
+        ]
+
+    def test_the_entry_carries_the_minted_engine_and_kmd_ids(self, scale_add_config):
+        """Ids are threaded from the one mint, never re-derived.
+
+        A re-derived id points at whatever engine shares a name, and the ids are
+        random precisely because names guarantee nothing.
+        """
+        ids = mint_ids(scale_add_config)
+        kdp = build_kdp(scale_add_config, scale_add_config.packs[0], ids)
+        for contract in self._consumers(kdp):
+            assert contract["schema_version"] == 1
+            assert len(contract["consumers"]) == 1
+            consumer = contract["consumers"][0]
+            assert consumer["engine_id"] == ids["ued"]
+            assert consumer["kmd_id"] == ids["kmd"]
+
+    def test_the_entry_carries_exactly_the_six_contract_keys(self, scale_add_config):
+        """The consumer of this data rejects a missing OR an unknown key, so an
+        extra one is as fatal as an absent one."""
+        kdp = build_kdp(
+            scale_add_config, scale_add_config.packs[0], mint_ids(scale_add_config)
+        )
+        for contract in self._consumers(kdp):
+            assert set(contract["consumers"][0]) == {
+                "engine_id",
+                "kmd_id",
+                "metadata_fields",
+                "matcher_only_fields",
+                "bindings",
+                "vocabulary",
+            }
+
+    def test_a_direct_load_declaration_emits_its_matcher_only_partition(self):
+        """The non-compiled path declares its fields rather than staying silent."""
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size", "dtype"],
+                "bindings": {},
+                "vocabulary": {},
+            }
+        )
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        consumer = self._consumers(kdp)[0]["consumers"][0]
+        assert consumer["metadata_fields"] == []
+        assert sorted(consumer["matcher_only_fields"]) == ["block_size", "dtype"]
+
+    @pytest.mark.parametrize(
+        "dialect,kind",
+        [("packaged", "rocke"), ("direct_load", "embedded_source")],
+    )
+    def test_a_config_with_no_declaration_refuses_to_emit(self, dialect, kind):
+        """Silence is not a waiver, on either path.
+
+        An engine emitting descriptors with no declaration ships UKDs that cannot
+        be checked against the builder they were compiled from -- and on the
+        receiving machine there is no builder left to ask. The rocKE row is the one
+        with a real obligation to waive; the direct-load row is there because a
+        gate that only fires on the dialect an author is already careful about is
+        the gate that never fires.
+        """
+        config = make_minimal_config(
+            dialect=dialect,
+            kernel_source_kind=kind,
+            packs=[make_pack(arch=["gfx942"])],
+            specialization={},
+        )
+        with pytest.raises(ValueError, match="specialization"):
+            build_kdp(config, config.packs[0], mint_ids(config))
+
+    def test_the_emitted_entry_satisfies_the_packagers_own_validator(
+        self, scale_add_config
+    ):
+        """The cross-check: the consumer of this data validates it exactly.
+
+        Asserting the shape here and hoping it matches ``hkp_pack`` is how the two
+        drift. Import the real validator when the provider tree is available and
+        hand it what actually ships.
+        """
+        agreement = _import_agreement()
+        if agreement is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
+        ids = mint_ids(scale_add_config)
+        kmd = build_kmd(scale_add_config, ids)
+        kdp = build_kdp(scale_add_config, scale_add_config.packs[0], ids)
+        for kernel in kdp["kernelDescriptors"]:
+            consumers = agreement.contracts(kernel, {ids["kmd"]: kmd})
+            assert len(consumers) == 1
+            agreement.validate_consumer(consumers[0], kmd)
+
+
+def _import_agreement():
+    """``hkp_pack.agreement``, or ``None`` where the provider tree is absent.
+
+    The generator deliberately does not depend on the packager -- descriptor
+    generation must not require the kernel toolchain -- so this is a test-only
+    bridge to the module that consumes what the generator emits.
+    """
+    import importlib
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[5]
+    package = root / "dnn-providers/hip-kernel-provider/descriptor-packaging/python"
+    if not (package / "hkp_pack" / "agreement.py").exists():
+        return None
+    if str(package) not in sys.path:
+        sys.path.insert(0, str(package))
+    try:
+        return importlib.import_module("hkp_pack.agreement")
+    except ImportError:
+        return None
+
+
+class TestCatalogIdentity:
+    """Identity is the COMPLETED tuple plus the devices it covers.
+
+    The loader substitutes each absent field's KMD ``default_value`` before
+    comparing, and compares per device. So the emitted JSON is not the catalog key:
+    two documents that differ can be one entry, and two that agree can be two.
+    Getting this wrong does not drop a descriptor -- a duplicate tuple drops the
+    whole engine at load.
+    """
+
+    @staticmethod
+    def _twin_config(**config_overrides):
+        """Two kernels, same source, whose metadata the caller sets."""
+        left = make_kernel(name="twin.left")
+        right = make_kernel(name="twin.right")
+        pack = make_pack(kernels=[left, right], arch=["gfx942"])
+        config = make_minimal_config(packs=[pack], **config_overrides)
+        return config, pack, left, right
+
+    def test_equal_tuples_on_disjoint_arches_both_survive(self):
+        """Two devices, two binaries. Dropping either leaves the engine matching
+        nothing on that device -- a coverage hole no count reconciles."""
+        config, pack, left, right = self._twin_config()
+        pack.arch = ["gfx942", "gfx950"]
+        left.arch = ["gfx942"]
+        right.arch = ["gfx950"]
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        assert [k["name"] for k in kdp["kernelDescriptors"]] == [
+            "twin.left",
+            "twin.right",
+        ]
+
+    def test_equal_tuples_on_overlapping_arches_are_refused_naming_both(self):
+        """Same tuple, same device, DIFFERENT binary.
+
+        Dropping the second discards a binary somebody deliberately built; keeping
+        both ships a duplicate catalog tuple that drops the engine at load. Neither
+        is a defensible silent outcome, so the generator refuses and names both.
+        """
+        config, pack, left, right = self._twin_config()
+        # Same matcher-visible metadata, different compiled source.
+        right.kernel_source.entry_point = "ScaleAddOther"
+
+        with pytest.raises(ValueError) as excinfo:
+            build_kdp(config, pack, mint_ids(config))
+        message = str(excinfo.value)
+        assert "twin.left" in message and "twin.right" in message
+
+    def test_one_candidate_on_unequal_overlapping_arches_names_the_coverage(self):
+        """Same tuple, same device, SAME binary -- and unequal coverage.
+
+        Refusing is right: the tuple appears twice on the shared device. But there
+        is no kernel_source or priority difference for the author to find, so a
+        diagnostic asserting one sends them hunting for a difference that does not
+        exist. The coverage is what differs and the coverage is what it must name.
+        """
+        config, pack, left, right = self._twin_config()
+        pack.arch = ["gfx942", "gfx950"]
+        left.arch = ["gfx942"]
+        right.arch = ["gfx942", "gfx950"]
+
+        with pytest.raises(ValueError) as excinfo:
+            build_kdp(config, pack, mint_ids(config))
+        message = str(excinfo.value)
+        assert "SAME candidate" in message
+        assert "kernel_source/priority differ" not in message
+
+    def test_a_wildcard_arch_overlapping_a_concrete_one_is_refused(self):
+        """An absent ``arch`` is the loader's wildcard, not "no coverage".
+
+        Treated as no coverage, a wildcard candidate sits happily beside a concrete
+        one holding the same tuple -- and collides on precisely the device the
+        concrete one names.
+        """
+        config, pack, left, right = self._twin_config()
+        pack.arch = []
+        left.arch = []  # every device
+        right.arch = ["gfx942"]
+        right.kernel_source.entry_point = "ScaleAddOther"
+
+        with pytest.raises(ValueError, match="overlapping architectures"):
+            build_kdp(config, pack, mint_ids(config))
+
+    def test_an_omitted_field_and_the_kmd_default_are_one_key(self):
+        """The collision that only appears after the loader completes the tuple.
+
+        One tuple omits an optional field; the other states it at exactly the KMD
+        default. The documents differ, the catalog keys must not -- the loader
+        substitutes the default before comparing, so those are one entry to it.
+
+        Keyed on the identity function rather than on an emitted pair, because
+        `_check_metadata_resolved` refuses to EMIT a descriptor that omits a
+        defaulted field at all: an omission that reached a descriptor would already
+        have been rejected one layer up. What has to hold here is that the key
+        cannot be fooled if it ever did.
+        """
+        config, _pack, _left, _right = self._twin_config()
+        omitted = _dedup_key({"dtype": "FLOAT"}, config)
+        stated = _dedup_key({"dtype": "FLOAT", "block_size": 64}, config)
+        assert omitted == stated
+        # The control: a value that is NOT the default stays a different key.
+        assert _dedup_key({"dtype": "FLOAT", "block_size": 128}, config) != stated
+
+    def test_an_int_and_a_float_spelling_of_one_float_value_are_one_entry(self):
+        """``1`` and ``1.0`` in a FLOAT field are one catalog entry.
+
+        They compare equal in Python and serialize to different bytes, so an
+        identity keyed on the emitted document sees two entries the runtime cannot
+        tell apart -- which is a duplicate tuple, which drops the engine.
+        """
+        config, pack, left, right = self._twin_config(
+            kmd_fields=[
+                KmdField(name="scale", type="float", default_value=1.0),
+                KmdField(name="dtype", type="string"),
+            ]
+        )
+        for kernel, spelling in ((left, 1), (right, 1.0)):
+            kernel.metadata = {"scale": spelling, "dtype": "FLOAT"}
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        assert [k["name"] for k in kdp["kernelDescriptors"]] == ["twin.left"]
+        assert kdp["kernelDescriptors"][0]["metadata"]["scale"] == 1.0
+
+    def test_a_bool_typed_field_keeps_its_boolean_spelling(self):
+        """A BOOL field's matcher holds ``true``, not ``1``.
+
+        Projecting every boolean to 0/1 destroys that: the descriptor then states
+        an integer where the matcher compares a boolean, and declines every graph
+        while the engine still loads and every count still reconciles.
+        """
+        config, pack, left, right = self._twin_config(
+            kmd_fields=[
+                KmdField(name="causal", type="bool", default_value=False),
+                KmdField(name="dtype", type="string"),
+            ]
+        )
+        pack.kernels = [left]
+        left.metadata = {"dtype": "FLOAT"}
+        left.kernel_source.spec = {"causal": True}
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        emitted = kdp["kernelDescriptors"][0]["metadata"]["causal"]
+        assert emitted is True, f"a bool field shipped {emitted!r}"
+
+    def test_a_builder_boolean_targeting_an_int_field_ships_as_an_integer(self):
+        """The converse, one field type over.
+
+        A builder spec spells a flag ``true`` while an ``int``-typed KMD field
+        carries ``1``; the loader compares an int alternative, so the boolean
+        matches nothing. Without both halves, a guard that keeps booleans is
+        indistinguishable from one that never converts.
+        """
+        config, pack, left, right = self._twin_config(
+            kmd_fields=[
+                KmdField(name="causal", type="int", default_value=0),
+                KmdField(name="dtype", type="string"),
+            ]
+        )
+        pack.kernels = [left]
+        left.metadata = {"dtype": "FLOAT"}
+        left.kernel_source.spec = {"causal": True}
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        emitted = kdp["kernelDescriptors"][0]["metadata"]["causal"]
+        assert emitted == 1 and emitted is not True, f"an int field shipped {emitted!r}"
+
+
+class TestEmittedInventory:
+    """The template context's view of what SHIPS, not of what was authored.
+
+    A census rendered from the authored count reports a shortfall on every run of
+    any config whose generation expressions overlap, and teaches its reader to
+    ignore it.
+    """
+
+    def test_the_count_is_the_deduplicated_one_not_the_authored_one(self):
+        config = make_minimal_config(
+            packs=[
+                make_pack(
+                    kernels=[
+                        make_kernel(name="expr_a"),
+                        make_kernel(name="expr_b"),  # same metadata, second expression
+                    ],
+                    arch=["gfx942"],
+                )
+            ]
+        )
+        ids = mint_ids(config)
+        inventory = emitted_inventory(config, build_kdp_documents(config, ids))
+        assert inventory["total_descriptor_count"] == 1
+        assert inventory["arches"]["gfx942"]["descriptor_count"] == 1
+
+    def test_multi_arch_entries_are_disjoint_and_union_to_the_emitted_set(self):
+        config = make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="rocke",
+            packs=[
+                make_pack(
+                    name="a",
+                    arch=["gfx942"],
+                    discriminator="a",
+                    kernels=[make_kernel(name="on_942")],
+                ),
+                make_pack(
+                    name="b",
+                    arch=["gfx950"],
+                    discriminator="b",
+                    kernels=[
+                        make_kernel(
+                            name="on_950",
+                            metadata={"block_size": 128, "dtype": "FLOAT"},
+                        )
+                    ],
+                ),
+            ],
+        )
+        ids = mint_ids(config)
+        inventory = emitted_inventory(config, build_kdp_documents(config, ids))
+        arches = inventory["arches"]
+        assert set(arches) == {"gfx942", "gfx950"}
+        left = set(arches["gfx942"]["descriptor_names"])
+        right = set(arches["gfx950"]["descriptor_names"])
+        assert not left & right
+        assert left | right == {"on_942", "on_950"}
+        assert inventory["total_descriptor_count"] == 2
+
+    def test_the_packaged_dialect_reports_the_kind_that_actually_ships(self):
+        """hkp_pack lowers ``rocke``/``hip`` to ``kpack`` before the loader reads
+        it, so a census expecting the AUTHORED kind expects one that never
+        arrives."""
+        config = make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="rocke",
+            packs=[make_pack(arch=["gfx950"])],
+        )
+        ids = mint_ids(config)
+        inventory = emitted_inventory(config, build_kdp_documents(config, ids))
+        assert inventory["source_kind"] == "kpack"
+
+    def test_the_direct_load_dialect_reports_its_authored_kind(self):
+        """The converse: nothing lowers a direct-load bundle, so what it authored
+        is what the loader reads."""
+        config = make_minimal_config()
+        ids = mint_ids(config)
+        inventory = emitted_inventory(config, build_kdp_documents(config, ids))
+        assert inventory["source_kind"] == "embedded_source"
+
+    def test_every_template_receives_the_inventory(self, generator, scale_add_config):
+        """It is exported through the EXISTING context, beside ``config`` and
+        ``ids`` -- not through a manifest file or a second CMake input."""
+        captured = {}
+        original = generator.env.get_template
+
+        class _Recorder:
+            def __init__(self, template):
+                self._template = template
+
+            def render(self, **context):
+                captured.update(context)
+                return self._template.render(**context)
+
+        generator.env.get_template = lambda name: _Recorder(original(name))
+        try:
+            generator._render_template("native.cpp.j2", scale_add_config)
+        finally:
+            generator.env.get_template = original
+        assert "emitted" in captured
+        assert captured["emitted"]["sdk_version"] == scale_add_config.engine.sdk_version

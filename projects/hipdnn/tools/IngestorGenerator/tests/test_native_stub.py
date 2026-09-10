@@ -540,6 +540,36 @@ class TestRealCompile:
             result.returncode == 0
         ), f"emitted matcher-test stub does not parse:\n{result.stderr}"
 
+    @pytest.mark.parametrize("config_name", ["scale_add_config", "binary_ops_config"])
+    def test_matcher_test_stub_declares_no_unused_using(
+        self, generator, request, config_name
+    ):
+        """Every `using` the matcher stub emits must be named by its own body.
+
+        `-fsyntax-only` above cannot see this. The provider compiles its tests
+        under clang-tidy with `misc-unused-using-decls` as an ERROR, so a `using`
+        that only the not-yet-written fixture would have named fails the provider
+        build the first time a generated engine is spliced in -- which is how it
+        was found, and days after generation. The pack template already dodges the
+        sibling trap with `[[maybe_unused]]` on its field constants; nothing was
+        checking this one.
+        """
+        config = request.getfixturevalue(config_name)
+        rendered = generator._render_template(
+            "test_matchers.cpp.j2", config, ids=mint_ids(config)
+        )
+        for line in rendered.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("using ") or not stripped.endswith(";"):
+                continue
+            name = stripped[len("using ") : -1].rsplit("::", 1)[-1]
+            body = rendered.replace(line, "")
+            assert name in body, (
+                f"the emitted matcher stub declares `using ...{name};` and then never "
+                f"names {name}. clang-tidy's misc-unused-using-decls is an error in the "
+                f"provider's test build, so this file cannot compile there."
+            )
+
     def test_multi_pack_stub_compiles(
         self, compile_env, generator, binary_ops_config, tmp_path
     ):

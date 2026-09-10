@@ -246,19 +246,22 @@ compute something wrong, each plan declines the graph up front:
 | varlen sequence lengths | `seq_len_q/kv_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` |
 | ragged tensors | `ragged_offset_tensor_uid` (**tensor**) | `PlanUtils.hpp`, `CHECK_NO_RAGGED_TENSORS` |
 | block-sparse | `block_mask_tensor_uid` (node) | both |
-| sinks | `sink_token_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` only |
+| sinks | `sink_token_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp`, `SdpaFwdPlan.hpp` |
 | dropout, FP8 descale, softmax stats | assorted | both |
 
-**Sinks break the addressing-mode pattern above.** A sink is an extra per-head logit
-in the softmax denominator, not a new indirection the dense q/k/v-plus-strides struct
-cannot express — the CPU reference (`SdpaFwdPlan.hpp`) computes it directly. The GPU
-reference still declines `sink_token_tensor_uid`, grouped with block-sparse in
-`GpuSdpaFwdPlan.hpp`, so an engine verified only against the GPU reference has no
-correctness story for sinks even though the CPU reference now provides one.
+**A sink-bearing graph requires a sink-capable numerical reference.** A sink is an
+extra per-head logit in the softmax denominator, but neither the current CPU
+reference (`SdpaFwdPlan.hpp`) nor the GPU reference (`GpuSdpaFwdPlan.hpp`) supports
+`sink_token_tensor_uid`. Selecting CPU verification does not provide a fallback.
+Use an actually capable, independently verified reference with evidence covering
+the graph's sink semantics, or record the workflow as **BLOCKED**. Unverified
+expected output, including a golden tensor without a capable reference behind it,
+does not satisfy this requirement.
 
 In `auto` mode a declined graph falls through golden → GPU → CPU → **skip**, so a bundle
-for an unsupported feature reports as skipped rather than failing. Check for skips before
-concluding a new engine passed.
+for an unsupported feature reports as skipped rather than failing. A skip is not
+numerical evidence: required unsupported cases block engine acceptance even if
+the remaining cases pass.
 
 **These features are distinct and are easy to conflate.** Paged KV is a block-table
 indirection into a physical cache. Varlen is per-batch *valid lengths* inside a padded
@@ -646,29 +649,30 @@ automatically from `integration-test-bundles/`.
 
 ```bash
 # Find all batchnorm bundle cases
-python3 migration_scripts/find_case.py --op Batchnorm
+python3 migration-scripts/find_case.py --op Batchnorm
 
 # Find cases that have an epsilon input
-python3 migration_scripts/find_case.py --input epsilon
+python3 migration-scripts/find_case.py --input epsilon
 
 # Find cases where epsilon is in [-1,1]
-python3 migration_scripts/find_case.py --input epsilon:-1,1
+python3 migration-scripts/find_case.py --input epsilon:-1,1
 
 # Full detail for a hashed case id
-python3 migration_scripts/find_case.py --id f446b9 --detail
+python3 migration-scripts/find_case.py --id f446b9 --detail
 ```
 
 ### Adding a bundle test
 
 ```bash
-python3 migration_scripts/import_graph.py \
+python3 migration-scripts/import_graph.py \
     --graph new_conv.json \
     --bundle-dir integration-test-bundles/
 ```
 
 The case id is auto-generated and printed to stderr. No manual naming
-needed. See [`migration_scripts/README.md`](migration_scripts/README.md)
+needed. See [`migration-scripts/README.md`](migration-scripts/README.md)
 for the full workflow and tooling reference.
+
 ## Troubleshooting
 
 | Symptom | Fix |

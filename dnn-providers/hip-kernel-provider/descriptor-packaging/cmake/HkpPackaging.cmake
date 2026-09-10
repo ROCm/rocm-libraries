@@ -17,6 +17,11 @@ set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_WHEEL_DIGEST_TOOL "${HKP_PKG_DIR}/tools/hkp_wheel_digest.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
+# The provider's own directory, absolute. The census registration below is DEFERRED to
+# the end of it, so the path has to be one CMake recognizes as a directory it is
+# processing -- a relative `..` would not match.
+get_filename_component(HKP_PROVIDER_DIR "${HKP_PKG_DIR}/.." ABSOLUTE)
+
 # The authored hip-form source root the integration suite's packaged artifact is built
 # from. It lives beside the test that consumes it, not in the product tree: it is a test
 # fixture, so it is staged into the build tree and never installed.
@@ -863,11 +868,38 @@ assertion: an unloadable path silently falls through to the next candidate.")
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}"
                        "${HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP}"
-                       "${_rocke_comgr_lib}")
+                       "${_rocke_comgr_lib}" "${_arches}")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>)
+# hkp_defer_census_registration(<arches>)
+#   Schedule the per-arch census registration for the END of the provider
+#   directory. hip_kernel_provider_tests is created by the provider's
+#   `add_subdirectory(src)`, which runs AFTER this subdirectory, so registering
+#   inline finds no target at all -- which is exactly how the whole registration
+#   sat dead and green while nobody could see it.
+#
+#   Wrapped in EVAL CODE because a deferred CALL's arguments are expanded when the
+#   call RUNS, in the deferred directory's scope, where none of these locals exist.
+#   EVAL bakes today's values into the recorded call as bracket arguments instead.
+# ---------------------------------------------------------------------------
+function(hkp_defer_census_registration arches)
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
+        return()
+    endif()
+    cmake_language(EVAL CODE "
+        cmake_language(DEFER DIRECTORY [[${HKP_PROVIDER_DIR}]]
+            CALL hkp_register_census_tests
+                 [[${Python3_EXECUTABLE}]]
+                 [[${HKP_PKG_DIR}/tools/hkp_census_check.py]]
+                 [[${HIPDNN_DESCRIPTOR_BUILD_DIR}]]
+                 [[${arches}]])
+    ")
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>
+#                    <arches>)
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
@@ -879,8 +911,12 @@ endfunction()
 #   enabled (a tests-only ingestor build configures clean on a bare box; the
 #   compile-dependent tests self-skip via the hipcc/rocke fixtures, and CI
 #   hard-gates them via the REQUIRE_* env vars forwarded below).
+#
+#   `arches` is the configured packaging architecture list, forwarded to the
+#   deferred per-arch census registration so it targets the shards this build
+#   packed rather than whatever device the test machine happens to hold.
 # ---------------------------------------------------------------------------
-function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
+function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib arches)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
@@ -961,57 +997,10 @@ silently stop running.")
         ENVIRONMENT "${_pyenv}"
         ${_disabled})
 
-    # S4: hipdnn_validate_descriptors --native-source cross-checks a pack's descriptor
-    # JSON against the C++ source it dispatches into (dispatch/graph_match/kernel_match/
-    # score symbol names). This is a pure filesystem/JSON/regex check -- no HIP call, no
-    # device -- but the flag was previously exercised only against generator-emitted
-    # synthetic fixtures, never against a real shipped pack, so a typo in any of the four
-    # symbol strings in a real descriptor was invisible to every test that ran.
-    #
-    # One entry per attention_dense pack this repo ships. This branch appends the
-    # gfx942 row to the list the tooling base declares empty. Each row targets
-    # the descriptor tree staged under HIPDNN_DESCRIPTOR_BUILD_DIR for its arch; that
-    # arch's kind: rocke sources are lowered to a loadable kind: kpack tree only when the
-    # arch is in GPU_TARGETS, so a build that did not target the arch never stages one.
-    # The driver script skips (ctest's SKIP_RETURN_CODE, 77) rather than fails in that
-    # case: absence reflects which arches this build configured, not a descriptor defect.
-    #
-    # Gated on the validator target existing (HIPDNN_ENABLE_KERNEL_INGESTOR) and nothing
-    # else -- the per-arch skip is the driver script's job, not configure-time's, since
-    # which arches got packed is a build-time fact HIPDNN_DESCRIPTOR_BUILD_DIR only
-    # resolves once hkp_stage_all()'s custom command has actually run.
-    # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
-    # pack the branch actually ships. The tooling base leaves this empty; this branch
-    # sets the gfx942 pack it integrates, so the table never names a Native.cpp absent
-    # from the checkout. Separators are escaped (`\;`) so each row stays ONE list
-    # element -- unescaped, the rows flatten into loose fields and `list(GET _ns_spec 1)`
-    # reads past the end of a 1-element list.
-    set(HKP_NATIVE_SOURCE_PACKS
-        "gfx942\;gfx942_attention_dense\;hipkernel:Gfx942AttentionDense\;Gfx942AttentionDenseNative.cpp")
-
-    if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
-        set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")
-        foreach(_ns_spec IN LISTS HKP_NATIVE_SOURCE_PACKS)
-            list(GET _ns_spec 0 _ns_arch)
-            list(GET _ns_spec 1 _ns_pack)
-            list(GET _ns_spec 2 _ns_engine)
-            list(GET _ns_spec 3 _ns_native_file)
-            set(_ns_test_name "hip-kernel-provider-hkp-native-source-${_ns_arch}")
-            add_test(
-                NAME ${_ns_test_name}
-                COMMAND "${Python3_EXECUTABLE}"
-                        "${HKP_PKG_DIR}/tools/hkp_native_source_check.py"
-                        --arch "${_ns_arch}"
-                        --root "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_ns_arch}/rocKE/${_ns_pack}"
-                        --validator "$<TARGET_FILE:hipdnn_validate_descriptors>"
-                        --expect-engine "${_ns_engine}"
-                        --native-source "${_ns_native_source_root}/${_ns_native_file}"
-            )
-            set_tests_properties(${_ns_test_name} PROPERTIES
-                SKIP_RETURN_CODE 77
-                LABELS "unit_test;hip-kernel-provider;host")
-        endforeach()
-    endif()
+    # Scheduled, not registered: see hkp_defer_census_registration for why the census
+    # cannot be add_test()'d from this directory. Kept out of the label pass below on
+    # purpose -- the census entries carry their own LABELS and are not pack tests.
+    hkp_defer_census_registration("${arches}")
 
     # Both entries are add_test()'d in this scope just above, so the YAML's
     # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
@@ -1022,4 +1011,82 @@ silently stop running.")
        AND COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
     endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# The emitted-bundle census. Each generated engine ships a GTest suite that
+# reads what actually loaded through discoverDescriptorSets() -- the provider's
+# real typed registration followed by loadValidatedDescriptorSets<Handle>() --
+# and compares the loaded pack/kernel identities, the runtime source kind and the
+# SDK version against the inventory its generation actually emitted. That is the
+# native-implementation check: a pack whose symbols do not register drops its
+# descriptors at load and the census sees them missing.
+#
+# The architecture is supplied EXPLICITLY. `arches` is the configured packaging
+# list (GPU_TARGETS/AMDGPU_TARGETS, normalized by hkp_selected_arches) -- the same
+# list the pack step lowered for -- so one entry is registered per selected arch
+# against that arch's own shard under HIPDNN_DESCRIPTOR_BUILD_DIR. Nothing here
+# probes a device and nothing reads the descriptors to decide what to expect: a
+# bundle cannot be its own expectation, and a host census must not depend on which
+# card is in the machine.
+#
+# Rows are GTest suite names, one per generated engine census spliced into the
+# test binary; the driver requires the filter to select at least one case, because
+# a filter matching nothing is a gtest PASS. EMPTY here by design -- this branch
+# carries the mechanism, not a generated engine -- and each integration appends
+# its own suite name (the generator's cmake_test_sources fragment says so).
+#
+# CALLED DEFERRED, from the end of the provider directory (see hkp_add_packaging),
+# because hip_kernel_provider_tests does not exist while descriptor-packaging is
+# being processed. Everything it needs is therefore passed in rather than read from
+# scope: `python`, `census_tool`, `descriptor_build_dir` and `arches`. Once a suite
+# row exists, a missing target or an empty arch list is a FATAL_ERROR -- the earlier
+# silent `return()` is what kept this registration dead and green.
+# ---------------------------------------------------------------------------
+function(hkp_register_census_tests python census_tool descriptor_build_dir arches)
+    set(HKP_CENSUS_TEST_SUITES)
+
+    if(NOT HKP_CENSUS_TEST_SUITES)
+        return()
+    endif()
+
+    # Past this point a census was DECLARED, so anything missing is a wiring fault, not
+    # a reason to register nothing. Silence here is what let the whole registration sit
+    # dead: it ran before add_subdirectory(src) created the target, took the `NOT TARGET`
+    # branch every time, and reported nothing.
+    if(NOT TARGET hip_kernel_provider_tests)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${HKP_CENSUS_TEST_SUITES}) but "
+            "hip_kernel_provider_tests does not exist, so no census could be "
+            "registered. This function must run after the provider's src/ subdirectory.")
+    endif()
+    if(NOT arches)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${HKP_CENSUS_TEST_SUITES}) but the "
+            "configured packaging architecture list is empty, so no shard exists to "
+            "census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    endif()
+
+    set(_census_filter "")
+    foreach(_suite IN LISTS HKP_CENSUS_TEST_SUITES)
+        if(_census_filter)
+            string(APPEND _census_filter ":")
+        endif()
+        string(APPEND _census_filter "${_suite}.*")
+    endforeach()
+
+    foreach(_census_arch IN LISTS arches)
+        add_test(
+            NAME "hip-kernel-provider-hkp-census-${_census_arch}"
+            COMMAND "${python}"
+                    "${census_tool}"
+                    --arch "${_census_arch}"
+                    --descriptor-root
+                    "${descriptor_build_dir}/${_census_arch}"
+                    --test-binary "$<TARGET_FILE:hip_kernel_provider_tests>"
+                    --gtest-filter "${_census_filter}")
+        set_tests_properties("hip-kernel-provider-hkp-census-${_census_arch}" PROPERTIES
+            LABELS "unit_test;hip-kernel-provider;host")
+    endforeach()
 endfunction()

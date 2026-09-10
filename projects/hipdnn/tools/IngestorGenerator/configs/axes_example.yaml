@@ -82,3 +82,18 @@ packs:
       metadata:
         dtype: BF16
         seqlen_q: 256
+
+# What the COMPILER specialized on. Every field here is written into
+# `kernel_source.spec` -- `dtype` by the pack defaults, `seqlen_q` by the
+# template, `block_n` and `waves_per_eu` by the axes themselves -- so all four are
+# hydrated into the builder's spec dataclass and all four are bound to it.
+specialization:
+  metadata_fields: [dtype, seqlen_q, block_n, waves_per_eu]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    seqlen_q: {field: seqlen_q}
+    block_n: {field: block_n}
+    waves_per_eu: {field: waves_per_eu}
+  vocabulary:
+    dtype: {bf16: BF16}

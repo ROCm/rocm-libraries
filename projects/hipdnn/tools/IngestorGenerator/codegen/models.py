@@ -354,6 +354,7 @@ class IngestorConfig:
     #: staged and installed trees, so it is part of the shipped layout rather
     #: than a scratch detail. Defaults to ``<kind>/<slug>``.
     authored_subpath: str = ""
+    specialization: dict = field(default_factory=dict)
 
     @property
     def is_packaged(self) -> bool:

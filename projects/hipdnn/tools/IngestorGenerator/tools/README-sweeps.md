@@ -1,190 +1,219 @@
-# Running the coverage, correctness and performance sweeps
+# Coverage, correctness and performance sweeps
 
-Everything here needs a machine with the target GPU. Nothing here needs a particular
-cluster, scheduler or site: if you can run `rocminfo` and see your arch, you can run
-all of it.
+[RUNBOOK.md](../../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md) owns the ordered
+create/extend workflow. This page specifies the Python sweep interface, input data,
+measurement protocol and evidence. A sweep requires installed arms and the actual
+target device; it does not replace early feasibility, native host proof or the
+engine-pinned integration tests.
 
-The runbook (`hipdnn-ingestor-engine/RUNBOOK.md`, steps 8e and 9) says *when* to do
-this and what the gates are. This page is the *how*.
+## Invocation and prerequisites
 
-> **Prefer the source projects' own documentation over this page.** It goes stale;
-> theirs does not. For the graph corpora, the CLI and its setup: the
-> `ROCm/dnn-benchmarking` repository and its `docs/`, plus each workload's
-> `MANIFEST.md`. For the kernel library — what the dispatcher decides, how kernels are
-> authored, what its own gates prove and where they have known gaps:
-> `<provider>/rocke/library/dispatch/AGENTS.md`, `rocke/AGENTS.md`,
-> `rocke/KERNEL_AUTHORING.md` and `rocke/TESTING.md`. This page covers only what an
-> *ingestor integration* has to do with them, and the measurement discipline the
-> harness encodes.
+Use the generator venv and absolute paths, independent of the current directory:
 
----
+```text
+<PY> <GEN>/tools/sweep.py --config <absolute-YAML>
+```
 
-## What you need
+`<PY>` is `<GEN>/.venv/bin/python`. Start from
+`configs/sweep-isolation.sweep.yaml.example`, and set paths, identities and counts
+from the actual experiment. The runner reads safe YAML as data; configuration is
+not executable. It accepts argument lists, not command strings or launchers that
+interpret configuration as code. There is no environment interpolation or implicit
+environment configuration.
 
-| | |
+Required prerequisites are the requested GPU on the execution host, a visible
+writable sweep root, readable graph corpora, each current installed provider arm,
+and a working benchmark executable with the selected numerical reference and
+hipDNN bindings. `dnn-benchmark` comes from the dnn-benchmarking project; a provider
+build alone does not establish its installation. Follow that project's setup
+without substituting unrelated plugins or bindings for the integration under test.
+Paths on a login machine's local disk are not necessarily compute-node-visible.
+Use an allocated device job and retain source, artifact, device and job identities.
+
+The device probe has two explicit interfaces:
+
+```text
+<PY> <GEN>/tools/device_probe.py --mode early --arch gfx942 --sweep-root <existing-root>
+<PY> <GEN>/tools/device_probe.py --mode installed --arch gfx942 --sweep-root <existing-root> --install <existing-install>
+```
+
+Early mode has no installation prerequisite and ignores inherited `INSTALL`.
+Installed mode follows installation. Exit 0 covers checks applicable to that mode;
+exit 1 reports device/path/write failure; exit 2 reports invalid invocation. Neither
+mode proves plugin loading, engine dispatch or numerical correctness.
+
+## YAML schema
+
+All filesystem paths are plain strings, absolute or relative to the YAML file's
+directory, never the process working directory. A bare executable name in `argv[0]`
+is resolved through `PATH` and recorded; an executable with path components resolves
+from the config directory. Child processes use the config directory as their cwd.
+
+| Key | Contract |
 |---|---|
-| a machine with the target device | `rocminfo \| grep -m1 -E "Name:\s+gfx"` matches your `$ARCH` |
-| the provider built and installed | `cmake --install $BUILD --prefix $INSTALL` |
-| `dnn-benchmark` on `PATH` | ships with the provider build |
-| graph corpora, staged | one directory per corpus name (below) |
-| a writable path **the device machine can see** | not merely one your shell can see |
+| `sweep_root` | Required existing, execution-host-visible directory |
+| `output_dir` | Required dedicated directory inside `sweep_root`; cannot equal or contain an install or corpus input root |
+| `corpus_dir` | Required existing corpus root; corpus entries still declare their paths explicitly |
+| `arch` | Required exact gfx architecture token |
+| `engine_ued_name` | Required exact installed UED engine name |
+| `engine_name` | Required exact identity in benchmark results, never a prefix or regex; installed baseline discovery must connect it to `engine_ued_name` |
+| `corpora` | Nonempty ordered list of `{name, path, expected_graphs}`; explicit directory path and positive count covering every staged graph |
+| `arms` | Nonempty ordered list of `{name, install_tree, expected_descriptors}`; descriptor count is the positive total of all KDP `kernelDescriptors` entries in the installed tree |
+| `warmup_arm` | Required arm name or explicit `null`; comparative runs use the first/baseline arm |
+| `rounds` | Positive integer; drift-reporting comparisons require at least three |
+| `min_served` | Positive integer no greater than any corpus count, set near the approved served population, not a success-by-one-row default |
+| `exclude_tensors` | Required literal `none` or nonempty list of exact tensor names, compared case-insensitively; a fail-if-present hazard gate, not silent filtering |
+| `benchmark` | `{argv, warmup, iters}`; nonempty string argument list, nonnegative warmup, positive iterations |
+| `correctness` | `{enabled, reference, warmup, iters}`; explicit boolean; when enabled, a nonempty supported reference name, nonnegative warmup and positive iterations |
+| `probe_env` | Optional `null` or string argument list for a directly invoked provenance executable; a declared missing/failing probe is an error |
 
-That last row is the one people get wrong. If the machine that runs is not the machine
-you are typing on, verify the path from *there* before you queue anything expensive —
-a job whose output path is invisible on the compute node dies before your payload runs,
-and the failure does not look like a path problem.
+Arm/corpus names must be unique safe single path components. Unknown or duplicate
+keys, wrong types (including booleans as counts), duplicate names, missing required
+paths/counts/identities/exclusions, invalid warmup selection, unreadable or malformed
+graphs and input/output overlap are invalid configuration, not partial measurement.
+Metacharacters in a YAML string remain data and never execute.
 
----
+A configuration's measurement controls can look like this; the complete example
+also supplies the experiment-specific roots, ordered arms/corpora and exact counts:
 
-## The three questions, and why they are not one
-
-A sweep is one run and three results. Conflating them is how a variant set ships that
-is fast on the shapes it covers and covers almost nothing.
-
-| | question | how | fails when |
-|---|---|---|---|
-| **coverage** | which graphs do we serve, and is every decline defensible? | served/declined counts, reconciled against rocKE | rocKE serves something you decline |
-| **correctness** | are the ones we serve *right*? | `--validate` against an independent reference | any mismatch, or an unwritten output |
-| **performance** | how does the shipped package land? | timings, split by corpus | you cannot say which population a number describes |
-
----
-
-## Corpora: two of them, measured separately
-
-**Never merge these into one number.** A geomean over a mixed corpus reports one
-population's result as everyone's.
-
-1. **What real callers send.** The `ROCm/dnn-benchmarking` repository's workload
-   graphs. Its own `docs/` explain the dvc pull; each workload carries a `MANIFEST.md`
-   describing provenance. A `microbench/` path is a provenance label, **not** a
-   synthetic-data warning — check the manifest before discarding a suite, because one
-   dismissed on its directory name alone turned out to be entirely real.
-
-2. **What the kernel owners judge themselves against.** `rocke/library/benchmarks/`
-   in this repository — the per-arch benchmark scripts and, when you can get it, the
-   results CSV they emit. The CSV is the better artifact: it is the shape list already
-   resolved, and it carries a priority column that exists nowhere else. Ask for it
-   before mining anything.
-
-Stage each as its own directory of graph JSON. The directory names are not free:
-`sweep.sh` reads `CORPORA` from the env config and gates each one on a matching
-`EXPECT_GRAPHS_<name>`, so these must be the names the config declares. The shipped
-`sweep-isolation.env.example` uses `published` and `servable`:
-
-```bash
-mkdir -p $CORPUS_DIR/servable $CORPUS_DIR/published
-cp <dnn-benchmarking graphs>/*.json $CORPUS_DIR/servable/
-cp <the owners' sweep graphs>/*.json $CORPUS_DIR/published/
+```yaml
+warmup_arm: parity
+rounds: 3
+benchmark:
+  argv: [dnn-benchmark]
+  warmup: 10
+  iters: 50
+correctness:
+  enabled: true
+  reference: pytorch
+  warmup: 1
+  iters: 3
+probe_env: null
 ```
 
----
+Do not assume the benchmark uses the UED spelling. If actual discovery reports
+`engine_<id>`, record that exact identity in `engine_name` and retain its observed
+mapping to `engine_ued_name`. Another engine's timings never credit this engine.
+There is no invented benchmark engine-selection flag; the separate installed
+engine-pinned integration registration establishes targeted device proof.
 
-## 1. Coverage
+## Corpus and coverage accounting
 
-Mine a shape corpus, resolve it through the dispatcher, and reconcile every decline:
+Keep external caller workloads and kernel-owner benchmark/published graphs separate.
+Preserve original corpus/source/graph identities and manifests; a `microbench` path
+alone says nothing about provenance. Stage actual graph JSON for measurement, not
+just the semantic request list consumed by mining/parity tools.
 
-```bash
-$GEN/.venv/bin/python $GEN/tools/mine_shapes.py \
-    --published <results.csv> --graphs $CORPUS_DIR/servable \
-    --arch $ARCH --out $SHAPES
+Declare every corpus count before measurement. Hazard exclusions do not shrink that
+denominator. For attention, use the exact backward-gradient names from the miner's
+`BACKWARD_GRADIENT_TENSOR_NAMES`, not a copied subset. Declare `none` explicitly
+when the approved operation has no such hazard class. Missing or malformed graph
+input is an error, never evidence of an empty population.
 
-$GEN/.venv/bin/python $GEN/tools/reconcile_applicability.py \
-    --profile $GEN/configs/$SLUG.profile.yaml --shapes $SHAPES
-```
+Coverage, numerical correctness and performance answer different questions. Retain
+served, explicitly declined, execution-error, missing and ambiguous outcomes;
+absence of a successful timing row is not a decline reason. A complete final
+runtime outcome join is required before `reconcile_applicability.py --declines`.
+See [workloads.md](../../ai/skills/hipdnn-ingestor-engine/workloads.md) for the join
+and semantic identity contract. Offline reconciliation alone proves no dispatch.
 
-**Gate: zero `ONLY THE REFERENCE` rows.** If rocKE serves a shape and you decline it,
-that is missing coverage or a matcher bug — add the variant, fix the matcher, or show
-that rocKE computes it *incorrectly* and report that as a rocKE defect. Choosing not
-to serve it is not one of the three.
+## Measurement protocol
 
-This part needs no GPU. Do it before you book device time.
+Use one target device, node, session and job for a comparative cohort. Warm each
+ordered corpus using `warmup_arm`; discard those timings but require its gates.
+The timed grid is round order, then YAML corpus order, then YAML arm order. Keep
+baseline first and never sort, rotate or silently reorder arms. Several rounds
+expose drift; position-sensitive results need that context.
 
----
+Each phase directly invokes `benchmark.argv` with these distinct arguments:
+`--graph <staged-corpus/*.json>`,
+`--plugin-path <arm-install>/lib/hipdnn_plugins/engines`, `--warmup <count>`,
+`--iters <count>` and `-o <attempt-output.json>`. Correctness runs once for each
+ordered corpus/arm after the timed grid, with `--validate <correctness.reference>`;
+it is not mixed into timed sampling.
 
-## 2. Correctness
+Construct each child's environment afresh from the original caller environment.
+Set the current arm's `ROCM_PATH` and `LD_LIBRARY_PATH` prefix without accumulating
+prior arms. Use phase-specific `HIPDNN_CACHE_DIR` and `HIPDNN_LOG_FILE`,
+`HIPDNN_FORCE_BENCHMARKING=1` for timing and `HIPDNN_LOG_LEVEL=info`. Correctness has
+its own cache and logs. Cache or staged-input paths from another sweep are not
+shared state.
 
-```bash
-dnn-benchmark --graph "$CORPUS_DIR/servable/*.json" \
-    --plugin-path $INSTALL/lib/hipdnn_plugins/engines \
-    --validate pytorch --warmup 1 --iters 3 \
-    -o /tmp/validate.json
-```
+Report geometric mean of per-graph ratios and time-weighted
+`sum(baseline time) / sum(arm time)` together, split by corpus provenance and round.
+A geometric mean alone is not a wall-clock saving. Establish byte-identical controls
+from descriptor/payload hashes, never by selecting graphs that timed alike; their
+observed ratio measures the noise floor, not an assumed exact 1.000x result.
 
-`--validate` against an *independent* reference is the point: your matcher and
-hipDNN's in-tree reference can share a misunderstanding and cancel it out. A third
-implementation cannot participate in that.
+## Phase gates and completion
 
-**Gate: zero failures among served graphs.** Read `allClose=false` with **zero finite
-mismatches** as *"an output element was never written"* — never as a tolerance
-problem. Outputs are NaN-sentinel-filled precisely so an unwritten element cannot
-pass, and the diff report counts only finite mismatches, so it prints `Mismatched: 0`
-while failing.
+A phase requires zero command exit, readable/parseable results and relevant hipDNN
+logs, the expected installed descriptor count, and plugin-path provenance for the
+intended arm. Result inventory must account for the staged graph identities without
+silently merging duplicate names or accepting unknown/missing rows. Timing credits
+only `status: success` rows with finite positive `mean_ms` for the **exact**
+configured engine, counting unique graphs against `min_served`. `role: reference`
+and other-engine rows cannot satisfy it; omitted `role` means engine. Failures
+remain in the outcome ledger. Benchmark `graph_name` uses the graph JSON name or
+file stem, so ambiguous names cannot be silently merged.
 
-Run correctness as a **separate pass** from timing. A reference execution per graph
-distorts the very timings you are about to measure.
+When correctness is enabled, every claimed served graph needs an actual comparison
+against the declared independent reference with `passed: true`,
+`execution_success: true` and `tolerance_match: true`. A failed/missing comparison,
+malformed result, nonzero command exit, unavailable reference, NaN or unwritten
+output fails the gate. Reference-provider rows without comparison evidence are not
+validated graphs. A plausible timing result cannot discharge correctness.
 
----
+Select a reference capable of the actual graph semantics. Neither current CPU nor
+GPU SDPA reference supports a sink UID. An unsupported reference means **BLOCKED**,
+not an automatic CPU fallback or unverified expected output. Zero finite mismatch
+counts do not excuse NaNs or unwritten output.
 
-## 3. Performance
+| Marker / exit | Meaning |
+|---|---|
+| `SWEEP_DONE` / 0 | Validated completion: every required timed and correctness phase plus applicable current-invocation warmup passes |
+| `SWEEP_TIMING_ONLY` / 0 | Explicit `correctness.enabled: false`; timing gates only, never validated completion or final RUNBOOK success |
+| `SWEEP_INCOMPLETE` / 1 | Required gates unmet; raw diagnostics are not completion evidence |
+| Exit 2 | Invalid configuration/invocation; no valid completed sweep |
 
-`tools/sweep.sh` runs the timed phases. It takes a config —
-`configs/sweep-isolation.env.example` is the worked one, and
-`configs/gfx950_attention_dense.sweep.env` is the gfx950 attention_dense one — rather
-than being forked per comparison:
+Completion checks the exact required phase-key set, not merely a success count or a
+nonempty output file. A failed correctness command with otherwise plausible JSON is
+still failure.
 
-```bash
-SWEEP_CONFIG=my-sweep.env $GEN/tools/sweep.sh
-```
+## Isolation and content-bound resume
 
-**`EXCLUDE_TENSORS` must name the exact backward-gradient tensor set
-`tools/mine_shapes.py` filters on** (`BACKWARD_GRADIENT_TENSOR_NAMES`), never a
-hand-copied subset — `tests/test_sweep_configs.py` checks every committed
-`configs/*.sweep.env` and `configs/*.env.example` against that one source of truth,
-so a value that drifts from it fails the test suite rather than silently gating
-nothing on a real backward graph.
+`output_dir/.running.lock` gives exclusive ownership. Each run stages validated
+source graphs into fresh output-owned attempt directories with sorted relative
+names, byte hashes and original provenance. It never merges a surviving stage or
+uses global corpus/cache paths. Cleanup is confined to tool-created temporary
+stage/cache/probe paths; an existing lock is not automatically deleted.
 
-Read its header before changing anything. Every structural choice exists because
-**clocks usually cannot be pinned on a shared machine**, so the harness controls for
-drift instead of pretending it is absent:
+Each phase's fingerprint binds normalized effective YAML, ordered arms/corpora,
+phase key, executable arguments/counts, reference/correctness mode, engine identity,
+architecture, expected descriptors, served floor and exclusions. It also binds
+current corpus names/content, installed descriptors and referenced payload or
+embedded-source inputs, loaded plugin/runtime artifacts, resolved executable and
+applicable reference environment, plus target host/device and relevant child
+environment/provenance. Root names, timestamps or counts alone are insufficient.
 
-- **one machine, one session, one job** — cross-machine absolute numbers are meaningless;
-- **a warmup pass, discarded**, so phase 1 does not measure a cold device;
-- **several rounds**, so round 1 versus round N *measures* drift rather than assuming none;
-- **fixed arm order, never rotated.** Drift penalises whichever arm runs later, so an
-  effect moving the *opposite* way to the confound cannot be explained by position. Put
-  the baseline first. This sign check is worth more than rotation would buy;
-- **a known-identical control.** Include shapes whose arms can only pick a byte-identical
-  binary: they must read exactly 1.000x, and whatever they actually read is your noise
-  floor. Build that set from descriptor `sha256`, **never** from timing — selecting
-  graphs *because* they timed alike is circular.
+A phase-specific `<tag>.complete.json` sidecar records `status=success`, phase key,
+input fingerprint, output/log hashes, command exit and every applicable gate.
+Before rerunning a stale/failed phase the old success sidecar is invalidated under
+the output lock. Results go to a fresh attempt path; only after gates pass and
+evidence is flushed/closed is a temporary completion record atomically installed.
+Failure/interruption can retain diagnostic output but cannot leave successful
+evidence for that attempt.
 
-### Reporting
+Resume recomputes **current input content** and checks sidecar status/key, evidence
+hashes and gates before skipping a phase. Missing, corrupt, partial, failed, stale
+or edited evidence is rerun, or rejected as invalid input before measurement.
+Correctness has its own record. Any invocation doing measurement runs a fresh
+warmup. Editing a corpus, installed artifact or relevant config invalidates reuse;
+a timed JSON surviving a failed served/correctness gate never permits a skip.
 
-Report **geomean-of-ratios and time-weighted (sum baseline / sum arm) side by side**,
-and split by corpus provenance. Those two statistics can differ by more than an order
-of magnitude on the same data when the shapes driving the geomean hold a small share of
-total time. Both are true; publishing only the flattering one implies wall-clock savings
-the data does not support.
-
----
-
-## Sizing: how long this actually takes
-
-Two costs dominate, and neither is the kernel:
-
-- **The reference executor.** The shared references are untiled — roughly one thread per
-  output element, looping the full contraction. Cost scales with the whole problem, so a
-  production-sized shape can take orders of magnitude longer to *verify* than to *run*.
-  Size this before booking device time; it is the usual reason a "quick" run is not.
-- **Packing.** Compile cost scales with the shape you compile, not just the variant
-  count, and the packer may not saturate the machine. Time one pack before assuming a
-  large set is affordable.
-
----
-
-## A note on what you can publish
-
-Keep measured numbers out of the public repository — commit messages, code comments and
-docs alike. State the *method* and the *shape* of a result ("the pinned arm measured
-worse on the shapes where the policy would have chosen otherwise"), not the digits.
-The lesson transfers; the number does not, because it belongs to one machine on one day.
+Retain resumed-session boundaries honestly. Diagnostic resume may establish phase
+gates across sessions, but not a single-session comparative timing cohort. Final
+publishable comparisons use a fresh output directory and complete single-job grid
+after final selection, regeneration, rebuild and installation. Preserve raw results,
+logs, winners, fingerprints and per-corpus coverage/correctness summaries with the
+run evidence; do not claim unexecuted architectures or unrelated installations.

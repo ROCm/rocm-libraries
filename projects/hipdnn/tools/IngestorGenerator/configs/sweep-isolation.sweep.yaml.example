@@ -1,0 +1,174 @@
+# Example sweep config. Copy, edit, and run:
+#
+#   <venv-python> $GEN/tools/sweep.py --config my-sweep.yaml
+#
+# DATA, NOT CODE. This file is read with a safe YAML loader that refuses duplicate
+# keys and non-string keys, and nothing in it is ever sourced, expanded or executed.
+# The predecessor was a shell fragment the driver sourced, so a config could define
+# functions, shell out, and silently redefine any part of the harness -- which meant
+# reading a sweep's inputs required reading its config as a program. Every path here
+# is resolved relative to THIS FILE's directory, so a config and its inputs move
+# together. Commands are argument ARRAYS: no quoting, no word splitting, no shell.
+#
+# This is the whole surface that differed between the two one-off sweeps the harness
+# was generalised from: an output directory, a corpus list, an arm list, the install
+# tree per arm, and the descriptor count each tree must have. Everything else -- the
+# gates, the warmup, the round structure, the fixed arm order, the resume logic -- is
+# the harness and must not be forked to change any of these.
+
+# Everything this sweep reads and writes lives under one root, so a run is
+# self-contained and a machine with a device needs no other layout. Put it on a
+# filesystem the compute node can actually see: on a scheduled cluster a path only
+# the submit host mounts fails the moment the job lands elsewhere, and the failure
+# looks like a queued job rather than a broken one. It must already exist -- the
+# driver creates output, never the root a human chose.
+sweep_root: /shared/sweeps/ingestor
+
+# Where this run's evidence lands. Required to be a dedicated child of sweep_root
+# and to overlap no input root, because the driver hashes every input to decide
+# whether a completed phase may be resumed: an output written inside an input tree
+# would invalidate the run it just produced.
+output_dir: /shared/sweeps/ingestor/results
+
+# Where staged graph corpora live: one directory per corpus name below. Must already
+# exist, and every corpus path must sit inside it.
+corpus_dir: /shared/sweeps/ingestor/corpora
+
+# The exact architecture this sweep claims. Checked against real rocminfo evidence on
+# the machine that runs, and corroborated against the benchmark's own reported
+# gpu_arch. An inexact token (a family, a marketing name) is refused.
+arch: gfx950
+
+# engine_name is the name the BENCHMARK RESULT rows carry, matched exactly -- never
+# by prefix, because a prefix credits a sibling engine's work to this one.
+# engine_ued_name is the name the INSTALLED ENGINE registry advertises, which is what
+# discovery resolves to a numeric engine ID. They are usually the same string; they
+# are declared separately because when they are not, the mismatch is the finding.
+engine_name: hipkernel:AttentionDenseGfx950
+engine_ued_name: hipkernel:AttentionDenseGfx950
+
+# Corpora are measured separately and answer different questions. Do not merge them:
+# the published corpus is what the kernel team judges themselves on, and the servable
+# corpus is what this integration generated for. Reporting one number over both hides
+# which population a win came from.
+#
+# expected_graphs is a gate, not documentation. A corpus that silently grew or shrank
+# between runs is not the same experiment, and resume is bound to the CONTENT of
+# every graph file, not to its name or timestamp.
+corpora:
+  - name: published
+    path: /shared/sweeps/ingestor/corpora/published
+    expected_graphs: 142
+  - name: servable
+    path: /shared/sweeps/ingestor/corpora/servable
+    expected_graphs: 283
+
+# ARMS RUN IN THIS ORDER, EVERY ROUND, NEVER ROTATED.
+#
+# That is deliberate. Clocks cannot be pinned here, so drift penalises whichever arm
+# runs later -- which means an effect moving the OPPOSITE way to the confound cannot
+# be explained by position. Rotating would trade that sign check for a symmetry that
+# is worth less. Put the BASELINE FIRST so every later arm carries the drift penalty.
+#
+# For an isolation sweep these are the arms `knob_sweep.py --isolate` emitted.
+#
+# expected_descriptors is the descriptor count each install tree MUST have. An
+# isolation arm has the SAME count as parity by construction -- it perturbs one knob
+# across the same shapes -- so a different number means the arm was built from a
+# different corpus and the comparison is not the one you think it is.
+arms:
+  - name: parity
+    install_tree: /shared/sweeps/ingestor/arm-parity
+    expected_descriptors: 91
+  - name: block_n32
+    install_tree: /shared/sweeps/ingestor/arm-block_n32
+    expected_descriptors: 91
+  - name: use_exp2_fastFalse
+    install_tree: /shared/sweeps/ingestor/arm-exp2off
+    expected_descriptors: 91
+  - name: lazy_rescaleFalse
+    install_tree: /shared/sweeps/ingestor/arm-lazyoff
+    expected_descriptors: 91
+
+# The arm to run once and DISCARD, so round 1 does not measure a cool device. It must
+# name one of the arms above, or be an explicit null -- an absent key is refused
+# rather than defaulted, because a sweep with no warmup is a different experiment and
+# should say so.
+warmup_arm: parity
+
+# Three rounds makes drift MEASURABLE rather than assumed: round 1 against round N on
+# the same arm is a direct readout of it. Fewer than three and there is nothing to
+# read; the two completed sweeps this comes from saw worst group deviation of a few
+# tenths of a percent against a 2% tolerance, but per-shape spread an order of
+# magnitude wider -- so say which statistic you mean when reporting.
+rounds: 3
+
+# A phase serving fewer than this many graphs through the ingestor FAILS. This is the
+# gate that catches a dropped engine; the descriptor count cannot, because the count
+# is a property of files on disk and the engine is rejected at load. Set it near the
+# expected served count, not to 1.
+min_served: 60
+
+# Tensor names whose presence makes a graph UNSERVABLE by the kernel under test, and
+# therefore dangerous: such a graph falls through to whichever engine will take it,
+# and one such path faulted the device mid-warmup with every later phase then
+# measuring dead hardware. For attention that class is backward graphs, marked by
+# their gradient tensors -- the filename is not authoritative.
+#
+# BOTH gradient spellings are required, not one. `d_query`/`d_key`/`d_value`/
+# `d_output` alone let a real backward graph through this gate once:
+# `sample_sdpa_backward` names its gradients `dq`/`dk`/`dv`/`do`, and a graph using
+# those spellings was caught only incidentally, by its dtype, rather than by this
+# filter -- see `tools/mine_shapes.py`'s `BACKWARD_GRADIENT_TENSOR_NAMES`, the one
+# other place this marker list is declared, which this value must always match
+# exactly. `tests/test_sweep_configs.py` enforces that.
+#
+# REQUIRED, with no default. Defaulting it to attention's names would make the gate
+# silently no-op for any other op: it would run, find nothing, and report protection
+# it was not providing. An op with no such class must say the string `none`.
+exclude_tensors:
+  - d_query
+  - d_key
+  - d_value
+  - d_output
+  - dq
+  - dk
+  - dv
+  - do
+
+# The benchmark itself, as an argument array. argv[0] must be a real executable --
+# a shell launcher is refused, because "the config named a program" and "the config
+# named a script that runs programs" are not the same claim about what was measured.
+#
+# The driver OWNS --graph, --plugin-path, --engine, --warmup, --iters, -o/--output,
+# --validate and --backend, and refuses a config that also passes any of them: an
+# extra copy of one of those flags silently redirects the evidence the gates read.
+benchmark:
+  argv:
+    - /shared/sweeps/ingestor/bench-venv/bin/dnn-benchmark
+  warmup: 25
+  iters: 200
+
+# Numerical correctness is a SEPARATE phase against a real reference provider, run
+# after timing so a comparison never perturbs a measurement. Its own warmup/iters are
+# lower on purpose: this phase exists to compare numbers, not to time them.
+#
+# When enabled, a phase passes only if the reference provider actually ran and every
+# served graph carries a genuine tolerance match. A skipped reference leaves the
+# engine rows with a null tolerance_match, which the benchmark suite counts as a
+# pass -- that is exactly the outcome this gate refuses.
+#
+# Setting enabled to false leaves the run reporting SWEEP_TIMING_ONLY. That is a
+# legitimate result to publish; it is not a correctness claim.
+correctness:
+  enabled: true
+  reference: pytorch
+  warmup: 3
+  iters: 10
+
+# Optional: an argument array that pins the comparand environment (library shas,
+# versions) into the log and into the resume fingerprint. Absent, the run is still
+# valid but not reproducible six months out -- and "which build produced this number"
+# has already been an unanswerable question once. Delete the key entirely to omit it.
+# probe_env:
+#   - /shared/sweeps/ingestor/probe-env
