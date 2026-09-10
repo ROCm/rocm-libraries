@@ -4,7 +4,6 @@
 #include "harness/bundle/SupportClaimWriter.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -16,6 +15,8 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include "harness/bundle/SupportClaims.hpp"
 
@@ -398,8 +399,8 @@ bool selectionWasNarrowed()
     // GTEST_FLAG_GET already folds in the GTEST_FILTER environment variable. A shard
     // split drops tests the same way a filter does and is invisible in the filter
     // string, so it is read separately.
-    const bool shardingActive = std::getenv("GTEST_TOTAL_SHARDS") != nullptr
-                                || std::getenv("GTEST_SHARD_INDEX") != nullptr;
+    const bool shardingActive = !hipdnn_data_sdk::utilities::getEnv("GTEST_TOTAL_SHARDS").empty()
+                                || !hipdnn_data_sdk::utilities::getEnv("GTEST_SHARD_INDEX").empty();
     return selectionIsNarrowed(GTEST_FLAG_GET(filter), shardingActive);
 }
 
