@@ -45,7 +45,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, host-only)"
+    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
     test_paths:
       - "rocisa_tests"
       - "Tensile/Tests/unit"
