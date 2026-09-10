@@ -84,7 +84,7 @@ namespace TensileLite
                 mxDataGeneration(InitMode                         mode,
                                  roc::host_numerics::ScalarType   dataType,
                                  roc::host_numerics::Shape const& shape,
-                                 uint32_t                         seed)
+                                 uint64_t                         seed)
             {
                 using namespace roc::host_numerics;
                 auto recipe = [&](GenerationRecipe::Component component) {
@@ -180,7 +180,7 @@ namespace TensileLite
                                                                size_t   blockSize,
                                                                InitMode dataInitialization,
                                                                InitMode scaleInitialization,
-                                                               uint32_t seed)
+                                                               uint64_t seed)
             {
                 using namespace roc::host_numerics;
                 const ScalarType hostDataType = toHostNumericsScalarType(dataType);
