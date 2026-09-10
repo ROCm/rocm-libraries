@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/therock-10.1
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
@@ -36,8 +36,9 @@ jobs:
       build_python_packages: false
       build_pytorch: false
       build_jax: false
+      stage_reuse_mode: off
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: release/therock-10.1
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   log_therock_ref:
@@ -64,7 +65,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@release/therock-10.1
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -75,7 +76,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: release/therock-10.1
     permissions:
       contents: read
       id-token: write
@@ -92,7 +93,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+          ref: release/therock-10.1
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
