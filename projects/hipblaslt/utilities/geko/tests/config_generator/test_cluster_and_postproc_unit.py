@@ -12,6 +12,7 @@ from geko.config_generator.fork_params.hw_profiles.gfx950 import post_processor 
 from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
 from geko.schemas import GemmType
+import pytest
 
 
 def _entry_with_groups(size, groups):
@@ -112,6 +113,8 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
     assert f2["UseCustomMainLoopSchedule"].values == [0]
 
 def test_load_cms_groups_uses_installed_tensilelite(monkeypatch) -> None:
+    pytest.importorskip("tensilelite", reason="requires an installed TensileLite")
+    pytest.importorskip("rocisa", reason="requires an importable rocisa")
     monkeypatch.setattr(
         os.path,
         "isdir",
