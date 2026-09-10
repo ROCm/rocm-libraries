@@ -637,10 +637,18 @@ def make_gemm_rowcolquant_kernel_name(
 def normalize_gfx_arch(arch: str) -> str:
     """Strip feature suffixes from a gfx target string.
 
-    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
-    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"`` or
-    ``"gfx1250:xnack-"``. Every arch comparison in the codegen/runtime path (and
-    the ``--offload-arch`` we hand to hipcc) wants the bare target, so normalize
+    A gfx target may carry trailing feature flags, e.g.
+    ``"gfx942:sramecc+:xnack-"`` or ``"gfx1250:xnack-"``. Not from
+    autodetection -- ``rocm_agent_enumerator``, ``amd-smi``'s
+    ``TARGET_GRAPHICS_VERSION`` and the rocminfo agent ``Name:`` line all print
+    the BARE target (measured on a gfx90a device). The suffixed spellings come
+    from ``hipDeviceProp_t::gcnArchName``, which returns
+    ``"gfx90a:sramecc+:xnack-"`` on that same device, and from build
+    configuration -- this repository's CMakeLists.txt sets, on the ASAN branch,
+    ``CK_GPU_TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"``.
+
+    Every arch comparison in the codegen/runtime path (and the
+    ``--offload-arch`` we hand to hipcc) wants the bare target, so normalize
     once at the boundary instead of scattering substring tests that happen to
     tolerate the suffix.
 
