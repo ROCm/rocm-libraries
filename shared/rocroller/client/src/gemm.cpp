@@ -102,14 +102,14 @@ namespace
 
 namespace rocRoller::Client::GEMMClient
 {
-    using namespace HostNumerics;
+    namespace host_numerics = rocRoller::HostNumerics;
 
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
 
     template <typename A, typename B, typename D>
     std::pair<bool, double>
-        validate(GeneratedGEMMInputs const&                              generatedInputs,
-                 std::vector<D> const&                                   hostD,
+        validate(host_numerics::GeneratedGEMMInputs const&               generatedInputs,
+                 const roc::host_numerics::Tensor&                       hostD,
                  std::vector<uint8_t> const&                             hostScaleA,
                  std::vector<uint8_t> const&                             hostScaleB,
                  rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
@@ -127,34 +127,33 @@ namespace rocRoller::Client::GEMMClient
         std::optional<roc::host_numerics::Tensor> runtimeScaleB;
         if(!generatedInputs.scaleA && !hostScaleA.empty())
         {
-            runtimeScaleA = hostScaleTensor(problemParams.types.scaleTypeA,
-                                            std::span<const uint8_t>(hostScaleA),
-                                            problemParams.m,
-                                            problemParams.k,
-                                            scaleBlockSize);
+            runtimeScaleA = host_numerics::hostScaleTensor(problemParams.types.scaleTypeA,
+                                                           std::span<const uint8_t>(hostScaleA),
+                                                           problemParams.m,
+                                                           problemParams.k,
+                                                           scaleBlockSize);
         }
         if(!generatedInputs.scaleB && !hostScaleB.empty())
         {
-            runtimeScaleB = hostScaleTensor(problemParams.types.scaleTypeB,
-                                            std::span<const uint8_t>(hostScaleB),
-                                            problemParams.n,
-                                            problemParams.k,
-                                            scaleBlockSize);
+            runtimeScaleB = host_numerics::hostScaleTensor(problemParams.types.scaleTypeB,
+                                                           std::span<const uint8_t>(hostScaleB),
+                                                           problemParams.n,
+                                                           problemParams.k,
+                                                           scaleBlockSize);
         }
 
-        const auto floatReference  = computeHostReference(generatedInputs,
-                                                         runtimeScaleA,
-                                                         runtimeScaleB,
-                                                         scaleBlockSize,
-                                                         problemParams.alpha,
-                                                         problemParams.beta);
-        const auto hostReference   = convertHostReference<D>(floatReference);
-        const auto acceptableError = acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
-        const auto comparison      = compareHostReference(
-            hostOutputTensor<D>(std::span<const D>(hostD), problemParams.m, problemParams.n),
-            hostOutputTensor<D>(
-                std::span<const D>(hostReference), problemParams.m, problemParams.n),
-            acceptableError);
+        const auto floatReference = host_numerics::computeHostReference(generatedInputs,
+                                                                        runtimeScaleA,
+                                                                        runtimeScaleB,
+                                                                        scaleBlockSize,
+                                                                        problemParams.alpha,
+                                                                        problemParams.beta);
+        const auto hostReference
+            = host_numerics::convertHostReferenceTensor<D>(floatReference);
+        const auto acceptableError
+            = host_numerics::acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
+        const auto comparison
+            = host_numerics::compareHostReference(hostD, hostReference, acceptableError);
 
         Log::debug(comparison.message());
 
@@ -201,7 +200,9 @@ namespace rocRoller::Client::GEMMClient
         std::vector<PackedTypeA> hostA;
         std::vector<PackedTypeB> hostB;
         std::vector<C>           hostC;
-        std::vector<D>           hostD(problemParams.m * problemParams.n, D{});
+        roc::host_numerics::Tensor hostD(
+            host_numerics::HostReferenceDetail::outputScalarType<D>(),
+            host_numerics::hostOutputLayout(problemParams.m, problemParams.n));
         std::vector<uint8_t>     hostScaleA, hostScaleB;
 
         constexpr auto seed           = 31415u;
@@ -228,25 +229,25 @@ namespace rocRoller::Client::GEMMClient
                 scaleTypeB = problemParams.types.scaleTypeB;
         }
 
-        auto generatedInputs = generateGEMMInputs(descA,
-                                                  descB,
-                                                  descC,
-                                                  problemParams.initModeA,
-                                                  problemParams.initModeB,
-                                                  problemParams.initModeC,
-                                                  scaleTypeA,
-                                                  scaleTypeB,
-                                                  scaleBlockSize,
-                                                  -1.f,
-                                                  1.f,
-                                                  seed);
-        hostA                = copyTensorStorage<PackedTypeA>(generatedInputs.a);
-        hostB                = copyTensorStorage<PackedTypeB>(generatedInputs.b);
-        hostC                = copyTensorStorage<C>(generatedInputs.c);
+        auto generatedInputs = host_numerics::generateGEMMInputs(descA,
+                                                                 descB,
+                                                                 descC,
+                                                                 problemParams.initModeA,
+                                                                 problemParams.initModeB,
+                                                                 problemParams.initModeC,
+                                                                 scaleTypeA,
+                                                                 scaleTypeB,
+                                                                 scaleBlockSize,
+                                                                 -1.f,
+                                                                 1.f,
+                                                                 seed);
+        hostA = host_numerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+        hostB = host_numerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+        hostC = host_numerics::copyTensorStorage<C>(generatedInputs.c);
         if(generatedInputs.scaleA)
-            hostScaleA = copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+            hostScaleA = host_numerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
         if(generatedInputs.scaleB)
-            hostScaleB = copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
+            hostScaleB = host_numerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
         // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
         std::vector<PackedTypeB> hostBForKernel(hostB);
@@ -623,11 +624,13 @@ namespace rocRoller::Client::GEMMClient
 
         if(benchmarkParams.check)
         {
-            AssertFatal(hipMemcpy(hostD.data(),
-                                  deviceD.get(),
-                                  problemParams.m * problemParams.n * sizeof(D),
-                                  hipMemcpyDeviceToHost)
-                        == (hipError_t)HIP_SUCCESS);
+            const auto hostDStorage = hostD.rawEncodedBackingStorage();
+            if(!hostDStorage.empty())
+                AssertFatal(hipMemcpy(hostDStorage.data(),
+                                      deviceD.get(),
+                                      hostDStorage.size(),
+                                      hipMemcpyDeviceToHost)
+                            == (hipError_t)HIP_SUCCESS);
 
             auto [correct, rnorm] = validate<A, B, D>(
                 generatedInputs, hostD, hostScaleA, hostScaleB, problemParams, arch);
