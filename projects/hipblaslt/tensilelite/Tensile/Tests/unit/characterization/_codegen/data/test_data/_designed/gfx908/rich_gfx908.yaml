@@ -55,6 +55,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # Two valid gfx908 HH (fp16) MFMA shapes in 9-element format:
         #   [16,16,16,1,1,1,1,1,1] = native HHS 16x16 tile (K=16)

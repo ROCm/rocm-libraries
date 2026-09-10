@@ -27,6 +27,7 @@
 #define GUARD_FLOAT_TYPES_H
 
 #include "bfloat16_dev.hpp"
+#include "fp8_dev.hpp"
 
 #define PPCAT_NX(A, B) A##B
 #define PPCAT(A, B) PPCAT_NX(A, B)

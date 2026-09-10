@@ -42,32 +42,6 @@
 #include "calcerr.hpp"
 #include <miopen/bfloat16.hpp>
 
-#if 0
-template<typename _T>
-double CalcErr( _T c_val, _T g_val)
-{
-    double err = 0;
-    if (sizeof(_T) == 4)
-    {
-        int * c_uval = (int *)&c_val;
-        int * g_uval = (int *)&g_val;
-        err = (double)std::abs(*c_uval - *g_uval);
-    }
-    else if (sizeof(_T) == 8)
-    {
-        int64_t * c_uval = (int64_t *)&c_val;
-        int64_t * g_uval = (int64_t *)&g_val;
-        err = (double)std::abs(*c_uval - *g_uval);
-
-    }
-
-    //		double delta = abs(c_val - g_val);
-    //	double nextafter_delta = nextafterf(min(abs(c_val), abs(g_val)), (_T)INFINITY) - min(abs(c_val), abs(g_val));
-    //		err = delta / nextafter_delta;
-    return err;
-}
-#endif
-
 ////////////////////////////////////////////////////////////
 //
 ///////////////////////////////////////////////////////////

@@ -106,7 +106,7 @@ auto forward_transform_types
 
 // function pointer callbacks need -fgpu-rdc, but that causes build
 // nondeterminism in kpack
-INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
+INSTANTIATE_TEST_SUITE_P(callback,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
                                                                   forward_transform_types,
