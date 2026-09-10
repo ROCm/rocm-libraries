@@ -139,10 +139,8 @@ TEST(CPU_Cache_NONE, check_kern_db)
 TEST(CPU_Cache_NONE, check_kern_db_cached_reuse)
 {
     miopen::TempFile temp_file("tmp-kerndb-cached");
-    auto& db1 =
-        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
-    auto& db2 =
-        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    auto& db1 = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    auto& db2 = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
     EXPECT_EQ(&db1, &db2);
 }
 
@@ -150,18 +148,15 @@ TEST(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
 {
     miopen::TempFile temp_file_a("tmp-kerndb-cached-a");
     miopen::TempFile temp_file_b("tmp-kerndb-cached-b");
-    auto& db_a =
-        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_a, false);
-    auto& db_b =
-        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_b, false);
+    auto& db_a = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_a, false);
+    auto& db_b = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_b, false);
     EXPECT_NE(&db_a, &db_b);
 }
 
 TEST(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
 {
     miopen::TempFile temp_file("tmp-kerndb-cached-mt");
-    auto& db =
-        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    auto& db = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
 
     miopen::KernelConfig cfg;
     cfg.kernel_name = "kernel_mt";
