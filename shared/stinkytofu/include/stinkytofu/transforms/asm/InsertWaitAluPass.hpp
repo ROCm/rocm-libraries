@@ -30,18 +30,30 @@ namespace stinkytofu {
 class Pass;
 class ModulePass;
 
+/// Pass policy, deliberately not in HWModel (see its SCOPE note: facts, not knobs).
+/// The two shared-order refinements are correct wherever VA_VDST is one counter
+/// shared by every VALU pipe; they are switchable so a run can be bisected against a
+/// stricter one without rebuilding the arch table.
+struct InsertWaitAluOptions {
+    /// Stamp VALU source operands as well as dests, for the src-operand WAR hazard.
+    bool enableESM2TrackValuVsrc = false;
+    /// Count a CSMACC producer's followers across the whole VA order rather than its
+    /// own pipe, while XDL and CSMACC are the only units in flight and so complete in
+    /// issue order. Weaker wait, same guarantee.
+    bool sharedOrderCountFollowers = true;
+};
+
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
 ///
 /// Function pass: full scoreboard analysis when run on the entry, conservative
 /// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
 /// mode and unit tests.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
-    bool enableESM2TrackValuVsrc = false);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts = {});
 
 /// Whole-kernel driver: full analysis on the entry function, then the conservative
 /// call-boundary drain on every callee. Reserves a seam for future caller<->callee
 /// analysis.
 STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createInsertWaitAluModulePass(
-    bool enableESM2TrackValuVsrc = false);
+    InsertWaitAluOptions opts = {});
 
 }  // namespace stinkytofu

@@ -68,6 +68,10 @@ bool g_enableESM2TrackValuVsrc = false;
 // Set once per function in setupArch, alongside g_enableESM2TrackValuVsrc.
 const HWModel::WaitHide* g_waitHide = nullptr;
 
+// Shared-VA-order refinement, from InsertWaitAluOptions. Off leaves the pass on the
+// per-pipe ordinals alone, which is always correct and always stricter.
+bool g_sharedOrderCountFollowers = true;
+
 // Render one WaitHide entry for the debug banner; 0 reads as off.
 inline std::string waitHideStr(int v) {
     return v > 0 ? std::to_string(v) : std::string("0(off)");
@@ -326,6 +330,10 @@ inline unsigned maxEmittableWait(CounterType c) {
 // WaitcntBrackets — per-pipe/per-FIFO scoreboard with per-VGPR stamps
 // ---------------------------------------------------------------------------
 
+// Saturation point for VgprStamp::xdlSince, set in setupArch to the largest threshold it
+// is ever compared against. Bounds the lattice; it does not model the hardware.
+unsigned g_xdlSinceCap = 0;
+
 struct VgprStamp {
     std::array<unsigned, NUM_VA_PIPE> vaOrd = {};
     unsigned vmOrdLds = 0;
@@ -340,16 +348,18 @@ struct VgprStamp {
     // Ordinal step this producer took (2 for a scale pair). The hide threshold is a
     // count of instructions, so it scales by this to stay in the same unit.
     unsigned vaInc = 1;
-    // XDL pipe UB when this producer stamped. Lets a non-XDL producer measure how many
-    // WMMA have issued since, which is what hides it.
-    unsigned xdlOrdAtStamp = 0;
-    // Position in the shared VA order. Only consulted while the units in flight
-    // complete in issue order; otherwise the per-pipe ordinals are the truth.
+    // Position in the shared VA order. The emitted count must bound the ops after this
+    // producer that are still OUTSTANDING, so it has to live in a frame; xdlSince is an
+    // age and counts retired ops too, which would emit a wait weaker than required.
     unsigned vaOrdShared = 0;
-    // Other units' positions when this producer stamped. Only ops issued AFTER it can
-    // reorder against the ops counted for it; older ones are not followers at all.
-    unsigned dpOrdAtStamp = 0;
-    unsigned trOrdAtStamp = 0;
+    // XDL ordinal steps issued since this producer stamped, saturating at g_xdlSinceCap.
+    // An age, not a position: a merge rebases every frame onto its in-flight width, and a
+    // producer older than that width cannot be named by a position in it, which is how the
+    // count used to be lost. An age survives the rebase; saturating keeps the lattice finite.
+    unsigned xdlSince = 0;
+    // A DPMACC or TRANS op issued after this producer stamped, so what is in flight no
+    // longer completes in issue order. Monotone, so a join can only ever set it.
+    bool otherUnitSince = false;
 };
 
 class WaitcntBrackets {
@@ -386,6 +396,16 @@ class WaitcntBrackets {
                 xdlInc = inc;
                 xdlIncSeen = true;
             }
+            // Age every producer already stamped. This op is not its own follower, so the
+            // stamps it writes are reset to zero below, after this.
+            if (pipe == PIPE_XDL || pipe == PIPE_DPMACC || pipe == PIPE_TRANS) {
+                for (auto& [k, s] : scores) {
+                    if (pipe == PIPE_XDL)
+                        s.xdlSince = std::min(g_xdlSinceCap, s.xdlSince + inc);
+                    else
+                        s.otherUnitSince = true;
+                }
+            }
 
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]   stamp event=" << eventName(ev) << " inc="
                                  << inc << " [pipe=" << vaPipeName(pipe) << " ord=" << ord
@@ -397,10 +417,9 @@ class WaitcntBrackets {
                 VgprStamp& s = scores[k];
                 s.vaOrd[pipe] = ord;
                 s.vaInc = inc;
-                s.xdlOrdAtStamp = vaPipeUB[PIPE_XDL];
                 s.vaOrdShared = vaUB;
-                s.dpOrdAtStamp = vaPipeUB[PIPE_DPMACC];
-                s.trOrdAtStamp = vaPipeUB[PIPE_TRANS];
+                s.xdlSince = 0;
+                s.otherUnitSince = false;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
                                      << " ord=" << ord << "]\n");
@@ -578,8 +597,16 @@ class WaitcntBrackets {
     // True when no DPMACC or TRANS op issued after \p s stamped, so every op counted
     // for it is on XDL or CSMACC and completion follows issue order. Ops older than
     // the producer are not followers, so they cannot disturb the count.
-    bool onlyXdlAndCsmaccSince(const VgprStamp& s) const {
-        return vaPipeUB[PIPE_DPMACC] <= s.dpOrdAtStamp && vaPipeUB[PIPE_TRANS] <= s.trOrdAtStamp;
+    static bool onlyXdlAndCsmaccSince(const VgprStamp& s) {
+        return !s.otherUnitSince;
+    }
+
+    // Whether \p s names a VA producer on this path at all, live or retired. Decides
+    // which side's age the join should carry.
+    static bool hasVaProducer(const VgprStamp& s) {
+        for (int p = 0; p < NUM_VA_PIPE; ++p)
+            if (s.vaOrd[p] != 0) return true;
+        return false;
     }
 
     unsigned vaFollowers(const VgprStamp& s) const {
@@ -600,16 +627,16 @@ class WaitcntBrackets {
                 if (g_waitHide != nullptr && !xdlFormMixed && p == PIPE_CSMACC) {
                     // A CSMACC producer is satisfied by matrix ops, not by its own
                     // unit, so measure the XDL issues since it stamped.
-                    const unsigned since = vaPipeUB[PIPE_XDL] - s.xdlOrdAtStamp;
+                    const unsigned since = s.xdlSince;
                     if (!onlyXdlAndCsmaccSince(s)) {
                         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
                                                 "units outstanding) [CSMACC matrix-ops="
                                              << since << "]\n");
-                    } else if (s.vaOrdShared != 0 &&
+                    } else if (g_sharedOrderCountFollowers && s.vaOrdShared != 0 &&
                                !waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
-                        // Only these two units outstanding, so they complete in issue
-                        // order: everything issued after the producer counts, which is
-                        // a weaker wait than its own unit's followers alone.
+                        // Only these two units outstanding, so they complete in issue order:
+                        // every op still outstanding after the producer counts, which is a
+                        // weaker wait than its own unit's followers alone.
                         followers = vaUB - s.vaOrdShared;
                         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
                                              << followers << " vs per-pipe "
@@ -771,30 +798,45 @@ class WaitcntBrackets {
             const VgprStamp* o = (it != other.scores.end()) ? &it->second : nullptr;
             const bool myVm = s.vmOrdLds != 0 || s.vmOrdTex != 0;
             const bool oVm = o && (o->vmOrdLds != 0 || o->vmOrdTex != 0);
+            const bool myVa = hasVaProducer(s);
+            const bool oVa = o && hasVaProducer(*o);
             // Merge each pipe's ordinal independently.
             for (int p = 0; p < NUM_VA_PIPE; ++p) {
                 mergeSlotOrd(s.vaOrd[p], o ? o->vaOrd[p] : 0, myShift[p], otherShift[p],
-                             myOldFloor[p], otherOldFloor[p], strictDom);
+                             myOldFloor[p], otherOldFloor[p], strictDom,
+                             vaPipeName(static_cast<VaPipe>(p)));
             }
             mergeSlotOrd(s.vmOrdLds, o ? o->vmOrdLds : 0, fMyShift[FIFO_LDS], fOtherShift[FIFO_LDS],
-                         fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom);
+                         fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom, "vmLds");
             mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, fMyShift[FIFO_TEX], fOtherShift[FIFO_TEX],
-                         fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom);
-            // Keep the later XDL stamp, which counts the fewer WMMA followers of the two
-            // paths. Floors are 0: this ordinal marks progress, it is not a live producer.
-            mergeSlotOrd(s.xdlOrdAtStamp, o ? o->xdlOrdAtStamp : 0, myShift[PIPE_XDL],
-                         otherShift[PIPE_XDL], 0, 0, strictDom);
+                         fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom, "vmTex");
             mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
-                         myOldFloorShared, otherOldFloorShared, strictDom);
-            // Keeping the later stamp makes the "nothing issued since" test harder to
-            // satisfy, so a join can only turn the widening off, never on.
-            mergeSlotOrd(s.dpOrdAtStamp, o ? o->dpOrdAtStamp : 0, myShift[PIPE_DPMACC],
-                         otherShift[PIPE_DPMACC], 0, 0, strictDom);
-            mergeSlotOrd(s.trOrdAtStamp, o ? o->trOrdAtStamp : 0, myShift[PIPE_TRANS],
-                         otherShift[PIPE_TRANS], 0, 0, strictDom);
+                         myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
+            // Ages and the out-of-order flag need no rebasing, so they join by value. Keep
+            // the fewer matrix ops and the set flag: both make the hide harder to satisfy.
+            // A path with no VA producer here carries no age to compare.
+            if (myVa && oVa) {
+                if (o->xdlSince < s.xdlSince) {
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]   widen slot=xdlSince " << s.xdlSince
+                                         << "->" << o->xdlSince << "\n");
+                    s.xdlSince = o->xdlSince;
+                    strictDom = true;
+                }
+                if (o->otherUnitSince && !s.otherUnitSince) {
+                    s.otherUnitSince = true;
+                    strictDom = true;
+                }
+            } else if (oVa) {
+                if (s.xdlSince != o->xdlSince || s.otherUnitSince != o->otherUnitSince)
+                    strictDom = true;
+                s.xdlSince = o->xdlSince;
+                s.otherUnitSince = o->otherUnitSince;
+            }
             // Paired means both FIFO ordinals came from one op. It survives the join only
             // if every path that contributed a stamp got it from a paired op; a path with
             // no stamp at all contributes nothing to disagree about.
+            const bool wasPaired = s.pairedFlat;
+            const unsigned wasAnchorLds = s.anchorLds;
             s.pairedFlat = (!myVm || s.pairedFlat) && (!oVm || o->pairedFlat) && (myVm || oVm);
             // An anchor holds only if every path carrying a live producer here issued one.
             // A path with no producer imposes no wait, so it does not veto the anchor.
@@ -806,19 +848,27 @@ class WaitcntBrackets {
                 } else {
                     mergeSlotOrd(s.anchorLds, o->anchorLds, fMyShift[FIFO_LDS],
                                  fOtherShift[FIFO_LDS], fMyOldFloor[FIFO_LDS],
-                                 fOtherOldFloor[FIFO_LDS], strictDom);
+                                 fOtherOldFloor[FIFO_LDS], strictDom, "anchorLds");
                     mergeSlotOrd(s.anchorTex, o->anchorTex, fMyShift[FIFO_TEX],
                                  fOtherShift[FIFO_TEX], fMyOldFloor[FIFO_TEX],
-                                 fOtherOldFloor[FIFO_TEX], strictDom);
+                                 fOtherOldFloor[FIFO_TEX], strictDom, "anchorTex");
                 }
             } else if (oVm) {
-                // The merged ordinals came from the other side, so its anchor comes too.
-                s.anchorLds = o->anchorLds != 0 ? o->anchorLds + fOtherShift[FIFO_LDS] : 0;
-                s.anchorTex = o->anchorTex != 0 ? o->anchorTex + fOtherShift[FIFO_TEX] : 0;
+                // The merged ordinals came from the other side, so its anchor comes too. A
+                // retired anchor is still meaningful to bridgeHides, so clamp rather than drop.
+                s.anchorLds = rebase(o->anchorLds, fOtherShift[FIFO_LDS], fOtherOldFloor[FIFO_LDS],
+                                     "anchorLds");
+                s.anchorTex = rebase(o->anchorTex, fOtherShift[FIFO_TEX], fOtherOldFloor[FIFO_TEX],
+                                     "anchorTex");
             } else if (s.anchorLds != 0) {
                 s.anchorLds += fMyShift[FIFO_LDS];
                 s.anchorTex += fMyShift[FIFO_TEX];
             }
+            // These two weaken a wait when they turn on -- pairedFlat can retire a producer
+            // from one FIFO, an anchor can discharge it via the bridge -- so gaining either
+            // has to re-reach the successors. Losing one only ever tightens, so it need not.
+            if ((!wasPaired && s.pairedFlat) || (wasAnchorLds == 0 && s.anchorLds != 0))
+                strictDom = true;
         }
 
         return strictDom;
@@ -839,6 +889,10 @@ class WaitcntBrackets {
                 if (live) out += " f=" + std::to_string(vaPipeUB[p] - ord);
             }
             out += "]";
+        }
+        if (s) {
+            out += " [since=" + std::to_string(s->xdlSince);
+            out += " otherUnit=" + std::to_string(s->otherUnitSince) + "]";
         }
         return out;
     }
@@ -874,10 +928,34 @@ class WaitcntBrackets {
 
     // Shift both into the widened frame, keep the later.
     static void mergeSlotOrd(unsigned& myOrd, unsigned oOrd, unsigned myShift, unsigned otherShift,
-                             unsigned myOldFloor, unsigned otherOldFloor, bool& strictDom) {
+                             unsigned myOldFloor, unsigned otherOldFloor, bool& strictDom,
+                             const char* slot) {
         unsigned myS = (myOrd && myOrd > myOldFloor) ? myOrd + myShift : 0;
         unsigned oS = (oOrd && oOrd > otherOldFloor) ? oOrd + otherShift : 0;
+        takeLater(myOrd, myS, oS, strictDom, slot);
+    }
+
+    // Move an ordinal into the widened frame. The other side's shift is negative once its
+    // floor moved, so an ordinal at or below that floor wraps if rebased as-is. Clamping
+    // there is what keeps a retired ordinal retired instead of vaulting past the UB.
+    static unsigned rebase(unsigned ord, unsigned shift, unsigned oldFloor,
+                           const char* slot = "?") {
+        if (ord == 0) return 0;
+        // A shift past the frame start is stored wrapped; naming the ordinals it would
+        // have carried over is how a bad rebase gets caught before it spreads.
+        PASS_DEBUG(if (shift > (~0u / 2) && ord < (0u - shift)) std::cerr
+                   << "[InsertWaitAlu]   WRAP-AVOIDED slot=" << slot << " ord=" << ord << " shift=-"
+                   << (0u - shift) << " floor=" << oldFloor << "\n");
+        return std::max(ord, oldFloor) + shift;
+    }
+
+    // Naming the slot that re-widened an entry state is what makes a non-converging
+    // Phase 1 diagnosable: a slot that dominates on every visit is failing to rebase.
+    static void takeLater(unsigned& myOrd, unsigned myS, unsigned oS, bool& strictDom,
+                          const char* slot) {
         if (oS > myS) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   widen slot=" << slot << " " << myS << "->"
+                                 << oS << "\n");
             myOrd = oS;
             strictDom = true;
         } else {
@@ -919,8 +997,9 @@ class InsertWaitAluPassImpl : public Pass {
     VGPRHalfKeyer keyer{};
 
    public:
-    explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc) {
-        g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
+    explicit InsertWaitAluPassImpl(const InsertWaitAluOptions& opts) {
+        g_enableESM2TrackValuVsrc = opts.enableESM2TrackValuVsrc;
+        g_sharedOrderCountFollowers = opts.sharedOrderCountFollowers;
     }
 
    private:
@@ -1227,6 +1306,13 @@ class InsertWaitAluPassImpl : public Pass {
 
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 1: fixed-point analysis (" << rpo.size()
                              << " BBs in RPO)\n");
+        // The whole analysis is only as sound as this edge set, so name it.
+        PASS_DEBUG(for (auto* bb
+                        : rpo) {
+            std::cerr << "[InsertWaitAlu]   CFG \"" << bb->getLabel() << "\" ->";
+            for (auto* succ : bb->getSuccessors()) std::cerr << " \"" << succ->getLabel() << "\"";
+            std::cerr << "\n";
+        });
 
         // Phase 1: fixed-point analysis using entry-state propagation.
         // Each BB starts from its accumulated entry state. After processing,
@@ -1278,12 +1364,20 @@ class InsertWaitAluPassImpl : public Pass {
         const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
         keyer = VGPRHalfKeyer(hasD16);
         g_waitHide = &passCtx.getHWModel().waitHide;
+        // Every threshold xdlSince is tested against is scaled by the XDL ordinal step,
+        // which is 2 on a scale pair. Saturating below that would suppress a real skip.
+        g_xdlSinceCap = 2 * static_cast<unsigned>(
+                                std::max({0, g_waitHide->csmaccVaVdst, g_waitHide->xdlVaVdst}));
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                              << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide"
                              << " xdlVaVdst=" << waitHideStr(g_waitHide->xdlVaVdst)
                              << " csmaccVaVdst=" << waitHideStr(g_waitHide->csmaccVaVdst)
-                             << " vmVsrc=" << waitHideStr(g_waitHide->vmVsrc) << "\n");
+                             << " vmVsrc=" << waitHideStr(g_waitHide->vmVsrc)
+                             << " vmVsrcBridge=" << waitHideStr(g_waitHide->vmVsrcBridge) << "\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
+                             << " countFollowers=" << g_sharedOrderCountFollowers
+                             << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
     }
 
    public:
@@ -1308,8 +1402,7 @@ char InsertWaitAluPassImpl::ID = 0;
 // future callee<->caller analysis.
 class InsertWaitAluModulePass : public ModulePass {
    public:
-    explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc)
-        : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc) {}
+    explicit InsertWaitAluModulePass(const InsertWaitAluOptions& opts) : opts(opts) {}
 
     const char* getName() const override {
         return "InsertWaitAluModulePass";
@@ -1317,7 +1410,7 @@ class InsertWaitAluModulePass : public ModulePass {
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
                           ModuleAnalysisManager& /*MAM*/) override {
-        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc);
+        InsertWaitAluPassImpl impl(opts);
         AnalysisManager AM;
         registerAllAnalyses(AM);
 
@@ -1336,16 +1429,16 @@ class InsertWaitAluModulePass : public ModulePass {
     }
 
    private:
-    bool enableESM2TrackValuVsrc;
+    InsertWaitAluOptions opts;
 };
 
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc);
+std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts) {
+    return std::make_unique<InsertWaitAluPassImpl>(opts);
 }
-std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc);
+std::unique_ptr<ModulePass> createInsertWaitAluModulePass(InsertWaitAluOptions opts) {
+    return std::make_unique<InsertWaitAluModulePass>(opts);
 }
 }  // namespace stinkytofu
