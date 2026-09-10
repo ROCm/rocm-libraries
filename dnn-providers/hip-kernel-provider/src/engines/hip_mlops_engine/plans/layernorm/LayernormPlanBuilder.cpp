@@ -38,39 +38,11 @@ size_t getMaxBwdWorkspaceSize(const Handle& handle,
         = attr->mean_tensor_uid().has_value()
               ? std::make_optional(opGraph.getTensorMap().at(attr->mean_tensor_uid().value()))
               : std::nullopt;
-    const auto* xDims = xTensorAttr->dims();
-    const auto* xStrides = xTensorAttr->strides();
-    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
-        std::vector<int64_t>(xStrides->begin(), xStrides->end()));
-
-    const size_t normalizedDim
-        = layernorm::guessNormalizedDim(xTensorAttr, scaleTensorAttr, meanTensorAttr);
-    int64_t outerSize = 1;
-    int64_t innerSize = 1;
-    int64_t stride = 1;
-    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
-    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
-
-    if(normalizedDim > 1
-       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
-    {
-        stride = static_cast<int64_t>(xDims->Get(1));
-    }
-
-    for(unsigned int i = 0; i < xDims->size(); ++i)
-    {
-        if(i < normalizedDim)
-        {
-            if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
-            {
-                outerSize *= static_cast<int64_t>(xDims->Get(i));
-            }
-        }
-        else
-        {
-            innerSize *= static_cast<int64_t>(xDims->Get(i));
-        }
-    }
+    const ProblemDescription problem(
+        xTensorAttr, scaleTensorAttr.value(), meanTensorAttr, Direction::BACKWARD);
+    const auto outerSize = problem.outerSize();
+    const auto innerSize = problem.innerSize();
+    const auto stride = problem.stride();
     const bool parallel
         = LayernormBwdPlan::isParallel(deviceProperties,
                                        static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
