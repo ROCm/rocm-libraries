@@ -335,6 +335,30 @@ const std::vector<std::string> DERIVED_SIGNATURE = {"$derived.tile", R"("$kernel
 const std::vector<std::pair<std::string, std::string>> DERIVED_TRAINED
     = {{"tile", R"({"*":["$q.seqlen",1]})"}};
 
+TEST(TestIngestorUhdKernelHeuristic, AKernelFieldReadThroughADerivedValueCountsAsAnAxis)
+{
+    // §6.3 check 2 compares the engine's knobs against the model's `$kernel.*` axes. A
+    // feature naming `$derived.tile` reads whatever that expression reads, so collecting
+    // axes from the signature alone reported <none> and refused the model -- while the
+    // extractor was already re-evaluating that same value per candidate precisely because
+    // it varies by kernel.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_derived_axis");
+    const std::vector<std::string> signature = {"$derived.tile", R"("$q.seqlen")"};
+    const std::vector<std::pair<std::string, std::string>> derived
+        = {{"tile", R"({"*":["$kernel.tile_m",1]})"}};
+
+    const auto hash = uhd::FeatureExtractor::computeHash(signature, {}, derived);
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "max", hash,
+                                      std::nullopt, "identity", signature);
+    auto descriptor = modelDescriptor(dir.path(), fixture.modelFileName, fixture.objective,
+                                      fixture.calibrated, fixture.scoreTransform, hash,
+                                      signature);
+    descriptor.derived = {{derived.front().first, derived.front().second}};
+
+    // KNOBS is {"tile_m"} -- reachable only through the derived value.
+    EXPECT_NE(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS, {}), nullptr);
+}
+
 TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseDerivedExpressionChangedIsRefused)
 {
     // `$derived.tile` reads identically whichever expression stands behind it, so §6.3

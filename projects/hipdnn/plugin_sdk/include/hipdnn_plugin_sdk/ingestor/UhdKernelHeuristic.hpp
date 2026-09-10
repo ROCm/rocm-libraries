@@ -116,11 +116,33 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
 /// fail silently. A knob the model does not read is a dial the caller can turn while the
 /// heuristic ignores it; an axis with no knob is a model ranking on something the API never
 /// lets anyone vary.
-inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::string>& signature)
+/// The `$kernel.*` fields a model actually reads, following `$derived.*` to its definition.
+///
+/// A derived value is a name for an expression, so a feature reading `$derived.intensity`
+/// reads whatever that expression reads -- `$kernel.*` included. Collecting axes from the
+/// signature alone under-reports them, and §6.3 check 2 then refuses a model whose only
+/// kernel reference lives behind a derived name. The extractor already knows better: it
+/// records exactly these as kernel-dependent so they are re-evaluated per candidate.
+///
+/// Followed transitively, since §6.4 lets a later derived value read an earlier one, and
+/// guarded against a cycle a malformed descriptor could declare.
+inline std::unordered_set<std::string>
+    kernelAxesOf(const std::vector<std::string>& signature,
+                 const std::vector<std::pair<std::string, std::string>>& derived = {})
 {
     std::unordered_set<std::string> axes;
-    for(const auto& entry : signature)
+    std::map<std::string, std::string> expressionOf;
+    for(const auto& value : derived)
     {
+        expressionOf.emplace(value.first, value.second);
+    }
+
+    std::vector<std::string> pending(signature.begin(), signature.end());
+    std::unordered_set<std::string> visited;
+    while(!pending.empty())
+    {
+        const auto entry = pending.back();
+        pending.pop_back();
         // Through FeatureExtractor's own parse, not a second one. RFC 0019 §7.2 allows a
         // bare reference (`$kernel.block_size`) as well as a JsonLogic expression, and a
         // bare reference is not valid JSON -- so parsing entries directly threw on every
@@ -133,9 +155,19 @@ inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::strin
                     uhd::FeatureExtractor::parseSignatureEntry(entry)))
             {
                 constexpr std::string_view PREFIX = "$kernel.";
+                constexpr std::string_view DERIVED = "$derived.";
                 if(variable.rfind(PREFIX, 0) == 0)
                 {
                     axes.insert(variable.substr(PREFIX.size()));
+                }
+                else if(variable.rfind(DERIVED, 0) == 0)
+                {
+                    const auto name = variable.substr(DERIVED.size());
+                    const auto definition = expressionOf.find(name);
+                    if(definition != expressionOf.end() && visited.insert(name).second)
+                    {
+                        pending.push_back(definition->second);
+                    }
                 }
             }
         }
@@ -200,7 +232,7 @@ public:
             // Returning nullptr degrades to declared order, which is what §5 step 7 asks for
             // on a broken feature contract -- the model's inputs are not the ones it was
             // trained on, so its scores would be wrong.
-            const auto axes = kernelAxesOf(config.featuresSignature);
+            const auto axes = kernelAxesOf(config.featuresSignature, config.derived);
             const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
             if(axes != exposed)
             {
