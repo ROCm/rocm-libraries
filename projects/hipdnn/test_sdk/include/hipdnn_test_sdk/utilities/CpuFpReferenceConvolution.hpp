@@ -106,23 +106,23 @@ public:
 
             // Which kernel taps hit the logical x tensor depends only on the y spatial
             // position, so resolve the whole window once instead of per channel.
-            window.build(static_cast<size_t>(nSpatialDims),
-                         kernelSpatialDims.data(),
-                         wStrides.data() + 2,
-                         xStrides.data() + 2,
-                         [&](size_t dim, int64_t kernelIndex) {
-                             const int64_t xIndex = (ySpatialIndices[dim] * strides[dim])
-                                                    + (kernelIndex * dilations[dim])
-                                                    - prePadding[dim];
+            window.build(
+                static_cast<size_t>(nSpatialDims),
+                kernelSpatialDims.data(),
+                wStrides.data() + 2,
+                xStrides.data() + 2,
+                [&](size_t dim, int64_t kernelIndex) {
+                    const int64_t xIndex = (ySpatialIndices[dim] * strides[dim])
+                                           + (kernelIndex * dilations[dim]) - prePadding[dim];
 
-                             // In either case, this position does not exist in the logical x tensor.
-                             // 1.  (y_idx * stride) + (kernel_idx * dilation) - prePadding < 0
-                             //  => (y_idx * stride) + (kernel_idx * dilation) < prePadding
-                             // 2.  (y_idx * stride) + (kernel_idx * dilation) - prePadding >= x_dim
-                             //  => (y_idx * stride) + (kernel_idx * dilation) >= x_dim + prePadding
-                             // It is implicit in Case 2 that the position could be in the postPadding region.
-                             return (xIndex < 0 || xIndex >= xSpatialDims[dim]) ? -1 : xIndex;
-                         });
+                    // In either case, this position does not exist in the logical x tensor.
+                    // 1.  (y_idx * stride) + (kernel_idx * dilation) - prePadding < 0
+                    //  => (y_idx * stride) + (kernel_idx * dilation) < prePadding
+                    // 2.  (y_idx * stride) + (kernel_idx * dilation) - prePadding >= x_dim
+                    //  => (y_idx * stride) + (kernel_idx * dilation) >= x_dim + prePadding
+                    // It is implicit in Case 2 that the position could be in the postPadding region.
+                    return (xIndex < 0 || xIndex >= xSpatialDims[dim]) ? -1 : xIndex;
+                });
 
             // Weight dims: [yChannels, xChannels/groupCount, ...]
             // Thus, we index via flattened y channel index and group-offset x channel index (c).
@@ -233,30 +233,31 @@ public:
 
             // Which kernel taps have a contributing y gradient depends only on the x
             // spatial position, so resolve the whole window once instead of per y channel.
-            window.build(static_cast<size_t>(nSpatialDims),
-                         kernelSpatialDims.data(),
-                         wStrides.data() + 2,
-                         yStrides.data() + 2,
-                         [&](size_t dim, int64_t kernelIndex) -> int64_t {
-                             const int64_t tmp = xSpatialIndices[dim] + prePadding[dim]
-                                                 - (kernelIndex * dilations[dim]);
+            window.build(
+                static_cast<size_t>(nSpatialDims),
+                kernelSpatialDims.data(),
+                wStrides.data() + 2,
+                yStrides.data() + 2,
+                [&](size_t dim, int64_t kernelIndex) -> int64_t {
+                    const int64_t tmp
+                        = xSpatialIndices[dim] + prePadding[dim] - (kernelIndex * dilations[dim]);
 
-                             // Check if the current x position could have contributed to an y element. If the
-                             // remainder is non-zero, this combination is not aligned with the stride, so it's not a valid
-                             // mapping from the forward pass.
-                             if(tmp % strides[dim] != 0)
-                             {
-                                 return -1;
-                             }
+                    // Check if the current x position could have contributed to an y element. If the
+                    // remainder is non-zero, this combination is not aligned with the stride, so it's not a valid
+                    // mapping from the forward pass.
+                    if(tmp % strides[dim] != 0)
+                    {
+                        return -1;
+                    }
 
-                             // Check if position does not exist in the logical y tensor.
-                             // 1.  (x_idx + prePadding - (kernel_idx * dilation)) / stride < 0
-                             //  => numerator < 0 => sampling from a location before the y tensor
-                             // 2.  (x_idx + prePadding - (kernel_idx * dilation)) / stride >= y_dim
-                             //  => x_idx + prePadding >= (y_dim * stride) + (kernel_idx * dilation) => beyond the y tensor
-                             const int64_t yIndex = tmp / strides[dim];
-                             return (yIndex < 0 || yIndex >= ySpatialDims[dim]) ? -1 : yIndex;
-                         });
+                    // Check if position does not exist in the logical y tensor.
+                    // 1.  (x_idx + prePadding - (kernel_idx * dilation)) / stride < 0
+                    //  => numerator < 0 => sampling from a location before the y tensor
+                    // 2.  (x_idx + prePadding - (kernel_idx * dilation)) / stride >= y_dim
+                    //  => x_idx + prePadding >= (y_dim * stride) + (kernel_idx * dilation) => beyond the y tensor
+                    const int64_t yIndex = tmp / strides[dim];
+                    return (yIndex < 0 || yIndex >= ySpatialDims[dim]) ? -1 : yIndex;
+                });
 
             const int64_t gradYBatch
                 = (nIdx * yStrides[0]) + (gIdx * yChannelsPerGroup * yStrides[1]);
