@@ -30,6 +30,7 @@ from .Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
+from .Common.SolutionIdGen import ensure_solution_uid
 from .Common.TimingInstrumentation import timing_context
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
@@ -259,6 +260,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
   for i in range(0, len(logicAnalyzer.solutions)):
     s = logicAnalyzer.solutions[i]
     s["SolutionIndex"] = i
+    ensure_solution_uid(s)
     s["SolutionNameMin"] = getSolutionNameMin(s, splitGSU)
     s["KernelNameMin"]   = getKernelNameMin(s, splitGSU)
     print1("(%2u) %s : %s" % (i, s["SolutionNameMin"], getSolutionNameFull(s, splitGSU)))
@@ -293,6 +295,8 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
       (validSolution, validSolutionInfo) = validSelectionSolution
       selectionSolutionIndex = solutionsStartIndex + i
       selectionSolutionsIds.add(selectionSolutionIndex)
+      validSolution["SolutionIndex"] = selectionSolutionIndex
+      ensure_solution_uid(validSolution)
       validSolution["SolutionNameMin"] = getSolutionNameMin(validSolution, splitGSU)
       validSolution["KernelNameMin"]   = getKernelNameMin(validSolution, splitGSU)
       validSolution["Ideals"] = validSolutionInfo

@@ -147,6 +147,7 @@ namespace TensileLite
         std::string                   libraryDirectory;
         std::string                   suffix;
         std::map<int, std::string>    libraryMapping;
+        std::map<uint64_t, int>       uidIndexMapping;
         mutable std::set<std::string> loadedFiles;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>
@@ -206,6 +207,10 @@ namespace TensileLite
                 std::cout << "No library mapping found at " << path.string() << std::endl;
                 return false;
             }
+
+            fs::path uidPath = fs::path(libraryDirectory)
+                               / ("TensileLiteLibrary_lazy_" + arch + "_UidMapping.dat");
+            uidIndexMapping = LoadUidMapping(uidPath.string());
             return true;
         }
 
@@ -454,6 +459,26 @@ namespace TensileLite
                     = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
             }
             return solution;
+        }
+
+        std::shared_ptr<MySolution> getSolutionByUid(MyProblem const& problem,
+                                                     Hardware const&  hardware,
+                                                     uint64_t         uid) const
+        {
+            auto it = uidIndexMapping.find(uid);
+            if(it == uidIndexMapping.end())
+                return {};
+            loadLibrary(it->second);
+            return getSolutionByIndex(problem, hardware, it->second);
+        }
+
+        std::shared_ptr<MySolution> getSolutionByUid(Hardware const& hardware,
+                                                     uint64_t        uid) const
+        {
+            auto it = uidIndexMapping.find(uid);
+            if(it == uidIndexMapping.end())
+                return {};
+            return getSolutionByIndex(hardware, it->second);
         }
 
         virtual std::shared_ptr<MySolution> findBestSolution(MyProblem const& problem,
