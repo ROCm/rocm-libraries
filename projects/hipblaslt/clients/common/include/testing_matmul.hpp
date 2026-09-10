@@ -90,15 +90,6 @@ extern "C" __global__ void flush_icache()
                          :);
 }
 
-// Convert element count to byte count, accounting for sub-byte packing.
-// FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
-size_t elementsToBytes(size_t numElements, hipDataType dtype)
-{
-    if(static_cast<int>(dtype) == HIP_R_4F_E2M1)
-        return numElements / 2;
-    return numElements * realDataTypeSize(dtype);
-}
-
 template <typename T>
 void swizzle_tensor(T*               dst,
                     const T*         src,
@@ -646,11 +637,10 @@ void testing_matmul_with_bias(const Arguments&                                  
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
         hAmaxD_gold, hAmaxD, hD_gold_epl, hD_gold_ScaleAlpha, hBias_gold_epl;
 
-    // These two vectors store the float values of MX data. Host numerics
-    // generates MX data and returns the corresponding float values. The float
-    // values can be directly used for CPU reference GEMM instead
-    // of converting the MX data to float again.
-    std::vector<std::vector<float>> refA, refB;
+    // Keep the decoded MX values as Tensors, one per problem and batch. This
+    // preserves their compact logical layout without reconstructing it from
+    // product allocation strides or converting element offsets to bytes.
+    std::vector<std::vector<roc::host_numerics::Tensor>> refA, refB;
 
     gpu_mem_gbytes = static_cast<double>(preparation.rotatingBytes) / (1024 * 1024 * 1024);
 
@@ -1203,7 +1193,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                        positiveOnlyInitialization);
         };
 
-        auto mxBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
+        auto mxScaleBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
             if(offset > buffer.getNumBytes())
                 throw std::invalid_argument("MX output offset exceeds host buffer capacity.");
             size_t capacity = buffer.getNumBytes() - offset;
@@ -1214,7 +1204,7 @@ void testing_matmul_with_bias(const Arguments&                                  
         auto generateMxBatch
             = [&](hipDataType                                                   dataType,
                   hipDataType                                                   scaleType,
-                  std::span<uint8_t>                                            dataOutput,
+                  const roc::host_numerics::Tensor&                             dataOutput,
                   std::span<uint8_t>                                            scaleOutput,
                   uint64_t                                                      rows,
                   uint64_t                                                      columns,
@@ -1236,11 +1226,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                       blockRows * blockColumns,
                       arg.initialization,
                       seed);
-                  const auto dataStorage = generated.data.rawEncodedBackingStorage();
-                  if(dataOutput.size() < dataStorage.size())
-                      throw std::invalid_argument("hipBLASLt MX data output is too small.");
-                  if(!dataStorage.empty())
-                      std::memcpy(dataOutput.data(), dataStorage.data(), dataStorage.size());
+                  dataOutput.copyLogicalElementsFrom(generated.data);
 
                   const std::vector<std::byte> scaleStorage
                       = roc::host_numerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
@@ -1252,10 +1238,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                   if(!scaleStorage.empty())
                       std::memcpy(scaleOutput.data(), scaleStorage.data(), scaleStorage.size());
 
-                  std::vector<float> reference(generated.reference.elementCount());
-                  generated.reference.copyLogicalElementsToEncodedStorage(
-                      std::as_writable_bytes(std::span<float>(reference.data(), reference.size())));
-                  return reference;
+                  return generated.reference;
               };
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
@@ -1290,19 +1273,18 @@ void testing_matmul_with_bias(const Arguments&                                  
 #endif
             }
             const auto& scalePlanA = *preparedProblem.a.mxScaleStorage;
-            size_t dataBatchBytesA
-                = (problem.batchCount > 1) ? elementsToBytes(problem.a.batchStride(), TiA) : 0;
             size_t scaleBatchBytesA
                 = (problem.batchCount > 1) ? preparedProblem.a.scaleElements : 0;
-            std::vector<float> refAAll;
-            refAAll.reserve(static_cast<size_t>(problem.a.rows()) * problem.a.columns()
-                            * problem.batchCount);
+            std::vector<roc::host_numerics::Tensor> refAAll;
+            refAAll.reserve(static_cast<size_t>(problem.batchCount));
             for(int64_t b = 0; b < problem.batchCount; b++)
             {
-                auto dataOutputA = mxBatchOutput(hA[i], b * dataBatchBytesA, dataBatchBytesA);
+                const auto dataOutputA = hA[i].tensor(
+                    hipblaslt::host_numerics::scalarType(TiA),
+                    problem.a.logicalBatchLayout(HIPBLAS_OP_N, static_cast<size_t>(b), false));
                 auto scaleOutputA
-                    = mxBatchOutput(hScaleA[i], b * scaleBatchBytesA, scaleBatchBytesA);
-                auto batchRef = generateMxBatch(
+                    = mxScaleBatchOutput(hScaleA[i], b * scaleBatchBytesA, scaleBatchBytesA);
+                refAAll.emplace_back(generateMxBatch(
                     TiA,
                     scaleDataType(arg.scaleA),
                     dataOutputA,
@@ -1313,8 +1295,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleA_row,
                     scaleA_col,
                     scalePlanA,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A, static_cast<size_t>(b)));
-                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::A,
+                               problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
             }
             refA.emplace_back(std::move(refAAll));
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
@@ -1381,19 +1363,18 @@ void testing_matmul_with_bias(const Arguments&                                  
 #endif
             }
             const auto& scalePlanB = *preparedProblem.b.mxScaleStorage;
-            size_t dataBatchBytesB
-                = (problem.batchCount > 1) ? elementsToBytes(problem.b.batchStride(), TiB) : 0;
             size_t scaleBatchBytesB
                 = (problem.batchCount > 1) ? preparedProblem.b.scaleElements : 0;
-            std::vector<float> refBAll;
-            refBAll.reserve(static_cast<size_t>(problem.b.rows()) * problem.b.columns()
-                            * problem.batchCount);
+            std::vector<roc::host_numerics::Tensor> refBAll;
+            refBAll.reserve(static_cast<size_t>(problem.batchCount));
             for(int64_t b = 0; b < problem.batchCount; b++)
             {
-                auto dataOutputB = mxBatchOutput(hB[i], b * dataBatchBytesB, dataBatchBytesB);
+                const auto dataOutputB = hB[i].tensor(
+                    hipblaslt::host_numerics::scalarType(TiB),
+                    problem.b.logicalBatchLayout(HIPBLAS_OP_N, static_cast<size_t>(b), false));
                 auto scaleOutputB
-                    = mxBatchOutput(hScaleB[i], b * scaleBatchBytesB, scaleBatchBytesB);
-                auto batchRef = generateMxBatch(
+                    = mxScaleBatchOutput(hScaleB[i], b * scaleBatchBytesB, scaleBatchBytesB);
+                refBAll.emplace_back(generateMxBatch(
                     TiB,
                     scaleDataType(arg.scaleB),
                     dataOutputB,
@@ -1404,8 +1385,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleB_row,
                     scaleB_col,
                     scalePlanB,
-                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B, static_cast<size_t>(b)));
-                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+                    matrixSeed(hipblaslt::host_numerics::MatrixRole::B,
+                               problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b))));
             }
             refB.emplace_back(std::move(refBAll));
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
@@ -2848,19 +2829,14 @@ void testing_matmul_with_bias(const Arguments&                                  
                     return buffers.at(bufferIndex).tensor(
                         hipblaslt::host_numerics::scalarType(type), layout);
                 };
-                const auto decodedMxTensor = [&](const std::vector<float>& values,
-                                                 const roc::host_numerics::Layout& layout) {
-                    const size_t elementOffset
-                        = (layout.offset() < 0) ? 0 : static_cast<size_t>(layout.offset());
-                    const auto rebased = roc::host_numerics::Layout(
-                        layout.shape(),
-                        std::vector<ptrdiff_t>(layout.strides().begin(), layout.strides().end()));
-                    const size_t elements
-                        = roc::host_numerics::storageBytesForLayout(
-                              roc::host_numerics::ScalarType::Float32, rebased)
-                          / sizeof(float);
-                    return roc::host_numerics::Tensor::copyNativeStorage<float>(
-                        rebased, std::span<const float>(values).subspan(elementOffset, elements));
+                const auto decodedMxTensor = [](const roc::host_numerics::Tensor& tensor,
+                                                hipblasOperation_t operation) {
+                    if(operation == HIPBLAS_OP_N)
+                        return tensor;
+                    return tensor.shareStorageWithLayout(roc::host_numerics::Layout(
+                        roc::host_numerics::Shape{tensor.shape()[1], tensor.shape()[0]},
+                        {tensor.layout().stride(1), tensor.layout().stride(0)},
+                        tensor.layout().offset()));
                 };
 
                 const auto aLayout = problem.a.logicalBatchLayout(
@@ -2876,11 +2852,11 @@ void testing_matmul_with_bias(const Arguments&                                  
 
                 roc::host_numerics::Tensor referenceA
                     = isScaleAMXFormat
-                          ? decodedMxTensor(refA.at(gemmIdx), aLayout)
+                          ? decodedMxTensor(refA.at(gemmIdx).at(batchIdx), problem.operationA)
                           : hostBufferTensor(hA, TiA, aLayout, pointerArrayMode);
                 roc::host_numerics::Tensor referenceB
                     = isScaleBMXFormat
-                          ? decodedMxTensor(refB.at(gemmIdx), bLayout)
+                          ? decodedMxTensor(refB.at(gemmIdx).at(batchIdx), problem.operationB)
                           : hostBufferTensor(hB, TiB, bLayout, pointerArrayMode);
                 roc::host_numerics::Tensor referenceC
                     = hostBufferTensor(hC, TiC, cLayout, pointerArrayMode);
