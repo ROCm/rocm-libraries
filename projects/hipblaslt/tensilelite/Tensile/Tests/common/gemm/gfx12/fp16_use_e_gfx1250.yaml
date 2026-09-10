@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
@@ -41,6 +42,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  2, 1,  1, 2 ]
         - AssertFree0ElementMultiple: [1]
@@ -59,7 +61,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [8]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
@@ -70,7 +73,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [true]
         - ActivationFuncCall: [true]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - StaggerU: [0]
         - StaggerUMapping: [0]
         - StaggerUStride: [256]

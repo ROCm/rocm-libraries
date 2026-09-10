@@ -5406,6 +5406,11 @@ class Solution(collections.abc.Mapping):
       # so plain StreamK keeps the extra buffer and only PAP falls back to two.
       if state["PrefetchAcrossPersistent"]:
         state["TDMPlusLdsBuf"] = 0
+      if state["_ScheduleIterAlg"] != 0:
+        if  state["TDMPlusLdsBuf"] == 1:
+          reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
+          return
+        state["TDMPlusLdsBuf"] = 0
 
     # Here, 1LDSBuffer == -1 is not resolved yet.
     # (cannot move 1LDSBuffer==-1 resolution code above because of referring ldsNumBytesAB)

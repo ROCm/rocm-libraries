@@ -123,6 +123,8 @@ class TestIrParityCoverage(unittest.TestCase):
         here means emitted IR changed -- if intended & reviewed, re-bless with:
           python tests/instances/rocke_ir_parity_harness.py \\
             --write tests/golden/rocke_representative_ir_sha256.json
+
+        ``QUARANTINED_CASES`` in the harness is excluded from this comparison.
         """
         self.assertTrue(
             _GOLDEN.exists(),
