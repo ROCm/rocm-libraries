@@ -213,11 +213,37 @@ def test_default_is_never_rejected():
         assert tdmCrossRejectReason(ks) is None, ks
 
 
-@pytest.mark.parametrize("fuse", [0, 1])
-def test_two_partitioned_groups_admit_crossing(fuse):
-    ks = _ks(fuse=fuse, cross=TDM_CROSS_CROSSED)
+def test_two_partitioned_groups_admit_crossing():
+    """MX_AB is the grouping whose crossed arrangement is implemented."""
+    ks = _ks(fuse=0, cross=TDM_CROSS_CROSSED)
     assert len(partitionedGroups(ks)) == 2
     assert tdmCrossRejectReason(ks) is None
+
+
+def test_paired_has_two_groups_but_its_crossing_is_not_implemented():
+    """Two partitioned groups is necessary for crossing but not sufficient.
+
+    The paired sets are {A,MXSA} and {MXSB,B}, one member of each on either
+    parity. Crossing asks for both data tensors on one parity and both scales
+    on the other, and _tdmPairedParityOrder answers within its own argument
+    pair, so it cannot express that arrangement -- it invents an even/odd pair
+    from argument position instead. Initialisation and the tail then program
+    different descriptors, which shows up as wrong results at every K that
+    leaves a tail while K dividing DepthU stays clean.
+    """
+    ks = _ks(fuse=1, cross=TDM_CROSS_CROSSED)
+    assert len(partitionedGroups(ks)) == 2
+    assert "paired grouping is not implemented" in tdmCrossRejectReason(ks)
+
+
+def test_crossing_needs_the_two_data_tensors_at_one_prefetch_depth():
+    """Decoupled prefetch depths pair each scale with a data tensor before the
+    crossing is applied, so the two disagree about which scale belongs to
+    which tensor. Wrong at every size, unlike the tail-only paired defect."""
+    ks = _ks(fuse=0, cross=TDM_CROSS_CROSSED, pgrA=1, pgrB=2)
+    assert "decoupled prefetch depths" in tdmCrossRejectReason(ks)
+    assert tdmCrossRejectReason(_ks(fuse=0, cross=TDM_CROSS_CROSSED,
+                                    pgrA=2, pgrB=2)) is None
 
 
 def test_amx_has_one_partitioned_group_so_nothing_to_cross():
