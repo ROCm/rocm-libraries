@@ -7,6 +7,7 @@
 #include <hipblaslt/host_numerics/MatrixTransformReference.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt/host_numerics/near.hpp>
+#include <hipblaslt/host_numerics/norm.hpp>
 
 #include <gtest/gtest.h>
 
@@ -551,6 +552,8 @@ TEST(HostNumericsTolerancePolicy, Gfx11ScalesComputeTypeEpsilon)
     EXPECT_DOUBLE_EQ(gfx11_low_precision_accumulation_tolerance_coefficient(HIP_R_32F, 8),
                      64.0 * std::numeric_limits<float>::epsilon());
     EXPECT_DOUBLE_EQ(bfloat16_output_rounding_tolerance_coefficient(), 0x1p-8);
+    EXPECT_THROW(sum_error_tolerance_for_compute_type(HIP_R_8I), std::invalid_argument);
+    EXPECT_THROW(norm_tolerance(roc::host_numerics::ScalarType::Count), std::invalid_argument);
 }
 
 TEST(HostNumericsDataInitializationBridge, CounterBasedGenerationIsRepeatable)
