@@ -151,17 +151,21 @@ auto callFuncUnpackArgs(F f, T args)
     return callFuncUnpackArgsImpl(f, args, std::make_index_sequence<N>{});
 }
 
-template <typename F>
-struct ParallelTensorFunctorDynamic
+/**
+ * @brief Row-major decomposition of a flat work index, plus the split of that work
+ * across threads.
+ *
+ * Factored out so the parallel tensor functors below differ only in what they hand the
+ * callee, not in how the work is divided.
+ */
+struct ParallelTensorRange
 {
-    F func;
     std::vector<std::size_t> lengths;
     std::vector<std::size_t> strides;
     std::size_t totalElements{1};
 
-    ParallelTensorFunctorDynamic(F f, const std::vector<int64_t>& dimensions)
-        : func(f)
-        , lengths(dimensions.begin(), dimensions.end())
+    explicit ParallelTensorRange(const std::vector<int64_t>& dimensions)
+        : lengths(dimensions.begin(), dimensions.end())
         , strides(dimensions.size())
     {
         if(lengths.empty())
@@ -194,7 +198,13 @@ struct ParallelTensorFunctorDynamic
         return indices;
     }
 
-    void operator()(std::size_t numThreads = 1) const
+    /**
+     * @brief Runs `body(workBegin, workEnd)` once per thread over disjoint work ranges.
+     *
+     * Every thread is joined before this returns, so `body` may capture by reference.
+     */
+    template <typename Body>
+    void runChunked(std::size_t numThreads, const Body& body) const
     {
         if(totalElements == 0)
         {
@@ -211,30 +221,108 @@ struct ParallelTensorFunctorDynamic
             const std::size_t workBegin = threadIdx * workPerThread;
             const std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
 
-            auto threadFunc = [=, *this] {
-                // One index buffer for the whole work range: the functor body only reads
-                // it, so allocating a fresh vector per element is pure heap traffic.
-                std::vector<int64_t> indices;
+            threads[threadIdx]
+                = JoinableThread([&body, workBegin, workEnd] { body(workBegin, workEnd); });
+        }
+    }
+};
 
-                for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
+/**
+ * @brief Runs a functor over every position of an index space, in parallel.
+ *
+ * The callee is invoked as `func(indices)`. A functor returning `bool` stops its own
+ * thread early when it returns false.
+ */
+template <typename F>
+struct ParallelTensorFunctorDynamic : ParallelTensorRange
+{
+    F func;
+
+    ParallelTensorFunctorDynamic(F f, const std::vector<int64_t>& dimensions)
+        : ParallelTensorRange(dimensions)
+        , func(f)
+    {
+    }
+
+    void operator()(std::size_t numThreads = 1) const
+    {
+        runChunked(numThreads, [this](std::size_t workBegin, std::size_t workEnd) {
+            // One index buffer for the whole work range: the functor body only reads
+            // it, so allocating a fresh vector per element is pure heap traffic.
+            std::vector<int64_t> indices;
+
+            for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
+            {
+                fillNdIndices(workIdx, indices);
+
+                if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>>)
                 {
-                    fillNdIndices(workIdx, indices);
-
-                    if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>>)
+                    if(!func(indices))
                     {
-                        if(!func(indices))
-                        {
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        func(indices);
+                        return;
                     }
                 }
-            };
-            threads[threadIdx] = JoinableThread(threadFunc);
-        }
+                else
+                {
+                    func(indices);
+                }
+            }
+        });
+    }
+};
+
+/**
+ * @brief Runs a functor over every position of an index space, in parallel, handing each
+ * worker thread its own `Scratch`.
+ *
+ * The scratch is constructed once per thread and reused for every work item that thread
+ * handles. That is the lifetime a callee needs for a buffer it rebuilds per work item but
+ * must not reallocate per work item - a ConvolutionWindow, for instance.
+ *
+ * ParallelTensorFunctorDynamic cannot express that: it invokes the callee with indices
+ * only, so a callee needing state that outlives a single work item has nowhere to put it
+ * short of a function-local `thread_local`. Prefer this, which makes the lifetime explicit
+ * and ends it with the parallel region.
+ *
+ * The callee is invoked as `func(scratch, indices)`.
+ */
+template <typename Scratch, typename F>
+struct ParallelTensorFunctorWithScratch : ParallelTensorRange
+{
+    static_assert(std::is_default_constructible_v<Scratch>,
+                  "Scratch must be default constructible; one is created per worker thread");
+
+    F func;
+
+    ParallelTensorFunctorWithScratch(F f, const std::vector<int64_t>& dimensions)
+        : ParallelTensorRange(dimensions)
+        , func(f)
+    {
+    }
+
+    void operator()(std::size_t numThreads = 1) const
+    {
+        runChunked(numThreads, [this](std::size_t workBegin, std::size_t workEnd) {
+            Scratch scratch;
+            std::vector<int64_t> indices;
+
+            for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
+            {
+                fillNdIndices(workIdx, indices);
+
+                if constexpr(std::is_invocable_r_v<bool, F, Scratch&, std::vector<int64_t>>)
+                {
+                    if(!func(scratch, indices))
+                    {
+                        return;
+                    }
+                }
+                else
+                {
+                    func(scratch, indices);
+                }
+            }
+        });
     }
 };
 
@@ -382,6 +470,14 @@ template <typename F>
 auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
+}
+
+/// Companion to makeParallelTensorFunctor for callees that need per-thread scratch.
+/// `Scratch` is explicit; `F` is deduced. The callee takes `(Scratch&, indices)`.
+template <typename Scratch, typename F>
+auto makeParallelTensorFunctorWithScratch(F f, const std::vector<int64_t>& dimensions)
+{
+    return ParallelTensorFunctorWithScratch<Scratch, F>(f, dimensions);
 }
 
 /**
