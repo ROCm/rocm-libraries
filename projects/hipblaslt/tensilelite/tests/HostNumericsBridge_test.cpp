@@ -6,30 +6,37 @@
 #include <Tensile/DataTypes.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <span>
 
 namespace
 {
     template <typename T>
     bool productValuesClose(rocisa::DataType type, T observed, T expected, double threshold = -1.0)
     {
-        using namespace roc::host_numerics;
+        using roc::host_numerics::ComparisonOptions;
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::Shape;
+        using roc::host_numerics::Tensor;
 
         const std::array<T, 1> observedStorage{observed};
         const std::array<T, 1> expectedStorage{expected};
         ComparisonOptions      options
             = TensileLite::Client::validationComparisonOptions(type, threshold);
         options.computeElementwiseStatistics = false;
-        options.computeFrobenius           = false;
-        const ComparisonReport report      = TensileLite::Client::compareHostBuffers(
-            type,
-            observedStorage.data(),
-            expectedStorage.data(),
-            Layout::contiguousLastDimensionFastest(Shape{1}),
-            options);
-        return report.passed();
+        options.computeFrobenius              = false;
+        const auto scalarType = TensileLite::Client::toHostNumericsScalarType(type);
+        const auto layout     = Layout::contiguousLastDimensionFastest(Shape{1});
+        return roc::host_numerics::compare(
+                   Tensor::copyEncodedBackingStorage(
+                       scalarType, layout, std::as_bytes(std::span<const T>(observedStorage))),
+                   Tensor::copyEncodedBackingStorage(
+                       scalarType, layout, std::as_bytes(std::span<const T>(expectedStorage))),
+                   options)
+            .passed();
     }
 
     template <typename T>
