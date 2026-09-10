@@ -39,7 +39,7 @@ accuracy and performance tests.
 
 ## Resources and runtime robustness
 
-rocFFT tests will attempt to use as all of the GPU's memory, and all of the host's memory in order
+rocFFT tests will attempt to use all of the GPU's memory, and all of the host's memory in order
 to test as many transform sizes as possible. rocfft-test will query the device and the host in order
 to determine if a given problem size will fit into the available hardware resources, and will either
 not generate the test (if the memory footprint exceeds the hardware's availability) or skips the
@@ -140,7 +140,7 @@ precision.  These bounds are designed so that if one sets the value, then numeri
 that value. Thus, the reported precision-based epsilon values reported at the end of the test run
 can be used as a bound for running the tests again.
 
-rocfft-test makes use of randomization.  A random static random seed can be provided via
+rocfft-test makes use of randomization.  A static random seed can be provided via
 command-line options, but should not be used in a general testing environment; the purpose here is
 to reproduce tests in the case of failures.  Randomized test selection is stable under test addition
 or removal, but not under test name changes (the test name, via gtest, is used in conjunction with
@@ -277,12 +277,12 @@ identify false positives.
 Performance testing is currently not implemented in TheRock due to infrastructure issues.
 
 
-## Other testing infrascturcture
+## Other testing infrasctructure
 
 ### Kernel test harness
 
-rocFFT provides a kernel test harness, which produces a stand-alone, AOT-compiled harness to enable
-stand-along debugging.  This is enabled by settting the environment variable
+rocFFT provides a kernel test harness, which produces a stand-alone harness to enable
+stand-alone debugging.  This is enabled by setting the environment variable
 `ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS=1`.  Some intervention is required in order to set the kernel
 launch parameters, which are visible under plan debugging (`ROCFFT_LAYER=8`); this is mostly a
 developer-level test tool, particularly when attempting to determine the layer of the stack involved
@@ -308,9 +308,9 @@ test timeouts and providing faster host hardware.
 
 Static analysis (formatting and cppcheck) is gating for PRs.
 
-Multi-gpu tests are run when a PR is manually tagged with `ci:multi-gpu`; at least a
-smoketest-levelsample should be run on any relevant PR, and this should be done automatically.  This
-is a gap in TheRock's CI infrastructure.
+Multi-gpu tests are run when a PR is manually tagged with `ci:multi-gpu`; at least a smoketest-level
+sample should be run on any relevant PR, and this should be done automatically.  This is a gap in
+TheRock's CI infrastructure.
 
 In general, performance tests aren't run, and multi-process tests are not run.
 These gaps are due to infrastructure availability issues.
