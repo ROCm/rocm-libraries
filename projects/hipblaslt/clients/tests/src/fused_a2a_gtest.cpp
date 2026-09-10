@@ -1,22 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// API-surface tests for the fused GEMM + all-to-all epilogue.
+// API-surface tests for the fused GEMM + all-to-all epilogue: the builder's
+// single-stage family rule, attribute ranges, the completeness check run at
+// descriptor attach, communicator registration, and the shape and layout
+// requirements checked before solution selection.
 //
-// This covers what the host can decide on its own: the builder's single-stage
-// family rule, each attribute's accepted range, the completeness check that runs
-// when the descriptor is attached to a matmul descriptor, communicator
-// registration, and the shape and layout requirements checked before a solution
-// is selected. No architecture carries a fused all-to-all kernel yet, so a
-// well-formed request ends in HIPBLAS_STATUS_NOT_SUPPORTED; the tests assert that
-// distinction, since an unusable request must be an error while missing
-// capability must never present as a rejected shape.
-//
-// The suite names carry the "pre_checkin" token on purpose: the ctest presets in
-// clients/tests/test_categories.yaml select by loose substring on a category
-// token, and a plain gtest suite has none, so it would be invisible to them.
-// One suite carries "multi_gpu" instead, which is the category that file gives a
-// two-device host; it skips rather than degrading to one device.
+// Suite names must keep their "pre_checkin" or "multi_gpu" token. The ctest
+// presets in clients/tests/test_categories.yaml select by loose substring on
+// that token, so a suite without one is invisible to them.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -37,63 +29,47 @@ namespace
         return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
     }
 
-    // A single-process allgather: with one rank it is exactly the memcpy the
-    // design doc names as the single-process case.
-    hipblasStatus_t memcpyAllgather(void*       userData,
-                                    const void* sendbuf,
-                                    void*       recvbuf,
-                                    size_t      bytesPerRank)
+    // With one rank an allgather is exactly a memcpy.
+    hipblasStatus_t
+        memcpyAllgather(void* /*userData*/, const void* sendbuf, void* recvbuf, size_t bytesPerRank)
     {
-        (void)userData;
         memcpy(recvbuf, sendbuf, bytesPerRank);
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    hipblasStatus_t failingAllgather(void*       userData,
-                                     const void* sendbuf,
-                                     void*       recvbuf,
-                                     size_t      bytesPerRank)
+    hipblasStatus_t failingAllgather(void* /*userData*/,
+                                     const void* /*sendbuf*/,
+                                     void* /*recvbuf*/,
+                                     size_t /*bytesPerRank*/)
     {
-        (void)userData;
-        (void)sendbuf;
-        (void)recvbuf;
-        (void)bytesPerRank;
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
 
-    // Publishes this rank's payload and leaves the second slot zeroed, which no
-    // real contribution can ever look like. Stands in for any way the ranks can
-    // fail to agree about the communicator.
-    hipblasStatus_t silentPeerAllgather(void*       userData,
+    // Leaves the second slot zeroed, which no real contribution can look like.
+    hipblasStatus_t silentPeerAllgather(void* /*userData*/,
                                         const void* sendbuf,
                                         void*       recvbuf,
                                         size_t      bytesPerRank)
     {
-        (void)userData;
         memcpy(recvbuf, sendbuf, bytesPerRank);
         memset(static_cast<char*>(recvbuf) + bytesPerRank, 0, bytesPerRank);
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    // Copies this rank's payload into both slots, so the second slot claims to be
-    // rank 0 where rank 1 belongs.
-    hipblasStatus_t duplicatingAllgather(void*       userData,
+    // Both slots claim to be rank 0, so rank 1's contribution is missing.
+    hipblasStatus_t duplicatingAllgather(void* /*userData*/,
                                          const void* sendbuf,
                                          void*       recvbuf,
                                          size_t      bytesPerRank)
     {
-        (void)userData;
         memcpy(recvbuf, sendbuf, bytesPerRank);
         memcpy(static_cast<char*>(recvbuf) + bytesPerRank, sendbuf, bytesPerRank);
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    // A real allgather for ranks that are threads of one process: each publishes
-    // into its own slot and waits for the rest before reading the whole buffer
-    // back. Registration cannot return until every peer has contributed, so this
-    // rendezvous is the only way more than one rank registers in one process. The
-    // wait is bounded so a rank that never arrives fails the test instead of
-    // hanging it.
+    // Registration cannot return until every peer has contributed, so ranks that
+    // are threads of one process need this rendezvous to register at all. The
+    // wait is bounded so a rank that never arrives fails the test, not hangs it.
     struct Rendezvous
     {
         std::mutex              mutex;
