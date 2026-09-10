@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Focused coverage for low-bit dynamic ``scf.for`` loop-carried types."""
+"""Low-bit carries and metadata validation in both ``scf.for`` lowering paths."""
 
 from __future__ import annotations
 
@@ -36,18 +36,29 @@ _LOWBIT_TYPES = (
 )
 
 
-def _build_loop(carry_types=_LOWBIT_TYPES):
+def _build_loop(carry_types=_LOWBIT_TYPES, *, trip_count=None, unroll=False):
     builder = IRBuilder("lowbit_loop_types")
-    lower = builder.param("lower", I32)
-    upper = builder.param("upper", I32)
-    step = builder.param("step", I32)
+    if trip_count is None:
+        lower = builder.param("lower", I32)
+        upper = builder.param("upper", I32)
+        step = builder.param("step", I32)
+    else:
+        lower = builder.const_i32(0)
+        upper = builder.const_i32(trip_count)
+        step = builder.const_i32(1)
     iter_args = [
         (f"carry_{name}", builder.param(f"init_{name}", carry_type))
         for name, carry_type, _ in carry_types
     ]
-    loop = builder.scf_for_iter(lower, upper, step, iter_args, iv_name="iteration")
-    with loop as (_, carries):
-        yielded = list(carries)
+    if iter_args:
+        loop = builder.scf_for_iter(
+            lower, upper, step, iter_args, iv_name="iteration", unroll=unroll
+        )
+    else:
+        loop = builder.scf_for(lower, upper, step, iv_name="iteration")
+        loop.op.attrs["unroll"] = unroll
+    with loop:
+        yielded = list(loop.iter_vars)
         if len(yielded) > 1:
             yielded[1] = builder.add(yielded[1], yielded[1])
         builder.scf_yield(*yielded)
@@ -56,6 +67,30 @@ def _build_loop(carry_types=_LOWBIT_TYPES):
 
 
 class TestLowbitLoopTypes(unittest.TestCase):
+    def test_unrolled_lowbit_carries_use_initial_or_final_yielded_values(self):
+        for trip_count in (0, 1, 3):
+            with self.subTest(trip_count=trip_count):
+                kernel, loop_op = _build_loop(trip_count=trip_count, unroll=True)
+                llvm = _lower_kernel_to_llvm_python(
+                    kernel, arch="gfx950", llvm_flavor="llvm20"
+                )
+                self.assertNotIn("for.header", llvm)
+                self.assertNotIn(" phi ", llvm)
+                updates = re.findall(
+                    r"^  (%\S+) = add nsw i16 (%\S+), (%\S+)$", llvm, re.MULTILINE
+                )
+                self.assertEqual(len(updates), trip_count)
+                final_i16 = "%init_i16"
+                for result, lhs, rhs in updates:
+                    self.assertEqual((lhs, rhs), (final_i16, final_i16))
+                    final_i16 = result
+                for (name, _, llvm_type), result in zip(_LOWBIT_TYPES, loop_op.results):
+                    expected = final_i16 if name == "i16" else f"%init_{name}"
+                    self.assertIn(
+                        f"  {result.name} = bitcast {llvm_type} {expected} to {llvm_type}",
+                        llvm,
+                    )
+
     def test_phi_latch_and_exit_use_complete_lowbit_types(self):
         kernel, loop_op = _build_loop()
         llvm = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
@@ -109,17 +144,91 @@ class TestLowbitLoopTypes(unittest.TestCase):
         except ImportError as exc:
             self.skipTest(f"rocke_engine extension not built: {exc}")
 
-        kernel, _ = _build_loop()
-        encoded = serialize(kernel)
-        for flavor in LLVM_FLAVORS:
-            with self.subTest(flavor=flavor):
-                python_llvm = _lower_kernel_to_llvm_python(
-                    kernel, arch="gfx950", llvm_flavor=flavor
-                )
-                cpp_llvm = rocke_engine.lower_serialized_ir(
-                    encoded, arch="gfx950", flavor=flavor
-                )
-                self.assertEqual(cpp_llvm, python_llvm)
+        for trip_count in (None, 0, 1, 3):
+            kernel, _ = _build_loop(
+                trip_count=trip_count, unroll=trip_count is not None
+            )
+            encoded = serialize(kernel)
+            for flavor in LLVM_FLAVORS:
+                with self.subTest(trip_count=trip_count, flavor=flavor):
+                    python_llvm = _lower_kernel_to_llvm_python(
+                        kernel, arch="gfx950", llvm_flavor=flavor
+                    )
+                    cpp_llvm = rocke_engine.lower_serialized_ir(
+                        encoded, arch="gfx950", flavor=flavor
+                    )
+                    self.assertEqual(cpp_llvm, python_llvm)
+
+    def _check_metadata_counts(self, lower, error_type):
+        for unroll in (False, True):
+            for num_carries in (0, 1):
+                carry_types = _LOWBIT_TYPES[:num_carries]
+                kernel, _ = _build_loop(carry_types, trip_count=1, unroll=unroll)
+                # Plain scf_for has no iter_args or num_iter_args metadata.
+                self.assertIn("ret void", lower(kernel))
+                cases = [
+                    (
+                        "extra",
+                        [{"name": "%extra", "type": "i8"}] * (num_carries + 1),
+                        f"scf.for declares {num_carries} iter_args but has {num_carries + 1} metadata entries",
+                    ),
+                    (
+                        "not_list",
+                        "invalid",
+                        "scf.for iter_args metadata must be a list",
+                    ),
+                ]
+                if num_carries:
+                    cases.extend(
+                        [
+                            (
+                                "empty",
+                                [],
+                                "scf.for declares 1 iter_args but has 0 metadata entries",
+                            ),
+                            (
+                                "absent",
+                                None,
+                                "scf.for declares 1 iter_args but has 0 metadata entries",
+                            ),
+                        ]
+                    )
+                for case, metadata, message in cases:
+                    with self.subTest(
+                        unroll=unroll, num_carries=num_carries, case=case
+                    ):
+                        kernel, loop_op = _build_loop(
+                            carry_types, trip_count=1, unroll=unroll
+                        )
+                        # Keep operands resolvable so rejection reaches the lowerer,
+                        # rather than failing on missing block names in the parser.
+                        loop_op.regions[0].ops[-1].operands = loop_op.operands[3:]
+                        if metadata is None:
+                            del loop_op.attrs["iter_args"]
+                        else:
+                            loop_op.attrs["iter_args"] = metadata
+                        with self.assertRaisesRegex(error_type, re.escape(message)):
+                            lower(kernel)
+
+    def test_python_validates_metadata_counts_in_both_loop_paths(self):
+        self._check_metadata_counts(
+            lambda kernel: _lower_kernel_to_llvm_python(
+                kernel, arch="gfx950", llvm_flavor="llvm20"
+            ),
+            ValueError,
+        )
+
+    def test_cpp_validates_metadata_counts_in_both_loop_paths(self):
+        try:
+            import rocke_engine
+        except ImportError as exc:
+            self.skipTest(f"rocke_engine extension not built: {exc}")
+        self._check_metadata_counts(
+            lambda kernel: rocke_engine.lower_serialized_ir(
+                serialize(kernel), arch="gfx950", flavor="llvm20"
+            ),
+            RuntimeError,
+        )
 
     def test_illegal_loop_carried_types_are_rejected_clearly(self):
         illegal_types = (

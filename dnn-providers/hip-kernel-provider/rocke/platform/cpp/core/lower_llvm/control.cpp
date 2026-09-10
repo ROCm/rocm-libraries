@@ -1201,6 +1201,37 @@ static void _op_tile_s_setprio(rocke_lower_t* L, const rocke_op_t* op)
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
 
+/* Validate counts before either lowering path emits or unrolls the body. */
+static int64_t ll_validate_iter_counts(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t num_iter = 0;
+    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
+    if(num_iter < 0 || op->num_operands - 3 != num_iter || op->num_results != num_iter)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for declares %lld iter_args but has %d init operands and %d results",
+                      (long long)num_iter,
+                      op->num_operands - 3,
+                      op->num_results);
+    }
+    const rocke_attr_value_t* meta = rocke_attr_get(&op->attrs, "iter_args");
+    if(meta && meta->kind != ROCKE_ATTR_LIST)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_args metadata must be a list");
+    }
+    const int num_meta = meta ? meta->u.list.count : 0;
+    if(num_meta != num_iter)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "scf.for declares %lld iter_args but has %d metadata entries",
+                      (long long)num_iter,
+                      num_meta);
+    }
+    return num_iter;
+}
+
 /* Fetch the i-th iter_args metadata map's "name"/"type" string fields. The
  * Python iter_meta is op.attrs["iter_args"], a list of {"name","type"} dicts;
  * here it is a ROCKE_ATTR_LIST whose items are small attr maps. Returns false if
@@ -1342,17 +1373,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int64_t num_iter = 0;
-    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
-    if(num_iter < 0 || op->num_operands != 3 + num_iter || op->num_results != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %d iter_args but has %d init operands and %d results",
-                      (int)num_iter,
-                      op->num_operands - 3,
-                      op->num_results);
-    }
+    const int64_t num_iter = ll_validate_iter_counts(L, op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -1507,17 +1528,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int64_t num_iter = 0;
-    rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
-    if(num_iter < 0 || op->num_operands != 3 + num_iter || op->num_results != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %d iter_args but has %d init operands and %d results",
-                      (int)num_iter,
-                      op->num_operands - 3,
-                      op->num_results);
-    }
+    const int64_t num_iter = ll_validate_iter_counts(L, op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
