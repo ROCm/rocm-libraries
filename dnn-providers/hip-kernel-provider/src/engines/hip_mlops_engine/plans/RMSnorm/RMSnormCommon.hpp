@@ -9,6 +9,12 @@
 namespace hip_kernel_provider::rmsnorm
 {
 
+enum class Direction
+{
+    FORWARD,
+    BACKWARD
+};
+
 inline int64_t
     getOuterSize(const flatbuffers::Vector<int64_t>* xDims, unsigned normalizeDim, int64_t stride)
 {
@@ -65,5 +71,48 @@ inline unsigned getNormalizeDim(const flatbuffers::Vector<int64_t>* xDims,
         = (matchCount == scaleDimsVec.size()) ? 1 : scaleDimsVec.size() - matchCount;
     return static_cast<unsigned>(normalizeDim);
 }
+
+class ProblemDescription
+{
+public:
+    ProblemDescription(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* x,
+                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale,
+                       Direction direction)
+        : _direction(direction)
+        , _normalizeDim(getNormalizeDim(x->dims(), scale->dims()))
+        , _stride(getStride(x, _normalizeDim))
+        , _outerSize(getOuterSize(x->dims(), _normalizeDim, _stride))
+        , _innerSize(getInnerSize(x->dims(), _normalizeDim))
+    {
+    }
+
+    Direction direction() const
+    {
+        return _direction;
+    }
+    unsigned normalizeDim() const
+    {
+        return _normalizeDim;
+    }
+    int64_t outerSize() const
+    {
+        return _outerSize;
+    }
+    int64_t innerSize() const
+    {
+        return _innerSize;
+    }
+    int64_t stride() const
+    {
+        return _stride;
+    }
+
+private:
+    Direction _direction;
+    unsigned _normalizeDim;
+    int64_t _stride;
+    int64_t _outerSize;
+    int64_t _innerSize;
+};
 
 }

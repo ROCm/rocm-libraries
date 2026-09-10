@@ -17,49 +17,36 @@
 namespace hip_kernel_provider::batchnorm
 {
 
-struct ProblemDims
+static ProblemDescription extractProblemDescription(const BatchnormBwdParams& params)
 {
+    const auto xDataType = params.x()->data_type();
+    const auto scaleDataType = params.scale()->data_type();
+    const bool useFp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useBfp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const auto* xDims = params.x()->dims();
     size_t n = 0;
     size_t c = 0;
     size_t h = 0;
     size_t w = 0;
-    unsigned int inCstride = 0;
-    unsigned int inNhw = 0;
-    unsigned int inChw = 0;
-    unsigned int inNchw = 0;
-    bool isLayoutNHWC = false;
-    bool useFp16Mix = false;
-    bool useBfp16Mix = false;
-    bool useFp32 = true;
-};
-
-static ProblemDims extractProblemDims(const BatchnormBwdParams& params)
-{
-    ProblemDims dims{};
-
-    const auto xDataType = params.x()->data_type();
-    const auto scaleDataType = params.scale()->data_type();
-    dims.useFp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-                       && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    dims.useBfp16Mix = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-                        && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    dims.useFp32 = !dims.useFp16Mix && !dims.useBfp16Mix;
-
-    const auto* xDims = params.x()->dims();
     if(xDims->size() == 4)
     {
-        dims.n = static_cast<size_t>(xDims->Get(0));
-        dims.c = static_cast<size_t>(xDims->Get(1));
-        dims.h = static_cast<size_t>(xDims->Get(2));
-        dims.w = static_cast<size_t>(xDims->Get(3));
+        n = static_cast<size_t>(xDims->Get(0));
+        c = static_cast<size_t>(xDims->Get(1));
+        h = static_cast<size_t>(xDims->Get(2));
+        w = static_cast<size_t>(xDims->Get(3));
     }
     else if(xDims->size() == 5)
     {
-        dims.n = static_cast<size_t>(xDims->Get(0));
-        dims.c = static_cast<size_t>(xDims->Get(1));
+        n = static_cast<size_t>(xDims->Get(0));
+        c = static_cast<size_t>(xDims->Get(1));
         const auto d = static_cast<size_t>(xDims->Get(2));
-        dims.h = d * static_cast<size_t>(xDims->Get(3));
-        dims.w = static_cast<size_t>(xDims->Get(4));
+        h = d * static_cast<size_t>(xDims->Get(3));
+        w = static_cast<size_t>(xDims->Get(4));
     }
     else
     {
@@ -68,12 +55,15 @@ static ProblemDims extractProblemDims(const BatchnormBwdParams& params)
                                                            + std::to_string(xDims->size()));
     }
 
-    dims.inCstride = static_cast<unsigned int>(dims.h * dims.w);
-    dims.inNhw = static_cast<unsigned int>(dims.n) * dims.inCstride;
-    dims.inChw = static_cast<unsigned int>(dims.c) * dims.inCstride;
-    dims.inNchw = static_cast<unsigned int>(dims.n) * dims.inChw;
-    dims.isLayoutNHWC = isChannelLastLayout(params.x());
-    return dims;
+    return ProblemDescription(n,
+                              c,
+                              h,
+                              w,
+                              isChannelLastLayout(params.x()),
+                              useFp16Mix,
+                              useBfp16Mix,
+                              Direction::BACKWARD,
+                              1);
 }
 
 BatchnormBwdParams::BatchnormBwdParams(
@@ -190,7 +180,7 @@ size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
 void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
-    const auto dims = extractProblemDims(_params);
+    const auto problem = extractProblemDescription(_params);
 
     if(_params.optActivation().has_value())
     {
@@ -207,49 +197,21 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     // in MIOpen backward_spatial.cpp.
     const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
     KernelConfig config;
-    if(useMultiple(dims.n,
-                   dims.h,
-                   dims.w,
-                   dims.useFp16Mix || dims.useBfp16Mix,
-                   dims.isLayoutNHWC,
-                   Direction::BACKWARD))
+    if(useMultiple(problem))
     {
-        const size_t minWorkgroups = 1;
-        defaultConfigSpatialMultiple(dims.n,
-                                     dims.c,
-                                     dims.h,
-                                     dims.w,
-                                     dims.isLayoutNHWC,
-                                     dims.useFp32,
-                                     minWorkgroups,
-                                     stashValuesBwd,
-                                     config);
+        defaultConfigSpatialMultiple(problem, stashValuesBwd, config);
         if(config.variant == -1)
         {
-            defaultConfigSpatialSingle(dims.n,
-                                       dims.h,
-                                       dims.w,
-                                       dims.useFp16Mix,
-                                       dims.useBfp16Mix,
-                                       dims.isLayoutNHWC,
-                                       Direction::BACKWARD,
-                                       config);
+            defaultConfigSpatialSingle(problem, config);
         }
     }
     else
     {
-        defaultConfigSpatialSingle(dims.n,
-                                   dims.h,
-                                   dims.w,
-                                   dims.useFp16Mix,
-                                   dims.useBfp16Mix,
-                                   dims.isLayoutNHWC,
-                                   Direction::BACKWARD,
-                                   config);
+        defaultConfigSpatialSingle(problem, config);
     }
 
     _kernelVariant = config.variant;
-    _invInNhw = 1.0f / static_cast<float>(dims.inNhw);
+    _invInNhw = 1.0f / static_cast<float>(problem.inNhw());
 
     size_t xlocalsize = config.xlocalsize;
     const size_t ylocalsize = config.ylocalsize;
@@ -276,29 +238,29 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                           _params.scale(),
                                           deviceProperties,
                                           activationMode);
-    options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
-    options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
+    options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix());
+    options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix());
     // Not using FP16 and BFP16 paths due to affine data type requirements
     options.update("HIP_PLUGIN_USE_FP16", 0);
     options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
-    options.update("HIP_PLUGIN_BN_N", dims.n);
-    options.update("HIP_PLUGIN_BN_C", dims.c);
-    options.update("HIP_PLUGIN_BN_HW", dims.inCstride);
-    options.update("HIP_PLUGIN_BN_NHW", dims.inNhw);
-    options.update("HIP_PLUGIN_BN_CHW", dims.inChw);
-    options.update("HIP_PLUGIN_BN_NCHW", dims.inNchw);
+    options.update("HIP_PLUGIN_BN_N", problem.n());
+    options.update("HIP_PLUGIN_BN_C", problem.c());
+    options.update("HIP_PLUGIN_BN_HW", problem.inCstride());
+    options.update("HIP_PLUGIN_BN_NHW", problem.inNhw());
+    options.update("HIP_PLUGIN_BN_CHW", problem.inChw());
+    options.update("HIP_PLUGIN_BN_NCHW", problem.inNchw());
     options.update("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
 
     if(_kernelVariant != 2)
     {
         xlocalsize = 1024;
-        if(((dims.inCstride < 256) && (dims.n < 256))
-           || ((dims.inCstride < 100) && (dims.n <= 256)))
+        if(((problem.inCstride() < 256) && (problem.n() < 256))
+           || ((problem.inCstride() < 100) && (problem.n() <= 256)))
         {
             xlocalsize = 256;
         }
-        xgridsize = dims.c * xlocalsize;
+        xgridsize = problem.c() * xlocalsize;
         ldsSize = static_cast<unsigned int>(xlocalsize);
 
         options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
@@ -314,30 +276,24 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
     else
     {
-        if(dims.isLayoutNHWC)
+        if(problem.isLayoutNHWC())
         {
-            xgridsize = xlocalsize * ((dims.c / config.vectorsize + xlocalsize - 1) / xlocalsize);
-            ygridsize = ylocalsize * ((dims.inCstride + ylocalsize - 1) / ylocalsize);
+            xgridsize
+                = xlocalsize * ((problem.c() / config.vectorsize + xlocalsize - 1) / xlocalsize);
+            ygridsize = ylocalsize * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
         }
         else
         {
-            xgridsize = xlocalsize * ((dims.c + xlocalsize - 1) / xlocalsize);
-            ygridsize
-                = ylocalsize * ((dims.inCstride / config.vectorsize + ylocalsize - 1) / ylocalsize);
+            xgridsize = xlocalsize * ((problem.c() + xlocalsize - 1) / xlocalsize);
+            ygridsize = ylocalsize
+                        * ((problem.inCstride() / config.vectorsize + ylocalsize - 1) / ylocalsize);
         }
-        zgridsize = zlocalsize * ((dims.n / config.nelements + zlocalsize - 1) / zlocalsize);
+        zgridsize = zlocalsize * ((problem.n() / config.nelements + zlocalsize - 1) / zlocalsize);
 
-        stashMethod = getStashMethod(dims.isLayoutNHWC,
-                                     dims.useFp32,
-                                     stashValuesBwd,
-                                     dims.c,
-                                     dims.n,
-                                     dims.inCstride,
-                                     ylocalsize,
-                                     zlocalsize,
-                                     config.nelements);
+        stashMethod
+            = getStashMethod(problem, stashValuesBwd, ylocalsize, zlocalsize, config.nelements);
 
-        if(dims.isLayoutNHWC && dims.c % 2 == 0 && xlocalsize % 2 == 0)
+        if(problem.isLayoutNHWC() && problem.c() % 2 == 0 && xlocalsize % 2 == 0)
         {
             xlocalsizeFinal = 2;
             zlocalsizeFinal = zgridsize / zlocalsize * zlocalsize;
