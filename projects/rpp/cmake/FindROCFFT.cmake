@@ -1,5 +1,5 @@
 #[[
-Copyright © 2019-2026 Advanced Micro Devices, Inc. or its affiliates.
+Copyright © 2026 Advanced Micro Devices, Inc. or its affiliates.
 SPDX-License-Identifier: MIT
 ]]
 
