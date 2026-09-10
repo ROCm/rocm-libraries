@@ -9,6 +9,7 @@ Each exposes to_stinky_logical() for logical IR lowering.
 from __future__ import annotations
 
 from copy import deepcopy as _deepcopy
+from enum import IntEnum as _IntEnum
 from typing import Any, Dict, List, Optional
 
 from ._dummy import make_dummy_class, make_dummy_func
@@ -455,15 +456,23 @@ def _to_stinky_register(arg: Any) -> Any:
     )
 
 
-# stinkytofu HighBitSel enum ints: NONE=-1, LOW=0, HIGH=1.
-_ST_HALF_NONE = -1
+class _StHalf(_IntEnum):
+    """stinkytofu HighBitSel wire values passed to ``set_true16``.
+
+    These are stinkytofu's HighBitSel integers, NOT the adaptor's ``HighBitSel``
+    dummy enum (that one is 0-based: NONE=0/LOW=1/HIGH=2).
+    """
+
+    NONE = -1
+    LOW = 0
+    HIGH = 1
 
 
 def _true16_half_int(op: Any) -> int:
-    """stinkytofu HighBitSel int for a ``t16``-tagged operand, else NONE (-1)."""
+    """stinkytofu HighBitSel int for a ``t16``-tagged operand, else NONE."""
     if isinstance(op, _True16Wrap):
-        return 1 if op._suffix == ".h" else 0  # HIGH=1, LOW=0
-    return _ST_HALF_NONE
+        return _StHalf.HIGH if op._suffix == ".h" else _StHalf.LOW
+    return _StHalf.NONE
 
 
 def _apply_true16(inst: Any, dst: Any, srcs: Any) -> None:
@@ -478,11 +487,11 @@ def _apply_true16(inst: Any, dst: Any, srcs: Any) -> None:
     """
     if not hasattr(inst, "set_true16"):
         return
-    dst0 = _true16_half_int(dst) if dst is not None else _ST_HALF_NONE
+    dst0 = _true16_half_int(dst) if dst is not None else _StHalf.NONE
     src_sels = [_true16_half_int(s) for s in srcs]
-    if dst0 == _ST_HALF_NONE and all(s == _ST_HALF_NONE for s in src_sels):
+    if dst0 == _StHalf.NONE and all(s == _StHalf.NONE for s in src_sels):
         return
-    inst.set_true16(dst0, _ST_HALF_NONE, src_sels)
+    inst.set_true16(int(dst0), int(_StHalf.NONE), [int(s) for s in src_sels])
 
 
 # gfx12+ style suffix on ``s_load_*`` (matches rocisa ``ReadWriteInstruction``
