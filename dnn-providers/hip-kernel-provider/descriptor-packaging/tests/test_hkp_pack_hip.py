@@ -684,6 +684,24 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     doc = _read(p)
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
+    # A second referencing KDP is a second CONSUMER: it resolves to its own engine
+    # and its own KMD, so the UKD has to declare what it claims for that pair too.
+    # Every field of kmd-copy is matcher-only here -- a hip source compiles no
+    # specialization -- but the claim is stated rather than inferred from silence.
+    ukd_path = src / _STANDALONE_UKD_FILE
+    ukd_doc = _read(ukd_path)
+    consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
+    consumers.append(
+        {
+            "engine_id": "ued-copy",
+            "kmd_id": "kmd-copy",
+            "metadata_fields": [],
+            "matcher_only_fields": ["block_size", "dtype"],
+            "bindings": {},
+            "vocabulary": {},
+        }
+    )
+    ukd_path.write_text(json.dumps(ukd_doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
     kpack = _load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(
@@ -693,6 +711,25 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     toc_key = ukd["kernel_source"]["toc_key"]
     # The shared standalone toc_key owns exactly one arch entry (one blob).
     assert list(archive.toc[toc_key]) == ["gfx942"]
+
+
+def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """The same second reference, with the declaration left alone.
+
+    A UKD several engines reference carries one entry per engine. Silence is not a
+    waiver: without the entry there is no statement about what this descriptor
+    claims under `ued-copy`, and packing it anyway would ship a catalog entry
+    nothing checked.
+    """
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / "copy.kdp.json"
+    doc = _read(p)
+    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(HkpPackError, match="expected exactly one"):
+        _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
 
 
 def test_standalone_ukd_referenced_by_wildcard_kdp(
@@ -999,19 +1036,41 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # An authored top-level 'provenance' is dropped; the shipped block is the
-    # generated traceability record, not the authored value.
+    # The shipped provenance block is the generated traceability record: an
+    # authored value for a field the producer writes is overwritten, while an
+    # authored field the producer does not write survives -- so this is the
+    # reservation at work rather than a wholesale drop.
+    src = _copy_fixture(tmp_path, main_fixture)
+    p = src / _STANDALONE_UKD_FILE
+    doc = _read(p)
+    doc["provenance"].update(
+        {
+            "origin_kind": "rocke",
+            "source": "HIJACKED.cpp",
+            "entry": "Hijacked",
+            "note": "authored",
+        }
+    )
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
+    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
+    assert prov["origin_kind"] == "hip"
+    assert prov["source"] == "PointwiseAdd.cpp"
+    assert prov["entry"] == "PointwiseAdd"
+    assert prov["note"] == "authored"
+
+
+@pytest.mark.quick
+def test_non_object_provenance_is_refused_at_load(tmp_path, main_fixture):
+    # A provenance that is not an object cannot carry the reserved keys the
+    # loader has to police, so it is refused at the door rather than dropped.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)
     doc["provenance"] = "HIJACKED"
     p.write_text(json.dumps(doc), encoding="utf-8")
-    _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
-    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
-    assert prov != "HIJACKED"
-    assert prov["origin_kind"] == "hip"
-    assert prov["source"] == "PointwiseAdd.cpp"
-    assert prov["entry"] == "PointwiseAdd"
+    with pytest.raises(HkpPackError, match="provenance must be an object"):
+        load_flat_input(src)
 
 
 # --- K. Drop diagnostics + arch warning --------------

@@ -96,15 +96,35 @@ def _run(*args) -> subprocess.CompletedProcess:
     )
 
 
-def _minimal_tree(tmp_path: Path) -> Path:
-    """A structurally-valid bundle, so rung 1 can pass without a build."""
-    root = tmp_path / "descriptors"
+_KMD_ID = "44444444-4444-4444-4444-444444444444"
+_UED_ID = "55555555-5555-5555-5555-555555555555"
+
+
+def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
+    """A structurally-valid, id-wired bundle, so rung 1 can pass without a build.
+
+    Wired by id and not by filename: the static rung reaches a bundle's schema
+    through `KDP.engine -> UED.metadata -> KMD`, so a tree whose documents merely
+    share a stem has no schema at all as far as it is concerned.
+    """
+    root = tmp_path / name
     root.mkdir()
     (root / "test_engine.kmd.json").write_text(
         json.dumps(
             {
                 "version": "1.0",
+                "id": _KMD_ID,
                 "fields": [{"name": "block_n", "type": "int", "default_value": 64}],
+            }
+        )
+    )
+    (root / "test_engine.ued.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": _UED_ID,
+                "name": "test:Engine",
+                "metadata": _KMD_ID,
             }
         )
     )
@@ -112,11 +132,19 @@ def _minimal_tree(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "version": "1.0",
+                "id": "66666666-6666-6666-6666-666666666666",
+                "engine": _UED_ID,
+                "arch": ["gfx942"],
                 "kernelDescriptors": [
                     {
+                        "version": "1.0",
+                        "id": "77777777-7777-7777-7777-777777777777",
                         "name": "k0",
+                        "arch": ["gfx942"],
                         "kernel_source": {
                             "kind": "kpack",
+                            "library": "kpack/test.kpack",
+                            "toc_key": "v0",
                             "symbol": "s0",
                             "sha256": "a" * 64,
                         },
@@ -129,6 +157,38 @@ def _minimal_tree(tmp_path: Path) -> Path:
     return root
 
 
+class TestTheStaticRungNeverOverstatesItself:
+    """Rung 1's claim is chosen, never defaulted, and reported as chosen.
+
+    The two modes answer different questions, and the failure being defended
+    against is the weaker answer printed under the stronger one's name: a run that
+    read no compiled evidence at all, reported "1. STATIC PASS", and let a reader
+    conclude the shipped binaries match the metadata selecting them.
+    """
+
+    def test_omitting_the_mode_is_a_usage_error(self, tmp_path):
+        result = _run("--tree", str(_minimal_tree(tmp_path)))
+        assert result.returncode != 0
+        assert "--mode" in result.stderr
+
+    def test_structural_reports_rung_one_as_structural_only(self, tmp_path):
+        result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "structural")
+        assert "1. STATIC   PASS (STRUCTURAL ONLY" in result.stdout
+        assert "compiled specialization agreement NOT checked" in result.stdout
+        assert (
+            "1. STATIC   PASS\n" not in result.stdout
+        ), "the unqualified line asserts a claim this run never made"
+
+    def test_full_mode_fails_a_tampered_evidence_record(self, tmp_path):
+        """The minimal tree carries no producing-build evidence at all, which is
+        the limiting case of a record that does not describe the artifact. Full
+        mode must fail it rather than report it as an unchecked property."""
+        result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "full")
+        assert result.returncode != 0
+        assert "1. STATIC   FAIL" in result.stdout
+        assert "static" in result.stdout
+
+
 class TestRungsStaySeparable:
     def test_a_missing_validator_fails_rather_than_skipping_to_a_pass(self, tmp_path):
         """The whole point of the split: rung 1 passing must not imply rung 2.
@@ -136,7 +196,7 @@ class TestRungsStaySeparable:
         A gate that quietly drops a rung reports success for work it did not do,
         which is exactly the shape of the defect this tool exists to prevent.
         """
-        result = _run("--tree", str(_minimal_tree(tmp_path)))
+        result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "structural")
         assert result.returncode != 0
         assert "2. LOADS    NOT RUN" in result.stdout
         assert "GATE FAILED" in result.stdout
@@ -144,21 +204,15 @@ class TestRungsStaySeparable:
 
     def test_serves_is_always_reported_as_owed_never_inferred(self, tmp_path):
         """Rungs 1 and 2 both green still means nothing was served."""
-        result = _run("--tree", str(_minimal_tree(tmp_path)))
+        result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "structural")
         assert "3. SERVES   NOT RUN" in result.stdout
         assert "engine_name" in result.stdout, (
             "rung 3 must say to filter by engine_name; an unfiltered aggregate "
             "reports another engine's work as this engine's"
         )
 
-    def test_a_narrowed_static_run_is_not_a_pass(self, tmp_path):
-        """No profile means the policy and vocabulary checks did not execute."""
-        result = _run("--tree", str(_minimal_tree(tmp_path)))
-        assert "NOT CHECKED" in result.stdout
-        assert "1. STATIC   FAIL" in result.stdout
-
     def test_a_missing_tree_is_an_error_not_an_empty_pass(self, tmp_path):
-        result = _run("--tree", str(tmp_path / "nope"))
+        result = _run("--tree", str(tmp_path / "nope"), "--mode", "structural")
         assert result.returncode == 2
 
 
@@ -168,6 +222,8 @@ class TestAgainstTheRealBuild:
         result = _run(
             "--tree",
             str(_PACKED),
+            "--mode",
+            "full",
             "--profile",
             str(_PROFILE),
             "--validator",
@@ -177,6 +233,7 @@ class TestAgainstTheRealBuild:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "1. STATIC   PASS" in result.stdout
+        assert "STRUCTURAL ONLY" not in result.stdout
         assert "2. LOADS    PASS" in result.stdout
         assert "NOT CHECKED" not in result.stdout
 
@@ -186,6 +243,8 @@ class TestAgainstTheRealBuild:
         result = _run(
             "--tree",
             str(_PACKED),
+            "--mode",
+            "full",
             "--profile",
             str(_PROFILE),
             "--validator",
@@ -205,35 +264,20 @@ class TestAgainstTheRealBuild:
         authored tree fails -- correctly, and with the same 'dropping it' message
         that a real dropped engine produces.
         """
-        root = tmp_path / "authored"
-        root.mkdir()
-        (root / "e.kmd.json").write_text(
-            json.dumps(
-                {
-                    "version": "1.0",
-                    "fields": [{"name": "block_n", "type": "int", "default_value": 64}],
-                }
-            )
+        root = _minimal_tree(tmp_path, "authored")
+        kdp_path = root / "test_engine.kdp.json"
+        doc = json.loads(kdp_path.read_text())
+        # Only the dialect changes. The tree stays id-wired so rung 1 still passes
+        # and the failure this test is about belongs unambiguously to rung 2.
+        doc["kernelDescriptors"][0]["kernel_source"] = {
+            "kind": "rocke",
+            "source": "m.py",
+            "builder": "build_x",
+            "spec": {"block_n": 64},
+        }
+        kdp_path.write_text(json.dumps(doc))
+        result = _run(
+            "--tree", str(root), "--mode", "structural", "--validator", str(_VALIDATOR)
         )
-        (root / "e.kdp.json").write_text(
-            json.dumps(
-                {
-                    "version": "1.0",
-                    "kernelDescriptors": [
-                        {
-                            "name": "k0",
-                            "kernel_source": {
-                                "kind": "rocke",
-                                "source": "m.py",
-                                "builder": "build_x",
-                                "spec": {"block_n": 64},
-                            },
-                            "metadata": {"block_n": 64},
-                        }
-                    ],
-                }
-            )
-        )
-        result = _run("--tree", str(root), "--validator", str(_VALIDATOR))
         assert result.returncode != 0
         assert "2. LOADS    FAIL" in result.stdout

@@ -48,10 +48,26 @@ def main() -> None:
         "--check-placeholders",
         action="store_true",
         help="Do not generate. Report unfilled stub markers in the files this "
-        "config's engine emits, resolved against --output-dir, and exit 1 if any "
-        "remain. Point it at the SPLICED tree (the provider's engine directory) to "
-        "gate step 6: it derives the file set from the config, so it cannot miss a "
+        "config's engine emits, searched under --emitted-root (default: "
+        "--output-dir), and exit 1 if any remain or if any of them cannot be "
+        "located. It derives the file set from the config, so it cannot miss a "
         "file a hand-written glob forgot.",
+    )
+    parser.add_argument(
+        "--emitted-root",
+        action="append",
+        dest="emitted_roots",
+        default=[],
+        type=Path,
+        help="A root the provider spliced this engine's emitted files into. "
+        "Repeatable, because the provider SPLITS the bundle: packs land in the "
+        "engine directory and the generated test stubs under "
+        "src/tests/engines/.../packs/, which may share no ancestor worth "
+        "scanning. Each root is searched only at the engine-specific relative "
+        "paths this generator's own CMake fragments splice to, and a file found "
+        "at the same relative path under two roots is an error rather than a "
+        "pick. Omit to search --output-dir alone. A root that does not exist is "
+        "an error, never an empty search.",
     )
     args = parser.parse_args()
 
@@ -83,43 +99,52 @@ def main() -> None:
 
     if args.check_placeholders:
         expected = generator.preview_files(config)
-        located, missing, ambiguous = generator.locate_emitted(
-            args.output_dir, expected
-        )
-        unfilled = generator.unfilled_placeholders(args.output_dir, expected)
+        # No --emitted-root means the output dir IS the one root, so the existing
+        # single-tree invocation keeps meaning exactly what it says.
+        roots = args.emitted_roots or [args.output_dir]
+        shown = ", ".join(f"'{root}'" for root in roots)
+        try:
+            located, missing, ambiguous = generator.locate_emitted(roots, expected)
+            unfilled = generator.unfilled_placeholders(roots, expected)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
         total_shippable = len(located) + len(missing) + len(ambiguous)
         print(
             f"\nLocated {len(located)} of this engine's {total_shippable} shippable "
-            f"files under '{args.output_dir}'."
+            f"files under {shown}."
         )
         failed = False
         if ambiguous:
-            # Two files with one basename: the scan cannot tell which is yours, and
-            # picking one made the verdict depend on directory order -- a filled
-            # stale copy would report green while the real file kept its markers.
+            # One relative path resolving twice: the scan cannot tell which is
+            # yours, and picking one made the verdict depend on directory order --
+            # a filled stale copy would report green while the real file kept its
+            # markers. Roots are unioned first, so a second root holding the same
+            # relative path is caught here rather than silently preferred.
             print(f"{len(ambiguous)} file(s) matched in more than one place:")
             for rel, paths in ambiguous.items():
                 print(f"        {rel}")
                 for p in paths:
                     print(f"            {p}")
             print(
-                "  Narrow --output-dir so each file resolves once (a build tree or a "
-                "stale copy under this root is the usual cause)."
+                "  Narrow the roots so each file resolves once (a build tree or a "
+                "stale copy under one of them is the usual cause)."
             )
             failed = True
         if missing:
             # A file the engine ships but nobody can find is an UNFINISHED SPLICE,
-            # not a pass. The first cut skipped silently unless ALL were missing,
-            # so a gate pointed at the engine dir found the packs, missed every
-            # test stub, and printed green -- the exact blind spot it replaced.
+            # not a pass. "No unfilled placeholders" across a set the scan never
+            # located is the exact false green this gate exists to prevent, so a
+            # located set that does not cover every shippable file fails here even
+            # when every file it DID read was clean.
             print(
-                f"{len(missing)} expected file(s) not found anywhere under that root:"
+                f"{len(missing)} expected file(s) not found under any of those roots:"
             )
             for rel in missing:
                 print(f"        {rel}")
             print(
-                "  Point --output-dir at a root containing BOTH the engine and its "
-                "test tree (the provider splits them; the cmake_test_sources fragment "
+                "  Add an --emitted-root for the tree holding them (the provider "
+                "splits the engine and its tests; the cmake_test_sources fragment "
                 "says where), or finish the splice."
             )
             failed = True
@@ -131,7 +156,7 @@ def main() -> None:
             failed = True
         if failed:
             sys.exit(1)
-        print("No unfilled placeholders.")
+        print(f"No unfilled placeholders across all {total_shippable} located files.")
         return
 
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.force:
@@ -158,7 +183,8 @@ def main() -> None:
     for f in written:
         print(f"  {f}")
 
-    unfilled = generator.unfilled_placeholders(args.output_dir, written)
+    # A fresh generation wrote everything into one tree, so that tree is the root.
+    unfilled = generator.unfilled_placeholders([args.output_dir], written)
     if unfilled:
         total = sum(unfilled.values())
         print(

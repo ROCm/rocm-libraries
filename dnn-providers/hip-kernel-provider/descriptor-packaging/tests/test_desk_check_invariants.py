@@ -289,9 +289,14 @@ class TestInvariant4SymbolNonUniquenessTolerated:
 _TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_desk_check.py"
 
 
-def _run_cli(*args):
+def _run_cli(*args, mode="structural"):
+    """The CLI as an agent runs it. The mode is always explicit, because the tool
+    requires it -- a call site that omitted it would be testing argparse's error
+    path rather than the invariant it names."""
     return subprocess.run(
-        [sys.executable, str(_TOOL), *args], capture_output=True, text=True
+        [sys.executable, str(_TOOL), "--mode", mode, *args],
+        capture_output=True,
+        text=True,
     )
 
 
@@ -303,8 +308,59 @@ class TestCliEndToEnd:
         )
         proc = _run_cli(str(kdp_path))
         assert proc.returncode == 0, proc.stdout + proc.stderr
-        assert "metadata/spec drift: none" in proc.stdout
+        assert "metadata/authored-spec drift: none" in proc.stdout
         assert "toc_key: distinct=2 of 2 OK" in proc.stdout
+
+    def test_structural_mode_never_reports_compiled_agreement(
+        self, packed_desk_check, tmp_path
+    ):
+        """A structural pass is a statement about the documents. Letting it read
+        as a statement about the binary is the substitution the two modes exist to
+        prevent, so the clean structural run must say what it did NOT check.
+        """
+        kdp_path = tmp_path / "clean.kdp.json"
+        kdp_path.write_text(
+            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
+        )
+        proc = _run_cli(str(kdp_path))
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "compiled specialization agreement: NOT CHECKED" in proc.stdout
+        assert "mode=structural" in proc.stdout
+
+    def test_the_mode_is_required(self, packed_desk_check, tmp_path):
+        """No default: a run whose mode is unstated cannot be read back out of a
+        log, and the weaker result would be indistinguishable from the stronger."""
+        kdp_path = tmp_path / "clean.kdp.json"
+        kdp_path.write_text(
+            json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
+        )
+        proc = subprocess.run(
+            [sys.executable, str(_TOOL), str(kdp_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0
+        assert "--mode" in proc.stderr
+
+    def test_full_mode_fails_a_tree_carrying_no_producing_build_record(self, tmp_path):
+        """An artifact that cannot say what it was built from has not shown
+        agreement with anything, so this is a failure and not an unchecked
+        property. The message names the missing record rather than the tree."""
+        kdp_path = tmp_path / "recordless.kdp.json"
+        kdp_path.write_text(
+            json.dumps(
+                {
+                    "id": "kdp-recordless",
+                    "engine": "ued-absent",
+                    "arch": ["gfx942"],
+                    "kernelDescriptors": [],
+                }
+            )
+        )
+        proc = _run_cli(str(kdp_path), mode="full")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "mode=full" in proc.stdout
+        assert "resolves to no descriptor" in proc.stdout
 
     def test_real_injected_drift_exits_nonzero(self, packed_desk_check, tmp_path):
         """The exact defect this whole tool exists for: a real packed tree
@@ -454,12 +510,17 @@ class TestDriftAndTupleFieldsAreIndependent:
 
     def test_narrowing_drift_fields_silences_drift_but_keeps_the_tuple(self):
         kernels = self._two_variants_with_a_translated_field()
-        coupled = DeskCheckReport(kernels, fields=("layout", "head_size"))
+        coupled = DeskCheckReport(
+            kernels, fields=("layout", "head_size"), mode="structural"
+        )
         # The premise: with one shared list, `layout` false-positives.
         assert coupled.drift == [("nhwc", "layout"), ("nchw", "layout")]
 
         narrowed = DeskCheckReport(
-            kernels, fields=("layout", "head_size"), drift_fields=("head_size",)
+            kernels,
+            fields=("layout", "head_size"),
+            drift_fields=("head_size",),
+            mode="structural",
         )
         assert narrowed.drift == [], "drift comparison should have dropped layout"
         assert narrowed.duplicate_tuples == {}, (
@@ -475,6 +536,7 @@ class TestDriftAndTupleFieldsAreIndependent:
             kernels,
             fields=("dtype", "head_size"),
             drift_fields=("head_size",),
+            mode="structural",
         )
         assert report.duplicate_tuples == {}, (
             "dtype was dropped from the DRIFT comparison only -- it must "
@@ -487,7 +549,10 @@ class TestDriftAndTupleFieldsAreIndependent:
         kernels[1]["metadata"]["dtype"] = "BFLOAT16"  # genuinely unreachable now
         kernels[1]["kernel_source"]["spec"]["dtype"] = "bf16"
         report = DeskCheckReport(
-            kernels, fields=("dtype", "head_size"), drift_fields=("head_size",)
+            kernels,
+            fields=("dtype", "head_size"),
+            drift_fields=("head_size",),
+            mode="structural",
         )
         assert report.duplicate_tuples == {("BFLOAT16", 64): 2}
         assert not report.ok
@@ -495,7 +560,9 @@ class TestDriftAndTupleFieldsAreIndependent:
     def test_drift_fields_defaults_to_fields(self):
         kernels = self._two_variants_differing_only_in_dtype()
         kernels[0]["metadata"]["head_size"] = 999  # real drift
-        report = DeskCheckReport(kernels, fields=("dtype", "head_size"))
+        report = DeskCheckReport(
+            kernels, fields=("dtype", "head_size"), mode="structural"
+        )
         assert report.drift_fields == report.fields
         assert report.drift == [("bf16", "head_size")]
 
@@ -565,7 +632,7 @@ class TestCliOnRealShippedBundles:
     def test_real_rocke_example_passes_out_of_the_box(self):
         proc = _run_cli(str(_ROCKE_EXAMPLE / "tiled_attention.kdp.json"))
         assert proc.returncode == 0, proc.stdout + proc.stderr
-        assert "metadata/spec drift: none" in proc.stdout
+        assert "metadata/authored-spec drift: none" in proc.stdout
         assert "duplicate matcher tuples: none" in proc.stdout
 
     def test_hip_producer_bundle_reports_could_not_check_not_a_false_clean(self):

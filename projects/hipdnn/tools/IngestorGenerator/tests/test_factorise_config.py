@@ -537,3 +537,56 @@ class TestCommandLine:
         assert factorise_config.main(self._argv(src, out)) == 0
         group = yaml.safe_load(out.read_text())["packs"][0]["variants"][0]
         assert group["vocabulary"]["dtype"]["bf16"] == "BF16"
+
+
+class TestTheSpecializationDeclarationSurvives:
+    """A source config's `specialization` block reaches the compact form unchanged.
+
+    It is the one thing a shipped descriptor carries that says which metadata
+    fields the producing compiler specialized on and how each is read off the
+    builder object, and it reaches exactly one UKD field rather than one per
+    kernel. The kernel-for-kernel round trip therefore cannot see it go missing,
+    and a set that lost it converts to a bundle whose compiled bytes nothing on
+    the receiving machine can check against anything.
+    """
+
+    # Every kmd_field of SAMPLE is a key of the rocke kernels' spec, so the
+    # partition is metadata_fields-only: calling any of them matcher-only would
+    # waive a field that demonstrably reached the compiler. `use_exp2_fast` is
+    # tri-state and absent from two of the specs, so it binds to the spec's
+    # zero-argument effective accessor rather than to the raw attribute.
+    DECLARATION = {
+        "metadata_fields": ["dtype", "seqlen_q", "block_m", "use_exp2_fast"],
+        "matcher_only_fields": [],
+        "bindings": {
+            "dtype": {"field": "dtype"},
+            "seqlen_q": {"field": "seqlen_q"},
+            "block_m": {"field": "block_m"},
+            "use_exp2_fast": {"method": "resolved_use_exp2_fast"},
+        },
+        "vocabulary": {"dtype": {"bf16": "BF16"}},
+    }
+
+    def test_it_round_trips_through_the_producer_unchanged(self, tmp_path):
+        source = copy.deepcopy(SAMPLE)
+        source["specialization"] = copy.deepcopy(self.DECLARATION)
+        path = tmp_path / "long.yaml"
+        path.write_text(yaml.safe_dump(source, sort_keys=False))
+        out = tmp_path / "compact.yaml"
+        assert (
+            factorise_config.main(
+                [
+                    "--config",
+                    str(path),
+                    "--out",
+                    str(out),
+                    "--knobs",
+                    ",".join(KNOBS),
+                    "--vocabulary",
+                    "dtype:bf16=BF16,fp16=FP16",
+                ]
+            )
+            == 0
+        )
+        assert yaml.safe_load(out.read_text())["specialization"] == self.DECLARATION
+        assert load_config(out).specialization == self.DECLARATION

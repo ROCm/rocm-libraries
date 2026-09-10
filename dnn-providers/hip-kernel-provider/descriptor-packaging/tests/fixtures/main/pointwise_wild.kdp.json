@@ -3,7 +3,9 @@
   "id": "kdp-pointwise-wild",
   "name": "Pointwise wildcard pack",
   "arch": [],
-  "matchers": ["umd-pointwise"],
+  "matchers": [
+    "umd-pointwise"
+  ],
   "engine": "ued-pointwise",
   "dispatch": "udd-pointwise",
   "kernelDescriptors": [
@@ -22,8 +24,29 @@
           }
         }
       },
-      "metadata": { "dtype": "FLOAT", "block_size": 256 },
-      "priority": 0
+      "metadata": {
+        "dtype": "FLOAT",
+        "block_size": 256
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "ued-pointwise",
+              "kmd_id": "kmd-pointwise",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     }
   ]
 }

@@ -2,7 +2,9 @@
   "version": "1.0",
   "id": "6ded9548-0adb-54c0-b7ae-2ea56c95b6ba",
   "name": "hkp_example:pointwise_add",
-  "arch": ["gfx942"],
+  "arch": [
+    "gfx942"
+  ],
   "matchers": [
     "b8fa1bc3-b608-501a-bd2d-4e619974282e",
     "a9a415b2-7f6d-52c4-a0cc-0ab3e9920d1f"
@@ -30,7 +32,26 @@
         "dtype": "FLOAT",
         "operation": "ADD"
       },
-      "priority": 0
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "4ec4821e-bcc7-58eb-ab6a-323bf33e7739",
+              "kmd_id": "1f6b9ff2-b690-5e8b-9491-f087eb1916f2",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype",
+                "operation"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     }
   ]
 }
