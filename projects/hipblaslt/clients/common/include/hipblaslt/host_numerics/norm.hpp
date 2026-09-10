@@ -9,6 +9,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <optional>
 #include <roc/host_numerics/scalar.hpp>
+#include <stdexcept>
 
 // These are product-level acceptance policies, not numerical mechanics.
 // Problem/architecture-specific callers may widen them.
@@ -43,7 +44,7 @@ inline double norm_tolerance(roc::host_numerics::ScalarType type)
     case ScalarType::Float6E3M2:
         return 0.5;
     default:
-        return 0.0;
+        throw std::invalid_argument("Unsupported type in hipBLASLt norm tolerance policy.");
     }
 }
 

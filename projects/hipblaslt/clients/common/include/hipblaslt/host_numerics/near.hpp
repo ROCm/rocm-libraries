@@ -5,10 +5,9 @@
 
 // Product-private hipBLASLt tolerance policy.
 
-#include "hipblaslt_ostream.hpp"
-
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <limits>
+#include <stdexcept>
 
 // Returns the per-term accumulation error bound for the compute type. Former
 // GFX11 input/output-specific allowances were removed after native GFX1151
@@ -28,18 +27,21 @@ inline double sum_error_tolerance_for_compute_type(hipDataType computeType)
     case HIP_R_32I:
         return std::numeric_limits<int32_t>::epsilon();
     default:
-        hipblaslt_cerr << "Error type in sum_error_tolerance_for_compute_type" << std::endl;
-        return 0.0;
+        throw std::invalid_argument(
+            "Unsupported compute type in hipBLASLt accumulation tolerance policy.");
     }
 }
 
 inline double gfx11_low_precision_accumulation_tolerance_coefficient(hipDataType computeType,
                                                                      size_t      reductionLength)
 {
-    // GFX11 matrix instructions may combine partial sums in a different order from the
-    // sequential host reference. The symmetric comparison below accounts for cancellation and
-    // result scaling. Native gfx1151 FP16 testing required a factor of 7; 8 is the next power of
-    // two above that observed bound.
+    // The K-linear form follows the established rocBLAS client policy in
+    // projects/rocblas/clients/include/near.hpp. GFX11 matrix instructions may
+    // combine partial sums in a different order from the sequential host
+    // reference, so the symmetric comparison below accounts for cancellation
+    // and result scaling. Native gfx1151 runs of the checked-in
+    // matmul_fallback_compute_fp16_gfx11 cases required a factor of 7; 8 is the
+    // next power of two above that observed bound.
     //
     // The caller uses this coefficient with the host-numerics symmetric comparison:
     //   |gpu - reference| < tolerance * (|gpu| + |reference| + 1).
