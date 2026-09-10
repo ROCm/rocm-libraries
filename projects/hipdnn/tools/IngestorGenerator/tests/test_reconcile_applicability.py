@@ -96,15 +96,9 @@ class Candidate:
         return True, ""
 
     def admits(self, req):
-        """The complete question: capability prefilter, then the predicate.
-
-        The isinstance check mirrors the real library: rocKE's candidates refuse
-        anything that is not their own request type, and duck-typing does not
-        satisfy a type check. The refusal is per-request and reads exactly like an
-        ordinary decline.
-        """
+        """The complete capability and predicate question for a typed request."""
         if not isinstance(req, Request):
-            return False, f"expected Request, got {type(req).__name__}"
+            raise TypeError(f"expected Request, got {type(req).__name__}")
         if self.arches and getattr(req, "arch", None) not in self.arches:
             return False, f"capability: arch {getattr(req, 'arch', None)!r} not in {self.arches}"
         return self._supports(req)
@@ -119,11 +113,15 @@ def candidates():
 
 
 def kernel_spec(req):
-    """THIS kernel: refuses short sequences."""
-    if int(req.seqlen_q) < 256:
-        raise ValueError("seqlen_q must be at least 256")
+    """Construct a spec; support is decided by the explicit predicate."""
     return Spec(batch=int(req.batch), seqlen_q=int(req.seqlen_q),
                 head_size=int(req.head_size))
+
+
+def supported(spec, *, arch):
+    if spec.seqlen_q < 256:
+        return False, "seqlen_q must be at least 256"
+    return True, ""
 '''
 
 
@@ -149,6 +147,7 @@ def env(tmp_path):
                 kmd_fields: []
                 metadata_fields: []
                 dispatch: {{module: stublib, function: kernel_spec}}
+                predicate: {{module: stublib, function: supported}}
                 request:
                   module: stublib
                   class: Request
@@ -270,16 +269,6 @@ class TestOnlyTheReferenceServes:
         assert "sibling" in result.stdout
         assert "seqlen_q must be at least 256" in result.stdout
 
-    def test_it_names_the_three_legitimate_responses(self, env):
-        """'We chose not to' must not read as one of them."""
-        result = env.run(env.profile(family="tiled", opt_in=False), env.shapes(_SHORT))
-        assert "add the variant" in result.stdout
-        assert "fix the matcher" in result.stdout
-        assert "INCORRECT result" in result.stdout, (
-            "the third option -- show the reference is wrong -- must be stated, or "
-            "an author facing a genuine reference defect has no legitimate move"
-        )
-
     def test_the_escape_hatch_is_explicit_and_still_reports(self, env):
         result = env.run(
             env.profile(family="tiled", opt_in=False),
@@ -291,14 +280,20 @@ class TestOnlyTheReferenceServes:
         assert "ONLY THE REFERENCE      1" in result.stdout
 
 
-class TestBothDecline:
-    def test_a_construction_rejection_counts_as_a_shared_decline(self, env):
-        """Structural rejections raise at request CONSTRUCTION, before any predicate.
-        Both sides hit it, so it reconciles -- but only because the tool builds the
-        request inside the try on both sides."""
-        result = env.run(env.profile(), env.shapes(_UNBUILDABLE))
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "both decline            1" in result.stdout
+class TestConstructionFailures:
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            (),
+            ("--allow-empty",),
+            ("--allow-unreconciled",),
+            ("--allow-empty", "--allow-unreconciled"),
+        ],
+    )
+    def test_construction_failure_is_operational(self, env, flags):
+        result = env.run(env.profile(), env.shapes(_UNBUILDABLE), *flags)
+        assert result.returncode == 2
+        assert "RECONCILED" not in result.stdout
 
 
 class TestOracleDeclaration:
@@ -613,3 +608,217 @@ class TestServingWhatTheReferenceDeclines:
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_LONG))
         assert "asked nothing" not in result.stderr
         assert "agreement about nothing" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        (),
+        ("--allow-empty",),
+        ("--allow-unreconciled",),
+        ("--allow-empty", "--allow-unreconciled"),
+    ],
+)
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def admits(self): return True, ''",
+        "def admits(self, req): raise RuntimeError('broken oracle')",
+        "admits = None",
+        "def admits(self, req): return True",
+        "def admits(self, req): return (1, '')",
+        "def admits(self, req): return (False, None)",
+        "pass",
+    ],
+)
+def test_broken_candidate_after_acceptance_is_never_waived(env, tmp_path, flags, body):
+    module = tmp_path / "rocke" / "library" / "broken.py"
+    module.write_text(
+        "import stublib\nclass Broken:\n"
+        "    algorithm = 'dense'\n    spec_id = 'broken'\n    " + body + "\n"
+        "def candidates():\n"
+        "    return (stublib.candidates()[0], Broken())\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "reference_candidates:\n                  module: stublib",
+            "reference_candidates:\n                  module: broken",
+        )
+        .replace(
+            "reference_candidates:\n  module: stublib",
+            "reference_candidates:\n  module: broken",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2
+    assert "RECONCILED" not in result.stdout
+
+
+def test_decline_wording_is_not_an_api_error(env, tmp_path):
+    module = tmp_path / "rocke" / "library" / "stublib.py"
+    module.write_text(
+        module.read_text().replace(
+            'return False, f"seqlen_q must be at least {self._min}"',
+            'return False, "expected Request, got Adapter"',
+        )
+    )
+    result = env.run(env.profile(), env.shapes(_SHORT))
+    assert result.returncode == 0
+    assert "both decline            1" in result.stdout
+
+
+def test_runtime_decline_matches_retained_occurrence(env, tmp_path):
+    shape = {
+        **_LONG,
+        "_provenance": {"graph": "first"},
+        "_provenance_occurrences": [{"graph": "first"}, {"graph": "second"}],
+    }
+    declines = tmp_path / "declines.json"
+    declines.write_text(json.dumps({"second": "runtime rejection"}))
+    result = env.run(env.profile(), env.shapes(shape), "--declines", str(declines))
+    assert result.returncode == 1
+    assert "runtime rejection" in result.stdout
+
+
+#: Every escape hatch this tool offers. An operational error must survive all of
+#: them: the flags describe what a COMPLETED comparison is allowed to find, and a
+#: comparison that never happened has found nothing to waive.
+_ESCAPES = [
+    (),
+    ("--allow-empty",),
+    ("--allow-unreconciled",),
+    ("--allow-empty", "--allow-unreconciled"),
+]
+
+
+def _point_registry_at(profile_path: Path, module: str) -> None:
+    """Repoint `reference_candidates.module` without rewriting the whole profile."""
+    profile_path.write_text(
+        profile_path.read_text().replace(
+            "reference_candidates:\n  module: stublib",
+            f"reference_candidates:\n  module: {module}",
+        )
+    )
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("", id="function_absent"),
+        pytest.param("candidates = None", id="not_callable"),
+        pytest.param("candidates = 'a string'", id="not_callable_value"),
+        pytest.param("def candidates(target): return ()", id="binding_failure"),
+        pytest.param(
+            "def candidates(): raise RuntimeError('registry blew up')",
+            id="invocation_failure",
+        ),
+        pytest.param("def candidates(): return 17", id="result_not_iterable"),
+    ],
+)
+def test_a_broken_candidate_registry_is_operational_under_every_flag(
+    env, tmp_path, flags, body
+):
+    """The registry is the oracle's entry point. Every way of failing to obtain the
+    candidate list means the reference was never asked -- which is exit 2, not a run
+    in which nothing happened to be unreconciled.
+
+    Without this the "function_absent" and "not_callable" rows exited 0 reporting
+    RECONCILED: the tool had compared this integration against an empty family."""
+    (tmp_path / "rocke" / "library" / "reg.py").write_text(body + "\n")
+    path = env.profile()
+    _point_registry_at(path, "reg")
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "raised",
+    [
+        pytest.param(
+            "ValueError('seqlen_q must be a multiple of 256')", id="ValueError"
+        ),
+        pytest.param(
+            "TypeError('spec factory got an unexpected field')", id="TypeError"
+        ),
+        pytest.param("KeyError('block_n')", id="KeyError"),
+    ],
+)
+def test_a_failing_spec_factory_is_operational_under_every_flag(
+    env, tmp_path, flags, raised
+):
+    """`resolve_shapes` builds this integration's spec through the profile's own
+    factory. A factory that RAISES has not declined the shape -- it has failed to
+    answer, and the two are not interchangeable.
+
+    The ValueError row matters most: a spec factory's validation error reads exactly
+    like a support decision, and treating it as one turns a broken profile into a
+    clean report of shapes 'this integration does not serve'."""
+    (tmp_path / "rocke" / "library" / "badfab.py").write_text(
+        "import stublib\n"
+        f"def kernel_spec(req): raise {raised}\n"
+        "def supported(spec, *, arch): return True, ''\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text()
+        .replace(
+            "dispatch: {module: stublib, function: kernel_spec}",
+            "dispatch: {module: badfab, function: kernel_spec}",
+        )
+        .replace(
+            "predicate: {module: stublib, function: supported}",
+            "predicate: {module: badfab, function: supported}",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "RECONCILED" not in result.stdout
+
+
+@pytest.mark.parametrize("flags", _ESCAPES)
+@pytest.mark.parametrize(
+    "via, expected_absent",
+    [
+        pytest.param("via = None", "RECONCILED", id="not_callable"),
+        pytest.param(
+            "def via(fields): raise RuntimeError('translator blew up')",
+            "RECONCILED",
+            id="raises",
+        ),
+        pytest.param(
+            "def via(fields): return object()", "RECONCILED", id="wrong_request_type"
+        ),
+        pytest.param("def via(a, b): return a", "RECONCILED", id="binding_failure"),
+    ],
+)
+def test_a_broken_reference_translator_is_operational_under_every_flag(
+    env, tmp_path, flags, via, expected_absent
+):
+    """`reference_request.via` exists so a profile whose request class is an adapter
+    can still ask the reference in its own vocabulary. A translator that cannot
+    produce a request means the reference was never asked about that shape -- the
+    same silent-vacuity failure the override was added to fix, arriving through the
+    fix itself."""
+    (tmp_path / "rocke" / "library" / "trans.py").write_text(
+        "import stublib\n" + via + "\n"
+    )
+    path = env.profile()
+    path.write_text(
+        path.read_text().replace(
+            "reference_candidates:",
+            "reference_request:\n"
+            "  module: stublib\n"
+            "  class: Request\n"
+            "  defaults: {algorithm: dense}\n"
+            "  via: {module: trans, function: via}\n"
+            "reference_candidates:",
+        )
+    )
+    result = env.run(path, env.shapes(_LONG), *flags)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert expected_absent not in result.stdout
