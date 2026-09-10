@@ -194,7 +194,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNcdhw)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNdhwc)
 {
     Tensor<float> inputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
     Tensor<float> outputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -214,6 +214,52 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceNdhwc)
 
     CpuFpReferenceBatchnorm::fwdInference(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeFp32)
+{
+    // Test with 2D tensor (batch, channel)
+    Tensor<half> inputTensor({4, 3});
+    Tensor<half> outputTensor({4, 3});
+    Tensor<half> scaleTensor({1, 3});
+    Tensor<half> biasTensor({1, 3});
+    Tensor<half> meanTensor({1, 3});
+    Tensor<half> invVarianceTensor({1, 3});
+
+    inputTensor.fillWithValue(half(1.0f));
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(half(1.0f), 0, i);
+        biasTensor.setHostValue(half(0.0f), 0, i);
+        meanTensor.setHostValue(half(1.0f), 0, i);
+        invVarianceTensor.setHostValue(half(1.0f), 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::fwdInference<half, half, half, half, float>(
+        inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceComputeFp32)
+{
+    // Test with 2D tensor (batch, channel)
+    Tensor<bfloat16> inputTensor({4, 3});
+    Tensor<bfloat16> outputTensor({4, 3});
+    Tensor<bfloat16> scaleTensor({1, 3});
+    Tensor<bfloat16> biasTensor({1, 3});
+    Tensor<bfloat16> meanTensor({1, 3});
+    Tensor<bfloat16> invVarianceTensor({1, 3});
+
+    inputTensor.fillWithValue(bfloat16(1.0f));
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(bfloat16(1.0f), 0, i);
+        biasTensor.setHostValue(bfloat16(0.0f), 0, i);
+        meanTensor.setHostValue(bfloat16(1.0f), 0, i);
+        invVarianceTensor.setHostValue(bfloat16(1.0f), 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::fwdInference<bfloat16, bfloat16, bfloat16, bfloat16, float>(
+        inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 }
 
 template <typename T1, typename T2, typename T3>
