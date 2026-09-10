@@ -49,6 +49,38 @@ inline void unsetEnv(const char* var)
     unsetenv(var);
 }
 
+/// Expands a **leading** `~` in @p path to the current user's home directory (from
+/// `HOME`); everything else is left untouched.
+///
+/// Not general tilde-expansion: a `~` anywhere but the very start is left as written, and
+/// `~user` (a leading `~` followed by a username rather than a path separator or end of
+/// string) is never expanded. If `HOME` is unset or empty, @p path is returned unchanged
+/// -- no fallback location is substituted.
+///
+/// @param path The path string to expand, e.g. as read from a config value or env var.
+/// @return @p path with a qualifying leading `~` replaced by `$HOME`, or @p path
+///     unchanged if no leading `~` qualifies or `HOME` is unset/empty. Never throws.
+inline std::string expandUser(const std::string& path)
+{
+    if(path.empty() || path.front() != '~')
+    {
+        return path;
+    }
+
+    if(path.size() > 1 && path[1] != '/')
+    {
+        return path;
+    }
+
+    const std::string home = getEnv("HOME");
+    if(home.empty())
+    {
+        return path;
+    }
+
+    return home + path.substr(1);
+}
+
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
     return a.native() == b.native();

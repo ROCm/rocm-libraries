@@ -342,6 +342,8 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"VBfiB32", "v_bfi_b32"},
         {"VPackF16toB32", "v_pack_b32_f16"},
         {"VReadfirstlaneB32", "v_readfirstlane_b32"},
+        {"VReadlaneB32", "v_readlane_b32"},
+        {"VWritelaneB32", "v_writelane_b32"},
         {"VRndneF32", "v_rndne_f32"},
         {"VPermB32", "v_perm_b32"},
         {"VPrngB32", "v_prng_b32"},

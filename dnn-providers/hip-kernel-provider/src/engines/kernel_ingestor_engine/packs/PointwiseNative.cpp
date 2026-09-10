@@ -24,9 +24,12 @@
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
 /**
@@ -391,10 +394,14 @@ class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDisp
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted is
+    /// the selected kernel's source kind, decided in buildIngestorKernelCode.
     /// Device properties aren't held here -- they arrive per call via MatchContext,
     /// so each call compiles for the device it's actually for.
-    explicit PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                             const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -422,14 +429,14 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code
+            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(1, 1, 1);
+        code.kernel->setBlockSize(blockSize, 1, 1);
+        code.kernel->setGridSize(1, 1, 1);
 
         return std::make_unique<PreparedPointwise>(
-            std::move(program), std::move(runnableKernel), binding);
+            std::move(code.program), std::move(code.kernel), binding);
     }
 
     void launch(const Handle& handle,
@@ -453,15 +460,36 @@ public:
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
+
+} // namespace
+
+compilation::KpackModuleCache& pointwiseKpackModuleCache()
+{
+    // Process-lifetime, and exposed rather than hidden inside the loader so a test can
+    // observe that two dispatches over the same (archive, toc_key, arch) loaded one
+    // module -- which is otherwise unobservable.
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetPointwiseModuleCache()
+{
+    pointwiseKpackModuleCache().clear();
+}
+
+namespace
+{
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const compilation::KpackKernelLoader s_kpackLoader(pointwiseKpackModuleCache());
+    static const PointwiseDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 

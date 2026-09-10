@@ -103,6 +103,7 @@ set(rocauxiliary_test_source
   auxiliary/ormxl_unmxl_gtest.cpp
   auxiliary/ormbr_unmbr_gtest.cpp
   auxiliary/ormtr_unmtr_gtest.cpp
+  auxiliary/ormtr_unmtr_hb2st_gtest.cpp
   # bidiagonal matrices
   auxiliary/labrd_gtest.cpp
   auxiliary/bdsqr_gtest.cpp
@@ -120,6 +121,7 @@ set(rocauxiliary_test_source
   auxiliary/lahr2_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp
+  auxiliary/sb2st_hb2st_gtest.cpp
   auxiliary/sy2sb_he2hb_gtest.cpp
   # triangular matrices
   auxiliary/lauum_gtest.cpp

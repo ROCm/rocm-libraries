@@ -72,7 +72,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -293,6 +293,8 @@ class ProblemType:
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
+        rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
@@ -425,6 +427,9 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
+            predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
+            if self.fusedGemmA2A and self.batched:
+                predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
@@ -601,6 +606,9 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        if state['ProblemType']['FusedGemmA2A']:
+            rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
+
         return rv
 
     @classmethod
@@ -611,33 +619,6 @@ class ProblemPredicate(Properties.Predicate):
 
         predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPreds
         return cls.And(predicates)
-
-class CustomKernel:
-    StateKeys = ['name',
-                 'args',
-                 'macrotile',
-                 'threads',
-                 'grid',
-                 'workspaceType',
-                 'workspaceSizePerElemC',
-                 'workspaceSizePerElemBias',
-                 'generated']
-
-    @classmethod
-    def FromOriginalState(cls, d):
-        return cls(name=d['name'],
-                   args=d['args'],
-                   macrotile=d['macrotile'],
-                   threads=d['threads'],
-                   grid=d['grid'],
-                   workspaceType=d.get('workspaceType', 'None'),
-                   workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
-                   workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
-                   generated=d.get('generated', False))
-
-    def __init__(self, **kwargs):
-        for (key, value) in list(kwargs.items()):
-            setattr(self, key, value)
 
 class SizeMapping:
     StateKeys = ['waveNum',
@@ -668,6 +649,7 @@ class SizeMapping:
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
+                 'CustomKernelName',
                  'workGroupMappingXCC',
                  'workGroupMappingXCCGroup',
                  'globalSplitUCoalesced',
@@ -762,6 +744,7 @@ class SizeMapping:
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
+                   CustomKernelName         = d['CustomKernelName'],
                    workGroupMappingXCC      = d['WorkGroupMappingXCC'],
                    workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
                    globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
@@ -789,7 +772,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
+                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod
@@ -808,6 +791,7 @@ class InternalArgsSupport:
                  'gsu',
                  'wgm',
                  'staggerU',
+                 'perTileExtraIters',
                  'useUniversalArgs',
                  'useSFC'
                  ]
@@ -817,11 +801,13 @@ class InternalArgsSupport:
         # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
         # the explicit InternalSupportParams setting
         useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
-        return cls(version = d['InternalSupportParams']['KernArgsVersion'],
-                   gsu = d['InternalSupportParams']['SupportUserGSU'],
-                   wgm = d['InternalSupportParams']['SupportCustomWGM'],
-                   staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
-                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
+        isp = d['InternalSupportParams']
+        return cls(version = isp['KernArgsVersion'],
+                   gsu = isp['SupportUserGSU'],
+                   wgm = isp['SupportCustomWGM'],
+                   staggerU = isp['SupportCustomStaggerU'],
+                   perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
 
     def __init__(self, **kwargs):
@@ -831,18 +817,17 @@ class InternalArgsSupport:
 class Solution:
     StateKeys = ['name',
                  'kernelName',
-                 'problemType',
-                 'hardwarePredicate',
-                 'problemPredicate',
-                 'taskPredicate',
-                 'sizeMapping',
-                 'customKernel',
-                 'internalArgsSupport',
-                 'debugKernel',
-                 'libraryLogicIndex',
-                 'index',
-                 'ideals',
-                 'linearModel']
+                'problemType',
+                'hardwarePredicate',
+                'problemPredicate',
+                'taskPredicate',
+                'sizeMapping',
+                'internalArgsSupport',
+                'debugKernel',
+                'libraryLogicIndex',
+                'index',
+                'ideals',
+                'linearModel']
     HiddenKeys = ['originalSolution']
 
     @classmethod
@@ -912,10 +897,6 @@ class Solution:
         rv.libraryLogicIndex = int(info.get("SolutionIndex", -1))
 
         rv.sizeMapping = SizeMapping.FromOriginalState(d)
-        if 'CustomKernel' in d:
-            rv.customKernel = CustomKernel.FromOriginalState(d['CustomKernel'])
-        else:
-            rv.customKernel = {}
 
         rv.internalArgsSupport = InternalArgsSupport.FromOriginalState(d)
 
@@ -964,7 +945,6 @@ class Solution:
         self.problemPredicate = ProblemPredicate('TruePred')
         self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
-        self.customKernel = None
         self.debugKernel = False
         self.libraryLogicIndex = {}
         self.index = None
