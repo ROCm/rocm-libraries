@@ -1057,9 +1057,15 @@ class MxGenerationOracleTests(unittest.TestCase):
             block_size=2,
             data=Recipe(RecipeKind.CONSTANT, value=1.0),
         )
+
+        empty = hv.generate_mx(*make_problem(MxCase(**(base | {"shape": (0, 3)}))))
+        self.assertEqual(empty.data.size, 0)
+        self.assertEqual(empty.scales.size, 0)
+        self.assertEqual(empty.scale_indices.size, 0)
+        self.assertEqual(empty.reference.size, 0)
+
         invalid_cases = (
             ("rank", MxCase(**(base | {"shape": (3,)})), ValueError),
-            ("zero_extent", MxCase(**(base | {"shape": (0, 3)})), ValueError),
             (
                 "short_leading_dimension",
                 MxCase(**(base | {"leading_dimension": 2})),
