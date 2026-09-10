@@ -659,6 +659,14 @@ class TensorAndGemmTests(unittest.TestCase):
             np.asarray([3.0, 5.0], dtype=np.float32),
         )
         np.testing.assert_array_equal(
+            hv.to_numpy(1.0 + float_values),
+            np.asarray([2.0, 3.0], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(hv.subtract(float_values, np.float32(0.5))),
+            np.asarray([0.5, 1.5], dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
             hv.to_numpy(10.0 - float_values * 2.0 - 1.0),
             np.asarray([7.0, 5.0], dtype=np.float32),
         )
@@ -671,6 +679,30 @@ class TensorAndGemmTests(unittest.TestCase):
         large_integer = 2**53 + 1
         integer_value = hv.from_numpy(np.asarray(0, dtype=np.int32))
         self.assertEqual((integer_value + large_integer).item(), 1)
+        integer_values = hv.from_numpy(np.asarray([1, 2], dtype=np.int32))
+        integer_plus_fraction = integer_values + np.float64(1.75)
+        self.assertEqual(integer_plus_fraction.type, hv.ScalarType.Int32)
+        np.testing.assert_array_equal(
+            hv.to_numpy(integer_plus_fraction), np.asarray([2, 3], dtype=np.int32)
+        )
+
+        with self.assertRaises(ValueError):
+            hv.add(x, y)
+
+        packed = hv.from_numpy(
+            np.asarray([0.5, 1.0, -1.5, 3.0], dtype=np.float32),
+            hv.ScalarType.Float4E2M1,
+        )
+        packed_product = hv.multiply(
+            packed,
+            2.0,
+            output_type=hv.ScalarType.Float32,
+            compute_type=hv.ScalarType.Float32,
+        )
+        np.testing.assert_array_equal(
+            hv.to_numpy(packed_product),
+            np.asarray([1.0, 2.0, -3.0, 6.0], dtype=np.float32),
+        )
 
         padded_x = hv.Tensor.from_storage(
             hv.ScalarType.Float32,
