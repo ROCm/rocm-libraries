@@ -74,8 +74,10 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(scale16):
-    """K=128 FP8 SCALE/SCALE16 WMMA with i32/i64 packed E8M0 scales."""
+def _wmma_scaled(a_kind, b_kind, scale_mode):
+    """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
+    scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
+    op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
 
     def build(b: IRBuilder) -> None:
         a_ptr = b.param(
@@ -85,7 +87,6 @@ def _wmma_scaled(scale16):
             "B", PtrType(I32, "global"), noalias=True, readonly=True, align=16
         )
         c_ptr = b.param("C", PtrType(F32, "global"), noalias=True, align=16)
-        scale_ty = I64 if scale16 else I32
         scale_ptr = b.param(
             "scale",
             PtrType(scale_ty, "global"),
@@ -104,10 +105,7 @@ def _wmma_scaled(scale16):
         bb = b.vec_concat(b_lo, b_hi)
         c = b.global_load_vN(c_ptr, tid, dtype=F32, n=8)
         scale = b.global_load(scale_ptr, tid, dtype=scale_ty)
-        if scale16:
-            d = b.wmma_scale16_f32_16x16x128_fp8_fp8(a, bb, c, scale, scale)
-        else:
-            d = b.wmma_scale_f32_16x16x128_fp8_fp8(a, bb, c, scale, scale)
+        d = b.mma(op_id, a, bb, c, scale, scale)
         b.global_store(c_ptr, tid, d)
         b.ret()
 
@@ -180,8 +178,8 @@ CONFIGS = [
     (_wmma_k64("fp8", "bf8"), "gfx1250"),
     (_wmma_k64("bf8", "fp8"), "gfx1250"),
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
-    (_wmma_scaled(False), "gfx1250"),
-    (_wmma_scaled(True), "gfx1250"),
+    (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
+    (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
