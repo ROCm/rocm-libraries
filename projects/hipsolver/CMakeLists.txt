@@ -118,41 +118,17 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-# Deprecated USE_CUDA option
-if(DEFINED USE_CUDA)
-  if(USE_CUDA)
-    set(ENV{HIP_PLATFORM} nvidia)
-    set(HIP_PLATFORM nvidia CACHE STRING "HIP platform (e.g., amd or nvidia)")
-    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
-  else()
-    set(ENV{HIP_PLATFORM} amd)
-    set(HIP_PLATFORM amd CACHE STRING "HIP platform (e.g., amd or nvidia)")
-    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
-  endif()
-endif()
+# USE_CUDA: build hipSOLVER for the CUDA backend using nvcc directly.
+# Replaces the old hipcc/hipconfig-based HIP_PLATFORM flow.
+option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
-# Hip headers required of all clients; clients use hip to allocate device memory
-find_package(hip CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
 
-# support for cuda backend with hip < 6.0
-if(NOT hip_FOUND)
-    find_package(HIP MODULE REQUIRED)
-    list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
-    set(ENV{HIP_PLATFORM} nvidia)
-    if (NOT HIP_PLATFORM)
-      set(HIP_PLATFORM nvidia)
-    endif()
-else()
-    if(NOT HIP_PLATFORM)
-      set(HIP_PLATFORM amd)
-    endif()
-endif()
-
-if(HIP_PLATFORM STREQUAL nvidia)
+if(USE_CUDA)
   find_package(CUDA REQUIRED)
 endif()
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
     # TODO: This LAPACK dependency is only required to support geev
     # It should be removed once geev is implemented in rocSOLVER
     option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
@@ -367,7 +343,7 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
 endif()
 
 # Package specific CPACK vars
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   set(rocblas_minimum 4.2.0)
   set(rocsolver_minimum 3.37.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
@@ -418,7 +394,7 @@ endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 # Give hipsolver compiled for CUDA backend a different name
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   set(package_name hipsolver)
 else()
   set(package_name hipsolver-alt)

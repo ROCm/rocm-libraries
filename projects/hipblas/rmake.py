@@ -340,7 +340,7 @@ def config_cmd():
         rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
         cmake_options.append( f"-DCUSTOM_ROCSOLVER={rocsolver_path_cmake}")
 
-    # CUDA backend: pass USE_CUDA=ON and locate nvcc so CMake's find_package(CUDAToolkit)
+    # CUDA backend: pass USE_CUDA=ON and locate nvcc so CMake's find_package(CUDA)
     # resolves without any hipcc involvement.
     if args.use_cuda:
         cmake_options.append("-DUSE_CUDA=ON")
