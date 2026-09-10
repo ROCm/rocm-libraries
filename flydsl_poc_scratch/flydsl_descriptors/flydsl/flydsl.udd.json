@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "f1d50000-0004-4a00-9000-000000000004",
+  "name": "flydsl dispatch",
+  "dispatch_symbol": "hipkernel.flydsl.dispatch"
+}
