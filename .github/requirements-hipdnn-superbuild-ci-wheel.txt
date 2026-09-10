@@ -1,0 +1,7 @@
+# Installed by hipdnn-superbuild-ci.yml after the superbuild install, for packing and
+# testing the hipDNN frontend wheel. Installed with --upgrade, so nothing is pinned here.
+#
+# build  -- the PEP 517 frontend that packs the wheel.
+# numpy  -- imported by frontend_wheel_package/tests, not by the build.
+build
+numpy
