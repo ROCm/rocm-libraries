@@ -8,7 +8,6 @@
 #include <Tensile/Utils.hpp>
 #include <TensileLite/Client/HostNumerics/DataInitializationHelpers.hpp>
 #include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
-#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>

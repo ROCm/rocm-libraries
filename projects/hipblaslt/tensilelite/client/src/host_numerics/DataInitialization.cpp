@@ -7,7 +7,6 @@
 #include "DataInitialization.hpp"
 
 #include <TensileLite/Client/HostNumerics/HostNumericsBridge.hpp>
-#include <TensileLite/Client/HostNumerics/TensileDataGeneration.hpp>
 #include <roc/host_numerics/generation.hpp>
 #include <roc/host_numerics/structured_sparsity.hpp>
 
@@ -23,13 +22,20 @@
 
 namespace TensileLite::Client
 {
+    namespace
+    {
+        constexpr std::uint64_t dataInitializationFnvLikeOffsetBasis = 1469598103934665603ULL;
+        constexpr std::uint64_t dataInitializationFnvLikePrime       = 1099511628211ULL;
+        constexpr std::uint64_t sparsePruningSeed                    = 0x5350415253453234ULL;
+    }
+
     std::uint64_t stableDataInitializationStream(std::string_view semanticName)
     {
-        std::uint64_t hash = HostNumerics::dataInitializationFnvLikeOffsetBasis;
+        std::uint64_t hash = dataInitializationFnvLikeOffsetBasis;
         for(const unsigned char character : semanticName)
         {
             hash ^= character;
-            hash *= HostNumerics::dataInitializationFnvLikePrime;
+            hash *= dataInitializationFnvLikePrime;
         }
         return hash;
     }
@@ -54,8 +60,7 @@ namespace TensileLite::Client
                                           std::uint64_t         sequence,
                                           std::optional<double> freeValue = std::nullopt)
         {
-            const GenerationRecipeSettings settings
-                = HostNumerics::dataInitializationSettings(seed, sequence);
+            const GenerationRecipeSettings settings{.seed = seed + sequence};
             auto realOnly = [settings](GenerationRecipe::Component component) {
                 return GenerationRecipe::realOnly(std::move(component), settings);
             };
@@ -295,7 +300,7 @@ namespace TensileLite::Client
             {
             case PruneSparseMode::PruneRandom:
                 pattern.selection = StructuredSparsitySelection::Random;
-                pattern.seed      = HostNumerics::sparsePruningSeed;
+                pattern.seed      = sparsePruningSeed;
                 break;
             case PruneSparseMode::PruneXX00:
                 pattern.fixedPositions = {0, 1};
@@ -415,7 +420,7 @@ namespace TensileLite::Client
 
         const auto uniformRealRecipe = roc::host_numerics::GenerationRecipe::realOnly(
             roc::host_numerics::GenerationRecipe::uniformReal({.lower = lower, .upper = upper}),
-            HostNumerics::dataInitializationSettings(key.seed, key.semanticStream));
+            {.seed = key.seed + key.semanticStream});
 
         Tensor generated(ScalarType::Float64, Shape{1});
         roc::host_numerics::generate(generated, uniformRealRecipe);
