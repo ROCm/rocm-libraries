@@ -122,7 +122,23 @@ static constexpr bool kCompiledForGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
 // the shared quant kernel header rather than a gfx1250-specific silicon property, so
 // every gfx12xx part is subject to it. Compile-time, so on gfx9 the guard folds away
 // instead of constructing a std::string per call to test a constant.
+//
+// Honest statement of what the wider predicate buys today: nothing. gfx1200 and gfx1201
+// are the only other gfx12xx parts, neither is in kSupportedArchs, so
+// dispatcher_initialize() returns -1 on them long before dispatcher_run_gemm is
+// reachable -- this constant is equal to kCompiledForGfx1250 on every architecture that
+// can execute the guard. It is kept rather than replaced by the exact predicate for one
+// reason: enabling another architecture is advertised two blocks up as "a one-line
+// addition here plus a CMake arch entry", and with the exact predicate that one line
+// would silently switch the M%4 guard off for the new gfx12xx target, reintroducing
+// exactly the silent wrong answer it exists to prevent. The static_assert below pins the
+// relationship so this note cannot quietly go stale.
 static constexpr bool kCompiledForGfx12 = ct_starts_with(GFX_ARCH, "gfx12");
+
+static_assert(!kCompiledForGfx1250 || kCompiledForGfx12,
+              "kCompiledForGfx12 must be implied by kCompiledForGfx1250. If this fires, "
+              "the two arch predicates have diverged and the M%4 guard no longer covers "
+              "the target the tile guards above are protecting.");
 
 static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileM == 16,
               "gfx1250 has no 32x32 WMMA fragment: warp_tile_m must be 16. This kernel "

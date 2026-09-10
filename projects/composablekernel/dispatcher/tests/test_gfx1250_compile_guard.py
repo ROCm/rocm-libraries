@@ -200,7 +200,9 @@ class TestGfx1250CompileGuard(unittest.TestCase):
         strip = re.compile(r"static_assert\(.*?\);", re.DOTALL)
         for op, path in SOURCES.items():
             disarmed = strip.sub("", _extract_guard(path))
-            self.assertNotIn("static_assert", disarmed)
+            # "static_assert(" with the paren: the prose in the block mentions
+            # static_assert by name, and matching the bare word would trip on it.
+            self.assertNotIn("static_assert(", disarmed)
             for label, kernel in ILLEGAL.items():
                 with self.subTest(op=op, config=label):
                     ok, err = self._compiles(disarmed, "gfx1250", kernel)
