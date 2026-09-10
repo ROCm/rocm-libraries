@@ -45,7 +45,7 @@ import tempfile
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalize/warm-state emit, global-state isolation, and per-kernel rocisa
