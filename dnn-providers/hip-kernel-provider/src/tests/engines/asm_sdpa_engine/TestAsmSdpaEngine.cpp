@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "SdpaGraphMutators.hpp"
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -65,6 +66,37 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
         strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto builder = withRaggedTensors(hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+                                         dims,
+                                         strides,
+                                         dims,
+                                         strides,
+                                         dims,
+                                         strides,
+                                         dims,
+                                         strides,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT),
+                                     {"q", "k", "v", "o"});
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());

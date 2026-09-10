@@ -9,6 +9,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
+#include "SdpaGraphMutators.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
@@ -77,6 +78,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
                                       false,
                                       false,
                                       /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForRaggedGraph)
+{
+    // The backward engine does not support group mode; any ragged tensor must be
+    // rejected via CHECK_NO_RAGGED_TENSORS.
+    auto builder = withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
