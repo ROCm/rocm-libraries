@@ -3,7 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cstdint>
 #include <thread>
 #include <vector>
 
@@ -52,6 +51,56 @@ public:
         return hipErrorInvalidDevice;
     }
 };
+
+/// Answers the fallthrough with an ordinal no single-device machine reports.
+class UnwrittenStreamDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int FALLTHROUGH_DEVICE = 3;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* /*deviceId*/) const override
+    {
+        return hipSuccess;
+    }
+
+    hipError_t queryCurrentDevice(int* deviceId) const override
+    {
+        *deviceId = FALLTHROUGH_DEVICE;
+        return hipSuccess;
+    }
+};
+
+/// Reports success from the stream query alongside an ordinal no device can have.
+class NegativeStreamDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int BOGUS_DEVICE = -42;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* deviceId) const override
+    {
+        *deviceId = BOGUS_DEVICE;
+        return hipSuccess;
+    }
+};
+
+/// What deviceId() must fall through to once a stream ordinal is rejected.
+hipdnn_plugin_sdk::ingestor::DeviceId currentDeviceOrNone()
+{
+    int currentDevice = -1;
+    if(hipGetDevice(&currentDevice) != hipSuccess)
+    {
+        return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
+    }
+    return currentDevice;
+}
+
+/// A stream the overridden seam never dereferences; only its non-null-ness is read.
+/// Backed by a real object rather than a literal address so the cast stays pointer-to-pointer.
+hipStream_t unusedStream()
+{
+    static int s_placeholder = 0;
+    return reinterpret_cast<hipStream_t>(&s_placeholder);
+}
 
 // deviceId()
 
@@ -106,6 +155,31 @@ TEST(TestHandleDeviceResolver, FallsThroughToTheCurrentDeviceWhenTheStreamCannot
     handle.setStream(stream);
 
     EXPECT_EQ(resolver.deviceId(handle), currentDevice);
+
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
+}
+
+TEST(TestHandleDeviceResolver, RejectsAStreamOrdinalTheRuntimeNeverWrote)
+{
+    // hipSuccess with the out-parameter untouched must not read as device 0: the seed has
+    // to be out of range so the guard rejects it and the fallthrough ordinal comes back.
+    const UnwrittenStreamDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_EQ(resolver.deviceId(handle), UnwrittenStreamDeviceResolver::FALLTHROUGH_DEVICE);
+}
+
+TEST(TestHandleDeviceResolver, RejectsANegativeStreamOrdinalReportedAsSuccess)
+{
+    // A negative ordinal is never a device, whatever status came back with it.
+    const NegativeStreamDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_NE(resolver.deviceId(handle), NegativeStreamDeviceResolver::BOGUS_DEVICE);
+    EXPECT_EQ(resolver.deviceId(handle), currentDeviceOrNone());
 
     static_cast<void>(hipGetLastError());
     static_cast<void>(hipExtGetLastError());
