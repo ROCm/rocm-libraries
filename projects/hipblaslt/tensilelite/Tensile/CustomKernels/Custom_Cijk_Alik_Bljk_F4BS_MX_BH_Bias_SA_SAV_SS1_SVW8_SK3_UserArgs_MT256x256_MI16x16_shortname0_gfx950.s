@@ -94,6 +94,9 @@ custom.config:
   UseSubtileImpl: True
   NonTemporalD: 4
   KernelLanguage: Assembly
+  AssertFree0ElementMultiple: 32    # M must be multiple of 32 (MT256 row tile)
+  AssertFree1ElementMultiple: 32    # N must be multiple of 32 (MT256 col tile)
+  AssertSummationElementMultiple: 256  # K must be multiple of DepthU=256
 amdhsa.version:
   - 1
   - 1

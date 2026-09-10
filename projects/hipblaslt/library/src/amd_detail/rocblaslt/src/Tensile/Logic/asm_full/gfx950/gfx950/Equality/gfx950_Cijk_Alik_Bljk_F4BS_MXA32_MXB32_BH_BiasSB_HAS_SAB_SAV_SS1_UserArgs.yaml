@@ -130,6 +130,9 @@
       UseUniversalArgs: true
     AssignedDerivedParameters: false
     AssignedProblemIndependentDerivedParameters: false
+    AssertFree0ElementMultiple: 32
+    AssertFree1ElementMultiple: 32
+    AssertSummationElementMultiple: 256
 - null
 - - - - 32768
       - 6144
