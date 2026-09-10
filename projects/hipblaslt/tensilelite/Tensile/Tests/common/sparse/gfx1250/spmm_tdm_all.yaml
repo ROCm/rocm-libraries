@@ -626,6 +626,72 @@ BenchmarkProblems:
           - [Enum: none]
 
 ########################################################
+# datatype = h (fp16), NN, MT256x256 wave4, ClusterDim[4,4], DepthU128 (metadata macrotile edge case)
+  -
+    - # ProblemType, NN
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 3
+      Batched: True
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 3
+      Sparse: 1
+      MetadataLayout: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 8, 4, 2, 2]
+          - [16, 16, 64, 1, 1, 4, 8, 2, 2]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - ClusterDim: [[4, 4]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1024, 1, 1024]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
+        - ActivationArgs:
+          - [Enum: none]
+
+########################################################
 # datatype = b8, ML0
   -
     - # ProblemType, TN
