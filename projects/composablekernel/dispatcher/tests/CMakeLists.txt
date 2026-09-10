@@ -130,6 +130,22 @@ set_tests_properties(dispatcher_test_codegen_common PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
+# instance builders and the dispatcher's own warp gate all share. Registered on the
+# dispatcher side because the bridge/Old-TE instance-set parity that depends on it
+# is a dispatcher property; tile_engine has no CTest registration of its own.
+add_test(
+    NAME dispatcher_test_gemm_validation_arch_normalization
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_validation_arch_normalization.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_validation_arch_normalization PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Arch-gate predicate used by the RowColQuant/TensorQuant GPU tests. CPU-only: it
 # exercises the string predicate, not a device. Worth its own registration because
 # the failure mode it guards is a SKIP -- CI stays green while covering nothing.
