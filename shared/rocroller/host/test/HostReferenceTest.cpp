@@ -219,6 +219,12 @@ namespace
                 "BF16 host-reference output conversion mismatch.");
         require(bfloat16[2].data == 0x3f80,
                 "BF16 host-reference output did not preserve rocRoller truncation.");
+
+        const Tensor bfloat16Tensor = convertHostReferenceTensor<BFloat16>(input);
+        require(bfloat16Tensor.type() == ScalarType::BFloat16
+                    && bfloat16Tensor.layout() == Layout(Shape{3, 1}, {1, 3})
+                    && bfloat16Tensor.loadAs<float>({2, 0}) == 1.0f,
+                "Tensor host-reference output conversion mismatch.");
     }
 
     void testStrictComparison()
