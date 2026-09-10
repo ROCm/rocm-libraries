@@ -245,11 +245,10 @@ namespace TensileLite
                                                   outputSelection,
                                               double                  threshold)
         {
-            using namespace roc::host_numerics;
-
-            const ScalarType scalarType
+            const roc::host_numerics::ScalarType scalarType
                 = toHostNumericsScalarType(tensor.dataType());
-            const size_t storageBits = scalarTypeInfo(scalarType).storageBits;
+            const size_t storageBits
+                = roc::host_numerics::scalarTypeInfo(scalarType).storageBits;
             if(storageBits % 8 != 0)
             {
                 throw std::runtime_error(
@@ -346,8 +345,8 @@ namespace TensileLite
             strides.reserve(tensor.strides().size());
             for(const auto stride : tensor.strides())
                 strides.push_back(static_cast<ptrdiff_t>(stride));
-            const Layout layout(
-                Shape(std::move(dimensions)), std::move(strides));
+            const roc::host_numerics::Layout layout(
+                roc::host_numerics::Shape(std::move(dimensions)), std::move(strides));
 
             if(tensor.totalAllocatedElements()
                > std::numeric_limits<size_t>::max() / elementBytes)
@@ -357,15 +356,18 @@ namespace TensileLite
                 = tensor.totalAllocatedElements() * elementBytes;
             const auto referenceStorage = std::span<const std::byte>(
                 static_cast<const std::byte*>(refPtr), allocatedBytes);
-            const auto resultStorage = std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(
-                    m_cpuResultBuffer.get())
+            const auto resultStorage = std::span<std::byte>(
+                reinterpret_cast<std::byte*>(m_cpuResultBuffer.get())
                     + elementsBeforeData * elementBytes,
                 allocatedBytes);
-            const Tensor resultTensor =
-                Tensor::copyEncodedBackingStorage(scalarType, layout, resultStorage);
+            const roc::host_numerics::Tensor resultTensor
+                = roc::host_numerics::Tensor::shareExternalMutableBackingStorage(
+                    scalarType, layout, m_cpuResultBuffer, resultStorage);
+            const roc::host_numerics::Tensor referenceTensor
+                = roc::host_numerics::Tensor::copyEncodedBackingStorage(
+                    scalarType, layout, referenceStorage);
 
-            ComparisonOptions options
+            roc::host_numerics::ComparisonOptions options
                 = validationComparisonOptions(tensor.dataType(), threshold);
             options.selection = outputSelection;
             options.computeElementwiseStatistics = false;
@@ -374,20 +376,15 @@ namespace TensileLite
             options.maxReportedMismatches
                 = m_printMax > 0 ? static_cast<size_t>(m_printMax) : 0;
 
-            ComparisonReport comparison;
+            roc::host_numerics::ComparisonReport comparison;
             {
                 ScopedTimer timer("validate_element_comparison");
-                comparison = compareHostBuffers(
-                    tensor.dataType(),
-                    resultStorage.data(),
-                    referenceStorage.data(),
-                    layout,
-                    options);
+                comparison = roc::host_numerics::compare(resultTensor, referenceTensor, options);
             }
 
             const bool isComplex
-                = scalarTypeInfo(scalarType).category
-                  == ScalarCategory::Complex;
+                = roc::host_numerics::scalarTypeInfo(scalarType).category
+                  == roc::host_numerics::ScalarCategory::Complex;
             const auto& samples
                 = m_printValids ? comparison.reportedComparisons
                                 : comparison.reportedMismatches;
@@ -426,7 +423,7 @@ namespace TensileLite
                           << " total values compared." << std::endl;
             }
 
-            SentinelReport sentinel;
+            roc::host_numerics::SentinelReport sentinel;
             const auto completeStorage = std::span<const std::byte>(
                 reinterpret_cast<const std::byte*>(
                     m_cpuResultBuffer.get()),
@@ -434,34 +431,35 @@ namespace TensileLite
             if(elementsBeforeData != 0)
             {
                 sentinel.append(
-                    checkUnwrittenSentinel(
+                    roc::host_numerics::checkUnwrittenSentinel(
                         scalarType,
                         completeStorage,
                         0,
                         elementsBeforeData,
-                        SentinelRegion::Before,
+                        roc::host_numerics::SentinelRegion::Before,
                         options.maxReportedMismatches),
                     options.maxReportedMismatches);
             }
             if(boundsCheck == BoundsCheckMode::NaN
                && outputSelection.selectsAll())
             {
-                sentinel.append(checkUnusedTensorStorage(resultTensor,
-                                                         tensor.totalAllocatedElements(),
-                                                         SentinelRegion::Inside,
-                                                         options.maxReportedMismatches),
+                sentinel.append(roc::host_numerics::checkUnusedTensorStorage(
+                                    resultTensor,
+                                    tensor.totalAllocatedElements(),
+                                    roc::host_numerics::SentinelRegion::Inside,
+                                    options.maxReportedMismatches),
                                 options.maxReportedMismatches);
             }
             if(elementsAfterData != 0)
             {
                 sentinel.append(
-                    checkUnwrittenSentinel(
+                    roc::host_numerics::checkUnwrittenSentinel(
                         scalarType,
                         completeStorage,
                         elementsBeforeData
                             + tensor.totalAllocatedElements(),
                         elementsAfterData,
-                        SentinelRegion::After,
+                        roc::host_numerics::SentinelRegion::After,
                         options.maxReportedMismatches),
                     options.maxReportedMismatches);
             }
@@ -476,16 +474,16 @@ namespace TensileLite
                 const char* location = "near";
                 switch(mismatch.region)
                 {
-                case SentinelRegion::Before:
+                case roc::host_numerics::SentinelRegion::Before:
                     location = "before";
                     break;
-                case SentinelRegion::Inside:
+                case roc::host_numerics::SentinelRegion::Inside:
                     location = "inside";
                     break;
-                case SentinelRegion::After:
+                case roc::host_numerics::SentinelRegion::After:
                     location = "after";
                     break;
-                case SentinelRegion::Unspecified:
+                case roc::host_numerics::SentinelRegion::Unspecified:
                     break;
                 }
                 std::cout << "Value written " << location
