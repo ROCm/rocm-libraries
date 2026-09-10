@@ -101,8 +101,8 @@ packs:
           block_n: 64
         priority: 0
 
-# What the COMPILER specialized on, carried on every emitted UKD as
-# provenance.specialization_contract.
+# What the COMPILER specialized on, carried once by each emitted KDP as
+# provenance.specialization_contract and inherited by the kernels under it.
 #
 # Every field below is a field of AttentionDenseSpec, hydrated by hkp_pack with
 # Spec(**fields) and handed to `build_attention_dense`, so each one demonstrably

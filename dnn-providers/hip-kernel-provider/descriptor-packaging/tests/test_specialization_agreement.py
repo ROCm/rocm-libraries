@@ -332,6 +332,74 @@ class TestDeclarationValidation:
             agreement.select_declaration(ukd, ENGINE, FULL_KMD, {"kmd-demo": FULL_KMD})
 
 
+def contract_of(*consumers) -> dict:
+    return {"schema_version": 1, "consumers": list(consumers)}
+
+
+class TestSharedCarriage:
+    """Where the declaration is written, and what each kernel resolves to.
+
+    One engine's inline kernels share one declaration by construction, so it may
+    be carried once by the enclosing KDP. What a reader must get is unchanged: the
+    consumers in force for the kernel in front of it.
+    """
+
+    @staticmethod
+    def kdp(contract=None, *kernels) -> dict:
+        doc = {
+            "id": "kdp-demo",
+            "engine": "ued-demo",
+            "kernelDescriptors": list(kernels),
+        }
+        if contract is not None:
+            doc["provenance"] = {"specialization_contract": contract}
+        return doc
+
+    def test_a_kernel_with_none_of_its_own_inherits_the_kdps(self):
+        kernel = {"id": "ukd-a"}
+        doc = self.kdp(contract_of(consumer()), kernel)
+        entries = agreement.contracts(kernel, {"kmd-demo": FULL_KMD}, doc)
+        assert [e["engine_id"] for e in entries] == ["ued-demo"]
+
+    def test_a_kernels_own_declaration_overrides_the_kdps_wholesale(self):
+        """Never a merge: a merged block would let a kernel inherit a consumer it
+        never declared, which is the one thing the declaration exists to rule out."""
+        second_kmd = dict(FULL_KMD, id="kmd-other")
+        kernel = {
+            "id": "ukd-a",
+            "provenance": {
+                "specialization_contract": contract_of(
+                    consumer(engine_id="ued-other", kmd_id="kmd-other")
+                )
+            },
+        }
+        doc = self.kdp(contract_of(consumer()), kernel)
+        entries = agreement.contracts(
+            kernel, {"kmd-demo": FULL_KMD, "kmd-other": second_kmd}, doc
+        )
+        assert [(e["engine_id"], e["kmd_id"]) for e in entries] == [
+            ("ued-other", "kmd-other")
+        ]
+
+    def test_a_kernel_with_neither_is_the_same_hard_error(self):
+        kernel = {"id": "ukd-a"}
+        with pytest.raises(HkpPackError, match="missing/invalid"):
+            agreement.contracts(kernel, {"kmd-demo": FULL_KMD}, self.kdp(None, kernel))
+
+    def test_a_standalone_ukd_has_no_enclosing_kdp_and_must_carry_its_own(self):
+        """It is its own file and several KDPs may reference it, so no KDP speaks
+        for it -- which is why every reader passes None for a standalone entry."""
+        with pytest.raises(HkpPackError, match="missing/invalid"):
+            agreement.contracts({"id": "ukd-standalone"}, {"kmd-demo": FULL_KMD})
+
+    def test_an_inherited_declaration_is_validated_like_an_authored_one(self):
+        """Inheritance moves where the claim is written, never what it must satisfy."""
+        kernel = {"id": "ukd-a"}
+        doc = self.kdp(contract_of(consumer(kmd_id="kmd-absent")), kernel)
+        with pytest.raises(HkpPackError, match="dangling KMD"):
+            agreement.contracts(kernel, {"kmd-demo": FULL_KMD}, doc)
+
+
 class TestComparison:
     """Observations against completed metadata."""
 

@@ -369,8 +369,15 @@ def _agreement_inputs(flat, arch):
     for kdp in flat.kdps():
         engine_id = kdp.doc["engine"]
         if engine_id is None:
+            if agreement.resolved_contract(kdp.doc) is not None:
+                raise HkpPackError(
+                    f"KDP {kdp.path.name}: a specialization contract names an "
+                    "engine, and this KDP authors none"
+                )
+            # The KDP declares nothing (just checked), so there is nothing for a
+            # kernel to inherit and each speaks only for itself.
             for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
-                if "specialization_contract" in ukd.get("provenance", {}):
+                if agreement.resolved_contract(ukd) is not None:
                     raise HkpPackError(
                         f"UKD {ukd['id']} in {kdp.path.name}: a specialization "
                         "contract names an engine, and this KDP authors none"
@@ -395,7 +402,12 @@ def _agreement_inputs(flat, arch):
             # mandatory field fails before a compile is spent on it.
             agreement.complete_metadata(ukd["metadata"], kmd)
             kind = ukd["kernel_source"]["kind"]
-            declaration = agreement.select_declaration(ukd, engine, kmd, schemas)
+            # A standalone UKD is its own file and several KDPs may reference it,
+            # so it inherits from none of them and states its own declaration.
+            enclosing = kdp.doc if sid is None else None
+            declaration = agreement.select_declaration(
+                ukd, engine, kmd, schemas, enclosing
+            )
             if kind != "rocke" and declaration["metadata_fields"]:
                 raise HkpPackError(
                     f"UKD {ukd['id']}: a '{kind}' source cannot fulfil compiled "
@@ -950,6 +962,10 @@ def _rewrite_ukd_kpack(
     descriptor asked for. Merged into provenance rather than the variant key: in
     the key, a wheel bump would rename every rocKE artifact including ones it
     could not affect.
+
+    A `specialization_contract` declared once on the enclosing KDP stays there: the
+    KDP header ships verbatim, so the packed tree is self-describing without the
+    declaration being copied onto every kernel it covers.
 
     PRODUCER EVIDENCE IS RESERVED. `provenance.effective_spec` is the compiler's
     statement about what it observed, so an authored input may not supply one and no

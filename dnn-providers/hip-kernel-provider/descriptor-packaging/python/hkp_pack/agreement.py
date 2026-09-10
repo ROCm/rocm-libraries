@@ -100,8 +100,33 @@ def validate_consumer(consumer, kmd):
     return consumer
 
 
-def contracts(ukd, schemas):
-    contract = ukd.get("provenance", {}).get("specialization_contract")
+def resolved_contract(ukd, kdp=None):
+    """The specialization contract in force for one kernel descriptor.
+
+    A declaration is identical across every inline kernel of one bundle -- one
+    engine, one KMD, one field partition -- so it may be declared ONCE on the
+    enclosing KDP's `provenance` and inherited by the kernels under it. Copying it
+    onto each entry instead says nothing extra and costs the whole bundle: a
+    2733-kernel pack grew 2.8x carrying the same fourteen fields 2733 times.
+
+    A kernel that carries its own overrides the KDP's WHOLESALE and is NEVER merged
+    with it. A merge would let a per-kernel block silently inherit a consumer it
+    never declared -- and the declaration's whole purpose is to state exactly what
+    the producing compiler specialized on, so a consumer nobody wrote down is worse
+    than no declaration at all.
+
+    `kdp` is the enclosing document, or None where there is none: a standalone UKD
+    is its own file and therefore has to carry its own. Returns None when neither
+    side declares anything, which every caller treats as the hard error it is.
+    """
+    own = (ukd.get("provenance") or {}).get("specialization_contract")
+    if own is not None:
+        return own
+    return ((kdp or {}).get("provenance") or {}).get("specialization_contract")
+
+
+def contracts(ukd, schemas, kdp=None):
+    contract = resolved_contract(ukd, kdp)
     if (
         not isinstance(contract, dict)
         or set(contract) != {"schema_version", "consumers"}
@@ -137,15 +162,18 @@ def observation_request(consumer, kmd):
     }
 
 
-def select_declaration(ukd, engine, kmd, schemas):
+def select_declaration(ukd, engine, kmd, schemas, kdp=None):
     """The single consumer entry this UKD declares for one (engine, KMD) pair.
 
     A standalone UKD several engines reference carries one entry per pair, so the
     pair -- not the UKD -- selects. Zero matches is an unfulfilled specialization
     obligation and more than one is a conflict; both fail rather than picking, since
     either would certify this compile against a declaration it was not written for.
+
+    `kdp` is the enclosing document whose declaration an inline kernel inherits when
+    it carries none of its own; see `resolved_contract`.
     """
-    declarations = contracts(ukd, schemas)
+    declarations = contracts(ukd, schemas, kdp)
     matching = [
         c
         for c in declarations

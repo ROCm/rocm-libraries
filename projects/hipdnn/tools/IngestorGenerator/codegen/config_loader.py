@@ -1277,13 +1277,14 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
     """The ``specialization`` block says which metadata fields the COMPILER
     specialized on, and how each one is read off the builder object.
 
-    It becomes ``provenance.specialization_contract`` on every emitted UKD, and it
-    is the ONLY thing a machine checking a shipped bundle has: the rocKE that
-    compiled the kernel is not installed on the machine that received the archive,
-    and importing a producer to answer "what did this descriptor's binary actually
-    specialize on" is precisely the check that cannot be run where it is needed.
-    So the declaration must be self-contained, and it must be exact -- every claim
-    below is one a downstream consumer will test rather than trust
+    It becomes the ``provenance.specialization_contract`` the emitted KDP carries
+    once for every kernel under it, and it is the ONLY thing a machine checking a
+    shipped bundle has: the rocKE that compiled the kernel is not installed on the
+    machine that received the archive, and importing a producer to answer "what did
+    this descriptor's binary actually specialize on" is precisely the check that
+    cannot be run where it is needed. So the declaration must be self-contained,
+    and it must be exact -- every claim below is one a downstream consumer will
+    test rather than trust
     (``hkp_pack.agreement.validate_consumer``).
 
     THE PARTITION IS EXHAUSTIVE AND DISJOINT over ``kmd_fields``. Not a subset:
