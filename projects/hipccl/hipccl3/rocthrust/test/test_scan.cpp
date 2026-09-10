@@ -572,8 +572,10 @@ TEST(ScanTests, TestScanWithLargeTypes)
   // Temporarily disable this test on gfx115x on Windows until we can determine the root cause.
   // TODO: remove this after the root cause has been found and fixed properly.
   if (temp_skip::should_skip())
-      GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
-  
+  {
+    GTEST_SKIP() << "Skipping test on gfx1151 Windows systems due to known issues.";
+  }
+
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   _TestScanWithLargeTypes<int, 1>();
