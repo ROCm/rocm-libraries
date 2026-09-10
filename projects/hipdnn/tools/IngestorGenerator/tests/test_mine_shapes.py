@@ -153,7 +153,7 @@ class TestPublishedCsv:
         text = (
             _HEADER
             + _row(mask="causal")
-            + _row(shape_idx=1, mask="swin", seq_q=2048, seq_kv=2048)
+            + _row(shape_idx=1, mask="swin", seq_q=2048, seq_kv=2048, window_size=512)
         )
         rc, _, shapes = _mine(tmp_path, text)
         assert rc == 0
@@ -164,6 +164,33 @@ class TestPublishedCsv:
         assert len(with_windowed) == 2
         masks = {s["mask_type"] for s in with_windowed}
         assert len(masks) == 2, "swin must keep its own mask_type, not become causal"
+
+    def test_a_windowed_csv_row_carries_its_WIDTH_not_just_its_kind(self, tmp_path):
+        """The published CSV states the width in its `window_size` column. Reading
+        any other column name refuses every swin row outright, so the documented
+        `--include-windowed` mining of this source cannot produce one at all; and a
+        width that silently arrived as 0 resolves to plain causal at the dispatcher
+        -- the same shape served wrong that this reader exists to prevent.
+        """
+        rc, output, shapes = _mine(
+            tmp_path, _HEADER + _row(mask="swin", window_size=512), "--include-windowed"
+        )
+        assert rc == 0, output
+        assert len(shapes) == 1
+        assert shapes[0]["mask_type"] == 2, "a windowed row is not causal"
+        assert shapes[0]["sliding_window"] == 512, (
+            "the window WIDTH must reach the request; a swin shape with width 0 is "
+            "dispatched as plain causal"
+        )
+
+    def test_a_windowed_csv_row_without_a_width_is_refused(self, tmp_path):
+        """The converse: absent a width there is no windowed shape to mine, and
+        defaulting one would invent a shape nobody asked for."""
+        rc, output, shapes = _mine(
+            tmp_path, _HEADER + _row(mask="swin", window_size=0), "--include-windowed"
+        )
+        assert rc != 0, output
+        assert not shapes, "a widthless windowed row must not reach the corpus"
 
     def test_identical_shapes_from_different_rows_merge_to_one_variant(self, tmp_path):
         """A corpus is a set of shapes; two rows asking for the same shape is one
@@ -200,6 +227,7 @@ class TestGraphCorpus:
         tensors = [
             {"name": "query", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
             {"name": "key", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+            {"name": "value", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
         ]
         if backward:
             tensors.append({"name": "d_query", "dims": [1, 32, 4096, 128]})
@@ -282,6 +310,11 @@ class TestCausalityComesFromTheGraphNotTheFilename:
                             "data_type": "bf16",
                         },
                         {"name": "key", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                        {
+                            "name": "value",
+                            "dims": [1, 8, 4096, 128],
+                            "data_type": "bf16",
+                        },
                     ],
                     "nodes": [{"attributes": attrs}],
                 }
@@ -390,7 +423,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
             text=True,
         )
         assert result.returncode != 0
-        assert "non-numeric left_bound" in (result.stdout + result.stderr)
+        assert not out.exists(), "a refused bound must not yield a mined corpus"
 
 
 class TestRocKeBenchTree:
@@ -519,6 +552,7 @@ class TestGradientSpellingsAreBothExcluded:
         tensors = [
             {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
             {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+            {"name": "v", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
             {"name": gradient, "dims": [1, 32, 4096, 128], "data_type": "bf16"},
         ]
         (corpus / "innocent.json").write_text(json.dumps({"tensors": tensors}))
@@ -542,6 +576,7 @@ class TestGradientSpellingsAreBothExcluded:
                     "tensors": [
                         {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
                         {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                        {"name": "v", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
                     ],
                     "nodes": [{"type": "SdpaBackwardAttributes"}],
                 }
@@ -566,6 +601,7 @@ class TestGradientSpellingsAreBothExcluded:
                     "tensors": [
                         {"name": "q", "dims": [1, 32, 4096, 128], "data_type": "bf16"},
                         {"name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                        {"name": "v", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
                         {"name": "descale_q", "dims": [1]},
                     ],
                     "nodes": [{"type": "SdpaAttributes"}],
@@ -580,3 +616,175 @@ class TestGradientSpellingsAreBothExcluded:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert len(json.loads(out.read_text())) == 1
+
+
+class TestEveryRequestSemanticSurvivesMining:
+    """A mined shape is a REQUEST, and a request field dropped here cannot be
+    recovered downstream.
+
+    Two failure shapes are covered together because they are the same defect seen
+    from opposite ends. A field dropped during mining sends the dispatcher a request
+    the caller did not make -- a banded window read as full causal computes a whole
+    triangle and returns a WRONG ANSWER rather than declining. A field dropped from
+    the corpus IDENTITY merges two genuinely different requests into one variant, so
+    only one of them is ever compiled and the other is served by whatever the
+    fallback is.
+    """
+
+    @staticmethod
+    def _graph(
+        path: Path, *, attrs: dict, v_dims=(1, 8, 4096, 128), sink: bool = False
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tensors = [
+            {
+                "uid": 1,
+                "name": "query",
+                "dims": [1, 32, 4096, 128],
+                "data_type": "bf16",
+            },
+            {"uid": 2, "name": "key", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+            {"uid": 3, "name": "value", "dims": list(v_dims), "data_type": "bf16"},
+        ]
+        node_attrs = {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3, **attrs}
+        if sink:
+            tensors.append(
+                {"uid": 4, "name": "sink", "dims": [32], "data_type": "bf16"}
+            )
+            node_attrs["sink_token_tensor_uid"] = 4
+        path.write_text(
+            json.dumps(
+                {
+                    "name": path.stem,
+                    "tensors": tensors,
+                    "nodes": [{"type": "SdpaAttributes", "attributes": node_attrs}],
+                }
+            )
+        )
+
+    @staticmethod
+    def _mine(tmp_path: Path) -> tuple[int, str, list]:
+        out = tmp_path / "shapes.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(_MINE),
+                "--graphs",
+                str(tmp_path / "graphs"),
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        shapes = json.loads(out.read_text()) if out.exists() else []
+        return result.returncode, result.stdout + result.stderr, shapes
+
+    _UNMASKED = {"causal_mask": False, "left_bound": None, "right_bound": None}
+    _CAUSAL = {"causal_mask": False, "left_bound": -1, "right_bound": 0}
+    _WINDOW = {"causal_mask": False, "left_bound": 127, "right_bound": 0}
+
+    def test_an_asymmetric_v_head_dimension_is_carried_not_copied_from_q(
+        self, tmp_path
+    ):
+        """Q and V head dimensions are INDEPENDENT. Copying Q's onto V builds a
+        variant with the wrong output width -- and the shape whose V dimension
+        actually differs then has no variant at all."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            attrs=self._CAUSAL,
+            v_dims=(1, 8, 4096, 64),
+        )
+        rc, output, shapes = self._mine(tmp_path)
+        assert rc == 0, output
+        assert shapes[0]["hdim_q"] == 128
+        assert shapes[0]["hdim_v"] == 64, "V's head dimension was taken from Q"
+
+    def test_a_v_tensor_disagreeing_on_batch_or_heads_is_refused(self, tmp_path):
+        """Independent does not mean arbitrary: V shares batch, heads and key length
+        with K. A graph where it does not is not one attention request, and mining
+        it as one invents a shape nobody asked for."""
+        self._graph(
+            tmp_path / "graphs" / "g.json",
+            attrs=self._CAUSAL,
+            v_dims=(1, 4, 4096, 128),
+        )
+        rc, output, _ = self._mine(tmp_path)
+        assert rc != 0
+        assert "incompatible independent Q/K/V dimensions" in output
+
+    def test_a_missing_v_tensor_is_refused_rather_than_defaulted(self, tmp_path):
+        path = tmp_path / "graphs" / "g.json"
+        self._graph(path, attrs=self._CAUSAL)
+        document = json.loads(path.read_text())
+        document["tensors"] = [t for t in document["tensors"] if t["uid"] != 3]
+        path.write_text(json.dumps(document))
+        rc, output, _ = self._mine(tmp_path)
+        assert rc != 0
+        assert "independent Q, K and V" in output
+
+    def test_unmasked_causal_and_windowed_requests_are_three_distinct_shapes(
+        self, tmp_path
+    ):
+        """Identical in every dimension; different in what they mask. Collapsing any
+        pair of them sizes a variant set that cannot serve the other."""
+        self._graph(tmp_path / "graphs" / "none.json", attrs=self._UNMASKED)
+        self._graph(tmp_path / "graphs" / "causal.json", attrs=self._CAUSAL)
+        self._graph(tmp_path / "graphs" / "window.json", attrs=self._WINDOW)
+        rc, output, shapes = self._mine(tmp_path)
+        assert rc == 0, output
+        assert len(shapes) == 3, "mask semantics collapsed distinct requests"
+        assert {(s["mask_type"], s["sliding_window"]) for s in shapes} == {
+            (0, 0),
+            (1, 0),
+            (2, 128),
+        }
+
+    def test_two_windows_of_different_width_do_not_merge(self, tmp_path):
+        """The mask KIND alone does not encode the window. Carrying only the kind
+        sends both to the dispatcher as the same request."""
+        self._graph(
+            tmp_path / "graphs" / "w64.json",
+            attrs={"causal_mask": False, "left_bound": 63, "right_bound": 0},
+        )
+        self._graph(
+            tmp_path / "graphs" / "w128.json",
+            attrs={"causal_mask": False, "left_bound": 127, "right_bound": 0},
+        )
+        rc, output, shapes = self._mine(tmp_path)
+        assert rc == 0, output
+        assert sorted(s["sliding_window"] for s in shapes) == [64, 128]
+
+    def test_a_sink_request_does_not_merge_with_its_sinkless_twin(self, tmp_path):
+        """Sinks are a recorded request attribute, not a tuning choice. Whether this
+        integration ships a sink variant is decided downstream; dropping the
+        distinction here hides the shape from the reconciler entirely."""
+        self._graph(tmp_path / "graphs" / "plain.json", attrs=self._CAUSAL)
+        self._graph(tmp_path / "graphs" / "sinks.json", attrs=self._CAUSAL, sink=True)
+        rc, output, shapes = self._mine(tmp_path)
+        assert rc == 0, output
+        assert len(shapes) == 2
+        assert {s["use_sinks"] for s in shapes} == {False, True}
+
+    def test_a_sink_uid_naming_no_tensor_is_refused(self, tmp_path):
+        path = tmp_path / "graphs" / "g.json"
+        self._graph(path, attrs=self._CAUSAL, sink=True)
+        document = json.loads(path.read_text())
+        document["tensors"] = [t for t in document["tensors"] if t["uid"] != 4]
+        path.write_text(json.dumps(document))
+        rc, output, _ = self._mine(tmp_path)
+        assert rc != 0
+        assert "sink_token_tensor_uid" in output
+
+    def test_provenance_alone_never_makes_two_shapes_distinct(self, tmp_path):
+        """The converse of every test above, and the reason identity is computed
+        from request fields rather than from the whole record: the same request
+        arriving from two suites is ONE variant to compile, and two votes for it."""
+        self._graph(tmp_path / "graphs" / "suite_a" / "g.json", attrs=self._CAUSAL)
+        self._graph(tmp_path / "graphs" / "suite_b" / "g.json", attrs=self._CAUSAL)
+        rc, output, shapes = self._mine(tmp_path)
+        assert rc == 0, output
+        assert len(shapes) == 1, "provenance leaked into the shape identity"
+        assert "1 duplicate shape(s) merged" in output
+        suites = {p["suite"] for p in shapes[0]["_provenance_occurrences"]}
+        assert suites == {"suite_a", "suite_b"}, "a merged duplicate lost its vote"
