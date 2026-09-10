@@ -2421,6 +2421,20 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
           break
         except OSError:
           continue
+  if not version_str:
+    # Fallback: derive ROCm root from PATH (e.g. TheRock builds where
+    # amdclang++ is on PATH but ROCM_PATH is not set and /opt/rocm doesn't exist).
+    import shutil
+    for exe in ["amdclang++", "rocm-smi", "amd-smi"]:
+      exe_path = shutil.which(exe)
+      if exe_path:
+        candidate_root = Path(exe_path).parent.parent
+        version_file = candidate_root / ".info" / "version"
+        try:
+          version_str = version_file.read_text().strip()
+          break
+        except OSError:
+          continue
   if version_str:
     # Strip pre-release suffixes before storing (e.g. "0a20260813" -> "0")
     # so that nightly version strings like "10.1.0a20260813" are handled correctly.
