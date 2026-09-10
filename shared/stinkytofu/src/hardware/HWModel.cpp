@@ -54,8 +54,13 @@ constexpr HWModel kGfx1250Model = {
         },
     .waitHide =
         {
-            .xdlVaVdst = 12,
-            .csmaccVaVdst = 13,
+            .wmmaForms = {{
+                {.costLatency = 4, .dstVgprs = 8, .xdlVaVdst = 13, .csmaccVaVdst = 13},
+                {.costLatency = 8, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+                {.costLatency = 8, .dstVgprs = 16, .xdlVaVdst = 11, .csmaccVaVdst = 11},
+                {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+            }},
+            .numWmmaForms = 4,
             .vmVsrc = 11,
             .vmVsrcBridge = 11,
         },

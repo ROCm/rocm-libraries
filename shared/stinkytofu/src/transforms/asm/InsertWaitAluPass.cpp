@@ -252,6 +252,15 @@ inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn
     }
 }
 
+// D0 width in VGPRs, from the instruction's first vector destination. Pairs with
+// latencyCycles (the resolved .cost latency) to select the arch's WaitHide row.
+inline int wmmaDstVgprs(const StinkyInstruction& inst) {
+    for (const auto& r : inst.getDestRegs())
+        if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
+            return static_cast<int>(r.reg.num);
+    return 0;
+}
+
 // EXEC writes invalidate any non-zero VA_VDST wait (skipped VALUs don't bump
 // the HW counter). Covers explicit destination and implicit destination via
 // HW flag.
@@ -393,8 +402,20 @@ class WaitcntBrackets {
             unsigned ord = vaPipeUB[pipe];
             // Remember the XDL step so a CSMACC stamp can scale its threshold too.
             if (pipe == PIPE_XDL) {
-                if (xdlIncSeen && inc != xdlInc) xdlFormMixed = true;
+                // One kernel issues one WMMA form, so the counts are latched from the first
+                // and any later disagreement disables both rules rather than picking one.
+                const auto* form =
+                    g_waitHide == nullptr
+                        ? nullptr
+                        : waitHideWmmaForm(*g_waitHide, inst.latencyCycles, wmmaDstVgprs(inst));
+                const int hideXdl = form != nullptr ? form->xdlVaVdst : 0;
+                const int hideCsmacc = form != nullptr ? form->csmaccVaVdst : 0;
+                if (xdlIncSeen &&
+                    (inc != xdlInc || hideXdl != xdlHideXdl || hideCsmacc != xdlHideCsmacc))
+                    xdlFormMixed = true;
                 xdlInc = inc;
+                xdlHideXdl = hideXdl;
+                xdlHideCsmacc = hideCsmacc;
                 xdlIncSeen = true;
             }
             // Age every producer already stamped. This op is not its own follower, so the
@@ -627,10 +648,10 @@ class WaitcntBrackets {
                 if (g_waitHide != nullptr && !xdlFormMixed && p == PIPE_XDL) {
                     // The count is in instructions while the ordinal steps by 2 on a
                     // scale pair, so scale it into ordinal units.
-                    if (waitHideSatisfied(followers, s.vaInc, g_waitHide->xdlVaVdst)) {
+                    if (waitHideSatisfied(followers, s.vaInc, xdlHideXdl)) {
                         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     skip va_vdst [XDL followers="
-                                             << followers << " >= " << g_waitHide->xdlVaVdst << "*"
-                                             << s.vaInc << "]\n");
+                                             << followers << " >= " << xdlHideXdl << "*" << s.vaInc
+                                             << "]\n");
                         continue;
                     }
                 }
@@ -643,7 +664,7 @@ class WaitcntBrackets {
                                                 "units outstanding) [CSMACC matrix-ops="
                                              << since << "]\n");
                     } else if (g_sharedOrderCountFollowers && s.vaOrdShared != 0 &&
-                               !waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
+                               !waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
                         // Only these two units outstanding, so they complete in issue order:
                         // every op still outstanding after the producer counts, which is a
                         // weaker wait than its own unit's followers alone.
@@ -651,11 +672,10 @@ class WaitcntBrackets {
                         PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
                                              << followers << " vs per-pipe "
                                              << (vaPipeUB[p] - s.vaOrd[p]) << "]\n");
-                    } else if (waitHideSatisfied(since, xdlInc, g_waitHide->csmaccVaVdst)) {
+                    } else if (waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
                         PASS_DEBUG(std::cerr
                                    << "[InsertWaitAlu]     skip va_vdst [CSMACC matrix-ops="
-                                   << since << " >= " << g_waitHide->csmaccVaVdst << "*" << xdlInc
-                                   << "]\n");
+                                   << since << " >= " << xdlHideCsmacc << "*" << xdlInc << "]\n");
                         continue;
                     }
                 }
@@ -765,8 +785,14 @@ class WaitcntBrackets {
         }
 
         xdlFormMixed = xdlFormMixed || other.xdlFormMixed ||
-                       (xdlIncSeen && other.xdlIncSeen && xdlInc != other.xdlInc);
-        if (!xdlIncSeen && other.xdlIncSeen) xdlInc = other.xdlInc;
+                       (xdlIncSeen && other.xdlIncSeen &&
+                        (xdlInc != other.xdlInc || xdlHideXdl != other.xdlHideXdl ||
+                         xdlHideCsmacc != other.xdlHideCsmacc));
+        if (!xdlIncSeen && other.xdlIncSeen) {
+            xdlInc = other.xdlInc;
+            xdlHideXdl = other.xdlHideXdl;
+            xdlHideCsmacc = other.xdlHideCsmacc;
+        }
         xdlIncSeen = xdlIncSeen || other.xdlIncSeen;
 
         // Shared VA order: widen like a pipe, keeping the shift so the per-reg stamps
@@ -981,6 +1007,9 @@ class WaitcntBrackets {
     // they complete out of order.
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
+    // Hide counts of this kernel's WMMA form, latched on the first XDL op.
+    int xdlHideXdl = 0;
+    int xdlHideCsmacc = 0;
     // Ordinal step of the most recent XDL op, for scaling the CSMACC hide threshold.
     unsigned xdlInc = 1;
     bool xdlIncSeen = false;
@@ -1377,13 +1406,15 @@ class InsertWaitAluPassImpl : public Pass {
         g_waitHide = &passCtx.getHWModel().waitHide;
         // Every threshold xdlSince is tested against is scaled by the XDL ordinal step,
         // which is 2 on a scale pair. Saturating below that would suppress a real skip.
-        g_xdlSinceCap = 2 * static_cast<unsigned>(
-                                std::max({0, g_waitHide->csmaccVaVdst, g_waitHide->xdlVaVdst}));
+        int maxHide = 0;
+        for (int i = 0; i < g_waitHide->numWmmaForms; ++i)
+            maxHide = std::max({maxHide, g_waitHide->wmmaForms[i].csmaccVaVdst,
+                                g_waitHide->wmmaForms[i].xdlVaVdst});
+        g_xdlSinceCap = 2 * static_cast<unsigned>(maxHide);
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
                              << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] waitHide"
-                             << " xdlVaVdst=" << waitHideStr(g_waitHide->xdlVaVdst)
-                             << " csmaccVaVdst=" << waitHideStr(g_waitHide->csmaccVaVdst)
+                             << " wmmaForms=" << g_waitHide->numWmmaForms
                              << " vmVsrc=" << waitHideStr(g_waitHide->vmVsrc)
                              << " vmVsrcBridge=" << waitHideStr(g_waitHide->vmVsrcBridge) << "\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"

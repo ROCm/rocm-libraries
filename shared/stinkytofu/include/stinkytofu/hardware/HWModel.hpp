@@ -93,11 +93,22 @@ struct HWModel {
     /// need not be emitted. 0 means a count alone never satisfies that wait on
     /// this arch and it is always emitted.
     struct WaitHide {
-        /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
-        int xdlVaVdst;
-        /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
-        /// Consulted only while XDL and CSMACC are the sole units outstanding.
-        int csmaccVaVdst;
+        /// Matrix ops that satisfy a pending va_vdst, for one WMMA form. Matched on the
+        /// instruction's own resolved .cost latency and D0 width, so a format
+        /// modifier that overrides either selects a different row.
+        struct WmmaForm {
+            int costLatency;
+            int dstVgprs;
+            /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
+            int xdlVaVdst;
+            /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
+            /// Consulted only while XDL and CSMACC are the sole units outstanding.
+            int csmaccVaVdst;
+        };
+        /// One row per form the arch issues. A form with no row never satisfies a
+        /// va_vdst wait, so its producers are always waited on.
+        std::array<WmmaForm, 8> wmmaForms;
+        int numWmmaForms;
         /// Same-class reads after a read that satisfy its vm_vsrc wait.
         int vmVsrc;
         /// Reads in the *other* order FIFO that satisfy the vm_vsrc wait of an op
@@ -124,6 +135,16 @@ struct HWModel {
 inline bool waitHideSatisfied(unsigned count, unsigned step, int required) {
     if (required <= 0) return false;
     return count >= static_cast<unsigned>(required) * step;
+}
+
+/// Row for the WMMA form \p costLatency / \p dstVgprs, or nullptr when the arch lists
+/// none. No row means that form never satisfies a va_vdst wait.
+inline const HWModel::WaitHide::WmmaForm* waitHideWmmaForm(const HWModel::WaitHide& wh,
+                                                           int costLatency, int dstVgprs) {
+    for (int i = 0; i < wh.numWmmaForms; ++i)
+        if (wh.wmmaForms[i].costLatency == costLatency && wh.wmmaForms[i].dstVgprs == dstVgprs)
+            return &wh.wmmaForms[i];
+    return nullptr;
 }
 
 /// Collapse a {major, minor, stepping} arch triple to a switchable key.

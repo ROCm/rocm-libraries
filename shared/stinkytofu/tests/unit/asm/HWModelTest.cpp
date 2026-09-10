@@ -123,14 +123,35 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
 // tests/filecheck/InsertWaitAluPass_xdl_hide_test.stir and _vmvsrc_hide_test.stir.
 TEST(HWModel, Gfx1250WaitHideCounts) {
     const HWModel& hw = hwModelForArch(kGfx1250);
-    EXPECT_EQ(hw.waitHide.xdlVaVdst, 12);
-    EXPECT_EQ(hw.waitHide.csmaccVaVdst, 13);
     EXPECT_EQ(hw.waitHide.vmVsrc, 11);
+    EXPECT_EQ(hw.waitHide.vmVsrcBridge, 11);
+
+    // One row per WMMA form the arch issues, matched on .cost latency and D0 width.
+    ASSERT_EQ(hw.waitHide.numWmmaForms, 4);
+    const struct {
+        int costLatency, dstVgprs, xdl, csmacc;
+    } kExpect[] = {{4, 8, 13, 13}, {8, 8, 12, 12}, {8, 16, 11, 11}, {16, 8, 12, 12}};
+    for (const auto& e : kExpect) {
+        const auto* row = waitHideWmmaForm(hw.waitHide, e.costLatency, e.dstVgprs);
+        ASSERT_NE(row, nullptr) << "no row for latency " << e.costLatency << " dst " << e.dstVgprs;
+        EXPECT_EQ(row->xdlVaVdst, e.xdl);
+        EXPECT_EQ(row->csmaccVaVdst, e.csmacc);
+    }
+
+    // A form the arch does not list never satisfies a wait: 4-VGPR destinations get no
+    // row, so waitHideSatisfied sees 0 and the producer is always waited on.
+    EXPECT_EQ(waitHideWmmaForm(hw.waitHide, 8, 4), nullptr);
+    EXPECT_EQ(waitHideWmmaForm(hw.waitHide, 4, 4), nullptr);
 
     const HWModel& v0 = hwModelForArch(kGfx1250v0);
-    EXPECT_EQ(v0.waitHide.xdlVaVdst, hw.waitHide.xdlVaVdst);
-    EXPECT_EQ(v0.waitHide.csmaccVaVdst, hw.waitHide.csmaccVaVdst);
+    EXPECT_EQ(v0.waitHide.numWmmaForms, hw.waitHide.numWmmaForms);
     EXPECT_EQ(v0.waitHide.vmVsrc, hw.waitHide.vmVsrc);
+    for (int i = 0; i < hw.waitHide.numWmmaForms; ++i) {
+        EXPECT_EQ(v0.waitHide.wmmaForms[i].costLatency, hw.waitHide.wmmaForms[i].costLatency);
+        EXPECT_EQ(v0.waitHide.wmmaForms[i].dstVgprs, hw.waitHide.wmmaForms[i].dstVgprs);
+        EXPECT_EQ(v0.waitHide.wmmaForms[i].xdlVaVdst, hw.waitHide.wmmaForms[i].xdlVaVdst);
+        EXPECT_EQ(v0.waitHide.wmmaForms[i].csmaccVaVdst, hw.waitHide.wmmaForms[i].csmaccVaVdst);
+    }
 }
 
 // The zero-is-off convention. No arch currently ships a 0, so this is the only
