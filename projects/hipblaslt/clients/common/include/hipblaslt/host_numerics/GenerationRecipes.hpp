@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <hipblaslt/host_numerics/InitializationPolicy.hpp>
 #include <roc/host_numerics/generation.hpp>
+#include <stdexcept>
 #include <utility>
 
 namespace hipblaslt::host_numerics
@@ -94,6 +95,11 @@ namespace hipblaslt::host_numerics
     inline GenerationRecipe randomIntegerRecipe(ScalarType                       type,
                                                 RandomIntegerRecipeConfiguration configuration = {})
     {
+        const ScalarCategory category = scalarTypeInfo(type).category;
+        if(category == ScalarCategory::Boolean)
+            throw std::invalid_argument(
+                "Random-integer initialization does not support Boolean tensors.");
+
         GenerationRecipe::Component component = [&] {
             if(configuration.small)
                 return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10})
@@ -116,8 +122,20 @@ namespace hipblaslt::host_numerics
                 return GenerationRecipe::randomEncodedExponent(
                     {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3});
             default:
-                return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
+                break;
             }
+
+            // All remaining arithmetic and scale encodings deliberately use
+            // the historical inclusive [1, 10] distribution. Categorizing the
+            // fallback makes new enum values fail unless they belong to a
+            // supported numerical category.
+            if(category == ScalarCategory::SignedInteger
+               || category == ScalarCategory::UnsignedInteger
+               || category == ScalarCategory::FloatingPoint
+               || category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+                return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
+            throw std::invalid_argument(
+                "Random-integer initialization requires an arithmetic tensor type.");
         }();
 
         if(configuration.alternating)
@@ -220,10 +238,15 @@ namespace hipblaslt::host_numerics
                                                  = ComplexGenerationPolicy::RealOnly,
                                                  uint64_t seed = defaultInitializationSeed)
     {
-        GenerationRecipe::Component component
-            = type == ScalarType::Int8
-                  ? GenerationRecipe::uniformInteger({.lower = 0, .upper = 1})
-                  : GenerationRecipe::uniformReal({.lower = 0.0, .upper = 1.0});
+        const ScalarCategory category = scalarTypeInfo(type).category;
+        const bool integerDestination = category == ScalarCategory::Boolean
+                                        || category == ScalarCategory::SignedInteger
+                                        || category == ScalarCategory::UnsignedInteger;
+        GenerationRecipe::Component component = integerDestination
+                                                     ? GenerationRecipe::uniformInteger(
+                                                           {.lower = 0, .upper = 1})
+                                                     : GenerationRecipe::uniformReal(
+                                                           {.lower = 0.0, .upper = 1.0});
         return bindComponentRecipe(type, std::move(component), complexPolicy, seed);
     }
 } // namespace hipblaslt::host_numerics

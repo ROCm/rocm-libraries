@@ -643,6 +643,9 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                                {1, ldc[i], stride_c[i]})));
         h_bias.emplace_back(ScalarType::Float32, Shape{static_cast<size_t>(size_bias[i])});
 
+        // Reserve one consecutive seed per operand role for every grouped
+        // problem. This makes A, B, C, and bias independent while keeping a
+        // problem's data stable if an optional operand is disabled.
         const uint64_t seed = defaultInitializationSeed
                               + static_cast<uint64_t>(i)
                                     * static_cast<uint64_t>(initialization::OperandSequence::Count);
