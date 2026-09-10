@@ -240,6 +240,7 @@ class ConvGroupedRequest(OperatorRequest):
     dilation_d: Optional[int] = None
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
+    force_deterministic: bool = False
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
@@ -456,6 +457,7 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
+    force_deterministic: bool = False  # wgrad only
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -530,6 +532,7 @@ class ConvGroupedSpec:
                 tile_k=self.tile_k,
                 arch=self.arch,
             ).split_k
+        two_stage = self.force_deterministic and resolved_split_k > 1
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -551,6 +554,8 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             split_k=resolved_split_k,
+            two_stage=two_stage,
+            force_deterministic=self.force_deterministic,
         )
 
 
@@ -1010,6 +1015,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
+            force_deterministic=req.force_deterministic,
             name=name,
         )
 
@@ -1154,6 +1160,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
+            force_deterministic=req.force_deterministic,
             name=name,
         )
 
@@ -1260,6 +1267,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=1,
+            force_deterministic=req.force_deterministic,
             name=name,
         )
 
