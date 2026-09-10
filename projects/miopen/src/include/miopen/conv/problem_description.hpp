@@ -433,58 +433,120 @@ private:
     mutable bool use_tf32                 = false;
 };
 
-inline bool IsPointOutput3dStrideEqFilter(const ProblemDescription& problem,
-                                          Direction direction,
-                                          bool require_input_spatial_eq_filter)
+// Point-output conv (Ho=Wo=1 or Do=Ho=Wo=1): zero pad, unit dilation, stride equals filter.
+// Matches patch-embedding / projection when stride == kernel size.
+inline bool IsPointOutputStrideEqFilter(const ProblemDescription& problem,
+                                        Direction direction,
+                                        bool require_input_spatial_eq_filter)
 {
     if(problem.GetDirection() != direction)
         return false;
 
-    const auto& conv = problem.GetConv();
-    if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
+    const auto& conv       = problem.GetConv();
+    const auto spatial_dim = conv.GetSpatialDimension();
+    if((spatial_dim != 2 && spatial_dim != 3) || conv.group_count != 1)
         return false;
 
-    const auto& in_desc    = problem.GetIn();
-    const auto& out_desc   = problem.GetOut();
-    const auto& point_desc = direction == Direction::Forward ? out_desc : in_desc;
-    const auto& w_desc     = problem.GetWeights();
-
-    const auto& point_lens = point_desc.GetLengths();
-    if(point_lens.size() != 5 || point_lens[2] != 1 || point_lens[3] != 1 || point_lens[4] != 1)
+    if(spatial_dim == 2 && !problem.IsLayoutDefault() && !problem.IsLayoutNHWC())
         return false;
-
-    const auto& in_lens = in_desc.GetLengths();
 
     const auto& pads      = conv.GetConvPads();
     const auto& strides   = conv.GetConvStrides();
     const auto& dilations = conv.GetConvDilations();
-    const auto& w_lens    = w_desc.GetLengths();
-    if(w_lens.size() != 5 || pads.size() != 3 || strides.size() != 3 || dilations.size() != 3)
+    if(pads.size() != spatial_dim || strides.size() != spatial_dim ||
+       dilations.size() != spatial_dim)
         return false;
 
-    for(int i = 0; i < 3; ++i)
+    for(std::size_t i = 0; i < spatial_dim; ++i)
     {
         if(pads[i] != 0 || dilations[i] != 1)
             return false;
-        if(static_cast<int>(w_lens[2 + i]) != strides[i])
+    }
+
+    if(direction == Direction::BackwardData || direction == Direction::BackwardWeights)
+    {
+        if(spatial_dim == 3 &&
+           (problem.GetInDepth() != 1 || problem.GetInHeight() != 1 || problem.GetInWidth() != 1))
             return false;
-        if(require_input_spatial_eq_filter &&
-           static_cast<int>(in_lens[2 + i]) != static_cast<int>(w_lens[2 + i]))
+        if(spatial_dim == 2 && (problem.GetInHeight() != 1 || problem.GetInWidth() != 1))
             return false;
+    }
+    else
+    {
+        if(spatial_dim == 3 && (problem.GetOutDepth() != 1 || problem.GetOutHeight() != 1 ||
+                                problem.GetOutWidth() != 1))
+            return false;
+        if(spatial_dim == 2 && (problem.GetOutHeight() != 1 || problem.GetOutWidth() != 1))
+            return false;
+    }
+
+    if(spatial_dim == 3)
+    {
+        if(static_cast<int>(problem.GetWeightsDepth()) != strides[0] ||
+           static_cast<int>(problem.GetWeightsHeight()) != strides[1] ||
+           static_cast<int>(problem.GetWeightsWidth()) != strides[2])
+            return false;
+    }
+    else
+    {
+        if(static_cast<int>(problem.GetWeightsHeight()) != strides[0] ||
+           static_cast<int>(problem.GetWeightsWidth()) != strides[1])
+            return false;
+    }
+
+    if(require_input_spatial_eq_filter)
+    {
+        if(direction == Direction::BackwardData || direction == Direction::BackwardWeights)
+        {
+            if(spatial_dim == 3 && (problem.GetOutDepth() != problem.GetWeightsDepth() ||
+                                    problem.GetOutHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetOutWidth() != problem.GetWeightsWidth()))
+                return false;
+            if(spatial_dim == 2 && (problem.GetOutHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetOutWidth() != problem.GetWeightsWidth()))
+                return false;
+        }
+        else
+        {
+            if(spatial_dim == 3 && (problem.GetInDepth() != problem.GetWeightsDepth() ||
+                                    problem.GetInHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetInWidth() != problem.GetWeightsWidth()))
+                return false;
+            if(spatial_dim == 2 && (problem.GetInHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetInWidth() != problem.GetWeightsWidth()))
+                return false;
+        }
     }
 
     return true;
 }
 
-inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+inline bool IsBwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
 {
-    return IsPointOutput3dStrideEqFilter(problem, Direction::BackwardData, false);
+    // 3D may have a dx larger than the filter and scatters the GEMM result through Col2Im,
+    // so only 2D, which always writes dx directly, constrains the dx spatial extent.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, !problem.Is3d());
 }
 
-inline bool IsFwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+inline bool IsBwdDataPointOutputDirectWritable(const ProblemDescription& problem)
+{
+    // When dx spatial equals the filter spatial extent, a per-batch dx slice enumerates its
+    // elements in the same order as a row of w, whatever the layout, so the GEMM can write
+    // dx in place instead of scattering through Col2Im.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, true);
+}
+
+inline bool IsFwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
 {
     // For direct GEMM without Im2Col, input spatial must equal filter spatial.
-    return IsPointOutput3dStrideEqFilter(problem, Direction::Forward, true);
+    return IsPointOutputStrideEqFilter(problem, Direction::Forward, true);
+}
+
+inline bool IsWrwPointOutputStrideEqFilter(const ProblemDescription& problem)
+{
+    // The wrw GEMM consumes x as a [N, C*Z*Y*X] matrix without Im2Col, which is only
+    // a valid reinterpretation when input spatial equals filter spatial.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardWeights, true);
 }
 
 } // namespace conv

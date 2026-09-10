@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -182,8 +183,11 @@ public:
         // Coverage and orderability are checked against the knob-filtered candidates
         // here, independent of the same check against the full catalog in
         // sortedCatalog(): one can fail while the other passes.
-        const WinnerKey winnerKey{GraphContentKey{opGraph}, DeviceKey{context.deviceProperties}};
-        if(const auto record = _stateManager.winnerFor(winnerKey); record.has_value())
+        const WinnerKey winnerKey{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+            DeviceKey{context.deviceProperties}};
+        const auto record = _stateManager.winnerFor(winnerKey);
+        if(record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
             {
@@ -239,15 +243,49 @@ public:
 
         if(!settings.benchmarkingEnabled)
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                   << _engine.name << "' selected kernel "
-                                   << toString(filtered.front().kernelId) << " from "
-                                   << filtered.size() << " candidate(s) (" << catalog.entries.size()
-                                   << " before knob filtering)");
+            // Constructing a GenericPlan runs prepare()/workspaceBytes(), so a kernel whose
+            // code object cannot be loaded must cost only itself while a sibling that loads
+            // still serves the graph. Same reason the ranked walk above walks.
+            std::vector<std::string> failures;
+            for(size_t rank = 0; rank < filtered.size(); ++rank)
+            {
+                try
+                {
+                    auto plan = std::make_unique<GenericPlan<THandle>>(
+                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-            executionContext.setPlan(std::make_unique<GenericPlan<THandle>>(
-                _stateManager.getDispatchDetails(filtered.front()), context, catalog.bound));
-            return;
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
+                        << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
+                        << catalog.entries.size() << " before knob filtering)");
+
+                    executionContext.setPlan(std::move(plan));
+                    return;
+                }
+                catch(const HipdnnPluginException& error)
+                {
+                    // A malformed descriptor is the author's mistake, not a kernel that
+                    // happens not to fit this graph: falling past it would hide the fault
+                    // and silently serve a different kernel than the one authored.
+                    if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                    {
+                        throw;
+                    }
+                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                }
+                catch(const std::exception& error)
+                {
+                    failures.emplace_back(toString(filtered[rank].kernelId) + ": " + error.what());
+                }
+
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                       << _engine.name << "' could not build a plan for "
+                                       << toString(filtered[rank].kernelId) << " at rank " << rank
+                                       << ": " << failures.back() << "; trying the next candidate");
+            }
+
+            throwNoBuildableKernel(filtered.size(), failures);
         }
 
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '" << _engine.name << "' will benchmark "
@@ -282,12 +320,18 @@ public:
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.
-        executionContext.setPlan(makeBenchmarkPlan(
-            std::move(candidates),
-            handle,
-            [&stateManager = _stateManager, winnerKey](std::vector<RankedEntry> ranking) {
-                stateManager.recordWinner(winnerKey, std::move(ranking));
-            }));
+        // A record that exists but did not serve this graph -- either it failed the coverage gate
+        // or none of its ranked entries still resolved -- is being superseded, so its write must
+        // append rather than adopt.
+        const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
+                                              : WinnerWriteCause::FRESH_MISS;
+        executionContext.setPlan(
+            makeBenchmarkPlan(std::move(candidates),
+                              handle,
+                              [&stateManager = _stateManager, winnerKey, cause](
+                                  const std::vector<RankedEntry>& ranking) {
+                                  stateManager.recordWinner(winnerKey, ranking, cause);
+                              }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
@@ -459,6 +503,26 @@ private:
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                     "engine '" + _engine.name
                                         + "' accepted this graph but has no applicable kernel");
+    }
+
+    /// @param reasons Why each candidate was rejected, in the order they were tried.
+    ///                Carried in the message because the per-candidate warnings are
+    ///                logged at WARN, which the default log level does not emit: without
+    ///                this the caller sees only that everything failed, not why.
+    [[noreturn]] void throwNoBuildableKernel(size_t candidates,
+                                             const std::vector<std::string>& reasons) const
+    {
+        std::string detail;
+        for(const auto& reason : reasons)
+        {
+            detail += (detail.empty() ? "" : "; ") + reason;
+        }
+
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                    "engine '" + _engine.name + "' could not build a plan for any "
+                                        + "of its " + std::to_string(candidates)
+                                        + " applicable kernel(s)"
+                                        + (detail.empty() ? "" : " (" + detail + ")"));
     }
 
     [[noreturn]] void throwUnsatisfiableKnobFilter(const KnobFilter& filter,

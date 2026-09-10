@@ -44,7 +44,6 @@ from Tensile.Common.DataType import DataType  # noqa: E402
 
 import AMaxGenerator  # noqa: E402
 
-
 # gfx11 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).
 # All of these are wave32 and select the true16 activation path on the fix branch.
 GFX11_TARGETS = [

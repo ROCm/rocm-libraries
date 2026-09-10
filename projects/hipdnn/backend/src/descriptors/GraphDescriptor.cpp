@@ -11,6 +11,7 @@
 #include "NodeFactory.hpp"
 #include "PlatformUtils.hpp"
 
+#include <functional>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
@@ -72,6 +73,23 @@ void GraphDescriptor::finalize()
     }
 }
 
+namespace
+{
+void throwIfTensorIsVirtualOrHasRaggedOffset(const std::string& location,
+                                             const TensorDescriptor& aux)
+{
+    THROW_IF_TRUE(aux.getData().virtual_,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::" + location + ": ragged-offset aux UID "
+                      + std::to_string(aux.getData().uid) + " must not be virtual");
+    THROW_IF_TRUE(aux.getData().ragged_offset_tensor_uid.has_value(),
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "GraphDescriptor::" + location + ": ragged-offset aux UID "
+                      + std::to_string(aux.getData().uid)
+                      + " must not itself carry a ragged offset");
+}
+}
+
 std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     GraphDescriptor::buildGraphFromOperations() const
 {
@@ -90,32 +108,42 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
             hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*_graphId));
     }
 
+    // Collect unique tensors (deduplicated by UID). After emitting a tensor, follow
+    // its ragged-offset aux edge through the same map so a non-operand aux still
+    // lands in graph->tensors, and an aux that is also a graph input dedups on
+    // object identity. The UID guard also terminates the recursion.
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
+    std::function<void(const std::shared_ptr<TensorDescriptor>&)> collect
+        = [&](const std::shared_ptr<TensorDescriptor>& tensorDesc) {
+              auto uid = tensorDesc->getData().uid;
+              auto it = seenTensors.find(uid);
+              if(it != seenTensors.end())
+              {
+                  THROW_IF_FALSE(it->second.get() == tensorDesc.get(),
+                                 HIPDNN_STATUS_BAD_PARAM,
+                                 "GraphDescriptor::buildGraphFromOperations: Tensor UID "
+                                     + std::to_string(uid)
+                                     + " used with different descriptor objects");
+                  return;
+              }
+              seenTensors[uid] = tensorDesc;
+              graph->tensors.push_back(
+                  std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>(
+                      tensorDesc->getData()));
+              if(const auto& aux = tensorDesc->getRaggedOffsetDesc())
+              {
+                  throwIfTensorIsVirtualOrHasRaggedOffset("buildGraphFromOperations", *aux);
+                  collect(aux);
+              }
+          };
 
     for(const auto& desc : _operations)
     {
         auto* op = desc->asGraphOperation();
 
-        // Collect unique tensors (deduplicated by UID)
         for(const auto& tensorDesc : op->getTensorDescriptors())
         {
-            auto uid = tensorDesc->getData().uid;
-            auto it = seenTensors.find(uid);
-            if(it != seenTensors.end())
-            {
-                THROW_IF_FALSE(it->second.get() == tensorDesc.get(),
-                               HIPDNN_STATUS_BAD_PARAM,
-                               "GraphDescriptor::buildGraphFromOperations: Tensor UID "
-                                   + std::to_string(uid)
-                                   + " used with different descriptor objects");
-            }
-            else
-            {
-                seenTensors[uid] = tensorDesc;
-                graph->tensors.push_back(
-                    std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>(
-                        tensorDesc->getData()));
-            }
+            collect(tensorDesc);
         }
 
         // Build node from operation
@@ -422,6 +450,40 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     }
 }
 
+namespace
+{
+
+// Restores each ragged tensor's aux descriptor pointer from the deserialized
+// tensor map (fromFlatBuffer only restores the uid) and enforces the ragged-aux
+// invariants that finalize() does not: the aux must exist, be non-virtual, and
+// not itself be ragged.
+void relinkRaggedOffsets(
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    for(const auto& [uid, primary] : tensorMap)
+    {
+        const auto& raggedUid = primary->getData().ragged_offset_tensor_uid;
+        if(!raggedUid.has_value())
+        {
+            continue;
+        }
+
+        auto it = tensorMap.find(raggedUid.value());
+        THROW_IF_TRUE(it == tensorMap.end(),
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "GraphDescriptor::deserializeGraph: tensor UID " + std::to_string(uid)
+                          + " names ragged-offset aux UID " + std::to_string(raggedUid.value())
+                          + " that is absent from the graph");
+
+        const auto& aux = it->second;
+        throwIfTensorIsVirtualOrHasRaggedOffset("deserializeGraph", *aux);
+
+        primary->setRaggedOffsetDesc(aux);
+    }
+}
+
+} // namespace
+
 void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t graphByteSize)
 {
     THROW_IF_TRUE(isFinalized(),
@@ -452,6 +514,7 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     }
 
     auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
+    relinkRaggedOffsets(tensorMap);
     std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
     unpacked.reserve(graph->nodes.size());
     for(const auto& nodeT : graph->nodes)

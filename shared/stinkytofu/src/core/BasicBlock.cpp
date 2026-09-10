@@ -19,10 +19,12 @@
  * ************************************************************************ */
 #include "stinkytofu/core/BasicBlock.hpp"
 
+#include <cassert>
 #include <iostream>
 #include <ostream>
 
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 
 namespace stinkytofu {
 const Function* BasicBlock::getParentFunc() const {
@@ -40,6 +42,29 @@ void BasicBlock::erase() {
         p->eraseBasicBlock(BasicBlockList::iterator(this));
     else
         delete this;
+}
+
+SSABlockArgument& BasicBlock::addSSAArgument(StinkySSAValue* value) {
+    assert(value != nullptr);
+    SSABlockArgument arg;
+    arg.value = value;
+    ssaArgs_.push_back(std::move(arg));
+    return ssaArgs_.back();
+}
+
+void BasicBlock::setSSAArgumentIncoming(size_t argIndex, const BasicBlock* predecessor,
+                                        StinkySSAValue* value) {
+    SSABlockArgument& arg = ssaArgs_.at(argIndex);
+    auto use = makeSSAValueOperand(value);
+    use->bindBlockOwner(this, static_cast<uint16_t>(arg.incoming.size()));
+    SSABlockIncoming incoming;
+    incoming.predecessor = predecessor;
+    incoming.use = std::move(use);
+    arg.incoming.push_back(std::move(incoming));
+}
+
+void BasicBlock::clearSSAArguments() {
+    ssaArgs_.clear();
 }
 
 void BasicBlock::dump() const {

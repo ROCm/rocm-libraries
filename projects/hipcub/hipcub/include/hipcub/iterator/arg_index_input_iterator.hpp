@@ -30,6 +30,8 @@
 #ifndef HIPCUB_ARG_INDEX_INPUT_ITERATOR_HPP_
 #define HIPCUB_ARG_INDEX_INPUT_ITERATOR_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/iterator/arg_index_input_iterator.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

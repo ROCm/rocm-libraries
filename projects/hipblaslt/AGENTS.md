@@ -38,7 +38,7 @@ invoke build -ca gfx942 -d     # add --install-deps on first run
 invoke --help build            # full flag list
 ```
 
-Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build).
+Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build), `--fortran-compiler` for `--clients` (path or name; default: `FC`, else `CMAKE_Fortran_COMPILER`, else auto-detect ROCm flang, else detected `gfortran`; exits if none found).
 
 `install.sh` is a deprecated compatibility wrapper that just shells out to `invoke build`; new instructions and tooling should call `invoke build` directly.
 
@@ -104,7 +104,7 @@ JIRA ID : <JIRA key or N/A>
 <outcome of the test plan: passing suites, benchmark numbers, before/after>
 
 ## Submission Checklist
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md#pull-requests.
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
