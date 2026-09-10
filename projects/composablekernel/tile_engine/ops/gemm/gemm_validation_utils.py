@@ -1429,6 +1429,14 @@ def _validate_fp8_mfma_warp_tile_k(
     - warp_tile_m == warp_tile_n (square MFMA requirement)
     - warp_tile_k matches the ISA-mandated K-block for the given warp_tile_m and gpu_target
     """
+    # Normalize once, here at the entry. Every arch test in this function is about
+    # which MFMA/WMMA fragment the silicon has, and a feature suffix does not change
+    # that: "gfx950:sramecc+:xnack-" is a gfx950 and must take the gfx950 K-block.
+    # Before this, a suffixed gfx950 fell through to the gfx90a/gfx942 branch and was
+    # told to use warp_tile_k=32/64 instead of 64/128 -- i.e. the correct tile was
+    # rejected and the wrong one accepted. `gpu_target` is kept unmodified for the
+    # error messages, which should echo what the caller passed in.
+    base_gpu_target = _base_gfx_arch(gpu_target)
     suffix = f" ({op_label})" if op_label else ""
     if warp_tile_m != warp_tile_n:
         return False, (
@@ -1443,7 +1451,7 @@ def _validate_fp8_mfma_warp_tile_k(
         #   gfx950 doubles the K-block:
         #                  MFMA_F32_16x16x256_F8 (warp_tile_m=16) → warp_tile_k=128
         #                  MFMA_F32_32x32x128_F8 (warp_tile_m=32) → warp_tile_k=64
-        if (gpu_target.split(":")[0] if gpu_target else gpu_target) == "gfx1250":
+        if base_gpu_target == "gfx1250":
             # gfx1250 is wave32 RDNA-style WMMA, not MFMA. The only 8-bit fragments
             # are V_WMMA_*_16x16x64 and 16x16x128; there is no 32x32 WMMA, so a
             # 32x32xK warp tile compiles and then returns garbage. This is the sole
@@ -1462,7 +1470,7 @@ def _validate_fp8_mfma_warp_tile_k(
                     f"warp_tile_k in (64, 128), got warp_tile_k={warp_tile_k}{suffix}"
                 )
             return True, ""
-        if gpu_target == "gfx950":
+        if base_gpu_target == "gfx950":
             expected_k = 64 if warp_tile_m == 32 else 128
         else:
             expected_k = 32 if warp_tile_m == 32 else 64
@@ -1506,7 +1514,7 @@ def validate_gemm_rowcol_tensor_quant(
     # is a property of this bridge's code generation, not of the hardware, so the
     # rule belongs here. (Both figures come from the same archive; an earlier draft
     # of this comment quoted 3,220, which is from a different, smaller sweep.)
-    if (gpu_target.split(":")[0] if gpu_target else gpu_target) == "gfx1250":
+    if _base_gfx_arch(gpu_target) == "gfx1250":
         if warp_m * warp_n * warp_k > 4:
             return False, (
                 f"On gfx1250 these grouped quant bridges do not emit a loadable "
