@@ -352,11 +352,6 @@ namespace hipblaslt::client
                 preparedProblem.epilogueEnabled
                     = preparedProblem.epilogue != HIPBLASLT_EPILOGUE_DEFAULT
                       || arguments.scaleAlpha_vector || arguments.amaxD;
-                if(preparedProblem.epilogueEnabled)
-                {
-                    preparedProblem.activation0 = arguments.activation_arg1;
-                    preparedProblem.activation1 = arguments.activation_arg2;
-                }
             }
             else
             {

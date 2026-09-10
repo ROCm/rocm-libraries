@@ -3,6 +3,11 @@
 
 #pragma once
 
+// Converts a normalized MatmulProblem and command-line Arguments into the
+// device-side allocation and descriptor values used by the hipBLASLt client.
+// Host reference computation deliberately does not consume these structures:
+// it works directly with host-numerics Tensors and operation options.
+
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
 #include <hipblaslt/client/MatmulProblem.hpp>
@@ -47,8 +52,6 @@ namespace hipblaslt::client
         size_t                scaleAlphaElements = 0;
         hipblasLtEpilogue_t   epilogue           = HIPBLASLT_EPILOGUE_DEFAULT;
         bool                  epilogueEnabled    = false;
-        float                 activation0        = 0.0f;
-        float                 activation1        = 0.0f;
         computeTypeInterface  alpha{};
         computeTypeInterface  beta{};
     };

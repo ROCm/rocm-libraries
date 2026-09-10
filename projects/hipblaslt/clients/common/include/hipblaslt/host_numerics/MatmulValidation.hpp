@@ -41,16 +41,17 @@ namespace hipblaslt::host_numerics
         roc::host_numerics::ComparisonTolerance allCloseTolerance;
     };
 
-    struct MatmulValidationMetrics
+    struct MatmulValidationSummary
     {
-        double& relativeFrobeniusError;
-        double& absoluteTolerance;
-        double& relativeTolerance;
-        double& maximumUlp;
-        double& averageUlp;
+        bool   passed                   = true;
+        double relativeFrobeniusError   = 0.0;
+        double absoluteTolerance        = 0.0;
+        double relativeTolerance        = 0.0;
+        double maximumUlp               = 0.0;
+        double averageUlp               = 0.0;
     };
 
-    bool validateMatmulOutputs(const MatmulValidationOptions&        options,
-                               std::span<const MatmulValidationCase> cases,
-                               MatmulValidationMetrics               metrics);
+    [[nodiscard]] MatmulValidationSummary
+        validateMatmulOutputs(const MatmulValidationOptions&        options,
+                              std::span<const MatmulValidationCase> cases);
 } // namespace hipblaslt::host_numerics

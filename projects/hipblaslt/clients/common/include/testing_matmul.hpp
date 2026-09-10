@@ -1728,13 +1728,13 @@ void testing_matmul_with_bias(const Arguments&                                  
                 CHECK_HIPBLASLT_ERROR(
                     hipblasLtMatmulDescSetAttribute(primaryMatmul,
                                                     HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
-                                                    &(preparedProblem.activation0),
-                                                    sizeof(preparedProblem.activation0)));
+                                                    &arg.activation_arg1,
+                                                    sizeof(arg.activation_arg1)));
                 CHECK_HIPBLASLT_ERROR(
                     hipblasLtMatmulDescSetAttribute(primaryMatmul,
                                                     HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-                                                    &(preparedProblem.activation1),
-                                                    sizeof(preparedProblem.activation1)));
+                                                    &arg.activation_arg2,
+                                                    sizeof(arg.activation_arg2)));
             }
 
             if(arg.use_e)
@@ -3262,13 +3262,12 @@ void testing_matmul_with_bias(const Arguments&                                  
             return validationCases;
         };
 
-    auto validateOutputs = [&](hipblaslt::host_numerics::MatmulValidationMetrics metrics) {
+    auto validateOutputs = [&] {
         const auto allCloseTolerances
             = matmulValidationTolerances(arg, matmulProblems, TiA, TiB, To, Tc);
         readValidationSideOutputs();
         const auto validationCases = makeValidationCases(allCloseTolerances);
-        CHECK_SUCCESS(hipblaslt::host_numerics::validateMatmulOutputs(
-            validationOptions, validationCases, metrics));
+        return hipblaslt::host_numerics::validateMatmulOutputs(validationOptions, validationCases);
     };
 
     if(!arg.timing)
@@ -3408,11 +3407,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     copy_gemm_to_host(stream, problem_count, hD_1, dOutput);
                 }
-                validateOutputs({hipblaslt_error,
-                                 hipblaslt_atol,
-                                 hipblaslt_rtol,
-                                 hipblaslt_max_ulp,
-                                 hipblaslt_avg_ulp});
+                const auto validation = validateOutputs();
+                CHECK_SUCCESS(validation.passed);
+                hipblaslt_error   = validation.relativeFrobeniusError;
+                hipblaslt_max_ulp = validation.maximumUlp;
+                hipblaslt_avg_ulp = validation.averageUlp;
+                if(validationOptions.searchAllClose)
+                {
+                    hipblaslt_atol = validation.absoluteTolerance;
+                    hipblaslt_rtol = validation.relativeTolerance;
+                }
             }
         }
     }
@@ -4003,11 +4007,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                             "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
                     }
                 }
-                validateOutputs({hipblaslt_error,
-                                 hipblaslt_atol,
-                                 hipblaslt_rtol,
-                                 hipblaslt_max_ulp,
-                                 hipblaslt_avg_ulp});
+                const auto validation = validateOutputs();
+                CHECK_SUCCESS(validation.passed);
+                hipblaslt_error   = validation.relativeFrobeniusError;
+                hipblaslt_max_ulp = validation.maximumUlp;
+                hipblaslt_avg_ulp = validation.averageUlp;
+                if(validationOptions.searchAllClose)
+                {
+                    hipblaslt_atol = validation.absoluteTolerance;
+                    hipblaslt_rtol = validation.relativeTolerance;
+                }
             }
 
 #define argument_param                                                                            \
