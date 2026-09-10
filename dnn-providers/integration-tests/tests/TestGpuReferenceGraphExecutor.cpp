@@ -514,7 +514,7 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 {
     SKIP_IF_NO_DEVICES();
 
-    // BatchnormInference has no GPU plan yet - should throw
+    // ResampleBwd has no GPU plan yet - should throw
     auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
