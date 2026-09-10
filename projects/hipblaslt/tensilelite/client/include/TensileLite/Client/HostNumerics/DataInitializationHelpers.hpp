@@ -86,7 +86,10 @@ namespace TensileLite
                                  roc::host_numerics::Shape const& shape,
                                  uint64_t                         seed)
             {
-                using namespace roc::host_numerics;
+                using roc::host_numerics::GenerationRecipe;
+                using roc::host_numerics::IndexOrder;
+                using roc::host_numerics::MxDataGeneration;
+                using roc::host_numerics::ScalarType;
                 auto recipe = [&](GenerationRecipe::Component component) {
                     return GenerationRecipe::realOnly(
                         std::move(component),
@@ -182,7 +185,10 @@ namespace TensileLite
                                                                InitMode scaleInitialization,
                                                                uint64_t seed)
             {
-                using namespace roc::host_numerics;
+                using roc::host_numerics::MxDataGeneration;
+                using roc::host_numerics::MxGenerationOptions;
+                using roc::host_numerics::ScalarType;
+                using roc::host_numerics::generateMx;
                 const ScalarType hostDataType = toHostNumericsScalarType(dataType);
                 if(leadingDimension > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
                     throw std::overflow_error(

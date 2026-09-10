@@ -329,19 +329,21 @@ void validation(hipDataType                       datatype,
                 const roc::host_numerics::Layout& bLayout,
                 const roc::host_numerics::Layout& outputLayout)
 {
-    using namespace roc::host_numerics;
-    const ScalarType type             = hipblaslt::host_numerics::scalarType(datatype);
-    const auto       readDeviceTensor = [&](void* pointer, const Layout& layout) {
-        std::vector<std::byte> storage(storageBytesForLayout(type, layout));
+    const roc::host_numerics::ScalarType type
+        = hipblaslt::host_numerics::scalarType(datatype);
+    const auto readDeviceTensor
+        = [&](void* pointer, const roc::host_numerics::Layout& layout) {
+        std::vector<std::byte> storage(roc::host_numerics::storageBytesForLayout(type, layout));
         const hipError_t       error = hipMemcpyDtoH(storage.data(), pointer, storage.size());
         if(error != hipSuccess)
             throw std::runtime_error(std::string("hipMemcpyDtoH failed: ")
                                      + hipGetErrorString(error));
-        return Tensor::takeOwnershipOfEncodedBackingStorage(type, layout, std::move(storage));
+        return roc::host_numerics::Tensor::takeOwnershipOfEncodedBackingStorage(
+            type, layout, std::move(storage));
     };
-    const Tensor observed = readDeviceTensor(c, outputLayout);
-    const Tensor inputA   = readDeviceTensor(a, aLayout);
-    const Tensor inputB   = readDeviceTensor(b, bLayout);
+    const roc::host_numerics::Tensor observed = readDeviceTensor(c, outputLayout);
+    const roc::host_numerics::Tensor inputA   = readDeviceTensor(a, aLayout);
+    const roc::host_numerics::Tensor inputB   = readDeviceTensor(b, bLayout);
     const auto   comparison
         = hipblaslt::host_numerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
     if(!comparison.passed())
