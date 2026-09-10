@@ -27,8 +27,8 @@
 #include "test_callbacks.h"
 #include "hip/hiprtc.h"
 #include "rocfft_complex.h"
-#include <map>
 #include <string>
+#include <unordered_map>
 
 #ifdef ROCFFT_MPI_ENABLE
 #include <mpi.h>
