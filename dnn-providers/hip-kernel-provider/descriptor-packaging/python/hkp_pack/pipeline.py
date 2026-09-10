@@ -267,6 +267,24 @@ def _is_passthrough(ukd):
     return ukd["kernel_source"]["kind"] in _PASSTHROUGH_KINDS
 
 
+def _root_holds_compiling_source(flat):
+    """Whether the authored root holds a UKD that a producer compiles.
+
+    The complement of _is_passthrough over both authoring forms -- a standalone
+    `<name>.ukd.json` and an inline entry of a KDP's kernelDescriptors -- so the
+    two spellings of the same distinction cannot drift. Only such a UKD yields a
+    code object, so only a root holding one implies an archive.
+    """
+    for desc in flat.ukds():
+        if not _is_passthrough(desc.doc):
+            return True
+    for kdp in flat.kdps():
+        for entry in kdp.doc.get("kernelDescriptors", []):
+            if isinstance(entry, dict) and not _is_passthrough(entry):
+                return True
+    return False
+
+
 def _dest_at(base, rel_dir, name):
     """Destination for an authored file, preserving its subpath under base.
 
@@ -1193,7 +1211,8 @@ def run_pipeline(
     no producer and is emitted as authored, so a root that holds only
     pass-through UKDs writes descriptors and no archive. An arch with no
     surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
-    kernels for <arch>, skipping'. Empty arch list installs nothing (exit 0).
+    kernels for <arch>, skipping'; every arch skipping is a failure, not a
+    pack. Empty arch list installs nothing (exit 0).
     """
     out_root = Path(out_root)
     results = {}
@@ -1292,5 +1311,36 @@ def run_pipeline(
             f"packing failed for {len(failures)} of {len(arches)} arch(es) "
             f"[{detail}]. Arches that succeeded were written; the failed arches' "
             "output was discarded."
+        )
+
+    # The archive clause keys on what the root holds rather than on what survived
+    # pruning: a compiling UKD that prunes out of every requested arch is
+    # indistinguishable downstream from one whose archive went missing. Nothing
+    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
+    # recipe touches unconditionally, and a staged tree holding nothing reads the
+    # same there as a root that is legitimately empty. Only the packer knows the
+    # kinds it walked and which arches pruned.
+    arch_list = ", ".join(arches)
+    if all(r.skipped for r in results.values()):
+        raise HkpPackError(
+            f"packing '{source_root}' produced nothing: no KDP survived arch "
+            f"pruning for any of the {len(arches)} requested arch(es) "
+            f"[{arch_list}], so every arch was skipped. A root wired to a pack "
+            "was wired to ship descriptors, so this is a failure and not a "
+            "clean skip. Check each KDP's 'arch' list against the requested "
+            "arches. Archives are a separate matter and are not always "
+            "required -- a root of only pass-through kinds legitimately packs "
+            "descriptors and no archive -- but descriptors always are."
+        )
+
+    if _root_holds_compiling_source(flat) and not any(
+        r.kpack_path for r in results.values()
+    ):
+        raise HkpPackError(
+            f"packing '{source_root}' wrote descriptors but no archive, while "
+            "the root holds at least one UKD of a compiling kind ('hip' or "
+            f"'rocke'). Requested arch(es) [{arch_list}]; none produced a "
+            "kpack. Either those UKDs pruned out of every shard that shipped, "
+            "or their KDPs ship without them."
         )
     return results

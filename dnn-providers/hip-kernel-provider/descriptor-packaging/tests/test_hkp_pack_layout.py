@@ -1728,3 +1728,75 @@ def test_packing_without_a_source_label_is_refused(
     assert "source_label is required" in message
     assert "--source-label" in message
     assert "pointwise/kernels/PointwiseAdd.cpp" in message
+
+
+# --- K. A pack that produced nothing ----------------------------------------
+
+
+@pytest.mark.quick
+def test_a_root_that_prunes_for_every_arch_is_a_failure(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Every arch skipping is a pack that shipped nothing, not a clean skip."""
+    root = tmp_path / "root"
+    # The fixture's only KDP names gfx942, so neither requested arch keeps it.
+    _nest(root, "hip/pointwise", empty_arch_fixture)
+
+    with pytest.raises(HkpPackError) as excinfo:
+        _run(root, tmp_path, "hipcc-not-invoked", rocm_kpack_dir, ["gfx90a", "gfx1100"])
+
+    message = str(excinfo.value)
+    assert str(root) in message
+    assert "gfx90a" in message
+    assert "gfx1100" in message
+    # The reader must not take this failure for "every root owes an archive".
+    assert "not always required" in message
+
+
+@pytest.mark.quick
+def test_a_passthrough_only_root_passes_with_no_archive(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Zero archives is the correct outcome for a root that compiles nothing.
+
+    The unit descriptor set is authored exactly this way, so the archive clause
+    must stay off a root whose every UKD is a pass-through kind.
+    """
+    root = _embedded_root(tmp_path, empty_arch_fixture)
+
+    results = _pack_embedded(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    assert results[ARCH].kpack_path is None
+    assert not results[ARCH].skipped
+    assert not list((tmp_path / "out").rglob("*.kpack"))
+
+
+@pytest.mark.quick
+def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
+    tmp_path, empty_arch_fixture, rocm_kpack_dir
+):
+    """Descriptors alone are not enough once a compiling source is present.
+
+    A mixed root is the only shape that reaches this clause: the pass-through
+    half keeps a shard alive, so nothing is skipped and a descriptor count is
+    satisfied, while the hip half prunes out of the one arch packed and its
+    kernels ship nowhere.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", empty_arch_fixture)
+    _embedded_copy(root, "embedded/pointwise", empty_arch_fixture, suffix="2")
+
+    with pytest.raises(HkpPackError) as excinfo:
+        _run(
+            root,
+            tmp_path,
+            "hipcc-not-invoked",
+            rocm_kpack_dir,
+            [OTHER_ARCH],
+            source_label=_LABEL,
+        )
+
+    message = str(excinfo.value)
+    assert str(root) in message
+    assert "no archive" in message
+    assert OTHER_ARCH in message
