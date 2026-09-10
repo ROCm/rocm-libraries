@@ -485,8 +485,6 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
 void validateInvocation(const MxGenerationInvocation& problem) {
     if (problem.shape.rank() != 2)
         throw std::invalid_argument("MX generation requires a rank-two tensor.");
-    if (problem.shape[0] == 0 || problem.shape[1] == 0)
-        throw std::invalid_argument("MX generation dimensions must be nonzero.");
     if (problem.blockAxis > 1) throw std::out_of_range("MX block axis exceeds the tensor rank.");
     if (problem.blockSize == 0) throw std::invalid_argument("MX block size must be nonzero.");
     if (problem.shape[0] > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))

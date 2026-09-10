@@ -705,6 +705,20 @@ void testStructuredSparsity() {
                 ownedMetadata.loadAs<uint8_t>({1}) == 0x08,
             "Owning two-of-four metadata result contract mismatch.");
 
+    for (const auto& [shape, axis] :
+         std::array<std::pair<Shape, size_t>, 2>{{{Shape{0, 8}, 0}, {Shape{2, 0}, 1}}}) {
+        StructuredSparsityPattern emptyPattern;
+        emptyPattern.axis = axis;
+        const StructuredSparseTensor empty = applyStructuredSparsity(
+            Tensor(ScalarType::Float32, shape), emptyPattern,
+            {.retainedIndices = true, .twoOfFourMetadata = true});
+        require(empty.pruned.shape() == shape && empty.pruned.elementCount() == 0 &&
+                    empty.compressed.elementCount() == 0 && empty.retainedIndices &&
+                    empty.retainedIndices->elementCount() == 0 && empty.twoOfFourMetadata &&
+                    empty.twoOfFourMetadata->elementCount() == 0,
+                "Structured sparsity did not preserve a zero extent as empty work.");
+    }
+
     const std::array<uint8_t, 2> invalidRetainedValues{2, 1};
     const Tensor invalidRetained = Tensor::copyNativeValues<uint8_t>(
         Shape{2}, std::span<const uint8_t>(invalidRetainedValues));

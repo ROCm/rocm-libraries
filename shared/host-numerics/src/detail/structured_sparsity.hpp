@@ -118,8 +118,6 @@ inline StructuredSparsityPlan validateStructuredSparsityProblem(
     if (problem.outputs.retainedIndices && problem.pattern.groupSize > 256)
         throw std::invalid_argument(
             "Structured sparsity UInt8 retained indices require group size at most 256.");
-    if (inputShape[problem.pattern.axis] == 0)
-        throw std::invalid_argument("Structured sparsity axis extent must be nonzero.");
     if (inputShape[problem.pattern.axis] % problem.pattern.groupSize != 0)
         throw std::invalid_argument(
             "Structured sparsity axis extent must be divisible by group size.");
@@ -732,6 +730,7 @@ detail::StructuredSparsityWorkCounts applyStructuredSparsityInvocation(
     const detail::StructuredSparsityPlan plan = detail::validateStructuredSparsityRequest(problem);
     const auto [firstSlice, endSlice] =
         detail::validateStructuredSparsitySliceRange(plan, sliceRange);
+    if (problem.input.elementCount() == 0) return {};
     const bool completeRange =
         sliceRange.firstSlice == 0 && sliceRange.sliceCount == std::numeric_limits<size_t>::max();
     const bool independentOutputs =
@@ -922,6 +921,7 @@ detail::TwoOfFourMetadataWorkCounts encodeTwoOfFourMetadataInvocation(
     const size_t sparsityGroups = problem.retainedIndices.shape()[problem.axis] / 2;
     const size_t metadataGroups = metadataShape[problem.axis];
     const size_t lineCount = problem.retainedIndices.shape().elementCountExcluding(problem.axis);
+    if (problem.retainedIndices.elementCount() == 0) return {};
 
     std::vector<size_t> retainedCoordinates(problem.retainedIndices.shape().rank(), 0);
     const ptrdiff_t retainedAxisStride = problem.retainedIndices.layout().strides()[problem.axis];

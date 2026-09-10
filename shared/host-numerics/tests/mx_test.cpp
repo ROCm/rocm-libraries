@@ -287,7 +287,23 @@ int main() {
         checkReference(fp6PackingTail, result);
         const size_t physicalElements = static_cast<size_t>(leadingDimension);
         require(result.data.rawEncodedBackingStorage().size() == (physicalElements * 6 + 7) / 8,
-                "FP6 packing-tail storage size mismatch.");
+                    "FP6 packing-tail storage size mismatch.");
+    }
+
+    for (const auto& [shape, blockAxis] :
+         std::array<std::pair<Shape, size_t>, 3>{{{Shape{0, 5}, 0},
+                                                  {Shape{5, 0}, 1},
+                                                  {Shape{0, 0}, 0}}}) {
+        MxCase empty = defaultMxCase(shape);
+        empty.dataType = ScalarType::Float4E2M1;
+        empty.scaleType = ScalarType::E8M0;
+        empty.blockAxis = blockAxis;
+        empty.blockSize = 4;
+        const MxTensor result = generateMx(empty);
+        checkReference(empty, result);
+        require(result.data.elementCount() == 0 && result.scales.elementCount() == 0 &&
+                    result.scaleIndices.elementCount() == 0 && result.reference.elementCount() == 0,
+                "MX generation did not preserve a zero extent as empty work.");
     }
 
     const std::array<GenerationRecipe::Component, 15> deterministicRecipes{
