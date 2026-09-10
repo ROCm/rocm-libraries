@@ -201,6 +201,13 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    # The KDA chunkwise specs demand nothing: every field, problem shape included,
+    # carries a default, so a descriptor may omit any of them. `KdaTileSpec` is the
+    # nested tiling struct reached through the `tile` field of the other three.
+    "kernels.gfx942.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaTileSpec": (),
     # Every gfx950-only codegen knob is defaulted.
     "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": (
         "batch",
@@ -238,6 +245,12 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
+    # defaulted, so the required set is empty on this arch too.
+    "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
 }
