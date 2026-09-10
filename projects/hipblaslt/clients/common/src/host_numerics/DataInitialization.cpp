@@ -15,7 +15,21 @@
 
 namespace hipblaslt::host_numerics
 {
-    using namespace ::roc::host_numerics;
+    using ::roc::host_numerics::GenerationRecipe;
+    using ::roc::host_numerics::IndexOrder;
+    using ::roc::host_numerics::MxDataGeneration;
+    using ::roc::host_numerics::MxGenerationOptions;
+    using ::roc::host_numerics::MxScaleGenerationMode;
+    using ::roc::host_numerics::MxTensor;
+    using ::roc::host_numerics::ScalarCategory;
+    using ::roc::host_numerics::ScalarType;
+    using ::roc::host_numerics::Shape;
+    using ::roc::host_numerics::Tensor;
+    using ::roc::host_numerics::generate;
+    using ::roc::host_numerics::generateAt;
+    using ::roc::host_numerics::scalarTypeInfo;
+
+    namespace amd_gpu_layout = ::roc::host_numerics::amd_gpu_layout;
 
     namespace
     {

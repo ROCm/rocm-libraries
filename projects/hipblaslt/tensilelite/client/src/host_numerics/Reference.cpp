@@ -18,9 +18,10 @@ namespace TensileLite
 {
     namespace
     {
-        using namespace roc::host_numerics;
         using Client::HostNumerics::GemmInvocationAdapter;
         using Client::HostNumerics::TranslationFailure;
+        using roc::host_numerics::GemmBackend;
+        using roc::host_numerics::OutputSelection;
 
         [[noreturn]] void throwTranslationFailure(const TranslationFailure& failure)
         {
@@ -33,10 +34,8 @@ namespace TensileLite
                                    OutputSelection               outputSelection,
                                    GemmBackend                   backend)
         {
-            using namespace Client::HostNumerics;
-
-            auto translation
-                = translateGemmInvocation(problem, inputs, std::move(outputSelection));
+            auto translation = Client::HostNumerics::translateGemmInvocation(
+                problem, inputs, std::move(outputSelection));
             if(std::holds_alternative<TranslationFailure>(translation))
                 throwTranslationFailure(std::get<TranslationFailure>(translation));
             GemmInvocationAdapter adapter = std::move(std::get<GemmInvocationAdapter>(translation));
