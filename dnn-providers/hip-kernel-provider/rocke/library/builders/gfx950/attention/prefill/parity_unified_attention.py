@@ -488,28 +488,8 @@ def default_scenarios() -> List[Scenario]:
             block_size=64,
             dtype=torch.bfloat16,
         ),
-        # fp16 no-sinks baselines — isolate whether errors above are fp16-specific
-        # or sinks-specific. Mirror of combo_bf16_d64_b32_gqa8_64x8 (Gate 1
-        # cohort) and the Gate 2 single-seq shape, both without use_sinks.
-        Scenario(
-            name="fp16_d64_no_sinks_gate1_cohort",
-            seq_lens=[(512, 1024), (512, 1024)],
-            num_query_heads=64,
-            num_kv_heads=8,
-            head_size=64,
-            block_size=32,
-            dtype=torch.float16,
-        ),
-        Scenario(
-            name="fp16_d64_no_sinks_gate2_cohort",
-            seq_lens=[(2048, 2048)],
-            num_query_heads=64,
-            num_kv_heads=8,
-            head_size=64,
-            block_size=16,
-            dtype=torch.float16,
-            num_blocks=512,
-        ),
+        # fp16 sink prefill: the cohort the combo widening admits. Gate 1 (D64
+        # b32 GQA-8, multi-seq) and Gate 2 (D64 b16, single-seq).
         Scenario(
             name="fp16_d64_sinks_gate1",
             seq_lens=[(640, 704), (640, 768)],
