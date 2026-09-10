@@ -268,10 +268,11 @@ function(hkp_wire_pack_target)
     # reading the edge as up to date and letting the embedding check walk nothing and
     # pass at zero descriptors.
     #
-    # This does not cover a tree emptied while its stamp survives: the build reads the
-    # edge as up to date and the embedding check walks nothing and passes, because a
-    # root with no descriptors is a legal pass. Only a check-side rule -- a stamped
-    # root must hold at least one descriptor -- would catch it.
+    # It does not by itself cover a tree emptied while its stamp survives: the build
+    # reads the edge as up to date and the embedding check walks nothing and passes,
+    # because a root with no descriptors is otherwise a legal pass. The rule that catches
+    # it -- a stamped root must hold at least one descriptor -- is stamped_root_failures()
+    # in hkp_verify_embedded_sources.py.
     #
     # The output root is created before the stamp is written, because a pack that emits
     # nothing never creates it and `touch` does not create parents. Such a root holds
@@ -378,12 +379,14 @@ endfunction()
 #   descriptor written by a pack no PACK_NAMES value lists still resolves.
 #
 #   PACK_NAMES lists the pack roots that write STAGED_DESCRIPTOR_ROOTS. Each one
-#   contributes its stamp file, so packing a root reruns the check. A name whose
-#   root is not wired contributes nothing.
+#   contributes its stamp file twice: as a dependency, so packing a root reruns
+#   the check, and as an argument, so the step also fails when a stamped pack
+#   root holds no descriptor at all. A name whose root is not wired contributes
+#   neither, so a dormant root -- production, with no source root set -- is not
+#   held to that rule.
 #
 #   An absent root, an empty root, a root with no embedded_source descriptor and
-#   an empty key table each pass -- including a root emptied after its pack
-#   stamped it.
+#   an empty key table each pass. A root emptied after its pack stamped it does not.
 #
 #   The comparison runs one way, from a staged descriptor to the table. A key no
 #   descriptor names is not an error, and neither is a descriptor no pack stages.
@@ -439,11 +442,15 @@ function(hkp_verify_embedded_sources)
     # The stamp file, not the packaging target: a target-level edge orders the two
     # steps but leaves the check stale after a repack.
     set(_pack_stamps "")
+    set(_stamp_args "")
     set(_pack_targets "")
     foreach(_pack IN LISTS ARG_PACK_NAMES)
         get_property(_pack_stamp GLOBAL PROPERTY HKP_PACK_STAMP_${_pack})
         if(_pack_stamp)
             list(APPEND _pack_stamps "${_pack_stamp}")
+            # The same stamp again as an argument, so the tool holds the root it
+            # sits in to the non-empty rule.
+            list(APPEND _stamp_args --pack-stamp "${_pack_stamp}")
         endif()
         if(TARGET hkp_packaging_${_pack})
             list(APPEND _pack_targets hkp_packaging_${_pack})
@@ -456,6 +463,7 @@ function(hkp_verify_embedded_sources)
                 --target "${ARG_TARGET}"
                 ${_manifest_arg}
                 ${_root_args}
+                ${_stamp_args}
                 ${_source_root_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${_tool}" ${_manifest_dep} ${_pack_stamps}
