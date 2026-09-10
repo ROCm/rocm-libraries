@@ -410,21 +410,26 @@ inline size_t registerReferenceValidationTests(const std::vector<LoadedBundle>& 
     }
     if(noGolden > 0)
     {
-        std::cerr << "\n       WARNING: " << noGolden
-                  << " loaded bundle(s) had no golden outputs; loadGoldenDataBundles() should "
-                     "already have excluded those";
+        std::cerr << "\n       " << noGolden
+                  << " loaded bundle(s) turned out to carry no golden outputs: the pre-load probe "
+                     "cannot always tell, and on a tree where `dvc pull` has not run every bundle "
+                     "lands here";
     }
     std::cerr << "\n";
 
     // A reference lane that registered nothing while golden data was sitting right
     // there verified nothing, and the whole-binary guard in main() cannot see it: a
-    // sibling reference that registered some bundles keeps the total non-zero. Every
-    // bundle here carries golden data by construction -- the load filters on it --
-    // so the only legitimate ways to register zero are the ones already printed
-    // above: every bundle fell outside this reference's op set, or every one was
-    // excluded on cost. Anything else is a bundle that should have been here and
-    // isn't.
-    if(registered == 0 && uncovered == 0 && tooCostly == 0)
+    // sibling reference that registered some bundles keeps the total non-zero. The
+    // legitimate ways to register zero are the ones already printed above: every
+    // bundle fell outside this reference's op set, or every one was excluded on
+    // cost. Anything else is a bundle that should have been here and isn't.
+    //
+    // `noGolden` is part of that test, not a formality. The probe errs toward
+    // loading whenever it cannot tell, so a bundle can reach here carrying nothing
+    // -- and on a tree where `dvc pull` never ran, every bundle does. Firing then
+    // would report "this lane verified nothing" as a failure when the honest answer
+    // is that there was nothing to verify.
+    if(registered == 0 && uncovered == 0 && tooCostly == 0 && noGolden != bundles.size())
     {
         registerFailedBundleLoad(std::string("GoldenDataValidation_") + label,
                                  "RegisteredAtLeastOneBundle",
@@ -484,15 +489,20 @@ namespace detail
 // binary's startup.
 //
 // The answers here are exact, not heuristic, because both sides of the real test
-// bottom out in the same facts:
+// bottom out in the same fact -- whether an output blob is on disk:
 //
-//   * a sweep case with no `golden` key resolves no golden directory
-//     (resolveSweepGoldenDirectory), so goldenOutputsPresent is false;
-//   * a direct bundle with no `<stem>.tensor*.bin` sibling has no output blob to
-//     find, so blobsPresentFor() over its output uids is false.
+//   * a sweep case whose case entry declares no `golden` resolves no golden
+//     directory (resolveSweepGoldenDirectory), and one that declares a directory
+//     holding no tensor*.bin has nothing for blobsPresentFor() to find;
+//   * a direct bundle with no `<stem>.tensor*.bin` sibling likewise.
 //
 // Both therefore end with hasGoldenOutputs == false, which is exactly what the
-// registration-time filter drops.
+// registration-time filter drops. Testing the sweep case's *declaration* alone is
+// not enough: `golden` lives in sweep.json and is checked into git, so on a tree
+// where `dvc pull` has not run every declaring case would survive the probe, load
+// in full, and then report no golden outputs -- which is precisely what happened
+// in multi-arch CI, where six cases were counted as golden-bearing on a tree that
+// had no blobs at all.
 //
 // It errs toward loading whenever it cannot tell -- an unparseable or absent sweep
 // manifest, a case id that is not there -- so a bundle that would report a load
@@ -504,7 +514,7 @@ class GoldenOutputProbe
 public:
     bool mayCarryGoldenOutputs(const DiscoveredBundle& disc)
     {
-        return disc.isTemplateSweepCase() ? sweepCaseDeclaresGolden(disc)
+        return disc.isTemplateSweepCase() ? sweepCaseHasGoldenBlobs(disc)
                                           : hasOutputBlobSibling(disc.jsonPath);
     }
 
@@ -525,7 +535,7 @@ private:
         return inserted->second.has_value() ? &*inserted->second : nullptr;
     }
 
-    bool sweepCaseDeclaresGolden(const DiscoveredBundle& disc)
+    bool sweepCaseHasGoldenBlobs(const DiscoveredBundle& disc)
     {
         const auto* manifest = sweepManifest(disc.jsonPath);
         if(manifest == nullptr)
@@ -537,7 +547,38 @@ private:
         {
             return true;
         }
-        return caseJson->contains("golden") && !caseJson->at("golden").is_null();
+
+        std::optional<std::filesystem::path> goldenDirectory;
+        try
+        {
+            goldenDirectory = detail::resolveSweepGoldenDirectory(disc.jsonPath, *caseJson);
+        }
+        catch(const std::exception&)
+        {
+            // A malformed `golden` block is an authoring error the loader reports
+            // as INVALID_SWEEP_CASE. Let it through so it says so.
+            return true;
+        }
+        if(!goldenDirectory.has_value())
+        {
+            return false;
+        }
+        return directoryHasTensorBlob(*goldenDirectory);
+    }
+
+    static bool directoryHasTensorBlob(const std::filesystem::path& directory)
+    {
+        std::error_code error;
+        for(const auto& entry : std::filesystem::directory_iterator(directory, error))
+        {
+            if(entry.path().extension() == ".bin"
+               && entry.path().filename().string().rfind("tensor", 0) == 0)
+            {
+                return true;
+            }
+        }
+        // An unreadable or absent directory is not evidence of absence.
+        return static_cast<bool>(error);
     }
 
     static bool hasOutputBlobSibling(const std::filesystem::path& jsonPath)
@@ -672,8 +713,12 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
 
     if(skippedWithoutGolden > 0)
     {
-        std::cerr << "Bundle discovery: " << bundles.size() << " bundle(s) with golden data, "
-                  << skippedWithoutGolden << " without skipped before load\n";
+        // "loaded" rather than "with golden data": these are the bundles that passed
+        // the pre-load probe, which is conservative and lets through anything it
+        // cannot decide. Whether they really carry golden outputs is settled during
+        // the load, and reported per lane below.
+        std::cerr << "Bundle discovery: " << bundles.size() << " bundle(s) loaded, "
+                  << skippedWithoutGolden << " skipped as carrying no golden data\n";
     }
 
     if(bundles.empty())
