@@ -98,14 +98,3 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
 
 #define CHECK_OPTIONAL_TENSOR_TYPE(tensor_map, optional_tensor_uid, datatype_enum) \
     CHECK_TENSOR_TYPE(tensor_map, *(optional_tensor_uid), datatype_enum)
-
-// The CPU references do not support ragged tensors. Reject any graph that
-// contains one so the plan builder is reported as not applicable.
-#define CHECK_NO_RAGGED_TENSORS(tensor_map)                                        \
-    do                                                                             \
-    {                                                                              \
-        if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds((tensor_map))) \
-        {                                                                          \
-            return false;                                                          \
-        }                                                                          \
-    } while(0)

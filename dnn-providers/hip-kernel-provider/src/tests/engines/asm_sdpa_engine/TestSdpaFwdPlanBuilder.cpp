@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "ConfigHelpers.hpp"
@@ -28,6 +29,7 @@ namespace asm_sdpa_engine
 {
 namespace
 {
+namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
 
 class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
@@ -235,6 +237,57 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       DataType::FLOAT),
                    "mma_core_mode = FLOAT"},
+         true}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
+// =============================================================================
+// Ragged tensors / group mode
+// =============================================================================
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // withStats adds a stats tensor without setting generate_stats, so it is not
+    // rejected by the stats check before the ragged classification runs.
+    auto withStatsGraph = [] {
+        return createSdpaFwdGraph({4, 8, 256, 128},
+                                  {4, 8, 256, 128},
+                                  DataType::BFLOAT16,
+                                  DataType::FLOAT,
+                                  false,
+                                  false,
+                                  /*withStats=*/true);
+    };
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v", "o"}),
+                   "All of Q, K, V, O ragged -> group mode"},
+         true},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q", "k", "v"}),
+                   "Q, K, V ragged but not O"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"q"}), "Only Q ragged"}, false},
+        {GraphTest{sdpa::withRaggedTensors(createSdpaFwdGraph(), {"k", "v", "o"}),
+                   "K, V, O ragged but not Q"},
+         false},
+        {GraphTest{sdpa::withRaggedTensors(withStatsGraph(), {"q", "k", "v", "o", "stats"}),
+                   "Q, K, V, O and STATS ragged -> STATS is an unsupported ragged tensor"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
@@ -242,6 +295,18 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
     }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenQ)
+{
+    const GraphTest test{sdpa::withSeqLenQ(createSdpaFwdGraph()), "seq_len_q_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsSeqLenKv)
+{
+    const GraphTest test{sdpa::withSeqLenKv(createSdpaFwdGraph()), "seq_len_kv_tensor_uid set"};
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
 }
 
 // =============================================================================
