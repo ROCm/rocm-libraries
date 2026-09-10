@@ -21,11 +21,9 @@ ADataType=BDataType=fp8/bf8; AQDataType=BQDataType=float; CDataType=half.
 """
 
 import ctypes
-import hashlib
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -70,60 +68,24 @@ _DEFAULT_GFX_ARCH = "gfx950"
 # dispatcher_get_tile_n()/dispatcher_get_pad_n() exports would be selected and then
 # fail at attribute-lookup time with a bare "undefined symbol".
 #
-# A hand-maintained integer would fix that only for as long as everyone remembers to
-# bump it, and nothing in the build or the tests can tell that they did not -- the
-# symptom appears later, on someone else's machine, in a cache directory. So derive
-# the token from the thing it is supposed to describe: the export signatures in
-# bindings/ctypes/grouped_gemm_tensorquant_ctypes_lib.cpp. Add, remove or
-# re-type an exported function and the cache key moves by itself; edit a comment or a
-# function body and it does not.
+# This was briefly derived at import time by regex-scanning the export signatures out
+# of bindings/ctypes/tensorquant_ctypes_lib.cpp. That is withdrawn. Parsing C++
+# declarations with a regex fails quietly -- the scan could not read a multi-token or
+# namespaced return type ("unsigned long long dispatcher_x()", "std::size_t
+# dispatcher_y()"), dropped those exports, and produced an unchanged token, which is
+# the exact stale-cache failure the mechanism existed to prevent. It also read a
+# source file at import time and fell back to a fixed string when it could not, so an
+# install that ships the Python without the C++ sources keys every build the same,
+# silently and only in that environment.
 #
-# Derived from signatures rather than the whole file so that unrelated edits do not
-# invalidate every cached artifact. Falls back to a fixed revision if the source
-# cannot be read or the scan finds nothing, so a packaging change degrades to the old
-# hand-bumped behaviour instead of silently keying every build the same.
-_SO_ABI_FALLBACK = "r2"
-
-_EXPORT_SIGNATURE_RE = re.compile(
-    r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*\*)?(?:\s+[A-Za-z_][A-Za-z0-9_]*)?(?:\s*\*)?)"
-    r"\s+(dispatcher_[A-Za-z0-9_]+)\s*\(([^)]*)\)",
-    re.MULTILINE,
-)
-
-
-def _ctypes_abi_token() -> str:
-    """Short hash of the exported C ABI of the ctypes source.
-
-    Changes exactly when an exported dispatcher_* function is added, removed,
-    renamed, or has its return type or parameter list changed.
-    """
-    try:
-        text = _CTYPES_LIB_SRC.read_text()
-    except OSError:
-        log.warning(
-            "cannot read %s to derive the .so ABI token; falling back to %s",
-            _CTYPES_LIB_SRC, _SO_ABI_FALLBACK,
-        )
-        return _SO_ABI_FALLBACK
-
-    signatures = {
-        "{} {}({})".format(
-            " ".join(ret.split()), name, ",".join(" ".join(a.split()) for a in args.split(","))
-        )
-        for ret, name, args in _EXPORT_SIGNATURE_RE.findall(text)
-    }
-    if not signatures:
-        log.warning(
-            "found no dispatcher_* export signatures in %s; falling back to %s",
-            _CTYPES_LIB_SRC, _SO_ABI_FALLBACK,
-        )
-        return _SO_ABI_FALLBACK
-
-    digest = hashlib.sha256(";".join(sorted(signatures)).encode()).hexdigest()
-    return digest[:10]
-
-
-_SO_ABI = _ctypes_abi_token()
+# So the runtime value is a plain literal: deterministic, no I/O, no fallback branch.
+# The parse still happens, but in tests/test_so_abi_token.py, where a failure to read
+# a declaration is a red test rather than a silent cache hit. That test holds a frozen
+# copy of this operator's export signatures, checks the ctypes source still matches it,
+# checks no dispatcher_* name in the source went unparsed, and derives the token below
+# from the frozen copy -- so changing the ABI fails the test, and updating the frozen
+# copy without updating this literal fails it again.
+_SO_ABI = "re8d662d9"
 
 
 # =============================================================================

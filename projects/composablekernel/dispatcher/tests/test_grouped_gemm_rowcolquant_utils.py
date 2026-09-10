@@ -465,15 +465,15 @@ class TestSoCacheAbiKey:
     """
 
     def test_abi_is_versioned(self):
-        # _SO_ABI is no longer a hand-bumped integer: it is a token derived from
-        # the ctypes source's export signatures, so nobody has to remember to
-        # bump it. See test_so_abi_token.py for the derivation's own tests. All
-        # that matters here is that it is a non-empty, filename-safe token that
-        # is not the read-failure fallback.
+        # _SO_ABI is a plain literal, not derived at import time: a regex over the
+        # ctypes source could not read multi-token or namespaced return types and
+        # dropped those exports silently, which froze the cache key instead of
+        # moving it. test_so_abi_token.py does the parse where it can fail loudly
+        # and pins this literal to the export set. All that matters here is that it
+        # is a non-empty, filename-safe token.
         assert isinstance(UTILS._SO_ABI, str)
         assert UTILS._SO_ABI
         assert UTILS._SO_ABI.isalnum()
-        assert UTILS._SO_ABI != UTILS._SO_ABI_FALLBACK
 
     def test_pre_abi_artifact_is_not_reused(self, monkeypatch, tmp_path):
         cfg = default_fp8_config(gfx_arch="gfx950")
