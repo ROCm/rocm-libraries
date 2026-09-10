@@ -89,7 +89,8 @@ if(NOT USE_CUDA)
   endif()
 
 else( )
-  target_link_libraries( hipblas-bench PRIVATE hip::host CUDA::cudart )
+  target_include_directories( hipblas-bench SYSTEM PRIVATE $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}> )
+  target_link_libraries( hipblas-bench PRIVATE hip::host ${CUDA_LIBRARIES} )
 endif( )
 
 set_target_properties( hipblas-bench PROPERTIES
