@@ -94,6 +94,13 @@ def _buildColScatter(stackM: int, instM: int, instK: int, bpe: float,
                      waveSize: int) -> TLUColScatter:
     """Derive the col_scatter parameters for one TLU fp4 stack (all from N)."""
     N = stackM
+    # 8 and 16 always reach here; 2 and 4 do as well on a shared strip, where
+    # the XOR is unusable.  32 is the one that must not: cgDelta = 16 // N below
+    # is 0 there, so readStrideBytes comes out 0 and the LR read stops stepping
+    # in K, which is a wrong-answer kernel rather than a rejected one.
+    # _SUBTILE_STACK_SIZES tops out at 16, but that is one tuple edit away.
+    assert N in (2, 4, 8, 16), \
+        "col_scatter is only derived for stacks 2, 4, 8 and 16, got %u" % N
     logN = int(math.log2(N))
     cpc = int(stackM * instM * bpe) // 16          # chunks per K-column
     gGroups = instK // N                            # col_groups per load
