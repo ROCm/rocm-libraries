@@ -102,6 +102,7 @@ class Result:
     # distinguish the two legs. False for fwd/dgrad, which do not sweep it.
     async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
+    two_stage: bool = False  # True when timed as Stage1+Stage2 deterministic pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -792,6 +793,19 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--two-stage",
+        default="auto",
+        choices=["auto", "always", "never"],
+        dest="two_stage",
+        help=(
+            "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce): "
+            "auto = enable when C/groups is odd (atomics require even channel count); "
+            "always = force two-stage for all split_k>1 configs; "
+            "never = skip two-stage entirely (default: auto)"
+        ),
+    )
+
+    parser.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
@@ -1415,6 +1429,113 @@ def _build_wgrad_one(args_tuple):
     except ValueError:
         return None
     return combo, spec, resolved_split_k, kernel
+
+
+def _build_wgrad_two_stage_one(args_tuple):
+    """Top-level picklable worker: build Stage 1 + Stage 2 IR for one wgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, s1_kernel, s2_kernel)`` on success,
+    or ``None``.  Only yields results for combos where ``split_k > 1`` — the
+    two-stage path is meaningless for split_k=1.
+    Must live at module level for pickle.
+    """
+    combo, problem, dtype, arch = args_tuple
+    (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) = combo
+
+    from rocke.core.arch import ArchTarget
+    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+        is_valid_wgrad_spec,
+    )
+    from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        build_conv_wgrad_workspace_reduce,
+    )
+
+    target = ArchTarget.from_gfx(arch)
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
+    atom = target.mma.select_largest_k(
+        family=_mma_family,
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=warp_tile_mn,
+        n=warp_tile_mn,
+        k_max=tile_k,
+    )
+    if atom is None:
+        return None
+
+    warp_tile_k = atom.k
+    if split_k == -1:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        resolved_split_k = select_split_k_wgrad(
+            wg_M=problem.kpg,
+            wg_N=problem.Y * problem.X * problem.cpg,
+            wg_K=problem.N * problem.Ho * problem.Wo,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            arch=arch,
+        ).split_k
+    elif split_k == 0:
+        # Runtime split-K is atomic, not two-stage — skip.
+        return None
+    else:
+        resolved_split_k = split_k
+
+    # Two-stage only makes sense for split_k > 1.
+    if resolved_split_k <= 1:
+        return None
+
+    from dataclasses import replace as dc_replace
+
+    spec = WgradConvSpec(
+        problem=problem,
+        name="rocke_bench_igemm_wgrad_2s",
+        data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        warp_tile_k=warp_tile_k,
+        wave_size=target.wave_size,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        split_k=resolved_split_k,
+        two_stage=True,
+    )
+    ok, _ = is_valid_wgrad_spec(spec, arch)
+    if not ok:
+        return None
+    try:
+        s1_kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+    except ValueError:
+        return None
+
+    s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
+    try:
+        s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
+    except (ValueError, Exception):
+        return None
+
+    return combo, spec, resolved_split_k, s1_kernel, s2_kernel
 
 
 def _build_dgrad_one(args_tuple):
@@ -2123,6 +2244,31 @@ def _run_wgrad_sweep(
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
 
+    # Two-stage path: build Stage 1 (two_stage=True) + Stage 2 (workspace-reduce).
+    # Enabled when:
+    #   --two-stage always  → force regardless of C/groups parity
+    #   --two-stage auto    → only when C/groups is odd (atomics require even channel
+    #                         pairing: the packed 16-bit atomic pairs (c, c+1) within
+    #                         one filter position and silently produces wrong results
+    #                         for odd cpg; two-stage is the correct path there)
+    #   --two-stage never   → skip
+    # Runtime split-K (split_k=0) is atomic-only; _build_wgrad_two_stage_one filters
+    # those out regardless.
+    _cpg_is_odd = (p.C // p.groups) % 2 != 0
+    _run_two_stage = args.two_stage == "always" or (
+        args.two_stage == "auto" and _cpg_is_odd
+    )
+    if _run_two_stage:
+        if args.two_stage == "auto":
+            print(
+                f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
+                flush=True,
+            )
+        pending_2s = _build_ir_parallel(work, _build_wgrad_two_stage_one, jobs)
+        pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
+    else:
+        pending_2s = []
+
     # ---------------------------------------------------------------------------
     # Phase 2 – compile: fan out compile_kernel across processes (or serial).
     # ---------------------------------------------------------------------------
@@ -2130,6 +2276,15 @@ def _run_wgrad_sweep(
         [k for _, _, _, k in pending], compile_kernel, arch, jobs
     )
     n_built = len(artifact_map)
+
+    # Compile both Stage 1 and Stage 2 kernels for the two-stage path.
+    _all_2s_kernels = [k for _, _, _, k, _ in pending_2s] + [
+        k for _, _, _, _, k in pending_2s
+    ]
+    artifact_map_2s = _compile_kernels_parallel(
+        _all_2s_kernels, compile_kernel, arch, jobs
+    )
+    n_built += len(artifact_map_2s)
 
     # ---------------------------------------------------------------------------
     # Phase 3 – GPU run: load modules and time each kernel serially.
@@ -2385,6 +2540,182 @@ def _run_wgrad_sweep(
     rt.free(X_dev)
     rt.free(dW_dev)
 
+    # ---------------------------------------------------------------------------
+    # Phase 3b – two-stage GPU run: Stage1 → workspace → Stage2 → dW.
+    # ---------------------------------------------------------------------------
+    if pending_2s:
+        print(
+            f"\nSweeping {len(pending_2s)} two-stage (deterministic) wgrad configs ...",
+            flush=True,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad_two_stage import (
+            _wgrad_stage1_signature,
+            wgrad_two_stage_workspace_nbytes,
+        )
+        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+            WgradReduceSpec,
+            wgrad_reduce_grid,
+            wgrad_reduce_signature,
+        )
+
+        rt2 = Runtime()
+        dY_dev2 = rt2.alloc(dY_t.nbytes)
+        X_dev2 = rt2.alloc(X_t.nbytes)
+        dW_dev2 = rt2.alloc(dW_t.nbytes)
+        rt2.memcpy_h2d(dY_dev2, _u8(dY_t), dY_t.nbytes)
+        rt2.memcpy_h2d(X_dev2, _u8(X_t), X_t.nbytes)
+        rt2.memset(dW_dev2, 0, dW_t.nbytes)
+        ws_dev = None
+        ws_nbytes_cur = 0
+
+        for combo, spec, resolved_split_k, s1_kernel, s2_kernel in pending_2s:
+            (
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_tile_mn,
+                pipeline,
+                epilogue,
+                _,
+            ) = combo
+            warp_tile_k = spec.warp_tile_k
+
+            s1_art = artifact_map_2s.get(s1_kernel.name)
+            s2_art = artifact_map_2s.get(s2_kernel.name)
+            if s1_art is None or s2_art is None:
+                n_skipped += 1
+                continue
+
+            ws_nbytes = wgrad_two_stage_workspace_nbytes(spec)
+            if ws_dev is None or ws_nbytes > ws_nbytes_cur:
+                if ws_dev is not None:
+                    rt2.free(ws_dev)
+                ws_dev = rt2.alloc(ws_nbytes)
+                ws_nbytes_cur = ws_nbytes
+
+            s1_grid = _grid_for_wgrad_spec(spec, resolved_split_k)
+            s2_spec = WgradReduceSpec(
+                problem=spec.problem,
+                dtype_d=spec.data.dtype_d,
+                groups=spec.problem.groups,
+            )
+            s2_grid = wgrad_reduce_grid(s2_spec)
+            s2_block = (s2_spec.tile_m * s2_spec.tile_n, 1, 1)
+
+            try:
+                s1_launcher = KernelLauncher(
+                    hsaco=s1_art.hsaco,
+                    kernel_name=s1_art.kernel_name,
+                    signature=_wgrad_stage1_signature(spec),
+                )
+                s2_launcher = KernelLauncher(
+                    hsaco=s2_art.hsaco,
+                    kernel_name=s2_art.kernel_name,
+                    signature=wgrad_reduce_signature(s2_spec),
+                )
+            except Exception as e:
+                n_skipped += 1
+                print(
+                    f"[skip] two-stage kernel load failed for "
+                    f"tile={tile_m}x{tile_n}x{tile_k} "
+                    f"warp={warp_m}x{warp_n} "
+                    f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                    f"{pipeline}/{epilogue}: {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+
+            s1_values = {
+                "A": dY_dev2,
+                "B": X_dev2,
+                "D": dW_dev2,
+                "A_bytes": dY_t.nbytes,
+                "B_bytes": X_t.nbytes,
+                "D_bytes": dW_t.nbytes,
+                "ws_ptr": ws_dev,
+                "ws_bytes": ws_nbytes,
+            }
+            s2_values = {
+                "ws_ptr": ws_dev,
+                "dw_ptr": dW_dev2,
+                "wg_M": spec.wg_M,
+                "wg_N": spec.wg_N,
+                "split_k": resolved_split_k,
+                "ws_bytes": ws_nbytes,
+                "dw_bytes": dW_t.nbytes,
+                "groups": spec.problem.groups,
+            }
+            s1_cfg = LaunchConfig(grid=s1_grid, block=(spec.block_size, 1, 1), stream=0)
+            s2_cfg = LaunchConfig(grid=s2_grid, block=s2_block, stream=0)
+
+            def _launch_two_stage(
+                _s1=s1_launcher,
+                _s2=s2_launcher,
+                _v1=s1_values,
+                _v2=s2_values,
+                _c1=s1_cfg,
+                _c2=s2_cfg,
+            ):
+                rt2.memset(dW_dev2, 0, dW_t.nbytes)
+                _s1(_v1, config=_c1)
+                _s2(_v2, config=_c2)
+
+            ms = time_launches(
+                _launch_two_stage,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=0,
+            )
+            synchronize_and_release(0)
+
+            cur_tflops = (flop / ms) * 1e-9
+            cur_gbps = (bytes_xfer / ms) * 1e-6
+            n_run += 1
+
+            _va, _vb, _vc = WgradConvSpec.default_vector_sizes(
+                p.C, p.K, dtype, split_k=resolved_split_k
+            )
+            results.append(
+                Result(
+                    kernel_name=s1_art.kernel_name,
+                    tile_m=tile_m,
+                    tile_n=tile_n,
+                    tile_k=tile_k,
+                    warp_m=warp_m,
+                    warp_n=warp_n,
+                    warp_tile_mn=warp_tile_mn,
+                    warp_tile_k=warp_tile_k,
+                    pipeline=pipeline,
+                    epilogue=epilogue,
+                    split_k=resolved_split_k,
+                    ms=ms,
+                    tflops=cur_tflops,
+                    gbps=cur_gbps,
+                    vec_a=_va,
+                    vec_b=_vb,
+                    vec_c=_vc,
+                    two_stage=True,
+                )
+            )
+            print(
+                f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+                f"warp={warp_m}x{warp_n} "
+                f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+                f"{pipeline}/{epilogue:9s} spk{resolved_split_k}2s  "
+                f"vec={_va}/{_vb}/{_vc} "
+                f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+                flush=True,
+            )
+
+        if ws_dev is not None:
+            rt2.free(ws_dev)
+        rt2.free(dY_dev2)
+        rt2.free(X_dev2)
+        rt2.free(dW_dev2)
+
     print(f"\nWgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
 
     if not results:
@@ -2394,22 +2725,25 @@ def _run_wgrad_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*84}")
+    print(f"\n{'='*92}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*84}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(f"{'='*92}")
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<10}  config"
     print(hdr)
-    print("-" * 84)
+    print("-" * 92)
     for rank, r in enumerate(results[:top_n], 1):
+        mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
-            f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
+            f"{r.pipeline}/{r.epilogue}"
             f"{' async' if r.async_dma else ''}"
         )
-        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+        print(
+            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<10}  {cfg_str}"
+        )
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
