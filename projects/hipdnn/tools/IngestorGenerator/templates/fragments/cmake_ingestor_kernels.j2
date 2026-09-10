@@ -20,12 +20,21 @@
 ## Splice point 2: .../kernel_ingestor_engine/IngestorKernels.cmake:14
 ## Append these kernel source stems (no extension) to the existing
 ## HIPDNN_INGESTOR_PACK_KERNELS list. Do not replace the list -- append.
+##
+## The stem of the SOURCE FILE, not the entry point. Both CMake consumers build a
+## path from this list (`${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp`), and the
+## embedding helper keys its generated variable on that file. A kernel whose
+## `entry_point` differs from its `source_file` stem -- Source.cpp exporting
+## OtherEntry -- would name a file that does not exist, and the pack would fail at
+## plan build with a missing embedded source. The two coincide in every shipped
+## pack, which is exactly why naming the wrong one was invisible.
 {% set stems = [] %}
 {% for pack in config.packs %}
 {% for kernel in pack.kernels %}
-{% if kernel.kernel_source.entry_point not in stems %}
-{% set _ = stems.append(kernel.kernel_source.entry_point) %}
-{{ kernel.kernel_source.entry_point }}
+{% set stem = kernel.kernel_source.source_file.rsplit('.', 1)[0] %}
+{% if stem not in stems %}
+{% set _ = stems.append(stem) %}
+{{ stem }}
 {% endif %}
 {% endfor %}
 {% endfor %}
