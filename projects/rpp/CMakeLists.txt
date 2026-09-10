@@ -576,6 +576,14 @@ endif()
 # Set the dependent packages
 set(RPP_DEBIAN_PACKAGE_LIST  "hip-runtime-amd, openmp-extras-runtime")
 set(RPP_RPM_PACKAGE_LIST     "hip-runtime-amd, openmp-extras-runtime")
+
+# When audio support links rocFFT, librpp.so gains a direct librocfft.so dependency. RPM/DEB auto
+# dependency generation is disabled, so add rocFFT to the runtime requirements explicitly to keep
+# the package from installing without it.
+if(RPP_AUDIO_SUPPORT AND "${BACKEND}" STREQUAL "HIP" AND ROCFFT_FOUND)
+    set(RPP_DEBIAN_PACKAGE_LIST  "${RPP_DEBIAN_PACKAGE_LIST}, rocfft")
+    set(RPP_RPM_PACKAGE_LIST     "${RPP_RPM_PACKAGE_LIST}, rocfft")
+endif()
 set(RPP_DEBIAN_DEV_PACKAGE_LIST  "hip-dev, openmp-extras-dev, half")
 set(RPP_RPM_DEV_PACKAGE_LIST     "hip-devel, openmp-extras-devel, half")
 set(RPP_DEBIAN_TEST_PACKAGE_LIST  "cmake, python3-dev, python3-pip, python3-pandas, libopencv-dev, libsndfile1-dev")

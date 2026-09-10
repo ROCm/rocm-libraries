@@ -141,4 +141,9 @@ if( "${BACKEND}" STREQUAL "HIP")
         ${RPP_SOURCE_DIR}/src/include/common/hip
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE hip::device)
+    # spectrogram.cpp includes <rocfft/rocfft.h>; link the imported target so its include
+    # directory propagates to this OBJECT library even when rocFFT lives outside ${ROCM_PATH}/include.
+    if(RPP_AUDIO_SUPPORT AND ROCFFT_FOUND)
+        target_include_directories(${PROJECT_NAME} PRIVATE ${ROCFFT_INCLUDE_DIRS})
+    endif()
 endif()

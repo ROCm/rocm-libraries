@@ -260,14 +260,13 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_spectrogram_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor,
-                                        centerWindows, reflectPadding, windowFunction, nfft, power,
-                                        windowLength, windowStep, handle);
+            return hip_exec_spectrogram_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                srcLengthTensor, centerWindows, reflectPadding, windowFunction, nfft, power,
+                windowLength, windowStep, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
-        return RPP_SUCCESS;
     }
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;

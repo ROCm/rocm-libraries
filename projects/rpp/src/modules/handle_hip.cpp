@@ -196,8 +196,12 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 #ifdef AUDIO_SUPPORT
 #ifdef RPP_USE_ROCFFT
     // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on
-    // failure)
-    if (rocfft_setup() != rocfft_status_success) RPP_THROW("rocFFT library initialization failed");
+    // failure). rocFFT increments its global usage count before some setup failures, so balance
+    // it with rocfft_cleanup() before throwing to keep a later handle from skipping init.
+    if (rocfft_setup() != rocfft_status_success) {
+        rocfft_cleanup();
+        RPP_THROW("rocFFT library initialization failed");
+    }
     try {
         impl->PreInitializeBuffer();
     } catch (...) {

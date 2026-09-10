@@ -391,42 +391,40 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
             }
         }
 
-        // Execute rocFFT for the entire batch (plan includes correct batch count)
+        // Execute rocFFT for the entire batch (plan includes correct batch count). This enqueues
+        // work on handle.GetStream() using workBuffer, so neither workBuffer nor execInfo may be
+        // released until the stream has completed. From here every exit path must fall through to
+        // the shared cleanup below (synchronize, then free) rather than returning early.
         void* inBuffers[1] = {windowOutput};
         void* outBuffers[1] = {fftOutput};
+        RppStatus retStatus = RPP_SUCCESS;
         if (rocfft_execute(plan, inBuffers, outBuffers, execInfo) != rocfft_status_success) {
-            if (workBuffer) (void)hipFree(workBuffer);
-            if (execInfo) rocfft_execution_info_destroy(execInfo);
-            return RPP_ERROR_HIP_RUNTIME;  // rocFFT execution failed
+            retStatus = RPP_ERROR_HIP_RUNTIME;  // rocFFT execution failed
+        } else {
+            // Compute magnitude from complex FFT output
+            // For NTF (vertical=false): stride.hStride = width (numBins), for NFT (vertical=true):
+            // maxNumWindows
+            Rpp32u dstHStride = vertical ? maxNumWindows : dstDescPtr->strides.hStride;
+            globalThreads_x = numBins;
+            hipLaunchKernelGGL(compute_magnitude_from_complex_hip_tensor,
+                               dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                               handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
+                               make_uint2(dstDescPtr->strides.nStride, dstHStride),
+                               numWindowsTensor, make_int2(numBins, power), vertical);
+            if (hipGetLastError() != hipSuccess) retStatus = RPP_ERROR_HIP_LAUNCH;
         }
 
-        // Compute magnitude from complex FFT output
-        // For NTF (vertical=false): stride.hStride = width (numBins), for NFT (vertical=true):
-        // maxNumWindows
-        Rpp32u dstHStride = vertical ? maxNumWindows : dstDescPtr->strides.hStride;
-        globalThreads_x = numBins;
-        hipLaunchKernelGGL(compute_magnitude_from_complex_hip_tensor,
-                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
-                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
-                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
-                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
-                           make_uint2(dstDescPtr->strides.nStride, dstHStride), numWindowsTensor,
-                           make_int2(numBins, power), vertical);
-        hipError_t launchStatus = hipGetLastError();
-        if (launchStatus != hipSuccess) {
-            fprintf(stderr, "HIP kernel launch error: returned %d at %s:%d", launchStatus, __FILE__,
-                    __LINE__);
-            if (workBuffer) (void)hipFree(workBuffer);
-            if (execInfo) rocfft_execution_info_destroy(execInfo);
-            return RPP_ERROR_HIP_LAUNCH;
-        }
-
-        // Clean up temporary rocFFT resources (plan is cached and reused)
+        // Synchronize before releasing rocFFT resources so the stream is no longer using
+        // workBuffer, then clean up temporary resources (plan is cached and reused).
+        hipError_t syncErr = hipStreamSynchronize(handle.GetStream());
         if (workBuffer) (void)hipFree(workBuffer);
         if (execInfo) rocfft_execution_info_destroy(execInfo);
 
-        RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
+        if (retStatus != RPP_SUCCESS) return retStatus;
+        if (syncErr != hipSuccess) return RPP_ERROR_HIP_RUNTIME;
         return RPP_SUCCESS;
     } else
 #endif
