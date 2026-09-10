@@ -272,7 +272,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     for(size_t i = 0; i < cpuY.elementCount(); ++i)
     {
         EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuYData[i]), tolerance)
-            << "Mismatch in dx at index " << i;
+            << "Mismatch in y at index " << i;
     }
 }
 
