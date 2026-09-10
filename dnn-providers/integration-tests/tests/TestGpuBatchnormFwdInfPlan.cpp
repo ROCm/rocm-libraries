@@ -9,6 +9,7 @@
 #include "harness/gpu-graph-executor/detail/GpuBatchnormFwdInfPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -227,9 +228,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     Tensor<MeanVarType> invVarianceTensor(perChannelDims, perChannelStrides);
 
     constexpr unsigned int SEED = 42;
-    constexpr float MEAN = 1e-3f;
-    constexpr float STDDEV = 1e2f;
-    constexpr float INV_VARIANCE = 1.0f / (STDDEV * STDDEV); // 1e-4
+    constexpr float MEAN = 0.5f;
+    constexpr float INV_VARIANCE = 1.0f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
 
     xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), SEED);
@@ -240,7 +240,6 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
                                     static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
                                     SEED + 2);
     meanTensor.fillWithValue(static_cast<MeanVarType>(MEAN));
-    // inverse variance must be non-negative (reference computes 1/sqrt(var + eps)).
     invVarianceTensor.fillWithValue(static_cast<MeanVarType>(INV_VARIANCE));
 
     // Run the GPU reference executor
@@ -269,13 +268,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     cpuY.markHostModified();
 
     // Compare
-    const auto* cpuYData = static_cast<const IOType*>(cpuY.rawHostData());
-    const auto* gpuYData = static_cast<const IOType*>(gpuY.rawHostData());
-    for(size_t i = 0; i < cpuY.elementCount(); ++i)
-    {
-        EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuYData[i]), tolerance)
-            << "Mismatch in dx at index " << i;
-    }
+    const CpuFpReferenceValidation<IOType> validator(tolerance, tolerance);
+    EXPECT_TRUE(validator.allClose(cpuY, gpuY));
 }
 
 } // anonymous namespace
@@ -337,7 +331,7 @@ TEST(TestGpuBatchnormFwdInfPlanBfp16, ExecutePlanNhwc)
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
-        {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInference<bfloat16>());
+        {2, 3, 4, 4}, TensorLayout::NHWC, batchnorm::getToleranceInference<bfloat16>());
 }
 
 // ============================================================================

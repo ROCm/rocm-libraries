@@ -9,6 +9,7 @@
 
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -323,8 +324,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     Tensor<MeanVarType> varianceTensor(perChannelDims, perChannelStrides);
     Tensor<ComputeType> epsilonTensor(std::vector<int64_t>{1}, std::vector<int64_t>{1});
 
-    constexpr float MEAN = 1e-3f;
-    constexpr float VARIANCE = 1e4f;
+    constexpr float MEAN = 0.5f;
+    constexpr float VARIANCE = 1.f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
     constexpr unsigned int SEED = 42;
     xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), SEED);
@@ -367,13 +368,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     cpuY.markHostModified();
 
     // Compare
-    const auto* cpuYData = static_cast<const IOType*>(cpuY.rawHostData());
-    const auto* gpuYData = static_cast<const IOType*>(gpuY.rawHostData());
-    for(size_t i = 0; i < cpuY.elementCount(); ++i)
-    {
-        EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuYData[i]), tolerance)
-            << "Mismatch in dx at index " << i;
-    }
+    const CpuFpReferenceValidation<IOType> validator(tolerance, tolerance);
+    EXPECT_TRUE(validator.allClose(cpuY, gpuY));
 }
 
 } // anonymous namespace
@@ -435,7 +431,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBfp16, ExecutePlanNhwc)
     SKIP_IF_NO_DEVICES();
 
     runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
-        {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInferenceWithVariance<bfloat16>());
+        {2, 3, 4, 4}, TensorLayout::NHWC, batchnorm::getToleranceInferenceWithVariance<bfloat16>());
 }
 
 // ============================================================================
