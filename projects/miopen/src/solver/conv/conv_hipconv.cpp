@@ -163,7 +163,8 @@ struct HipConvTransposePlan
 
     size_t Bytes(size_t i) const
     {
-        return slot[i].has_value() ? slot[i]->GetOutputTensorSize() : 0;
+        const auto& s = slot[i];
+        return s.has_value() ? s->GetOutputTensorSize() : 0;
     }
 
     // The operand an argument carries, for logging.
@@ -540,13 +541,14 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
 
     for(size_t i = 0; i < plan.slot.size(); ++i)
     {
-        if(!plan.slot[i].has_value())
+        const auto& slot = plan.slot[i];
+        if(!slot.has_value())
             continue;
         const auto kernel_idx = result.construction_params.size();
-        result.construction_params.push_back(plan.slot[i]->GetKernelInfo());
-        trans[i].emplace(*plan.slot[i], kernel_idx, wt, i);
+        result.construction_params.push_back(slot->GetKernelInfo());
+        trans[i].emplace(*slot, kernel_idx, wt, i);
         MIOPEN_LOG_I2("ConvHipConv: operand " << plan.GetOperandName(i) << " transpose "
-                                              << plan.slot[i]->GetKernelName());
+                                              << slot->GetKernelName());
     }
 
     const auto cast_off       = wt.GetOffset(3);
