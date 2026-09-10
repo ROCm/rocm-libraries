@@ -14,11 +14,8 @@
 namespace roc::host_numerics {
 void matmulInto(const Tensor& a, const Tensor& b, Tensor output, const MatmulOptions& options,
                 OutputSelection selection, GemmBackend backend) {
-    GemmOptions gemmOptions(options);
-    gemmOptions.outputSelection = std::move(selection);
-    Tensor zero = output;
-    (void)detail::executeGemm(GemmInvocation(a, b, std::move(zero), std::move(output), gemmOptions),
-                              backend);
+    (void)detail::executeGemm(
+        GemmInvocation(a, b, std::move(output), options, std::move(selection)), backend);
 }
 
 Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const MatmulOptions& options,

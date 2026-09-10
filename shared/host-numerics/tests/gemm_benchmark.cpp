@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
         const Tensor b = makeMatrix(profile.inputType, bLayout, 2);
         const Tensor c = makeMatrix(profile.outputType, outputLayout, 5, !profile.commonEpilogue);
         const Tensor output(profile.outputType, outputLayout);
-        GemmOptions requestOptions(profile.accumulatorType);
+        GemmTestOptions requestOptions(profile.accumulatorType);
         requestOptions.outputSelection = selection;
         if (profile.blockScaled) {
             constexpr size_t blockSize = 32;
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
                 ? OutputSelection::primeStride(outputElements, outputElements, 128)
                 : selection;
         const Tensor expected(profile.outputType, outputLayout);
-        GemmOptions expectedOptions = requestOptions;
+        GemmTestOptions expectedOptions = requestOptions;
         expectedOptions.outputSelection = validationSelection;
         GemmTestCase expectedRequest(a, b, c, expected, expectedOptions);
         runScalarOracle(expectedRequest, expected);

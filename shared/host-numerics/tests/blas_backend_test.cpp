@@ -159,8 +159,10 @@ void testZeroExtentsDoNotInvokeBlas() {
     zeroReduction.alpha = std::numeric_limits<float>::quiet_NaN();
     zeroReduction.beta = 3.0f;
     const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(zeroReduction, GemmBackend::Blas);
-    require(runInfo.backendUsed == GemmBackend::Blas && output.loadAs<float>({0, 0}) == 6.0f,
-            "BLAS strategy did not treat an empty reduction as a null product.");
+    require(runInfo.backendUsed == GemmBackend::Blas,
+            "BLAS strategy did not accept an empty reduction.");
+    require(output.loadAs<float>({0, 0}) == 6.0f,
+            "Composed GEMM did not treat an empty reduction as a null product.");
 }
 
 void testModeratelyLargeExactGemm() {
@@ -216,11 +218,11 @@ int main() {
 
     d.copyLogicalElementsFrom(ones);
     problem.activation = Activation::Relu;
-    const GemmTestRunInfo fallback = referenceGemmWithBlasBackend(problem);
-    require(fallback.backendUsed == GemmBackend::Blocked && fallback.fallbackReason.has_value() &&
+    const GemmTestRunInfo activated = referenceGemmWithBlasBackend(problem);
+    require(activated.backendUsed == GemmBackend::Blas && !activated.fallbackReason &&
                 d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
                 d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
-            "Automatic runtime backend fallback mismatch.");
+            "Composed activation changed automatic matmul backend selection.");
     problem.activation = Activation::None;
 
     testPartialOutputSelection();

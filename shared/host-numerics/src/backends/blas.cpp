@@ -106,10 +106,9 @@ void validateCommon(const GemmInvocation& problem) {
     detail::validateRuntimeGemm(problem);
 
     if (problem.a.type() != problem.accumulatorType ||
-        problem.b.type() != problem.accumulatorType ||
-        problem.c.type() != problem.accumulatorType || problem.d.type() != problem.accumulatorType)
+        problem.b.type() != problem.accumulatorType || problem.d.type() != problem.accumulatorType)
         throw std::invalid_argument(
-            "BLAS backend requires A, B, C, D, and accumulator types to match.");
+            "BLAS backend requires A, B, output, and accumulator types to match.");
     if (problem.computeTypeA || problem.computeTypeB)
         throw std::invalid_argument("BLAS backend does not support compute-input quantization.");
     if (!problem.preQuantizationScalesA.empty() || !problem.preQuantizationScalesB.empty())
@@ -118,23 +117,12 @@ void validateCommon(const GemmInvocation& problem) {
         throw std::invalid_argument("BLAS backend does not support block scaling.");
     if (problem.mathMode != MathMode::Default)
         throw std::invalid_argument("BLAS backend supports only default operand math.");
-    if (problem.bias || problem.scaleAlpha || problem.scaleA || problem.scaleB ||
-        problem.activation != Activation::None ||
-        detail::runtimeScalar<std::complex<double>>(problem.scaleC, "C scale") !=
-            std::complex<double>(1.0, 0.0) ||
-        detail::runtimeScalar<std::complex<double>>(problem.outputScale, "output scale") !=
-            std::complex<double>(1.0, 0.0) ||
-        problem.outputConversion != OutputConversion::Default)
-        throw std::invalid_argument("BLAS backend does not support a fused epilogue.");
     if (!problem.outputSelection.selectsAll())
         throw std::invalid_argument("BLAS backend requires complete output selection.");
-    if (problem.c.layout() != problem.d.layout() ||
-        adjustedStorage(problem.c) != adjustedStorage(problem.d))
-        throw std::invalid_argument("BLAS backend currently requires C and D to alias.");
     if (problem.d.layout().strides()[0] != 1 ||
         problem.d.layout().strides()[1] <
             static_cast<ptrdiff_t>(std::max<size_t>(1, problem.d.shape()[0])))
-        throw std::invalid_argument("BLAS backend requires column-major C/D storage.");
+        throw std::invalid_argument("BLAS backend requires column-major output storage.");
 
     const size_t m = problem.a.shape()[0];
     const size_t n = problem.b.shape()[1];
@@ -157,8 +145,8 @@ GemmExecutionInfo runReal(const GemmInvocation& problem) {
     const int n = static_cast<int>(problem.b.shape()[1]);
     const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha = detail::runtimeScalar<T>(problem.alpha, "alpha");
-    const T beta = detail::runtimeScalar<T>(problem.beta, "beta");
+    const T alpha = T(1);
+    const T beta = T(0);
     const T* a = typedData<T>(problem.a, "A");
     const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
@@ -186,8 +174,8 @@ GemmExecutionInfo runComplex(const GemmInvocation& problem) {
     const int n = static_cast<int>(problem.b.shape()[1]);
     const int k = static_cast<int>(problem.a.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha = detail::runtimeScalar<T>(problem.alpha, "alpha");
-    const T beta = detail::runtimeScalar<T>(problem.beta, "beta");
+    const T alpha = T(1);
+    const T beta = T(0);
     const T* a = typedData<T>(problem.a, "A");
     const T* b = typedData<T>(problem.b, "B");
     T* d = typedMutableData<T>(problem.d, "D");
@@ -230,14 +218,6 @@ void validateTransforming(const GemmInvocation& problem) {
             throw std::invalid_argument(
                 "Transforming BLAS backend supports F32, F64, C64, and C128 accumulation.");
     }
-    const auto hasNonScalarScale = [](const std::optional<Tensor>& scale) {
-        return scale && scale->elementCount() != 1;
-    };
-    if (problem.bias || problem.scaleAlpha || hasNonScalarScale(problem.scaleA) ||
-        hasNonScalarScale(problem.scaleB) || problem.activation != Activation::None)
-        throw std::invalid_argument(
-            "Transforming BLAS backend supports operand transforms, scalar A/B scales, and "
-            "output conversion, but not the general GEMM epilogue.");
     if (problem.blockScaleA || problem.blockScaleB)
         throw std::invalid_argument(
             "Transforming BLAS backend cannot preserve block-scale reduction boundaries.");
@@ -351,26 +331,24 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
     if (problem.a.shape()[1] != 0 && blas.querySupport(problem)) return blas.run(problem);
 
     Tensor stagedOutput(nativeScalarType<Accumulator>, columnMajorLayout(problem.d.shape()));
-    const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
-
-    if (!finalizer.skipsProduct()) {
+    if (problem.a.shape()[1] != 0) {
         auto [stagedA, conjugateA] = prepareBlasOperand<Accumulator>(
             problem.a, problem.computeTypeA, problem.preQuantizationScalesA, problem.conjugateA,
             problem.mathMode, "A");
         auto [stagedB, conjugateB] = prepareBlasOperand<Accumulator>(
             problem.b, problem.computeTypeB, problem.preQuantizationScalesB, problem.conjugateB,
             problem.mathMode, "B");
-        GemmOptions stagedOptions(nativeScalarType<Accumulator>);
+        MatmulOptions stagedOptions(nativeScalarType<Accumulator>);
         stagedOptions.conjugateA = conjugateA;
         stagedOptions.conjugateB = conjugateB;
-        GemmInvocation stagedProblem(std::move(stagedA), std::move(stagedB), stagedOutput,
-                                     stagedOutput, stagedOptions);
+        GemmInvocation stagedProblem(
+            std::move(stagedA), std::move(stagedB), stagedOutput, stagedOptions);
 
         blas.run(stagedProblem);
     }
 
     const RuntimeMatrixReader<Accumulator> stagedOutputReader(stagedOutput);
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
+    const RuntimeMatrixWriter<Accumulator> output(problem.d);
     const size_t rows = problem.d.shape()[0];
     const size_t outputElementCount = problem.d.shape().elementCount();
     detail::forEachParallelIndex(
@@ -378,8 +356,7 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         [&](size_t linearIndex) {
             const size_t column = linearIndex / rows;
             const size_t row = linearIndex % rows;
-            output.store(row, column,
-                         finalizer.finalize(row, column, stagedOutputReader(row, column)));
+            output.store(row, column, stagedOutputReader(row, column));
         });
 
     return {
@@ -512,11 +489,8 @@ GemmExecutionInfo runTransformingBlasGemm(const GemmInvocation& problem) {
 
 void matmulIntoWithBlasBackend(const Tensor& a, const Tensor& b, Tensor output,
                                const MatmulOptions& options, OutputSelection selection) {
-    GemmOptions gemmOptions(options);
-    gemmOptions.outputSelection = std::move(selection);
-    Tensor zero = output;
     (void)detail::executeBlasGemm(
-        GemmInvocation(a, b, std::move(zero), std::move(output), gemmOptions),
+        GemmInvocation(a, b, std::move(output), options, std::move(selection)),
         GemmBackend::Automatic);
 }
 

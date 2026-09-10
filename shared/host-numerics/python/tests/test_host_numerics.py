@@ -11,6 +11,7 @@ import weakref
 import numpy as np
 
 import roc_host_numerics as hv
+from roc_host_numerics import _roc_host_numerics as native
 from gemm_test_adapter import reference_gemm, reference_gemm_into
 
 GENERATION_REAL_RANDOM_DOMAIN = 0
@@ -466,6 +467,9 @@ class TensorAndGemmTests(unittest.TestCase):
     def test_public_api_uses_matmul_instead_of_fused_gemm(self):
         self.assertFalse(hasattr(hv, "reference_gemm"))
         self.assertFalse(hasattr(hv, "reference_gemm_into"))
+        self.assertFalse(hasattr(native, "_GemmOptions"))
+        self.assertFalse(hasattr(native, "_reference_gemm"))
+        self.assertFalse(hasattr(native, "_reference_gemm_into"))
 
     def test_numpy_round_trip(self):
         values = np.arange(12, dtype=np.float32).reshape(3, 4)
@@ -2235,19 +2239,20 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = np.float32(np.maximum(combined, np.float32(0.0)) * output_scale)
 
-        observed = reference_gemm(
-            hv.from_numpy(a),
-            hv.from_numpy(b),
-            hv.from_numpy(c),
+        product = hv.matmul(
+            hv.from_numpy(a), hv.from_numpy(b), hv.ScalarType.Float32
+        )
+        combined_tensor = hv.add(
+            hv.multiply(product, float(alpha)),
+            hv.multiply(hv.from_numpy(c), float(beta * scale_c)),
+        )
+        observed = hv.reference_epilogue(
+            combined_tensor,
             hv.ScalarType.Float32,
             hv.ScalarType.Float32,
-            alpha=float(alpha),
-            beta=float(beta),
-            scale_c=float(scale_c),
             activation=hv.Activation.Relu,
             output_scale=float(output_scale),
-            backend=hv.GemmBackend.Blocked,
-        )
+        ).output
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
     def test_float64_gemm_matches_numpy(self):
@@ -2310,30 +2315,14 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(hv.to_numpy(observed), expected)
 
-    def test_int32_accumulator_rejects_fractional_scalar_proxy(self):
-        values = np.ones((1, 1), dtype=np.int8)
-        initial = np.zeros((1, 1), dtype=np.int32)
-        with self.assertRaises(ValueError):
-            reference_gemm(
-                hv.from_numpy(values),
-                hv.from_numpy(values),
-                hv.from_numpy(initial),
-                hv.ScalarType.Int32,
-                hv.ScalarType.Int32,
-                alpha=0.5,
-            )
-
     def test_float16_accumulator_rounds_each_step(self):
         a = np.full((1, 64), np.float16(0.1), dtype=np.float16)
         b = np.full((64, 1), np.float16(0.1), dtype=np.float16)
-        c = np.zeros((1, 1), dtype=np.float16)
-        result = reference_gemm(
+        result = hv.matmul(
             hv.from_numpy(a),
             hv.from_numpy(b),
-            hv.from_numpy(c),
             hv.ScalarType.Float16,
             hv.ScalarType.Float16,
-            backend=hv.GemmBackend.Automatic,
         )
 
         expected = np.float16(0)
@@ -2348,11 +2337,9 @@ class TensorAndGemmTests(unittest.TestCase):
     def test_bfloat16_accumulator_rounds_product_and_sum_each_step(self):
         a = np.full((1, 16), np.float32(0.1), dtype=np.float32)
         b = np.full((16, 1), np.float32(0.1), dtype=np.float32)
-        c = np.zeros((1, 1), dtype=np.float32)
-        observed = reference_gemm(
+        observed = hv.matmul(
             hv.from_numpy(a),
             hv.from_numpy(b),
-            hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
         )
@@ -2371,20 +2358,17 @@ class TensorAndGemmTests(unittest.TestCase):
     def test_bfloat16_accumulator_rounding_policy_is_explicit(self):
         a = np.full((1, 16), np.float32(0.1), dtype=np.float32)
         b = np.full((16, 1), np.float32(0.1), dtype=np.float32)
-        c = np.zeros((1, 1), dtype=np.float32)
 
-        rounded = reference_gemm(
+        rounded = hv.matmul(
             hv.from_numpy(a),
             hv.from_numpy(b),
-            hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
             accumulation_rounding=hv.AccumulationRounding.AfterProductAndSum,
         )
-        full_precision = reference_gemm(
+        full_precision = hv.matmul(
             hv.from_numpy(a),
             hv.from_numpy(b),
-            hv.from_numpy(c),
             hv.ScalarType.Float32,
             hv.ScalarType.BFloat16,
             accumulation_rounding=hv.AccumulationRounding.FullPrecision,
