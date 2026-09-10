@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
@@ -16,6 +17,7 @@
 #include "engines/plans/MiopenBinaryPointwisePlan.hpp"
 
 using namespace miopen_plugin;
+using namespace hipdnn_test_sdk::utilities;
 using namespace pointwise_common;
 
 namespace
@@ -40,7 +42,7 @@ protected:
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, GetWorkspaceSizeReturnsZero)
 {
-    auto fbb = validBinaryGraph();
+    auto fbb = createBinaryPointwiseGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);
@@ -53,7 +55,7 @@ TEST_F(TestGpuMiopenBinaryPointwisePlan, GetWorkspaceSizeReturnsZero)
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorDoesNotThrowForValidGraph)
 {
-    auto fbb = validBinaryGraph();
+    auto fbb = createBinaryPointwiseGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);
@@ -65,11 +67,11 @@ TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorDoesNotThrowForValidGraph)
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorThrowsInternalErrorWhenIn1TensorUidMissing)
 {
-    // A default createValidPointwiseGraph() call produces a unary-shaped node (no
+    // A default createUnaryPointwiseGraph() call produces a unary-shaped node (no
     // in_1_tensor_uid) -- isApplicable would reject this graph, but here the plan
     // constructor is invoked directly to exercise its own defense against isApplicable and
     // buildPlan drifting apart.
-    auto fbb = createValidPointwiseGraph(PointwiseMode::ADD);
+    auto fbb = createUnaryPointwiseGraph(PointwiseMode::ADD);
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);
