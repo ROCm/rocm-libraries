@@ -95,12 +95,6 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     using FmhaDropout           = remove_cvref_t<typename Problem::FmhaDropout>;
     using HotLoopScheduler      = typename Policy::template HotLoopScheduler<Problem>;
 
-    // Mirror tile pairing inlines two bodies into the function and only fires
-    // for masked instances, so IsMasking is what distinguishes the two regimes.
-    static constexpr bool kDropStagedSched =
-        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 2) ||
-        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 1 && !FmhaMask::IsMasking);
-
     using BlockFmhaShape = remove_cvref_t<typename Problem::BlockFmhaShape>;
 
     static constexpr index_t kBlockPerCu = Problem::kBlockPerCu;
@@ -130,6 +124,24 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr bool kHasBiasGrad     = Problem::kHasBiasGrad;
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
+
+    // Mirror tile pairing inlines two bodies into the function, and the machine
+    // scheduler's clustering heuristics go the wrong way in a doubled region:
+    // dropping the hand-written prescriptions is +14.9..+28.2% wherever the
+    // body holds one Q tile and -1.4..-3.2% where it holds two. So the
+    // discriminator is whether pairing fires, not whether the instance is
+    // masked -- group mode never pairs, and its causal instances measure
+    // +15.65% with the drop.
+    //
+    // Mirrors kMaskTilePairing in fmha_bwd_kernel.hpp. Two of its terms
+    // simplify here: kUseQrQtrDorPipeline is false by construction in this
+    // pipeline, and with it false kUsePersistent reduces to kIsDeterministic.
+    static constexpr bool kBodyIsPaired = CK_TILE_FMHA_BWD_MASK_TILE_PAIRING &&
+                                          FmhaMask::IsMasking && !kIsGroupMode &&
+                                          !kIsDeterministic;
+    static constexpr bool kDropStagedSched =
+        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 2) ||
+        (CK_TILE_FMHA_BWD_SCHED_DROP_MODE == 1 && !kBodyIsPaired);
     static_assert(!kUseTrLoad, "This pipeline does not use trload!");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
