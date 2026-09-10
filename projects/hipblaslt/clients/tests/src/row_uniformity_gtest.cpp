@@ -526,10 +526,9 @@ namespace
                                        enumerated);
             enumeratedCount = static_cast<int>(enumerated.size());
 
-            // getAllAlgos walks a std::set of shared_ptr, so the order follows
-            // heap addresses and varies from process to process. Sorting on the
-            // solution index -- a value baked into the library -- is what makes
-            // the sweep below pick the same candidates on every run.
+            // getAllAlgos now reports solutions in solution-index order, so this
+            // sort is redundant; it is kept so the sweep below still picks the
+            // same candidates if that ordering ever regresses.
             std::sort(
                 enumerated.begin(),
                 enumerated.end(),
