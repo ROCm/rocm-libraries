@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace
@@ -191,4 +193,38 @@ TEST(HipBuffer, smoke_TransfersValidSwizzleGeometry)
                           /*needSwizzle=*/true),
               hipSuccess);
     expectHostEquals(padded, paddedExpected);
+}
+
+TEST(HipBuffer, PackedTensorViewsUseLogicalElementOffsets)
+{
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::ScalarType;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+
+    constexpr size_t batchStride = 5;
+    HipHostBuffer    storage(HIP_R_6F_E2M3, 2 * batchStride);
+    auto             complete = storage.tensor(
+        ScalarType::Float6E2M3, Layout::contiguousLastDimensionFastest(Shape{2 * batchStride}));
+    std::ranges::fill(complete.rawEncodedBackingStorage(), std::byte{0});
+
+    const std::array<float, 3> firstValues{1.0f, 0.5f, -1.0f};
+    const std::array<float, 3> secondValues{2.0f, -0.5f, -2.0f};
+    const Tensor first = Tensor::copyValuesWithConversion(
+        ScalarType::Float6E2M3, Shape{3}, std::span<const float>(firstValues));
+    const Tensor second = Tensor::copyValuesWithConversion(
+        ScalarType::Float6E2M3, Shape{3}, std::span<const float>(secondValues));
+
+    storage.tensor(ScalarType::Float6E2M3, Layout(Shape{3}, {1}, 0))
+        .copyLogicalElementsFrom(first);
+    storage.tensor(ScalarType::Float6E2M3, Layout(Shape{3}, {1}, batchStride))
+        .copyLogicalElementsFrom(second);
+
+    for(size_t index = 0; index < firstValues.size(); ++index)
+    {
+        EXPECT_EQ(complete.loadAs<float>({index}), firstValues[index]);
+        EXPECT_EQ(complete.loadAs<float>({batchStride + index}), secondValues[index]);
+    }
+    EXPECT_EQ(complete.loadAs<float>({3}), 0.0f);
+    EXPECT_EQ(complete.loadAs<float>({4}), 0.0f);
 }
