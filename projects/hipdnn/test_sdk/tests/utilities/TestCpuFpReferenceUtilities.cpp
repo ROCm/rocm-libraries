@@ -779,3 +779,50 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchDoesNothingF
     EXPECT_EQ(visits.load(), 0);
     EXPECT_EQ(CountingScratch::constructions.load(), 0);
 }
+
+// A bool-returning functor taking a non-const lvalue reference. It binds fine at the call
+// site either way, so an early-exit probe that models the argument as an rvalue or as a
+// `const&` silently drops the bool and runs the whole range.
+namespace
+{
+
+struct MutableIndexEarlyExit
+{
+    std::atomic<int>* visits;
+
+    bool operator()(std::vector<int64_t>& indices) const
+    {
+        (*visits)++;
+        return indices[0] < 3;
+    }
+};
+
+} // namespace
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStopsOnFalseForMutableIndices)
+{
+    std::atomic<int> visits{0};
+
+    auto functor
+        = makeParallelTensorFunctor(MutableIndexEarlyExit{&visits}, std::vector<int64_t>{100});
+    functor(1);
+
+    // Indices 0, 1 and 2 continue; index 3 returns false and stops the thread.
+    EXPECT_EQ(visits.load(), 4);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchStopsOnFalseForMutableIndices)
+{
+    std::atomic<int> visits{0};
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visits](CountingScratch& scratch, std::vector<int64_t>& indices) {
+            (void)scratch;
+            visits++;
+            return indices[0] < 3;
+        },
+        std::vector<int64_t>{100});
+    functor(1);
+
+    EXPECT_EQ(visits.load(), 4);
+}

@@ -255,7 +255,10 @@ struct ParallelTensorFunctorDynamic : ParallelTensorRange
             {
                 fillNdIndices(workIdx, indices);
 
-                if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>>)
+                // Probed with the call-site expression type - a non-const lvalue. Probing an
+                // rvalue or a `const&` misses a functor taking `std::vector<int64_t>&`, which
+                // would then bind fine at the call below and have its bool silently dropped.
+                if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>&>)
                 {
                     if(!func(indices))
                     {
@@ -310,7 +313,7 @@ struct ParallelTensorFunctorWithScratch : ParallelTensorRange
             {
                 fillNdIndices(workIdx, indices);
 
-                if constexpr(std::is_invocable_r_v<bool, F, Scratch&, std::vector<int64_t>>)
+                if constexpr(std::is_invocable_r_v<bool, F, Scratch&, std::vector<int64_t>&>)
                 {
                     if(!func(scratch, indices))
                     {
