@@ -33,9 +33,10 @@ jobs:
     env:
       VENV_PATH: B:\rocm_wheels
       THIRD_PARTY_DEPS_DIR: B:\third-party-deps
+      # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
+      # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
+      # than a TheRock family name. A lane that needs a family name will need its own variable.
       GPU_TARGET: gfx1151
-      # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
-      DEVICE_TARGET: gfx1151
     steps:
       - name: Runner health status
         shell: pwsh
@@ -100,8 +101,8 @@ jobs:
           python -m venv $env:VENV_PATH
           & "$env:VENV_PATH\Scripts\Activate.ps1"
 
-          Write-Host "Installing ROCm wheels from multi-arch nightlies (device: $env:DEVICE_TARGET)"
-          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$env:DEVICE_TARGET]"
+          Write-Host "Installing ROCm wheels from multi-arch nightlies (device: $env:GPU_TARGET)"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$env:GPU_TARGET]"
           if ($LASTEXITCODE -ne 0) { throw "Failed to install ROCm wheels" }
 
           Write-Host "Initializing ROCm SDK"
@@ -226,7 +227,7 @@ jobs:
         shell: pwsh
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python -m pip install --upgrade build numpy pytest
+          & $python -m pip install --upgrade build numpy
           if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
 
       - name: Pack frontend wheel
@@ -258,9 +259,10 @@ jobs:
     name: HipDNN Linux Superbuild
     runs-on: azure-linux-scale-rocm
     env:
+      # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
+      # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
+      # than a TheRock family name. A lane that needs a family name will need its own variable.
       GPU_TARGET: gfx942
-      # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
-      DEVICE_TARGET: gfx942
     steps:
       - name: Runner health status
         run: |
@@ -315,13 +317,8 @@ jobs:
           python -m venv "$VENV_PATH"
           source "$VENV_PATH/bin/activate"
 
-          echo "Installing ROCm wheels from multi-arch nightlies (device: $DEVICE_TARGET)"
-          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
-
-          # rocm_kpack is used from a source tree, so pip never resolves the
-          # msgpack/zstandard it declares. The descriptor-packaging tool imports
-          # it, so this lane needs them present in the configuring interpreter.
-          pip install "msgpack>=1.0.0" "zstandard>=0.20.0"
+          echo "Installing ROCm wheels from multi-arch nightlies (device: $GPU_TARGET)"
+          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$GPU_TARGET]"
 
           echo "Initializing ROCm SDK"
           rocm-sdk init
@@ -450,7 +447,7 @@ jobs:
       - name: Install Python build dependencies
         run: |
           set -euo pipefail
-          "$VENV_PATH/bin/python" -m pip install --upgrade build numpy pytest
+          "$VENV_PATH/bin/python" -m pip install --upgrade build numpy
 
       - name: Pack frontend wheel
         run: |

@@ -264,24 +264,20 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 endif()
 include(Tests)
 
-if(WIN32)
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "${CMAKE_INSTALL_BINDIR}")
-else()
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "${CMAKE_INSTALL_LIBDIR}")
-endif()
-
-set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
-    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
-)
-
-message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
-message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
-file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
-
 if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR
         "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
 endif()
+
+# Build output, install destination and the test lookup below all resolve from this one
+# SDK-provided relative directory, so the build tree mirrors the install tree.
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
+    "${CMAKE_BINARY_DIR}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
+)
+
+message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
+message(STATUS "Plugin install directory (relative): ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
+file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # The offset a test binary walks from its own directory to reach the plugin engine
 # directory and the trees hanging off it. Binaries land under CMAKE_INSTALL_BINDIR, the
