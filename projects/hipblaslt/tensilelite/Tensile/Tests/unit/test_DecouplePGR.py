@@ -215,14 +215,34 @@ _F8F4_PROBLEM_TYPE = {
 }
 
 
-def test_macro_tile_from_matrix_instruction():
-    assert macroTileFromMatrixInstruction([16, 16, 128, 1, 1, 1, 32, 4, 1]) == (64, 512)
+@pytest.mark.parametrize("mi, expected", [
+    # MatrixInstB == 1: MIBlockBM is 1 and MIWaveGroup is (mi[7], mi[8]), which is
+    # the only case the old mi[0]*mi[5]*mi[7] / mi[1]*mi[6]*mi[8] shortcut got right.
+    ([16, 16, 128, 1, 1, 1, 32, 4, 1], (64, 512)),
+    ([16, 16, 128, 1, 1, 2, 8, 2, 2], (64, 256)),
+    # MatrixInstB > 1: the blocks are distributed into MIBlockBM first and
+    # MIWaveGroup follows, so the shortcut under-reported MacroTile1. These are
+    # the shapes it got wrong.
+    ([32, 32, 1, 2, 1, 4, 1, 2, 2], (256, 128)),
+    ([16, 16, 32, 4, 1, 2, 2, 2, 2], (64, 256)),
+    ([16, 16, 64, 2, 1, 4, 2, 2, 2], (128, 128)),
+])
+def test_macro_tile_from_matrix_instruction(mi, expected):
+    assert macroTileFromMatrixInstruction(mi, 32) == expected
+
+
+def test_macro_tile_from_matrix_instruction_needs_a_wavefront_size():
+    assert macroTileFromMatrixInstruction([16, 16, 128, 1, 1, 1, 32, 4, 1], None) is None
 
 
 def _autoSelectState(**overrides):
     state = {
         "PrefetchGlobalRead": 2,
         "DepthU": 256,
+        # WavefrontSize is required: MacroTile is derived from the MI geometry,
+        # and the wavefront size enters that derivation. Auto-selection rejects
+        # rather than guessing when it is missing.
+        "WavefrontSize": 32,
         "MatrixInstruction": [16, 16, 128, 1, 1, 2, 8, 2, 2],
         "MaxLDS": 327680,
         "ProblemType": _F8F4_PROBLEM_TYPE,
@@ -368,9 +388,14 @@ def test_pgr_auto_select_uses_element_size_not_f8f4_default():
     assert pgrAutoPairSelectMaxLds(2, f16, f16["ProblemType"]) is None
 
 
-def test_pgr_auto_select_without_type_does_not_assume_f8f4():
+def test_pgr_auto_select_without_type_rejects_rather_than_guessing():
+    """No element size means no LDS estimate, so there is nothing to rank.
+
+    This used to return the first candidate. That is indistinguishable from a
+    search that ran and chose it, which is what hid the missing search.
+    """
     state = _autoSelectState(MaxLDS=90000, ProblemType={})
-    assert pgrAutoPairSelectMaxLds(2, state, {}) == (2, 2)
+    assert pgrAutoPairSelectMaxLds(2, state, {}) is None
 
 
 def _realMacA(dt):

@@ -10,13 +10,15 @@ Both keys must be set or both omitted.
   scalar PGR == -1 (no keys)    auto: start at 2
   (-1, -1) and PGR is 0 or 1    drop A/B, keep that scalar (no auto pair)
   (k, k) for k >= 0             PrefetchGlobalRead=k  (includes (0,0) and (1,1))
-  (-1, k) / (k, -1) for k >= 0  auto over the -1 tensor with the other held at k
+  (-1, k) / (k, -1) for k >= 1  auto over the -1 tensor with the other held at k
+  (-1, 0) / (0, -1)             reject (a divergent pair at level 0 has no cadence)
   (0, 1) / (1, 0)               reject (both single-buffered)
   one key only                  reject
 """
 
 
 from ..Common.DataType import DataType
+from ..Common.Utilities import effectiveMatrixInstMN
 
 PGR_SPECIAL_AUTO = -1
 PGR_AUTO_DEFAULT_LEVEL = 2
@@ -44,13 +46,85 @@ def pgrAutoPairCandidates(pgr):
     return candidates
 
 
-def macroTileFromMatrixInstruction(mi):
-    """MacroTile (M, N) from a MatrixInstruction tuple, or None if unavailable.
-    MacroTile0 = MT0 * MIWT0 * WG0, MacroTile1 = MT1 * MIWT1 * WG1
+DCP_MAX_LDS_BLOCKS_DIVERGENT = 2
+
+
+def _macroTileFromMIGeometry(instM, instN, instBM, instBN, miWaveTile, miWaveGroup,
+                             wavefrontSize):
+    """MacroTile (0, 1) from derived MI geometry, or None if it cannot be derived.
+
+    This is assignProblemIndependentDerivedParameters' own arithmetic for the
+    MIBlock[0] != 4 branch, not a second formula for the same quantity. Deriving
+    the tile independently is what made the old MatrixInstruction shortcut wrong.
+
+    MIBlock[0] == 4 needs MIOutputVectorWidth, which comes from the ISA info map
+    that this module has no access to, so callers screen that shape out and get
+    None rather than a guess.
+    """
+    for value in (instM, instN, instBM, instBN, wavefrontSize):
+        if not isinstance(value, int) or value <= 0:
+            return None
+    if wavefrontSize % instN or (instM * instN) % wavefrontSize:
+        return None
+    threadTile0 = instBM * miWaveTile[0] * (instM * instN // wavefrontSize)
+    threadTile1 = instBN * miWaveTile[1]
+    subGroup0 = miWaveGroup[0] * (wavefrontSize // instN)
+    subGroup1 = miWaveGroup[1] * instN
+    return subGroup0 * threadTile0, subGroup1 * threadTile1
+
+
+def macroTileFromMatrixInstruction(mi, wavefrontSize):
+    """MacroTile (0, 1) from a nine-item MatrixInstruction, or None.
+
+    Derives MIBlockBM/BN and MIWaveGroup the way matrixInstructionToMIParameters
+    does, then applies the shared tile arithmetic.
+
+    The previous formula was mi[0]*mi[5]*mi[7], mi[1]*mi[6]*mi[8]. It read
+    MIWaveGroup straight off mi[7]/mi[8], but MatrixInstB is distributed into
+    MIBlockBM first and MIWaveGroup follows that distribution, so any
+    MatrixInstruction with MatrixInstB > 1 came out wrong -- and always too
+    small, which under-reports LDS and lets a pair that does not fit win the
+    ranking. [32, 32, 1, 2, 1, 4, 1, 2, 2] returned 256x64 where derivation
+    gives 256x128.
     """
     if not isinstance(mi, (list, tuple)) or len(mi) < 9:
         return None
-    return mi[0] * mi[5] * mi[7], mi[1] * mi[6] * mi[8]
+    if not isinstance(wavefrontSize, int) or wavefrontSize <= 0:
+        return None
+    if mi[0] == 4 or mi[0] <= 0 or mi[3] <= 0:
+        return None
+    waves = mi[7] * mi[8]
+    wg0 = mi[4] * mi[0] * mi[7]
+    if waves <= 0 or wg0 <= 0 or wg0 // mi[0] <= 0:
+        return None
+    instBM = min(wg0 // mi[0], mi[3])
+    if instBM <= 0:
+        return None
+    instBN = mi[3] // instBM
+    miwg0 = min((wg0 // mi[0]) // instBM, waves)
+    if miwg0 <= 0:
+        return None
+    return _macroTileFromMIGeometry(mi[0], mi[1], instBM, instBN,
+                                    (mi[5], mi[6]), (miwg0, waves // miwg0),
+                                    wavefrontSize)
+
+
+def autoPairCandidateIsLegal(pgrA, pgrB):
+    """Whether an auto candidate can survive the divergent-pair rules.
+
+    Applied before ranking, not after. A divergent pair that the later rules
+    reject must not be allowed to win on LDS and strand a legal pair that fits:
+    nothing retries, so the whole solution is lost instead of stepping down.
+
+    Equal pairs degenerate to scalar PrefetchGlobalRead and are always legal
+    here. Level 0 in a divergent pair is not (see divergentPairUnsupportedReason).
+    """
+    if pgrA == pgrB:
+        return True
+    if min(pgrA, pgrB) == 0:
+        return False
+    return max(ldsBlocksForPgrLevel(pgrA),
+               ldsBlocksForPgrLevel(pgrB)) <= DCP_MAX_LDS_BLOCKS_DIVERGENT
 
 
 def _roundUpToMultiple(n, m):
@@ -189,13 +263,45 @@ def decouplePGRLdsBytesEstimate(ks, problemType=None):
 
 
 def _macroTileFromState(state):
+    """MacroTile (0, 1) for the LDS estimate, or None when it cannot be derived.
+
+    Three sources, in descending order of authority:
+
+      1. MacroTile0/MacroTile1, once assignProblemIndependentDerivedParameters
+         has run.
+      2. The MI parameters that matrixInstructionToMIParameters leaves in the
+         state (MIBlock, MIWaveTile, MIWaveGroup). THIS is the normal tuning
+         path: standard benchmark processing converts the nine-item
+         MatrixInstruction to four items and derives these before Solution() is
+         constructed, and auto-selection runs before MacroTile exists. Reading
+         MatrixInstruction alone therefore saw a four-item list, produced no
+         tile, and the search was skipped entirely.
+      3. A raw nine-item MatrixInstruction, for callers that never went through
+         that conversion.
+
+    None means the solution cannot be sized. The caller must reject, not accept
+    a candidate whose LDS it never measured.
+    """
     mt0 = state.get("MacroTile0")
     mt1 = state.get("MacroTile1")
     if mt0 is not None and mt1 is not None:
         return mt0, mt1
+    wavefrontSize = state.get("WavefrontSize")
+    miBlock = state.get("MIBlock")
+    miWaveTile = state.get("MIWaveTile")
+    miWaveGroup = state.get("MIWaveGroup")
+    if (isinstance(miBlock, (list, tuple)) and len(miBlock) == 6
+            and isinstance(miWaveTile, (list, tuple)) and len(miWaveTile) == 2
+            and isinstance(miWaveGroup, (list, tuple)) and len(miWaveGroup) == 2):
+        if miBlock[0] == 4:
+            return None
+        instM, instN = effectiveMatrixInstMN(miBlock[0], miBlock[1],
+                                             state.get("SourceSwap", False))
+        return _macroTileFromMIGeometry(instM, instN, miBlock[4], miBlock[5],
+                                        miWaveTile, miWaveGroup, wavefrontSize)
     mi = state.get("MatrixInstruction")
     if mi is not None:
-        return macroTileFromMatrixInstruction(mi)
+        return macroTileFromMatrixInstruction(mi, wavefrontSize)
     return None
 
 
@@ -206,8 +312,19 @@ def pgrAutoPairSelectMaxLds(pgr, state, problemType=None, fixedA=None, fixedB=No
     one-sided auto searches: the pinned side is filtered out of the candidate
     list instead of being searched, so the result still maximises LDS over
     every combination that remains rather than being decided in advance.
+
+    Candidate legality is filtered BEFORE ranking. Ranking first and rejecting
+    afterwards loses the solution outright, because nothing steps down to the
+    legal pair that also fits.
+
+    None is returned whenever the search could not be carried out -- no legal
+    candidate, no derivable MacroTile, no usable DepthU, or no candidate whose
+    LDS could be resolved and fits. Returning a candidate that was never
+    measured would report a selection that did not happen, which is how the
+    missing search stayed invisible.
     """
-    candidates = pgrAutoPairCandidates(pgr)
+    candidates = [pair for pair in pgrAutoPairCandidates(pgr)
+                  if autoPairCandidateIsLegal(*pair)]
     if fixedA is not None:
         candidates = [pair for pair in candidates if pair[0] == fixedA]
     if fixedB is not None:
@@ -216,26 +333,22 @@ def pgrAutoPairSelectMaxLds(pgr, state, problemType=None, fixedA=None, fixedB=No
         return None
     macroTile = _macroTileFromState(state)
     if macroTile is None:
-        return candidates[0]
+        return None
+    depthU = state.get("DepthU")
+    if not isinstance(depthU, int) or depthU <= 0:
+        return None
     pt = problemType if problemType is not None else state.get("ProblemType")
     maxLds = state.get("MaxLDS", 327680)
     if maxLds is None or maxLds < 0:
         maxLds = 327680
     probe = dict(state)
     probe["MacroTile0"], probe["MacroTile1"] = macroTile
-    if "DepthU" not in probe:
-        probe["DepthU"] = 32
-    # Rank needs A/B element size; without it do not pretend this is F8F4.
+    probe["DepthU"] = depthU
     probe["PrefetchGlobalRead"] = pgr
-    probe["PrefetchGlobalReadA"], probe["PrefetchGlobalReadB"] = candidates[0]
-    if decouplePGRLdsBytesEstimate(probe, pt) is None:
-        return candidates[0]
     bestPair = None
     bestLds = -1
     for pair in candidates:
-        pgrA, pgrB = pair
-        probe["PrefetchGlobalReadA"] = pgrA
-        probe["PrefetchGlobalReadB"] = pgrB
+        probe["PrefetchGlobalReadA"], probe["PrefetchGlobalReadB"] = pair
         lds = decouplePGRLdsBytesEstimate(probe, pt)
         if lds is None or lds > maxLds:
             continue
@@ -298,6 +411,15 @@ def resolvePrefetchGlobalReadSpecialValues(state):
         else:
             fixedA = held = pgrA
             heldTc = "A"
+        if held == 0:
+            # Not an LDS shortfall: no pair can keep a tensor at 0, because a
+            # divergent pair at level 0 is unsupported. Say that, rather than
+            # letting an empty candidate list be reported as "nothing fits" --
+            # and reject for the same reason an explicit (0, N) is rejected.
+            return ("PrefetchGlobalReadA/B: PrefetchGlobalRead%s=0 cannot be held while "
+                    "the other tensor is auto: level 0 allocates the same single LDS "
+                    "block as level 1 and pins the same scalar PrefetchGlobalRead, so a "
+                    "divergent pair at level 0 is not supported" % heldTc)
         start = max(start, held)
     selected = pgrAutoPairSelectMaxLds(start, state, state.get("ProblemType"),
                                        fixedA=fixedA, fixedB=fixedB)
@@ -355,8 +477,21 @@ def equalPairDegeneratesToScalar(ks):
 
 def divergentPairUnsupportedReason(ks):
     """Why a divergent pair cannot relocate its single-buffered fill, or None."""
+    decoupled, pgrA, pgrB = pgrLevelsForTensors(ks)
+    if decoupled and min(pgrA, pgrB) == 0:
+        # ldsBlocksForPgrLevel maps 0 and 1 to the same single block, the scalar
+        # pin min(max(A,B), min(blocks)) is 1 for both, and every consumer reads
+        # the block counts rather than the level. So (0, N) emits exactly the
+        # instructions of (1, N) under a different kernel name -- measured
+        # byte-identical -- and a real "no prefetch on this tensor" cadence does
+        # not exist yet. Reject rather than ship two names for one kernel.
+        return ("level 0 has no per-tensor prefetch cadence: it allocates the same "
+                "single LDS block as level 1 and pins the same scalar "
+                "PrefetchGlobalRead, so (%u, %u) would emit the instructions of "
+                "(%u, %u) under a different kernel name"
+                % (pgrA, pgrB, max(pgrA, 1), max(pgrB, 1)))
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
-    if max(numLdsBlkA, numLdsBlkB) > 2:
+    if max(numLdsBlkA, numLdsBlkB) > DCP_MAX_LDS_BLOCKS_DIVERGENT:
         return "more than two LDS blocks for a tensor is not supported"
     if ks["_ScheduleIterAlg"] != 0:
         return ("only ScheduleIterAlg=0 places the fill where it can be moved, "
