@@ -2624,28 +2624,33 @@ class SWaitCnt(Instruction):
         return self.formatWithComment(self.instStr)
 
     def to_stinky_logical(self) -> Any:
-        """Emit one logical ``s_waitcnt`` carrying all requested counters.
+        """Emit one typed logical wait per requested counter.
 
-        The C++ ``legalizeWaitCnt`` (invoked in ToStinkyAsmPass before the O3
-        pipeline) splits it into the gfx12+ typed waits, exactly as the native
-        rocisa->asm path does.
+        Mirrors rocisa ``SWaitCnt::setupInstructions`` on SeparateVMcnt +
+        SeparateLGKMcnt (gfx12+): dscnt, kmcnt, loadcnt, storecnt as four
+        instructions. A single combined ``SWaitCntData`` would instead be
+        packed by ``legalizeWaitCnt`` into ``s_wait_loadcnt_dscnt``.
         """
-        # rocisa SWaitCnt::setupInstructions treats waitAll as "wait for
-        # everything": vlcnt = vscnt = dscnt = kmcnt = 0. Mirror that here so a
-        # bare SWaitCnt(waitAll=True) lowers to the four typed gfx12 waits rather
-        # than the unsupported ``s_waitcnt 0``.
+        # waitAll: all four counters 0, comment overwritten to "(Wait all)".
         dscnt = 0 if self.waitAll else self.dscnt
         kmcnt = 0 if self.waitAll else self.kmcnt
         vlcnt = 0 if self.waitAll else self.vlcnt
         vscnt = 0 if self.waitAll else self.vscnt
+        comment = "(Wait all)" if self.waitAll else self.comment
 
-        return _make_swaitcnt(
-            comment=self.comment,
-            vlcnt=vlcnt,
-            vscnt=vscnt,
-            dscnt=dscnt,
-            kmcnt=kmcnt,
-        )
+        # Native emit order: _SWaitDscnt, _SWaitKMcnt, _SWaitLoadcnt, _SWaitStorecnt.
+        parts: List[Any] = []
+        if dscnt != -1:
+            parts.append(_make_swaitcnt(comment=comment, dscnt=dscnt))
+        if kmcnt != -1:
+            parts.append(_make_swaitcnt(comment=comment, kmcnt=kmcnt))
+        if vlcnt != -1:
+            parts.append(_make_swaitcnt(comment=comment, vlcnt=vlcnt))
+        if vscnt != -1:
+            parts.append(_make_swaitcnt(comment=comment, vscnt=vscnt))
+        if not parts:
+            return _make_swaitcnt(comment=comment)
+        return parts[0] if len(parts) == 1 else parts
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
