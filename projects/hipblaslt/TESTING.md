@@ -2,7 +2,6 @@
 
 - **Owner:** T.J. Alumbaugh (@talumbau)
 - **Technical Lead:** Tony Davis (@tony-davis)
-- **Last Updated:** 2026-08-11
 
 > **In a hurry?** Start with [The short version](#the-short-version). From there, jump to
 > [Choosing the Right Test Type](#choosing-the-right-test-type) if you are about to write a test, or
@@ -539,8 +538,7 @@ job types, of which exactly three are configured as gating:
   gfx950 (unit tests, then the GEMM-selection `common` suite, only if the unit stage passed), skipped
   when nothing under `tensilelite/`, `shared/stinkytofu/`, or `shared/origami/` changed, with the
   `common` stage further conditional on target branch, and droppable entirely when the same PR also
-  touches rocroller. The full stage order and trigger conditions, including a correction to a stage
-  order this document previously had backwards, are in
+  touches rocroller. The full stage order and trigger conditions are in
   [tensilelite/TESTING.md#pre-submit--ci-gates](tensilelite/TESTING.md#pre-submit--ci-gates).
 
 Other Math CI jobs post checks without gating. The one worth knowing is
@@ -638,14 +636,14 @@ about "what do we currently know is broken" has to check all eight.
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string | **Yes**, when written `strict=True` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
-| `_needs_logic_dir` environment-conditional `pytest.mark.xfail` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/Tensile/Tests/unit/test_PlaceholderMerge.py), duplicated in [`test_GpuRevisionTarget.py`](tensilelite/Tensile/Tests/unit/test_GpuRevisionTarget.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
 
 This last mechanism is a different shape from the other seven: it is not quarantining a *known* bug
 at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
 quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
 this precondition checks for never exists by design (see
 [CI visibility and gating](#ci-visibility-and-gating)), so the tests behind it (2 in
-`test_PlaceholderMerge.py`, 4 in `test_GpuRevisionTarget.py`) cannot execute for real in that lane,
+`test_PlaceholderMerge.py`, 1 in `test_GpuRevisionTarget.py`) cannot execute for real in that lane,
 ever, independent of whether the underlying data is correct. [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
 narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
 the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
@@ -1033,8 +1031,7 @@ for this document.
 
 Ordered by value per unit of effort, not by ambition. This covers hipBLASLt's C++ client and library.
 TensileLite, rocisa, and library-logic build-time validation have their own roadmap, including the
-larger structural items (the characterization-to-unit migration, mutation testing, and folding the
-logic-corpus consistency checks into `TensileLogic --check-all`), in
+larger structural items (the characterization-to-unit migration and mutation testing), in
 [tensilelite/TESTING.md#improvement-roadmap](tensilelite/TESTING.md#improvement-roadmap).
 
 ### Near term, cheap and unblocking

@@ -218,11 +218,12 @@ corpus-backed pytest copy of each also lives in
 confirmation wherever the real corpus happens to be on disk, not the enforcement point.
 
 The chip-ID-aware-arch lock, confirming that only gfx950 carries chip-ID-aware dispatch predicates,
-stays a pytest-only check against the real corpus in `test_PlaceholderMerge.py`. It is parametrized
-over every architecture in the tree to assert a whole-corpus fact, and a per-build, per-architecture
-invocation would let a single-arch build silently check only its own target architecture — exactly the
-guarantee this check exists to provide. `test_PlaceholderMerge.py`'s remaining three tests, an AST scan
-of `SolutionLibrary.py` plus two function-level unit tests, validate code rather than data.
+stays a pytest-only check against the real corpus in `test_PlaceholderMerge.py`. Its single test scans
+every architecture in the corpus to assert a whole-corpus fact, and wiring it into the build-scoped
+`--check-all` invocation instead would let a single-arch build silently check only its own target
+architecture — exactly the guarantee this check exists to provide. `test_PlaceholderMerge.py`'s
+remaining three tests, an AST scan of `SolutionLibrary.py` plus two function-level unit tests, validate
+code rather than data.
 
 All of the above, including the corpus-backed pytest copies, are gated on whether the raw corpus
 (`library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full`, relative to the hipBLASLt root) happens
