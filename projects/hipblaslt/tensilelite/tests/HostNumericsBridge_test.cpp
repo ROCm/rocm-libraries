@@ -57,6 +57,8 @@ TEST(HostNumericsComparisonAdapter, PreservesFloatOnlyPositiveThresholdOverride)
     EXPECT_FALSE(productValuesClose<float>(rocisa::DataType::Float, 1.0f, 1.02f, -0.01));
 
     EXPECT_FALSE(productValuesClose<double>(rocisa::DataType::Double, 1.0, 1.02, 0.1));
+    EXPECT_THROW(TensileLite::Client::validationComparisonOptions(rocisa::DataType::None, -1.0),
+                 std::invalid_argument);
 }
 
 TEST(HostNumericsComparisonAdapter, UsesTensileLowPrecisionConversions)
