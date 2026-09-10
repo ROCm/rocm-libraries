@@ -7,11 +7,14 @@ six CMake/registration text fragments -- from a YAML config. Modeled on
 deviations: `undefined=StrictUndefined` on the Jinja2 environment (an unset UUID
 cross-reference fails loudly at generation time, not as a confusing empty-string
 rejection at load time), and a required `--force` flag to overwrite a non-empty output
-directory (the extend flow points this tool at a *live* descriptor directory that may
-hold hand-filled `graph_match`/matcher bodies).
+directory. Generate into scratch space, including when extending an engine; preserve
+existing IDs and hand-written bodies through addition-only splicing.
 
-This tool has **no CMake/CI hookup**, matching `DescriptorGenerator`'s own convention:
-its correctness gate is running `pytest` (below), not a build.
+Generic generation is toolchain-free and issues **no compiler evidence**. The test
+suite checks generation behavior; a complete integration also needs artifact
+agreement, real native loading and engine-attributed numerical device proof. The
+[ingestor RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md) owns the only
+ordered create/extend procedure.
 
 ## Prerequisites
 
@@ -42,8 +45,8 @@ python3 -m venv .venv
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle
 
-# Regenerate over an existing, non-empty output directory (the extend flow) --
-# --force is REQUIRED, or generate.py exits 1 without touching anything.
+# Regenerate a disposable output directory, never a live engine directory.
+# --force is REQUIRED for a non-empty output directory.
 .venv/bin/python generate.py \
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle \
@@ -89,14 +92,15 @@ UMDs that existed only to carry a topology gate. Concretely:
 
 ### Native-symbol stub shape
 
-`packs/<Name>Native.cpp` uses `constexpr std::string_view` symbol constants at the top
-of an anonymous namespace and `scope.add(std::string(CONST), &fn)` calls in
-`register<Name>Symbols()` -- the exact form `hipdnn_validate_descriptors`'s
-`--native-source` check resolves (it looks for named constants referenced from that
-function, not inline string literals). The `graph_match` stub's doc comment carries,
-verbatim, the warning that returning `std::nullopt` empties the **whole** engine's
-catalog and skips every remaining pack (`KernelIngestorStateManager.hpp:450-455`) --
-the widest blast radius in the system.
+`packs/<Name>Native.cpp` declares symbol names and registers hooks through typed
+`SymbolScope<Handle>` calls in `register<Name>Symbols()`. Fill every applicable
+placeholder. Returning `std::nullopt` from `graph_match` empties the **whole**
+engine catalog; it is not a per-candidate decline. A heuristic-disabled engine has
+no scorer declaration, implementation or registration and no UHD.
+
+Native proof executes the provider's actual registration and descriptor-loading
+path. Matching strings in C++ source cannot establish a hook's type, presence or
+uniqueness and is not certification.
 
 ### Matcher-test stub
 
@@ -107,11 +111,18 @@ whatever happens to be running CI (`TestAsmSdpaForwardMatchers.cpp:27-33`).
 
 ### Pack-shape census test
 
-`tests/Test<Name>Packs.cpp` is **complete**, not a stub. It reads the descriptors this
-engine actually ships via `discoverDescriptorSets()` (the same helper
-`PointwiseTestGraphs.hpp`'s `loadedSet()` wraps) rather than a hand-built twin, so a
-broken *shipped* descriptor -- a missing pack, a dropped knob, a wrong kernel count --
-fails this fast suite instead of surfacing only in the slow GPU integration suite.
+`tests/Test<Name>Packs.cpp` exercises `discoverDescriptorSets()` and the provider's
+typed registration/loading path against the finalized emitted inventory. Expected
+pack/kernel identities, counts, SDK version and runtime source kind derive from the
+actual output, after normalization and deduplication. Packaged runtime source kind
+is KPACK, not its authored builder kind.
+
+Host census selection uses explicit `HIPDNN_TEST_EXPECTED_ARCH` from the configured
+packaging architectures, not the loaded descriptors or detected GPU. Each selected
+architecture needs its corresponding descriptor shard and a nonempty exact test
+selection. Missing/unknown selection, wrong-arch data and missing/extra identities
+fail. Use the provider's registered host invocation for the integrated template;
+host loading does not prove graph dispatch.
 
 ## The five CMake/registration splice points
 
@@ -135,11 +146,11 @@ references) while still working in the plugin `.so` -- no error either way.
 
 ## The generate -> validate round trip
 
-`hipdnn_validate_descriptors` only exists in a build configured with
-`-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default **OFF**). If it is not present in your
-build's `bin/` directory, that build was not configured with the flag -- reconfigure
-and rebuild the `hip-kernel-provider`/`tools` targets, or check with whoever owns the
-build.
+`hipdnn_validate_descriptors` requires a build configured with
+`-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default **OFF**) and the validator target
+built. A missing binary can mean an unbuilt target, disabled capability or a wrong
+build/install path. Use runtime descriptors: authored direct-load output or packed
+per-architecture output, never unlowered rocKE authoring input.
 
 ```bash
 # 1. Generate a bundle.
@@ -150,22 +161,14 @@ build.
     /tmp/scale-add/descriptors \
     --expect-engine hipkernel:ScaleAdd \
     --json
-
-# 3. (Optional, once you've filled in packs/<Name>Native.cpp) cross-check that the
-#    native file's constexpr symbol constants agree with what the descriptors name.
-<build-dir>/bin/hipdnn_validate_descriptors \
-    /tmp/scale-add/descriptors \
-    --expect-engine hipkernel:ScaleAdd \
-    --native-source /tmp/scale-add/packs/ScaleAddNative.cpp
 ```
 
-Exit 0 means: every root loaded with zero ERROR diagnostics, every `--expect-engine`
-name is present, and (if given) every `--native-source` check is clean. **This proves
-parse, cross-reference, symbol resolution, and construction -- nothing about
-`graph_match`/matcher correctness**, which needs a real graph and a real device.
-Enumeration proves much less than it looks: PR #10839's engine enumerated cleanly on
-gfx90a and failed all 27 cases on gfx942, because the packs arch-pruned before the
-matcher ever ran on gfx90a.
+Exit 0 from this structural invocation establishes descriptor parsing,
+cross-references and the expected engine's presence within the validator's
+structural scope. It does **not** certify real native registrations, matcher
+semantics, compiled specialization or device correctness. Execute actual provider
+registration/loading and the emitted-bundle census separately, then prove dispatch
+and numerics against the exact intended engine.
 
 `tests/test_round_trip.py` checks this in as a permanent (though `-m round_trip`
 opt-in, since it depends on a validator binary this repo does not build by default)
@@ -174,29 +177,98 @@ regression: point `HIPDNN_VALIDATE_DESCRIPTORS` at your build's binary and run
 
 ## The pipeline tools
 
-`generate.py` emits a bundle; these audit it. All are host-only and need no GPU. Each
-reads the same per-kernel `configs/<slug>.profile.yaml`, so they cannot disagree about
-which kernel they are discussing.
+`generate.py` emits a bundle. The host tools below inspect distinct contracts;
+profiles are optional analysis or authoring inputs where supported, not compiler
+evidence. Full compiled agreement reads the self-contained producing-build record
+and requires no rocKE installation on the verifying machine.
 
 | Tool | Answers | Invocation |
 |---|---|---|
-| `tools/verify_variant_sets.py` | Do the descriptors nest, are their loader tuples unique, and does each one's metadata agree with the spec its binary was built from? | `verify_variant_sets.py [--profile P] LABEL ROOT...` |
+| `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary. Artifact-bound compiler agreement is a distinct, stronger mode checked against the packed producing-build record | `verify_variant_sets.py --mode {full,structural} [--arch A] [--profile P] [--kpack-python-dir D] LABEL ROOT...`; `--mode` is required and has no default, because the two make different claims. `--mode structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `--mode full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--profile` is optional and supplies only the bundle to gate and the matcher vocabulary — but full mode needs that vocabulary to actually run, so a full invocation over string fields no declaration spells out requires one |
 | `tools/variant_reachability.py` | Can any shape in the corpus actually select each variant, or is one dead weight? | `variant_reachability.py --kdp K --shapes S [--profile P]` |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? | `launch_surface.py PROFILE --check [--allow-unguarded]` |
-| `tools/coverage_gate.py` | Three rungs: descriptors well-formed, engine loads, engine serves. Rung 3 needs a device and reports NOT RUN without one. | `coverage_gate.py --tree T [--profile P] [--validator V]` |
+| `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--arch A] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. A missing `--validator` makes rung 2 `loads-not-run`, a failure and never a silent skip; an offline result is not serving evidence |
 | `tools/knob_sweep.py` | Which knob arms are worth measuring, isolation first then pairwise. | `knob_sweep.py --profile P --shapes S [--plan]` |
 | `tools/dispatch_parity.py` | Do the emitted descriptors match what the kernel's real dispatcher resolves? | see `--help` |
 | `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
 | `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
 
-A green tool proves only what it asked. `coverage_gate.py` is explicit about this: it
-reports rung 3 as NOT RUN rather than passing, because nothing host-side can prove the
-engine served a graph.
+A green tool proves only the properties it checked. Missing, unsupported or
+mismatched required evidence fails full agreement. Structural-only results must be
+labeled as such and cannot satisfy a compiled-agreement or device gate.
 
-`tools/sweep.sh` drives a measurement sweep and requires `EXCLUDE_TENSORS` with no
-default -- the tensor names marking graphs that are unservable and dangerous for your op
-(for attention, backward graphs, marked by their gradient tensors). An op with no such
-class must say `EXCLUDE_TENSORS=none` explicitly. See `tools/README-sweeps.md`.
+`tools/sweep.py --config <absolute-YAML>` drives measurement with declarative input.
+Use `configs/sweep-isolation.sweep.yaml.example` and the
+[sweep reference](tools/README-sweeps.md) for exact input keys, hazard exclusions,
+engine attribution, correctness gates and current-input-bound resume semantics.
+
+## Specialization agreement
+
+The producing compiler, not the generator or a later verifier's installed library,
+is authoritative for effective specialization. Generation carries declarations as
+data in each UKD's ignored provenance extension:
+
+```yaml
+provenance:
+  specialization_contract:
+    schema_version: 1
+    consumers:
+      - engine_id: <UED UUID>
+        kmd_id: <KMD UUID>
+        metadata_fields: [dtype, use_v_swizzle]
+        matcher_only_fields: [layout]
+        bindings:
+          dtype: {field: dtype}
+          use_v_swizzle: {method: resolved_use_v_swizzle}
+        vocabulary:
+          dtype: {bf16: BF16}
+```
+
+This illustrative consumer assumes its KMD has exactly these three fields; names
+and accessor choices must come from the actual builder's source-use-site audit.
+For each consumer, `metadata_fields` and `matcher_only_fields` must exhaustively
+and disjointly partition its referenced KMD fields. `bindings` keys are exactly
+`metadata_fields`, and each value is exactly `{field: "<attr>"}` or
+`{method: "<accessor>"}`. Bindings refer to the actual hydrated spec object passed
+to the builder, never a reconstructed policy object. IDs reference existing
+descriptors; KMD types/defaults are not duplicated in the declaration. A UKD shared
+by engines carries each consumer's entry; duplicate/conflicting entries fail.
+
+A direct field is legal only when the builder consumes it without further
+resolution. When the builder consumes an effective accessor, that zero-argument
+bound method must be read **even if the raw field is non-null**: coupling can
+override explicit values. For example, raw swizzle true can resolve false when
+conflict-free V is disabled. Do not guess accessor names or copy policy formulas.
+Missing/noncallable readouts, exceptions, unsupported values, unresolved `None`
+and non-repeatable resolution block full agreement.
+
+`None` is authored intent, **never a compiled-artifact wildcard**. Authored
+`provenance.spec` remains distinct and preserved; only the producing compiler
+writes `provenance.effective_spec`. Authored inputs supplying that reserved
+evidence record are rejected. The generator neither imports a compiler to resolve
+policy nor issues observations on its behalf.
+
+Metadata completion and comparison use the referenced KMD's defaults and types.
+BOOL remains boolean; a builder boolean may deliberately project to 0/1 for INT;
+FLOAT values are canonicalized numerically. Matcher-only classification requires a
+source-use-site audit and independent review, not merely a mechanically complete
+partition. A consumed specialization field with no authoritative binding remains
+unsupported; reclassifying it to make a check pass is invalid.
+
+Packaging observes the actual builder object, retains serializable observations
+with serial/prewarm/shared compilation results, and compares **every consumer**
+independently before publication. The record binds effective values and declaration
+digests, authored inputs, actual producer identities/origins, descriptors, KMD
+content, completed metadata, architecture and library/toc-key/symbol/payload hashes.
+Authored passthrough cannot overwrite fresh observations.
+
+Full checking verifies that self-contained record against the current descriptors
+and named payload bytes without importing rocKE on the verifier. Structural-only
+checking cannot supply missing compiler agreement. Neither strength proves arbitrary
+machine-code equivalence, native semantics or numerical correctness. See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
+There is no packaging `--profile`, CMake `PROFILES` or external root manifest;
+existing profiles remain authoring/mining inputs whose declarations travel in UKDs.
 
 ## Configs
 
@@ -257,11 +329,12 @@ every shape carries its own resolved values for the fields the dispatcher derive
 shapes carry four arms and 63 carry six; one global cross-product would invent
 variants for some shapes and drop them for others.
 
-**The tri-state.** A knob absent from an arm is absent from the emitted
-`kernel_source.spec`, which tells the builder its own policy decides at build time.
-That is NOT the same as pinning it `false`, and both reach metadata as `0`. The shape
-states the policy's answer under `resolved`; an arm may also pin `metadata` directly,
-for a knob swept in the catalog while the binary is unchanged.
+**The tri-state.** An omitted or null policy knob retains the builder's policy
+intent; it is not an explicit false. `resolved` supplies an authored metadata
+projection, not compiler evidence. Final composition includes pack defaults before
+projection, and the producing compiler must compare metadata against the declared
+effective readout. A metadata override is legal only under its reviewed binding or
+matcher-only classification; it cannot disguise contradictory specialization.
 
 **Names.** The template must encode everything that varies, and the loader rejects a
 pack whose expansion produces two kernels with the same name. A slot is a spec field,
@@ -296,8 +369,8 @@ graph_match:                      # documentation of shape, not consumed by temp
   shape: shared_shape | disjoint_attributes
   discriminator: none | field_value | disjoint_topology
 
-kernel_source_kind: embedded_source   # the only implemented kind; anything else is a
-                                        # hard ConfigError naming why
+kernel_source_kind: embedded_source   # direct-load example; packaged sources use
+                                        # their build-time source kind
 workspace_policy: none | fixed | derived
 delegates_to_existing_plan: false
 
@@ -345,8 +418,8 @@ implementations:
   `extern "C" __global__` entry points and candidate KMD fields (externally-supplied
   `HIP_PLUGIN_*` defines, template parameters).
 
-`rocke` is a later adapter behind the same protocol, added once the packer and kpack
-launcher land -- deliberately absent here, not stubbed.
+`rocke` authoring uses the packaged path; its actual builder/spec and effective
+policy observations belong to the producing compiler, not these source adapters.
 
 `hsaco_file` is rejected explicitly (naming `supportsSourceKind()` as the missing
 prerequisite on `IKernelDispatchHandler`), not silently accepted and left to fail later

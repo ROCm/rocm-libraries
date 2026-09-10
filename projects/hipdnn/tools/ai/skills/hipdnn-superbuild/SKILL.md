@@ -79,11 +79,26 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    |---|---|---|
    | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
-   | `ENABLE_ASM_SDPA_ENGINE` | ON | Turn **OFF** to stop the incumbent ASM engine winning attention graphs when you are testing a new one. |
-   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE kernels. |
-   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | unset | The authored descriptor tree `hkp_pack` packs. Unset means the production packaging path stays dormant and ships nothing, silently. |
-   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`. |
-   | `Python3_EXECUTABLE` | system | Must itself import `msgpack` and `zstandard` — the packager *runs* this interpreter. Distinct from the flag above, which only locates the package. The failure names `/usr/bin/python3`, not the variable you set, so point it at a venv holding all three. |
+   | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE engine/dependency readiness; distinct from production lowering switches. |
+   | `HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE` / `HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP` | OFF | Enable the corresponding authored source producer. Read current CMake guards for required wheel/compiler/kpack inputs. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | unset | Finalized authored descriptor tree consumed by production packaging; use the configured relative staging layout. |
+   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
+   | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+
+   For an ingestor create/extend task, [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md)
+   owns the full sequence. Early device/workspace feasibility has no installation
+   requirement; installed probing follows build and installation. Build production
+   packaging as well as provider, validator and applicable tests; a plugin build
+   alone does not show that current descriptors were packed.
+
+   Declarations travel in UKD `provenance.specialization_contract`. Only the producing
+   compiler writes `provenance.effective_spec`, distinct from authored `provenance.spec`;
+   generic generation is toolchain-free. No packaging `--profile`, CMake `PROFILES`
+   or external root manifest is part of this interface. Read the
+   [packaging reference](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
+   A build is not compiler-agreement, native-registration or numerical evidence by
+   itself; the RUNBOOK requires those observations against the final installation.
 
 7. Build with output redirected to a log:
    ```bash
