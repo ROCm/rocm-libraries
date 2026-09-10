@@ -162,6 +162,22 @@ TEST(MatmulBatchOffsetPlan, ValidatesOffsetArithmetic)
                  std::overflow_error);
 }
 
+TEST(MatmulBatchOffsetPlan, AcceptsZeroBatchAsEmptyWork)
+{
+    Arguments arguments{};
+    arguments.init();
+    arguments.a_type      = HIP_R_32F;
+    arguments.b_type      = HIP_R_32F;
+    arguments.c_type      = HIP_R_32F;
+    arguments.d_type      = HIP_R_32F;
+    arguments.transA      = 'N';
+    arguments.transB      = 'N';
+    arguments.batch_mode  = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+    arguments.batch_count = 0;
+
+    EXPECT_NO_THROW(testing_matmul_batch_offset(arguments));
+}
+
 TEST(HostNumericsTensorManipulation, SwizzlePreservesPaddedMatrixEncoding)
 {
     constexpr size_t rows             = 18;
