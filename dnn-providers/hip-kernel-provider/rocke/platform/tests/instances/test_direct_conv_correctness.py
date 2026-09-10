@@ -8,10 +8,8 @@ GPU, and compares the output against a float32 reference produced by
 torch.nn.functional.conv2d.
 
 The test shapes are kept intentionally small (fast compile + run) while
-hitting the branch points that differ across variants:
-  - MFMA atom selection (4×4×4 for cpg=4; 16×16×16/32 for cpg=8/16/32)
-  - fold_k32 path (cpg=16, gfx950 only)
-  - double-buffer toggle
+hitting the branch points that differ across implementations:
+  - grouped DirectConvSpec (mfma_f32_16x16x16_f16) across representative cpg values
   - depthwise scalar-FMA path (cpg=1)
 
 Requires a ROCm GPU (gfx942 or gfx950) and torch.  Run:
