@@ -375,13 +375,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     const bool needsScalarC =
         mn_pad_fallback_eligible && ((CPacksN ? N : M) % CVectorSize != 0);
 
-    // Tile-size alignment is a separate, coarser boundary than the vector-size one
-    // above: a shape can be vector-aligned yet still not be a multiple of the tile size.
-    const bool needsPadM = M % GemmConfig::M_Tile != 0;
-    const bool needsPadN = N % GemmConfig::N_Tile != 0;
-    const bool needsPadK = K % (GemmConfig::K_Tile * kbatch) != 0;
-    const bool needsPad  = needsPadM || needsPadN || needsPadK;
-
     auto invoke = [&]<typename Cfg>() {
         return invoke_gemm<Cfg,
                            Invoker,
@@ -421,9 +414,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         else if(needsScalarC)
             ave_time = invoke.template operator()<
                 GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
         else
             ave_time = invoke.template operator()<GemmConfig>();
     }
@@ -432,9 +422,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         if(needsScalarAB)
             ave_time = invoke.template
                 operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
         else
             ave_time = invoke.template operator()<GemmConfig>();
     }
@@ -443,9 +430,6 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
         if(needsScalarC)
             ave_time = invoke.template operator()<
                 GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
         else
             ave_time = invoke.template operator()<GemmConfig>();
     }
