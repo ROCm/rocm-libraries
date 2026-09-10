@@ -12,13 +12,13 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "common/PointwiseGraphCommon.hpp"
+#include "common/PointwiseCommon.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
-using namespace test_pointwise_graph_common;
+using namespace pointwise_common;
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;

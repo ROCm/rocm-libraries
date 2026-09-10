@@ -8,7 +8,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-namespace test_pointwise_graph_common
+namespace pointwise_common
 {
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -134,4 +134,31 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph(const PointwiseGraphS
     return builder;
 }
 
-} // namespace test_pointwise_graph_common
+// The canonical valid binary graph: fp32 NCHW ADD, in_0 uid 1, in_1 uid 3 (broadcast on the
+// last two axes), out_0 uid 2.
+inline PointwiseGraphSpec validBinarySpec()
+{
+    PointwiseGraphSpec spec;
+    spec.mode = PointwiseMode::ADD;
+    spec.secondInputDims = {1, 3, 1, 1};
+    spec.secondInputStrides = {3, 1, 1, 1};
+    return spec;
+}
+
+struct ModeCase
+{
+    PointwiseMode mode;
+    const char* name;
+};
+
+inline const std::vector<ModeCase>& getBinaryModeCases()
+{
+    static const std::vector<ModeCase> s_cases = {{PointwiseMode::ADD, "Add"},
+                                                  {PointwiseMode::SUB, "Sub"},
+                                                  {PointwiseMode::MUL, "Mul"},
+                                                  {PointwiseMode::MAX_OP, "MaxOp"},
+                                                  {PointwiseMode::MIN_OP, "MinOp"}};
+    return s_cases;
+}
+
+} // namespace pointwise_common

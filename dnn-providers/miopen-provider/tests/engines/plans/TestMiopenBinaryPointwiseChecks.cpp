@@ -8,62 +8,20 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
-#include "common/PointwiseGraphCommon.hpp"
+#include "common/PointwiseCommon.hpp"
 #include "engines/plans/MiopenBinaryPointwiseChecks.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
-using namespace test_pointwise_graph_common;
+using namespace pointwise_common;
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
-namespace
-{
-
-// The canonical valid binary graph: fp32 NCHW ADD, in_0 uid 1, in_1 uid 3 (broadcast on the
-// last two axes), out_0 uid 2.
-PointwiseGraphSpec validBinarySpec()
-{
-    PointwiseGraphSpec spec;
-    spec.mode = PointwiseMode::ADD;
-    spec.secondInputDims = {1, 3, 1, 1};
-    spec.secondInputStrides = {3, 1, 1, 1};
-    return spec;
-}
-
-struct BinaryModeCase
-{
-    PointwiseMode mode;
-    const char* name;
-};
-
-const std::vector<BinaryModeCase>& getBinaryModeCases()
-{
-    static const std::vector<BinaryModeCase> s_cases = {{PointwiseMode::ADD, "Add"},
-                                                        {PointwiseMode::SUB, "Sub"},
-                                                        {PointwiseMode::MUL, "Mul"},
-                                                        {PointwiseMode::MAX_OP, "MaxOp"},
-                                                        {PointwiseMode::MIN_OP, "MinOp"}};
-    return s_cases;
-}
-
-} // namespace
-
-class TestMiopenBinaryPointwiseChecksModes : public ::testing::TestWithParam<BinaryModeCase>
+class TestMiopenBinaryPointwiseChecksModes : public ::testing::TestWithParam<ModeCase>
 {
 };
-
-INSTANTIATE_TEST_SUITE_P(AllCases,
-                         TestMiopenBinaryPointwiseChecksModes,
-                         ::testing::ValuesIn(getBinaryModeCases()),
-                         [](const ::testing::TestParamInfo<BinaryModeCase>& info) {
-                             return std::string(info.param.name);
-                         });
-
-// Coverage for the A/B/mode assignment across every accepting shape lives in
-// TestMiopenBinaryPointwisePlanBuilder.cpp, which exercises every mode end-to-end.
 
 TEST_P(TestMiopenBinaryPointwiseChecksModes, IsSupportedTrueForValidGraph)
 {
@@ -74,6 +32,13 @@ TEST_P(TestMiopenBinaryPointwiseChecksModes, IsSupportedTrueForValidGraph)
 
     EXPECT_TRUE(binary_pointwise_applicability::isSupported(graph));
 }
+
+INSTANTIATE_TEST_SUITE_P(AllCases,
+                         TestMiopenBinaryPointwiseChecksModes,
+                         ::testing::ValuesIn(getBinaryModeCases()),
+                         [](const ::testing::TestParamInfo<ModeCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 // Mode-independent decline cases.
 
@@ -103,16 +68,6 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNonFloatComputeType)
 {
     auto spec = validBinarySpec();
     spec.computeDataType = DataType::HALF;
-    auto builder = createPointwiseGraph(spec);
-    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-
-    EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
-}
-
-TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForUnsupportedMode)
-{
-    auto spec = validBinarySpec();
-    spec.mode = PointwiseMode::DIV;
     auto builder = createPointwiseGraph(spec);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -209,56 +164,6 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForNullSecondInputStrides)
     auto builder = createPointwiseGraph(spec);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
-}
-
-TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsFirstInput)
-{
-    // out_0 must differ from in_0 and in_1; reusing in_0's uid as the output uid is the
-    // cheapest way to construct that without a bespoke graph.
-    PointwiseGraphSpec spec = validBinarySpec();
-    spec.outputDims = spec.inputDims;
-    spec.outputStrides = spec.inputStrides;
-
-    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-    flatbuffers::FlatBufferBuilder fbb;
-
-    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        fbb, 1, "input", DataType::FLOAT, &spec.inputStrides.value(), &spec.inputDims, false));
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(fbb,
-                                                   3,
-                                                   "second_input",
-                                                   DataType::FLOAT,
-                                                   &spec.secondInputStrides.value(),
-                                                   &spec.secondInputDims.value(),
-                                                   false));
-
-    auto pwAttr = data_objects::CreatePointwiseAttributes(fbb,
-                                                          PointwiseMode::ADD,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          flatbuffers::nullopt,
-                                                          1,
-                                                          3,
-                                                          flatbuffers::nullopt,
-                                                          1); // out_0 == in_0's uid
-
-    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(
-        data_objects::CreateNodeDirect(fbb,
-                                       "pointwise",
-                                       DataType::FLOAT,
-                                       data_objects::NodeAttributes::PointwiseAttributes,
-                                       pwAttr.Union()));
-
-    auto graphOffset = data_objects::CreateGraphDirect(
-        fbb, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensorAttributes, &nodes);
-    fbb.Finish(graphOffset);
-
-    const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
 }
 
@@ -373,38 +278,13 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedTrueRegardlessOfOverrideShape)
     EXPECT_TRUE(binary_pointwise_applicability::isSupported(graph));
 }
 
-// Modes this provider doesn't map to a miopenTensorOp_t -- including BINARY_SELECT, which fails
-// on the mode check itself rather than the separate in_2-tensor check, since the mode switch
-// runs first.
+// Modes this provider doesn't map to a miopenTensorOp_t.
 
-struct UnmappedModeCase
-{
-    PointwiseMode mode;
-    const char* name;
-};
-
-class TestMiopenBinaryPointwiseChecksUnmappedModes
-    : public ::testing::TestWithParam<UnmappedModeCase>
+class TestMiopenBinaryPointwiseChecksUnsupportedModes : public ::testing::TestWithParam<ModeCase>
 {
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    AllCases,
-    TestMiopenBinaryPointwiseChecksUnmappedModes,
-    ::testing::Values(UnmappedModeCase{PointwiseMode::DIV, "Div"},
-                      UnmappedModeCase{PointwiseMode::CMP_GT, "CmpGt"},
-                      UnmappedModeCase{PointwiseMode::CMP_EQ, "CmpEq"},
-                      UnmappedModeCase{PointwiseMode::LOGICAL_AND, "LogicalAnd"},
-                      UnmappedModeCase{PointwiseMode::ADD_SQUARE, "AddSquare"},
-                      UnmappedModeCase{PointwiseMode::RELU_BWD, "ReluBwd"},
-                      UnmappedModeCase{PointwiseMode::SIGMOID_BWD, "SigmoidBwd"},
-                      UnmappedModeCase{PointwiseMode::TANH_BWD, "TanhBwd"},
-                      UnmappedModeCase{PointwiseMode::BINARY_SELECT, "BinarySelect"}),
-    [](const ::testing::TestParamInfo<UnmappedModeCase>& info) {
-        return std::string(info.param.name);
-    });
-
-TEST_P(TestMiopenBinaryPointwiseChecksUnmappedModes, IsSupportedFalseForUnmappedMode)
+TEST_P(TestMiopenBinaryPointwiseChecksUnsupportedModes, IsSupportedFalseForUnsupportedMode)
 {
     auto spec = validBinarySpec();
     spec.mode = GetParam().mode;
@@ -413,6 +293,21 @@ TEST_P(TestMiopenBinaryPointwiseChecksUnmappedModes, IsSupportedFalseForUnmapped
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
 }
+
+INSTANTIATE_TEST_SUITE_P(AllCases,
+                         TestMiopenBinaryPointwiseChecksUnsupportedModes,
+                         ::testing::Values(ModeCase{PointwiseMode::DIV, "Div"},
+                                           ModeCase{PointwiseMode::CMP_GT, "CmpGt"},
+                                           ModeCase{PointwiseMode::CMP_EQ, "CmpEq"},
+                                           ModeCase{PointwiseMode::LOGICAL_AND, "LogicalAnd"},
+                                           ModeCase{PointwiseMode::ADD_SQUARE, "AddSquare"},
+                                           ModeCase{PointwiseMode::RELU_BWD, "ReluBwd"},
+                                           ModeCase{PointwiseMode::SIGMOID_BWD, "SigmoidBwd"},
+                                           ModeCase{PointwiseMode::TANH_BWD, "TanhBwd"},
+                                           ModeCase{PointwiseMode::BINARY_SELECT, "BinarySelect"}),
+                         [](const ::testing::TestParamInfo<ModeCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 namespace
 {
@@ -583,6 +478,14 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForPassByValueSecondInput)
 TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForRaggedSecondInput)
 {
     auto builder = buildGraphWithTweakedSecondInput(false, 7);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
+}
+
+TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForInPlaceOutputEqualsFirstInput)
+{
+    auto builder = buildGraphWithInPlaceOutput(1);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
