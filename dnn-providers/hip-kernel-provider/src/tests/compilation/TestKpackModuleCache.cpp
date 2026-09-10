@@ -10,12 +10,19 @@
 
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "PackedKernelSource.hpp"
+#include "TestDescriptorRoot.hpp"
 #include "compilation/KpackModuleCache.hpp"
 
 namespace hip_kernel_provider::compilation
 {
 namespace
 {
+
+using hip_kernel_provider::testing::findPackedArchDirectory;
+using hip_kernel_provider::testing::PackedKernelSource;
+using hip_kernel_provider::testing::readPackedKernelSource;
+using hip_kernel_provider::testing::unitKpackRoot;
 
 /// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
 /// payloads rather than HSA code objects, which is what makes it useful here: it is a
@@ -28,6 +35,11 @@ constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 /// actually carries. The load cases below fail earlier and never reach the comparison,
 /// as their stage() assertions prove.
 constexpr const char* DIGEST = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// The standalone descriptor of the packed conv set, whose archive this build produced for
+/// the local arch. The ordinal case below needs a code object HIP actually accepts, which
+/// REAL_ARCHIVE's placeholder payloads deliberately are not.
+constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
 {
@@ -137,6 +149,75 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
         EXPECT_NE(message.find(ARCHIVE_ARCH), std::string::npos)
             << "the message must name the arches the archive provides: " << message;
     }
+}
+
+TEST(TestKpackModuleCacheLoad, ASecondOrdinalDoesNotAnswerFromTheFirstOrdinalsEntry)
+{
+    SKIP_IF_NO_DEVICES();
+
+    std::string arch;
+    std::filesystem::path packaged;
+    hipDeviceProp_t properties{};
+    ASSERT_NO_FATAL_FAILURE(findPackedArchDirectory(properties, arch, packaged));
+    if(packaged.empty())
+    {
+        GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                     << "): " << unitKpackRoot() / arch
+                     << " does not exist. Environmental -- the build packs per arch and this "
+                        "device is outside GPU_TARGETS.";
+    }
+
+    PackedKernelSource packed;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
+
+    // A cache of its own, so ordinal 0's entry below is the only thing ordinal 1 can hit.
+    KpackModuleCache cache;
+
+    const auto first
+        = cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, 0, packed.sha256);
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(cache.size(), 1U);
+
+    int devices = 0;
+    ASSERT_EQ(hipGetDeviceCount(&devices), hipSuccess);
+
+    if(devices > 1)
+    {
+        const auto second
+            = cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, 1, packed.sha256);
+        ASSERT_NE(second, nullptr);
+        EXPECT_NE(second, first);
+        EXPECT_EQ(cache.size(), 2U);
+        return;
+    }
+
+    // One device: the miss still loads, and the load throws at its bind because there is no
+    // device 1 to make current. That throw is what makes this case discriminating on the
+    // single-device hosts CI runs -- an ordinal-blind key would hit the entry above and
+    // hand back device 0's module without a sound.
+    try
+    {
+        cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, 1, packed.sha256);
+        FAIL() << "expected ordinal 1 to miss the ordinal-0 entry and fail its bind, but a "
+                  "module was returned on a host with one device";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        // MODULE_LOAD: every stage that reads the archive already succeeded for ordinal 0,
+        // so the only thing left to refuse is the device.
+        EXPECT_EQ(failure.stage(), KpackLoadStage::MODULE_LOAD) << failure.what();
+        EXPECT_NE(std::string(failure.what()).find("cannot make device 1 current"),
+                  std::string::npos)
+            << failure.what();
+    }
+
+    EXPECT_EQ(cache.size(), 1U);
+    EXPECT_TRUE(cache.contains(packed.archive.string(), packed.tocKey, arch, 0, packed.sha256));
+
+    // Clear the HIP error state left by the intentional hipSetDevice failure, or the
+    // HipErrorHandler listener fails this test for it.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
 
 } // namespace
