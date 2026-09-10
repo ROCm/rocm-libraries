@@ -965,6 +965,75 @@ void testTensorOperations() {
     require(negated.loadAs<float>({0}) == -3.0f && negated.loadAs<float>({1}) == -5.0f,
             "Tensor unary negation mismatch.");
 
+    const std::array<float, 4> fp4Values{0.5f, 1.0f, -1.5f, 3.0f};
+    const std::array<float, 4> fp6Values{0.5f, 2.0f, -0.5f, 1.0f};
+    const Tensor fp4 = Tensor::copyValuesWithConversion(
+        ScalarType::Float4E2M1, Shape{4}, std::span<const float>(fp4Values));
+    const Tensor fp6 = Tensor::copyValuesWithConversion(
+        ScalarType::Float6E2M3, Shape{4}, std::span<const float>(fp6Values));
+    const Tensor packedProduct
+        = multiply(fp4, fp6, ScalarType::Float32, ScalarType::Float32);
+    const std::array<float, 4> packedExpected{0.25f, 2.0f, 0.75f, 3.0f};
+    for (size_t index = 0; index < packedExpected.size(); ++index)
+        require(packedProduct.loadAs<float>({index}) == packedExpected[index],
+                "Packed input arithmetic mismatch.");
+
+    requireInvalidArgument([&] { (void)(fp4 * fp4); },
+                           "Implicit packed arithmetic did not require a compute type.");
+
+    const std::array<float, 4> fp4OutputValues{0.5f, 1.5f, -3.0f, 6.0f};
+    const Tensor fp4Output = multiply(
+        Tensor::copyNativeValues<float>(Shape{4}, std::span<const float>(fp4OutputValues)),
+        Tensor(1.0f),
+        ScalarType::Float4E2M1,
+        ScalarType::Float32);
+    for (size_t index = 0; index < fp4OutputValues.size(); ++index)
+        require(fp4Output.loadAs<float>({index}) == fp4OutputValues[index],
+                "Packed output arithmetic mismatch.");
+
+    const std::array<int32_t, 2> intValues{4, -5};
+    const Tensor saturatedInt4 = multiply(
+        Tensor::copyNativeValues<int32_t>(Shape{2}, std::span<const int32_t>(intValues)),
+        Tensor(int32_t{2}),
+        ScalarType::Int4,
+        ScalarType::Int32);
+    require(saturatedInt4.loadAs<int32_t>({0}) == 7
+                && saturatedInt4.loadAs<int32_t>({1}) == -8,
+            "Packed Int4 output did not apply its implicit saturation policy.");
+
+    const std::array<float, 3> initialPackedValues{0.5f, 0.5f, 0.5f};
+    Tensor selectedPackedOutput = Tensor::copyValuesWithConversion(
+        ScalarType::Float4E2M1,
+        Shape{3},
+        std::span<const float>(initialPackedValues));
+    const std::byte packedPaddingBefore = selectedPackedOutput.rawEncodedBackingStorage().back();
+    const std::array<float, 3> selectedInputValues{2.0f, 2.0f, 2.0f};
+    multiplyInto(Tensor::copyNativeValues<float>(Shape{3},
+                                                  std::span<const float>(selectedInputValues)),
+                 Tensor(1.0f),
+                 selectedPackedOutput,
+                 ScalarType::Float32,
+                 OutputSelection::explicitIndices({1}));
+    require(selectedPackedOutput.loadAs<float>({0}) == 0.5f
+                && selectedPackedOutput.loadAs<float>({1}) == 2.0f
+                && selectedPackedOutput.loadAs<float>({2}) == 0.5f,
+            "Selected packed arithmetic modified an unselected value.");
+    require((std::to_integer<uint8_t>(selectedPackedOutput.rawEncodedBackingStorage().back())
+             & 0xf0U)
+                == (std::to_integer<uint8_t>(packedPaddingBefore) & 0xf0U),
+            "Selected packed arithmetic modified padding bits.");
+
+    const std::array<float, 2> subtractionInputValues{5.0f, 8.0f};
+    Tensor                     subtractionOutput(ScalarType::Float32, Shape{2});
+    subtractInto(Tensor::copyNativeValues<float>(
+                     Shape{2}, std::span<const float>(subtractionInputValues)),
+                 Tensor(3.0f),
+                 subtractionOutput,
+                 ScalarType::Float32);
+    require(subtractionOutput.loadAs<float>({0}) == 2.0f
+                && subtractionOutput.loadAs<float>({1}) == 5.0f,
+            "Tensor subtraction-into mismatch.");
+
     bool rejectedBeforeAllocation = false;
     try {
         (void)multiply(x, Tensor(std::complex<double>(1.0, 1.0)), ScalarType::Float32,
