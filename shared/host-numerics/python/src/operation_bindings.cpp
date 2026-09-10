@@ -140,17 +140,14 @@ EpilogueOutputs referenceEpilogueOwned(Tensor input, ScalarType outputType, Scal
         options);
 }
 
-void referenceEpilogueIntoBound(Tensor input, Tensor output, ScalarType computeType,
-                                std::optional<Tensor> bias, Activation activation,
-                                ActivationApplication activationApplication,
-                                std::optional<Tensor> auxiliaryInput,
-                                std::optional<Tensor> rawOutput,
-                                std::optional<Tensor> auxiliaryOutput,
-                                std::optional<Tensor> gateResidual, nb::object outputScale,
-                                nb::object auxiliaryScale, nb::object activationParameter0,
-                                nb::object activationParameter1, OutputConversion outputConversion,
-                                std::optional<Tensor> amax, bool accumulateAmax,
-                                OutputSelection outputSelection) {
+void referenceEpilogueIntoBound(
+    Tensor input, Tensor output, ScalarType computeType, std::optional<Tensor> bias,
+    Activation activation, ActivationApplication activationApplication,
+    std::optional<Tensor> auxiliaryInput, std::optional<Tensor> rawOutput,
+    std::optional<Tensor> auxiliaryOutput, std::optional<Tensor> gateResidual,
+    nb::object outputScale, nb::object auxiliaryScale, nb::object activationParameter0,
+    nb::object activationParameter1, OutputConversion outputConversion, std::optional<Tensor> amax,
+    bool accumulateAmax, OutputSelection outputSelection) {
     EpilogueOptions options(computeType);
     options.auxiliaryInput = std::move(auxiliaryInput);
     options.gateResidual = std::move(gateResidual);
@@ -341,20 +338,17 @@ void registerOperationBindings(nb::module_& module) {
                "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
                "output_conversion"_a = OutputConversion::Default, "include_raw_output"_a = false,
                "include_amax"_a = false, "output_selection"_a = OutputSelection::all());
-    module.def("reference_epilogue_into", &referenceEpilogueIntoBound, "input"_a, "output"_a,
-               "compute_type"_a, "bias"_a = std::optional<Tensor>{},
-               "activation"_a = Activation::None,
-               "activation_application"_a = ActivationApplication::Forward,
-               "auxiliary_input"_a = std::optional<Tensor>{},
-               "raw_output"_a = std::optional<Tensor>{},
-               "auxiliary_output"_a = std::optional<Tensor>{},
-               "gate_residual"_a = std::optional<Tensor>{},
-               "output_scale"_a = std::complex<double>(1.0, 0.0),
-               "auxiliary_scale"_a = std::complex<double>(1.0, 0.0),
-               "activation_parameter0"_a = 0.0, "activation_parameter1"_a = 0.0,
-               "output_conversion"_a = OutputConversion::Default,
-               "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a = false,
-               "output_selection"_a = OutputSelection::all());
+    module.def(
+        "reference_epilogue_into", &referenceEpilogueIntoBound, "input"_a, "output"_a,
+        "compute_type"_a, "bias"_a = std::optional<Tensor>{}, "activation"_a = Activation::None,
+        "activation_application"_a = ActivationApplication::Forward,
+        "auxiliary_input"_a = std::optional<Tensor>{}, "raw_output"_a = std::optional<Tensor>{},
+        "auxiliary_output"_a = std::optional<Tensor>{}, "gate_residual"_a = std::optional<Tensor>{},
+        "output_scale"_a = std::complex<double>(1.0, 0.0),
+        "auxiliary_scale"_a = std::complex<double>(1.0, 0.0), "activation_parameter0"_a = 0.0,
+        "activation_parameter1"_a = 0.0, "output_conversion"_a = OutputConversion::Default,
+        "amax"_a = std::optional<Tensor>{}, "accumulate_amax"_a = false,
+        "output_selection"_a = OutputSelection::all());
 
     module.def("apply_structured_sparsity", &applyStructuredSparsityOwned, "input"_a, "pattern"_a,
                "emit_two_of_four_metadata"_a = false);

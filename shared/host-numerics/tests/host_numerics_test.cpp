@@ -60,12 +60,12 @@ void testRuntimeReferenceGemm() {
     const std::array<float, 2> scaleA{2, 3};
     const std::array<float, 2> scaleB{5, 7};
 
-    const Tensor operandA = Tensor::copyNativeStorage<float>(
-        Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a));
-    const Tensor operandB = Tensor::copyNativeStorage<float>(
-        Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b));
-    const Tensor inputC = Tensor::copyNativeStorage<float>(
-        Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c));
+    const Tensor operandA =
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a));
+    const Tensor operandB =
+        Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b));
+    const Tensor inputC =
+        Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c));
     const Tensor biasTensor =
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
                                          std::span<const float>(bias))
@@ -113,8 +113,7 @@ void testRuntimeReferenceGemm() {
 
     bool rejectedBeforeAllocation = false;
     try {
-        (void)matmul(operandA, operandB, ScalarType::Float32,
-                     MatmulOptions(ScalarType::Float32),
+        (void)matmul(operandA, operandB, ScalarType::Float32, MatmulOptions(ScalarType::Float32),
                      Layout::contiguousLastDimensionFastest(Shape{1, 1}));
     } catch (const std::invalid_argument&) {
         rejectedBeforeAllocation = true;
@@ -157,8 +156,8 @@ void testRuntimeMixedAndBlockScaledGemm() {
     blockOptions.blockSizeA = 2;
     blockOptions.blockScaleB = scalesB;
     blockOptions.blockSizeB = 2;
-    const Tensor blockResult =
-        matmul(blockA, blockB, ScalarType::Float32, blockOptions, std::nullopt, GemmBackend::Blocked);
+    const Tensor blockResult = matmul(blockA, blockB, ScalarType::Float32, blockOptions,
+                                      std::nullopt, GemmBackend::Blocked);
     require(blockResult.loadAs<float>({0, 0}) == 2 * 2 * 8 + 2 * 4 * 16,
             "Runtime block-scaled GEMM result mismatch.");
 }
@@ -185,8 +184,7 @@ void testBlockedUnalignedScaleSegments() {
 
     Tensor automaticOutput =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, -99});
-    matmulInto(operandA, operandB, automaticOutput, options,
-               OutputSelection::explicitIndices({1}));
+    matmulInto(operandA, operandB, automaticOutput, options, OutputSelection::explicitIndices({1}));
 
     const Tensor expected =
         Tensor::copyNativeValues<float>(Shape{1, 2}, std::array<float, 2>{-99, 184});
@@ -206,13 +204,12 @@ void testExactIntegerGemm() {
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const int32_t>(b));
     const Tensor inputC = Tensor::copyNativeStorage(
         Layout::contiguousLastDimensionFastest(Shape{1, 1}), std::span<const int32_t>(c));
-    const Tensor product = matmul(operandA, operandB, ScalarType::Int32,
-                                  MatmulOptions(ScalarType::Int32), std::nullopt,
-                                  GemmBackend::Blocked);
-    const Tensor d = add(product,
-                         multiply(inputC, int32_t{2}, ScalarType::Int32, ScalarType::Int32),
-                         ScalarType::Int32,
-                         ScalarType::Int32);
+    const Tensor product =
+        matmul(operandA, operandB, ScalarType::Int32, MatmulOptions(ScalarType::Int32),
+               std::nullopt, GemmBackend::Blocked);
+    const Tensor d =
+        add(product, multiply(inputC, int32_t{2}, ScalarType::Int32, ScalarType::Int32),
+            ScalarType::Int32, ScalarType::Int32);
 
     const auto wrapMultiply = [](int32_t left, int32_t right) {
         return std::bit_cast<int32_t>(static_cast<uint32_t>(left) * static_cast<uint32_t>(right));
@@ -223,7 +220,6 @@ void testExactIntegerGemm() {
     const int32_t expected = wrapAdd(wrapMultiply(a[0], b[0]), wrapMultiply(int32_t{2}, c[0]));
     require(d.loadAs<int32_t>({0, 0}) == expected,
             "Int32 GEMM did not use defined wrapping arithmetic.");
-
 }
 
 void testRuntimeComplexAndExplicitAxisGemm() {
@@ -239,33 +235,28 @@ void testRuntimeComplexAndExplicitAxisGemm() {
         std::span<const std::complex<float>>(complexB));
     MatmulOptions complexOptions(ScalarType::ComplexFloat32);
     complexOptions.conjugateA = true;
-    const Tensor complexResult = matmul(complexOperandA,
-                                        complexOperandB,
-                                        ScalarType::ComplexFloat32,
-                                        complexOptions,
-                                        std::nullopt,
-                                        GemmBackend::Blocked);
-    require(complexResult.loadAs<std::complex<float>>({0, 0})
-                == std::complex<float>(11.0f, -2.0f),
+    const Tensor complexResult =
+        matmul(complexOperandA, complexOperandB, ScalarType::ComplexFloat32, complexOptions,
+               std::nullopt, GemmBackend::Blocked);
+    require(complexResult.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11.0f, -2.0f),
             "Runtime complex GEMM result mismatch.");
 
     const std::array<float, 1> realA{1};
     const std::array<float, 2> realB{0, 0};
     const std::array<float, 2> columnBias{2, 3};
-    const Tensor realProduct = matmul(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(realA)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
-                                         std::span<const float>(realB)),
-        ScalarType::Float32);
+    const Tensor realProduct =
+        matmul(Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
+                                                std::span<const float>(realA)),
+               Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                                                std::span<const float>(realB)),
+               ScalarType::Float32);
     EpilogueOptions axisOptions(ScalarType::Float32);
     axisOptions.bias = Tensor::copyNativeStorage<float>(
         Layout::contiguousLastDimensionFastest(Shape{2}), std::span<const float>(columnBias));
     const Tensor axisResult = referenceEpilogue(realProduct, {}, axisOptions).output;
-    require(compare(axisResult,
-                    Tensor::copyNativeStorage<float>(
-                        Layout::contiguousLastDimensionFastest(Shape{1, 2}),
-                        std::span<const float>(columnBias)))
+    require(compare(axisResult, Tensor::copyNativeStorage<float>(
+                                    Layout::contiguousLastDimensionFastest(Shape{1, 2}),
+                                    std::span<const float>(columnBias)))
                 .passed(),
             "Runtime GEMM explicit column-axis bias mismatch.");
 }
@@ -282,10 +273,7 @@ void testOutputSelection() {
     Tensor d =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
 
-    matmulInto(operandA,
-               operandB,
-               d,
-               MatmulOptions(ScalarType::Float32),
+    matmulInto(operandA, operandB, d, MatmulOptions(ScalarType::Float32),
                OutputSelection::explicitIndices({0, 3}));
     require(d.loadAs<float>({0, 0}) == 19 && d.loadAs<float>({0, 1}) == -99 &&
                 d.loadAs<float>({1, 0}) == -99 && d.loadAs<float>({1, 1}) == 50,
@@ -293,10 +281,7 @@ void testOutputSelection() {
 
     Tensor firstDimensionFastestOutput =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{-99, -99, -99, -99});
-    matmulInto(operandA,
-               operandB,
-               firstDimensionFastestOutput,
-               MatmulOptions(ScalarType::Float32),
+    matmulInto(operandA, operandB, firstDimensionFastestOutput, MatmulOptions(ScalarType::Float32),
                OutputSelection::explicitIndices({1}, IndexOrder::FirstDimensionFastest));
     require(firstDimensionFastestOutput.loadAs<float>({0, 0}) == -99 &&
                 firstDimensionFastestOutput.loadAs<float>({0, 1}) == -99 &&
@@ -709,9 +694,9 @@ void testStructuredSparsity() {
          std::array<std::pair<Shape, size_t>, 2>{{{Shape{0, 8}, 0}, {Shape{2, 0}, 1}}}) {
         StructuredSparsityPattern emptyPattern;
         emptyPattern.axis = axis;
-        const StructuredSparseTensor empty = applyStructuredSparsity(
-            Tensor(ScalarType::Float32, shape), emptyPattern,
-            {.retainedIndices = true, .twoOfFourMetadata = true});
+        const StructuredSparseTensor empty =
+            applyStructuredSparsity(Tensor(ScalarType::Float32, shape), emptyPattern,
+                                    {.retainedIndices = true, .twoOfFourMetadata = true});
         require(empty.pruned.shape() == shape && empty.pruned.elementCount() == 0 &&
                     empty.compressed.elementCount() == 0 && empty.retainedIndices &&
                     empty.retainedIndices->elementCount() == 0 && empty.twoOfFourMetadata &&
@@ -967,12 +952,11 @@ void testTensorOperations() {
 
     const std::array<float, 4> fp4Values{0.5f, 1.0f, -1.5f, 3.0f};
     const std::array<float, 4> fp6Values{0.5f, 2.0f, -0.5f, 1.0f};
-    const Tensor fp4 = Tensor::copyValuesWithConversion(
-        ScalarType::Float4E2M1, Shape{4}, std::span<const float>(fp4Values));
-    const Tensor fp6 = Tensor::copyValuesWithConversion(
-        ScalarType::Float6E2M3, Shape{4}, std::span<const float>(fp6Values));
-    const Tensor packedProduct
-        = multiply(fp4, fp6, ScalarType::Float32, ScalarType::Float32);
+    const Tensor fp4 = Tensor::copyValuesWithConversion(ScalarType::Float4E2M1, Shape{4},
+                                                        std::span<const float>(fp4Values));
+    const Tensor fp6 = Tensor::copyValuesWithConversion(ScalarType::Float6E2M3, Shape{4},
+                                                        std::span<const float>(fp6Values));
+    const Tensor packedProduct = multiply(fp4, fp6, ScalarType::Float32, ScalarType::Float32);
     const std::array<float, 4> packedExpected{0.25f, 2.0f, 0.75f, 3.0f};
     for (size_t index = 0; index < packedExpected.size(); ++index)
         require(packedProduct.loadAs<float>({index}) == packedExpected[index],
@@ -982,56 +966,44 @@ void testTensorOperations() {
                            "Implicit packed arithmetic did not require a compute type.");
 
     const std::array<float, 4> fp4OutputValues{0.5f, 1.5f, -3.0f, 6.0f};
-    const Tensor fp4Output = multiply(
-        Tensor::copyNativeValues<float>(Shape{4}, std::span<const float>(fp4OutputValues)),
-        Tensor(1.0f),
-        ScalarType::Float4E2M1,
-        ScalarType::Float32);
+    const Tensor fp4Output =
+        multiply(Tensor::copyNativeValues<float>(Shape{4}, std::span<const float>(fp4OutputValues)),
+                 Tensor(1.0f), ScalarType::Float4E2M1, ScalarType::Float32);
     for (size_t index = 0; index < fp4OutputValues.size(); ++index)
         require(fp4Output.loadAs<float>({index}) == fp4OutputValues[index],
                 "Packed output arithmetic mismatch.");
 
     const std::array<int32_t, 2> intValues{4, -5};
-    const Tensor saturatedInt4 = multiply(
-        Tensor::copyNativeValues<int32_t>(Shape{2}, std::span<const int32_t>(intValues)),
-        Tensor(int32_t{2}),
-        ScalarType::Int4,
-        ScalarType::Int32);
-    require(saturatedInt4.loadAs<int32_t>({0}) == 7
-                && saturatedInt4.loadAs<int32_t>({1}) == -8,
+    const Tensor saturatedInt4 =
+        multiply(Tensor::copyNativeValues<int32_t>(Shape{2}, std::span<const int32_t>(intValues)),
+                 Tensor(int32_t{2}), ScalarType::Int4, ScalarType::Int32);
+    require(saturatedInt4.loadAs<int32_t>({0}) == 7 && saturatedInt4.loadAs<int32_t>({1}) == -8,
             "Packed Int4 output did not apply its implicit saturation policy.");
 
     const std::array<float, 3> initialPackedValues{0.5f, 0.5f, 0.5f};
     Tensor selectedPackedOutput = Tensor::copyValuesWithConversion(
-        ScalarType::Float4E2M1,
-        Shape{3},
-        std::span<const float>(initialPackedValues));
+        ScalarType::Float4E2M1, Shape{3}, std::span<const float>(initialPackedValues));
     const std::byte packedPaddingBefore = selectedPackedOutput.rawEncodedBackingStorage().back();
     const std::array<float, 3> selectedInputValues{2.0f, 2.0f, 2.0f};
-    multiplyInto(Tensor::copyNativeValues<float>(Shape{3},
-                                                  std::span<const float>(selectedInputValues)),
-                 Tensor(1.0f),
-                 selectedPackedOutput,
-                 ScalarType::Float32,
-                 OutputSelection::explicitIndices({1}));
-    require(selectedPackedOutput.loadAs<float>({0}) == 0.5f
-                && selectedPackedOutput.loadAs<float>({1}) == 2.0f
-                && selectedPackedOutput.loadAs<float>({2}) == 0.5f,
+    multiplyInto(
+        Tensor::copyNativeValues<float>(Shape{3}, std::span<const float>(selectedInputValues)),
+        Tensor(1.0f), selectedPackedOutput, ScalarType::Float32,
+        OutputSelection::explicitIndices({1}));
+    require(selectedPackedOutput.loadAs<float>({0}) == 0.5f &&
+                selectedPackedOutput.loadAs<float>({1}) == 2.0f &&
+                selectedPackedOutput.loadAs<float>({2}) == 0.5f,
             "Selected packed arithmetic modified an unselected value.");
-    require((std::to_integer<uint8_t>(selectedPackedOutput.rawEncodedBackingStorage().back())
-             & 0xf0U)
-                == (std::to_integer<uint8_t>(packedPaddingBefore) & 0xf0U),
+    require((std::to_integer<uint8_t>(selectedPackedOutput.rawEncodedBackingStorage().back()) &
+             0xf0U) == (std::to_integer<uint8_t>(packedPaddingBefore) & 0xf0U),
             "Selected packed arithmetic modified padding bits.");
 
     const std::array<float, 2> subtractionInputValues{5.0f, 8.0f};
-    Tensor                     subtractionOutput(ScalarType::Float32, Shape{2});
-    subtractInto(Tensor::copyNativeValues<float>(
-                     Shape{2}, std::span<const float>(subtractionInputValues)),
-                 Tensor(3.0f),
-                 subtractionOutput,
-                 ScalarType::Float32);
-    require(subtractionOutput.loadAs<float>({0}) == 2.0f
-                && subtractionOutput.loadAs<float>({1}) == 5.0f,
+    Tensor subtractionOutput(ScalarType::Float32, Shape{2});
+    subtractInto(
+        Tensor::copyNativeValues<float>(Shape{2}, std::span<const float>(subtractionInputValues)),
+        Tensor(3.0f), subtractionOutput, ScalarType::Float32);
+    require(subtractionOutput.loadAs<float>({0}) == 2.0f &&
+                subtractionOutput.loadAs<float>({1}) == 5.0f,
             "Tensor subtraction-into mismatch.");
 
     bool rejectedBeforeAllocation = false;
@@ -1346,11 +1318,11 @@ void testStridedAndOffsetViews() {
     const Tensor inputC =
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 4}), std::span<const float>(c));
     Tensor d = Tensor::takeOwnershipOfEncodedBackingStorage(ScalarType::Float32, outputLayout,
-                                                           std::move(dStorage));
+                                                            std::move(dStorage));
     const Tensor product = matmul(operandA, operandB, ScalarType::Float32,
                                   MatmulOptions(ScalarType::Float32), outputLayout);
-    const Tensor scaledProduct = multiply(
-        product, 2.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
+    const Tensor scaledProduct =
+        multiply(product, 2.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
     const Tensor scaledC =
         multiply(inputC, 3.0f, ScalarType::Float32, ScalarType::Float32, outputLayout);
     addInto(scaledProduct, scaledC, d, ScalarType::Float32);

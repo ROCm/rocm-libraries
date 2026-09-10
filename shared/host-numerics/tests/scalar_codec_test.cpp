@@ -324,13 +324,12 @@ void testIntegerConversionPrimitives() {
     requireThrows<std::overflow_error>(
         [&] { (void)Tensor::scalar(ScalarType::Int4, 9, rejectTowardZero); },
         "Explicit-policy rank-zero construction accepted integer overflow.");
-    const Tensor saturatedInt4
-        = Tensor::scalar(ScalarType::Int4, 9, saturateNearestEven);
+    const Tensor saturatedInt4 = Tensor::scalar(ScalarType::Int4, 9, saturateNearestEven);
     const Tensor wrappedInt4 = Tensor::scalar(ScalarType::Int4, 9, wrapNearestEven);
     require(saturatedInt4.item<int>() == 7 && wrappedInt4.item<int>() == -7,
             "Explicit-policy rank-zero integer construction mismatch.");
-    const Tensor explicitlyTruncatedBFloat16
-        = Tensor::scalar(ScalarType::BFloat16, bfloat16RoundingBoundary, truncateBFloat16);
+    const Tensor explicitlyTruncatedBFloat16 =
+        Tensor::scalar(ScalarType::BFloat16, bfloat16RoundingBoundary, truncateBFloat16);
     require(tensorRaw(explicitlyTruncatedBFloat16) == 0x3f80,
             "Explicit-policy rank-zero BFloat16 construction did not truncate.");
 
