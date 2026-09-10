@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
@@ -30,8 +31,8 @@ namespace hipdnn_plugin_sdk::ingestor
 {
 
 /// A caller's requested value for each knob it explicitly set, keyed by KMD field
-/// name.
-using KnobFilter = std::map<std::string, int64_t>;
+/// name. Values are int64_t for integer knobs or std::string for string knobs.
+using KnobFilter = std::map<std::string, std::variant<int64_t, std::string>>;
 
 /// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
 /// provider embeds one member rather than replicating loose fields by name.
@@ -343,18 +344,20 @@ public:
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
 
-            std::vector<int64_t> choices;
-            choices.reserve(values.size());
+            std::vector<int64_t> intChoices;
+            std::vector<std::string> stringChoices;
+            intChoices.reserve(values.size());
+            stringChoices.reserve(values.size());
             for(const auto& value : values)
             {
                 if(const auto* intValue = std::get_if<int64_t>(&value))
                 {
-                    choices.push_back(*intValue);
+                    intChoices.push_back(*intValue);
                 }
-            }
-            if(choices.empty())
-            {
-                continue;
+                else if(const auto* strValue = std::get_if<std::string>(&value))
+                {
+                    stringChoices.push_back(*strValue);
+                }
             }
 
             KnobT knob;
@@ -362,16 +365,33 @@ public:
             knob.description
                 = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
 
-            IntValueT defaultValue;
-            defaultValue.value = choices.front();
-            knob.default_value.Set(defaultValue);
+            if(!intChoices.empty())
+            {
+                IntValueT defaultValue;
+                defaultValue.value = intChoices.front();
+                knob.default_value.Set(defaultValue);
 
-            IntConstraintT constraint;
-            constraint.min_value = *std::min_element(choices.begin(), choices.end());
-            constraint.max_value = *std::max_element(choices.begin(), choices.end());
-            constraint.step = 1;
-            constraint.valid_values = std::move(choices);
-            knob.constraint.Set(constraint);
+                IntConstraintT constraint;
+                constraint.min_value = *std::min_element(intChoices.begin(), intChoices.end());
+                constraint.max_value = *std::max_element(intChoices.begin(), intChoices.end());
+                constraint.step = 1;
+                constraint.valid_values = std::move(intChoices);
+                knob.constraint.Set(constraint);
+            }
+            else if(!stringChoices.empty())
+            {
+                StringValueT defaultValue;
+                defaultValue.value = stringChoices.front();
+                knob.default_value.Set(defaultValue);
+
+                StringConstraintT constraint;
+                constraint.valid_values = std::move(stringChoices);
+                knob.constraint.Set(constraint);
+            }
+            else
+            {
+                continue;
+            }
 
             knobs.push_back(std::move(knob));
         }
@@ -430,13 +450,20 @@ private:
             }
 
             const auto& setting = engineConfig.getKnobSettingByName(knobName);
-            if(setting.valueType() != KnobValue::IntValue)
+            if(setting.valueType() == KnobValue::IntValue)
+            {
+                filter[knobName] = setting.valueAs<IntValue>().value();
+            }
+            else if(setting.valueType() == KnobValue::StringValue)
+            {
+                filter[knobName] = setting.valueAs<StringValue>().value()->str();
+            }
+            else
             {
                 throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                                             "engine '" + _engine.name + "' knob '" + knobName
-                                                + "' must be set to an integer value");
+                                                + "' must be set to an integer or string value");
             }
-            filter[knobName] = setting.valueAs<IntValue>().value();
         }
         return filter;
     }
@@ -479,9 +506,17 @@ private:
             const bool matchesEverySetKnob
                 = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
                       const auto value = kernel.tryGetMetadata(setting.first);
-                      const auto* intValue
-                          = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
-                      return intValue != nullptr && *intValue == setting.second;
+                      if(!value.has_value())
+                      {
+                          return false;
+                      }
+                      return std::visit(
+                          [&value](const auto& filterVal) {
+                              using T = std::decay_t<decltype(filterVal)>;
+                              const auto* ptr = std::get_if<T>(&*value);
+                              return ptr != nullptr && *ptr == filterVal;
+                          },
+                          setting.second);
                   });
             if(matchesEverySetKnob)
             {
@@ -528,7 +563,20 @@ private:
             {
                 settingsText += ", ";
             }
-            settingsText += knobName + "=" + std::to_string(value);
+            settingsText += knobName + "="
+                            + std::visit(
+                                [](const auto& v) -> std::string {
+                                    using T = std::decay_t<decltype(v)>;
+                                    if constexpr(std::is_same_v<T, int64_t>)
+                                    {
+                                        return std::to_string(v);
+                                    }
+                                    else
+                                    {
+                                        return "\"" + v + "\"";
+                                    }
+                                },
+                                value);
         }
 
         throw HipdnnPluginException(

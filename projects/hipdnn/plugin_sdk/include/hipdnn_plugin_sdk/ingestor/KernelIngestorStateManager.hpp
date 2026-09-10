@@ -391,6 +391,8 @@ private:
                                             + toString(pack.dispatchId) + "'");
             }
 
+            const auto& dispatchHandler = _dispatches.at(pack.dispatchId).handler;
+
             std::vector<KernelDefinition> packDefinitions;
             packDefinitions.reserve(pack.kernels.size());
             for(const auto& kernel : pack.kernels)
@@ -405,6 +407,16 @@ private:
                                      << " declares a source kind this build has no adapter for;"
                                         " only EMBEDDED_SOURCE and KPACK are implemented,"
                                         " dropping it");
+                    continue;
+                }
+
+                if(!dispatchHandler->supportsSourceKind(kernel.source.kind))
+                {
+                    HIPDNN_PLUGIN_LOG_WARN(
+                        "ingestor: "
+                        << describeDescriptor("kernel", kernel.name, kernel.id)
+                        << " uses source kind that its dispatch handler does not support;"
+                           " dropping it");
                     continue;
                 }
 

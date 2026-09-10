@@ -180,6 +180,13 @@ inline bool acceptFloatKernels(const MatchContext& /*context*/,
     return kernel.getStringMetadata(DTYPE) == "FLOAT";
 }
 
+inline bool acceptAllKernels(const MatchContext& /*context*/,
+                             const BoundTokens& /*bound*/,
+                             const KernelDefinition& /*kernel*/)
+{
+    return true;
+}
+
 inline double scoreByBlockSize(const MatchContext& /*context*/,
                                const BoundTokens& /*bound*/,
                                const KernelDefinition& kernel)
@@ -234,6 +241,13 @@ public:
                 uint32_t /*numDeviceBuffers*/,
                 void* /*workspace*/) const override
     {
+    }
+
+    /// Tests use both EMBEDDED_SOURCE and KPACK kernels interchangeably; a no-op
+    /// handler must not reject either.
+    bool supportsSourceKind(KernelSourceKind /*kind*/) const override
+    {
+        return true;
     }
 };
 
