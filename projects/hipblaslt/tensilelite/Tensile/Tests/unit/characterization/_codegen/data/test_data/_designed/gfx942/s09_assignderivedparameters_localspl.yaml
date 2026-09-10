@@ -1,0 +1,77 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# PROBE candidate: assignDerivedParameters LocalSplitU / NumWaveSplitK store-path
+# rejects in Tensile/SolutionStructs/Solution.py.
+#
+# Target lines: 4259,4260,4320,5286,5287 (probe-confirmed 5/5).
+#
+# These reject/derivation sites live on the non-MI (dot2/source) derivation path
+# where
+#   LocalSplitU   = 1 if WaveSplitK else WorkGroup[2]
+#   NumWaveSplitK = WorkGroup[2] if WaveSplitK else 1
+# so a non-MI base (EnableMatrixInstruction=False, ThreadTile+WorkGroup) with
+# WorkGroup[2] > 1 drives LocalSplitU>1; WaveSplitK=True instead drives
+# NumWaveSplitK>1. Forking BufferStore/StoreRemapVectorWidth spreads the rejects.
+# emit runs assignDerivedParameters + emission so the target lines fire during
+# the emit call.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # ARM 1: fp16 HPA TT non-MI (dot2 capable on gfx942)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [2, 2]
+        - WorkGroup:
+          - [8, 4, 2]
+        - WaveSplitK: [True, False]
+        - BufferStore: [True, False]
+        - StoreRemapVectorWidth: [0, 4]
+        - InnerUnroll: [1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [2]
+        - StoreVectorWidth: [1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - GlobalSplitU: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - ScheduleIterAlg: [1]
+        - ScheduleLocalWrite: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  ########################################
+  # ARM 2: double compute LSU -> ComputeDataType not single/int32/complex (4256)
+  ########################################
