@@ -108,6 +108,12 @@ static bool is_supported_arch(const std::string& arch)
 //
 // The test is exact-gfx1250, not gfx12-family: gfx1200/gfx1201 have a different 8-bit
 // fragment (16x16x16) and are not in kSupportedArchs anyway.
+// --- BEGIN gfx1250 compile-time tile guard ---
+// Extracted verbatim and compiled against a mock kernel struct by
+// dispatcher/tests/test_gfx1250_compile_guard.py. Keep the markers: the test
+// reads what is between them, so it exercises the shipped guard rather than a
+// copy that can drift. Nothing outside these markers may be needed to compile
+// the block except GFX_ARCH and SelectedKernel.
 static constexpr bool ct_starts_with(const char* s, const char* prefix)
 {
     return *prefix == '\0' ? true : (*s == *prefix && ct_starts_with(s + 1, prefix + 1));
@@ -142,6 +148,7 @@ static_assert(!kCompiledForGfx1250 ||
               "there. Paired with a legal tile in a 14,208-row sweep the 8-warp maps "
               "aborted at launch 2,168 times and passed 192 times, with no wrong "
               "answers -- unreliable rather than incorrect, so refused here.");
+// --- END gfx1250 compile-time tile guard ---
 
 extern "C" {
 

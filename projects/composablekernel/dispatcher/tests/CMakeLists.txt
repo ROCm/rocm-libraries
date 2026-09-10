@@ -130,6 +130,23 @@ set_tests_properties(dispatcher_test_codegen_common PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# gfx1250 compile-time tile guard in the RowColQuant/TensorQuant ctypes libs. It is
+# the only one of the three gfx1250 guards that outlives Tile-Engine deprecation, so
+# it needs coverage of its own. Needs no GPU and no ROCm: the test extracts the guard
+# block from the shipped .cpp and compiles it against a mock kernel struct with the
+# host C++ compiler. Skips itself if no compiler is on PATH.
+add_test(
+    NAME dispatcher_test_gfx1250_compile_guard
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gfx1250_compile_guard.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gfx1250_compile_guard PROPERTIES
+    LABELS "dispatcher;python;validation;gfx1250"
+    TIMEOUT 300
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
 # instance builders and the dispatcher's own warp gate all share. Registered on the
 # dispatcher side because the bridge/Old-TE instance-set parity that depends on it
