@@ -34,7 +34,6 @@ setup(
         "joblib>=1.4.0",
         "filelock",
         "numpy",
-        "rocisa",
     ],
     cmdclass={"build_py": CleanBuildPy},
 )
