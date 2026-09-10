@@ -190,14 +190,6 @@ struct ParallelTensorRange
         }
     }
 
-    std::vector<int64_t> getNdIndices(std::size_t i) const
-    {
-        std::vector<int64_t> indices;
-        fillNdIndices(i, indices);
-
-        return indices;
-    }
-
     /**
      * @brief Runs `body(workBegin, workEnd)` once per thread over disjoint work ranges.
      *
@@ -247,8 +239,8 @@ struct ParallelTensorFunctorDynamic : ParallelTensorRange
     void operator()(std::size_t numThreads = 1) const
     {
         runChunked(numThreads, [this](std::size_t workBegin, std::size_t workEnd) {
-            // One index buffer for the whole work range: the functor body only reads
-            // it, so allocating a fresh vector per element is pure heap traffic.
+            // One index buffer per thread, refilled per work item. The callee only reads
+            // it, so it never needs to be a fresh allocation.
             std::vector<int64_t> indices;
 
             for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
@@ -335,15 +327,18 @@ struct ParallelTensorFunctorWithScratch : ParallelTensorRange
  * Each spatial dimension of a convolution maps a window index to a source index
  * independently, and independently decides that the tap has no source element -
  * it lands in padding, or (for dgrad) is not stride-aligned. Validity and both
- * flat offsets therefore factor per dimension, so the whole window can be
- * resolved once per output element instead of being re-derived for every
- * (output element x channel x tap).
+ * flat offsets therefore factor per dimension, so the whole window resolves once
+ * per output element rather than per (output element x channel x tap).
  *
- * Buffers are reused across rebuilds, so a `thread_local` instance stops
- * allocating after the first output element. That is the point: the index-vector
- * formulation this replaces allocated several `std::vector<int64_t>` per tap,
- * which dominated the reference's runtime on allocators without a per-thread
- * cache (the Windows heap, notably).
+ * Contracts:
+ * - Not thread safe. One instance per concurrent user; obtain one from
+ *   ParallelTensorFunctorWithScratch rather than sharing or making it `static`.
+ * - `build()` invalidates the reference returned by any prior `taps()`.
+ *
+ * Buffers are reused across rebuilds, so a reused instance stops allocating after
+ * the first output element. That is the whole point: an index-vector formulation
+ * costs several `std::vector<int64_t>` per tap, which dominates runtime on
+ * allocators without a per-thread cache (the Windows heap, notably).
  */
 class ConvolutionWindow
 {
@@ -364,9 +359,8 @@ public:
      * @param mapIndex `(dim, windowIndex) -> sourceIndex`, negative when the tap
      *        has no source element.
      *
-     * Taps come out in row-major window order, which is the order the
-     * `iterateAlongDimensions` formulation accumulated in, so floating-point
-     * results are unchanged.
+     * Taps come out in row-major window order. Convolution accumulates in tap order,
+     * so this ordering is part of the numerical contract, not an implementation detail.
      */
     template <typename MapIndex>
     void build(std::size_t nDims,

@@ -33,15 +33,18 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{10});
 
-    auto indices0 = functor.getNdIndices(0);
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0);
     EXPECT_EQ(indices0.size(), 1);
     EXPECT_EQ(indices0[0], 0);
 
-    auto indices5 = functor.getNdIndices(5);
+    std::vector<int64_t> indices5;
+    functor.fillNdIndices(5, indices5);
     EXPECT_EQ(indices5.size(), 1);
     EXPECT_EQ(indices5[0], 5);
 
-    auto indices9 = functor.getNdIndices(9);
+    std::vector<int64_t> indices9;
+    functor.fillNdIndices(9, indices9);
     EXPECT_EQ(indices9.size(), 1);
     EXPECT_EQ(indices9[0], 9);
 }
@@ -51,24 +54,29 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{3, 4});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0)
     EXPECT_EQ(indices0.size(), 2);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
 
-    auto indices3 = functor.getNdIndices(3); // Should be (0, 3)
+    std::vector<int64_t> indices3;
+    functor.fillNdIndices(3, indices3); // Should be (0, 3)
     EXPECT_EQ(indices3[0], 0);
     EXPECT_EQ(indices3[1], 3);
 
-    auto indices4 = functor.getNdIndices(4); // Should be (1, 0)
+    std::vector<int64_t> indices4;
+    functor.fillNdIndices(4, indices4); // Should be (1, 0)
     EXPECT_EQ(indices4[0], 1);
     EXPECT_EQ(indices4[1], 0);
 
-    auto indices7 = functor.getNdIndices(7); // Should be (1, 3)
+    std::vector<int64_t> indices7;
+    functor.fillNdIndices(7, indices7); // Should be (1, 3)
     EXPECT_EQ(indices7[0], 1);
     EXPECT_EQ(indices7[1], 3);
 
-    auto indices11 = functor.getNdIndices(11); // Should be (2, 3)
+    std::vector<int64_t> indices11;
+    functor.fillNdIndices(11, indices11); // Should be (2, 3)
     EXPECT_EQ(indices11[0], 2);
     EXPECT_EQ(indices11[1], 3);
 }
@@ -78,18 +86,21 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{2, 3, 4});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0)
     EXPECT_EQ(indices0.size(), 3);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
 
-    auto indices12 = functor.getNdIndices(12); // Should be (1, 0, 0)
+    std::vector<int64_t> indices12;
+    functor.fillNdIndices(12, indices12); // Should be (1, 0, 0)
     EXPECT_EQ(indices12[0], 1);
     EXPECT_EQ(indices12[1], 0);
     EXPECT_EQ(indices12[2], 0);
 
-    auto indices23 = functor.getNdIndices(23); // Should be (1, 2, 3)
+    std::vector<int64_t> indices23;
+    functor.fillNdIndices(23, indices23); // Should be (1, 2, 3)
     EXPECT_EQ(indices23[0], 1);
     EXPECT_EQ(indices23[1], 2);
     EXPECT_EQ(indices23[2], 3);
@@ -101,20 +112,23 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculati
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0)
     EXPECT_EQ(indices0.size(), 4);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
     EXPECT_EQ(indices0[3], 0);
 
-    auto indices8 = functor.getNdIndices(8); // Should be (1, 0, 0, 0)
+    std::vector<int64_t> indices8;
+    functor.fillNdIndices(8, indices8); // Should be (1, 0, 0, 0)
     EXPECT_EQ(indices8[0], 1);
     EXPECT_EQ(indices8[1], 0);
     EXPECT_EQ(indices8[2], 0);
     EXPECT_EQ(indices8[3], 0);
 
-    auto indices15 = functor.getNdIndices(15); // Should be (1, 1, 1, 1)
+    std::vector<int64_t> indices15;
+    functor.fillNdIndices(15, indices15); // Should be (1, 1, 1, 1)
     EXPECT_EQ(indices15[0], 1);
     EXPECT_EQ(indices15[1], 1);
     EXPECT_EQ(indices15[2], 1);
@@ -326,7 +340,8 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculati
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2, 2});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0, 0)
     EXPECT_EQ(indices0.size(), 5);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
@@ -334,14 +349,16 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculati
     EXPECT_EQ(indices0[3], 0);
     EXPECT_EQ(indices0[4], 0);
 
-    auto indices16 = functor.getNdIndices(16); // Should be (1, 0, 0, 0, 0)
+    std::vector<int64_t> indices16;
+    functor.fillNdIndices(16, indices16); // Should be (1, 0, 0, 0, 0)
     EXPECT_EQ(indices16[0], 1);
     EXPECT_EQ(indices16[1], 0);
     EXPECT_EQ(indices16[2], 0);
     EXPECT_EQ(indices16[3], 0);
     EXPECT_EQ(indices16[4], 0);
 
-    auto indices31 = functor.getNdIndices(31); // Should be (1, 1, 1, 1, 1)
+    std::vector<int64_t> indices31;
+    functor.fillNdIndices(31, indices31); // Should be (1, 1, 1, 1, 1)
     EXPECT_EQ(indices31[0], 1);
     EXPECT_EQ(indices31[1], 1);
     EXPECT_EQ(indices31[2], 1);
@@ -418,13 +435,15 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDim
     EXPECT_EQ(count.load(), 15); // 1 * 5 * 1 * 3 = 15
 
     // Verify index calculation for this shape
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0)
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
     EXPECT_EQ(indices0[3], 0);
 
-    auto indices7 = functor.getNdIndices(7); // Should be (0, 2, 0, 1)
+    std::vector<int64_t> indices7;
+    functor.fillNdIndices(7, indices7); // Should be (0, 2, 0, 1)
     EXPECT_EQ(indices7[0], 0);
     EXPECT_EQ(indices7[1], 2);
     EXPECT_EQ(indices7[2], 0);
