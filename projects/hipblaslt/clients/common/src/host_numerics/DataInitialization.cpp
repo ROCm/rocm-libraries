@@ -33,6 +33,223 @@ namespace hipblaslt::host_numerics
 
     namespace
     {
+        // Compatibility values inherited from hipblaslt_init_alt_impl_big/small.
+        constexpr double specialInitializationAValue = 65'280.0;
+        constexpr double specialInitializationBValue = 0.0000607967376708984375;
+
+        // The historical FP16 accumulator probe alternates 2 * (max_finite - 4)
+        // so the running sum exposes premature Float16 rounding without overflow.
+        constexpr double maximumFiniteFloat16Value = 65'504.0;
+        constexpr double fp16AccumulatorProbeStep  = 4.0;
+
+        enum class ComplexGenerationPolicy
+        {
+            RealOnly,
+            Replicated,
+            Cartesian,
+        };
+
+        struct RandomIntegerRecipeConfiguration
+        {
+            bool                    small         = false;
+            bool                    alternating   = false;
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::Cartesian;
+            uint64_t                seed          = defaultInitializationSeed;
+        };
+
+        struct HplRecipeConfiguration
+        {
+            bool                    positiveOnly  = false;
+            bool                    alternating   = false;
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::Cartesian;
+            uint64_t                seed          = defaultInitializationSeed;
+        };
+
+        GenerationRecipe bindComponentRecipe(ScalarType                  destinationType,
+                                               GenerationRecipe::Component component,
+                                               ComplexGenerationPolicy     policy,
+                                               uint64_t                    seed)
+        {
+            if(scalarTypeInfo(destinationType).category != ScalarCategory::Complex
+               || policy == ComplexGenerationPolicy::RealOnly)
+                return GenerationRecipe::realOnly(std::move(component), {.seed = seed});
+            if(policy == ComplexGenerationPolicy::Replicated)
+                return GenerationRecipe::replicated(std::move(component), {.seed = seed});
+            GenerationRecipe::Component imaginary = component;
+            return GenerationRecipe::cartesian(
+                std::move(component), std::move(imaginary), {.seed = seed});
+        }
+
+        GenerationRecipe bindComponentPairRecipe(ScalarType                  destinationType,
+                                                   GenerationRecipe::Component real,
+                                                   GenerationRecipe::Component imaginary,
+                                                   ComplexGenerationPolicy     policy,
+                                                   uint64_t                    seed)
+        {
+            if(scalarTypeInfo(destinationType).category != ScalarCategory::Complex
+               || policy == ComplexGenerationPolicy::RealOnly)
+                return GenerationRecipe::realOnly(std::move(real), {.seed = seed});
+            if(policy == ComplexGenerationPolicy::Replicated)
+                return GenerationRecipe::replicated(std::move(real), {.seed = seed});
+            return GenerationRecipe::cartesian(
+                std::move(real), std::move(imaginary), {.seed = seed});
+        }
+
+        GenerationRecipe::Component
+            trigonometricComponent(TrigonometricComponent component, bool absolute = false)
+        {
+            GenerationRecipe::Component result = component == TrigonometricComponent::Sine
+                                                     ? GenerationRecipe::sine()
+                                                     : GenerationRecipe::cosine();
+            return absolute ? result.withAbsoluteTransform() : result;
+        }
+
+        GenerationRecipe
+            randomIntegerRecipe(ScalarType                       type,
+                                RandomIntegerRecipeConfiguration configuration = {})
+        {
+            const ScalarCategory category = scalarTypeInfo(type).category;
+            if(category == ScalarCategory::Boolean)
+                throw std::invalid_argument(
+                    "Random-integer initialization does not support Boolean tensors.");
+
+            GenerationRecipe::Component component = [&] {
+                if(configuration.small)
+                    return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10})
+                        .withAffineValueMapping({.scale = 0.1});
+
+                switch(type)
+                {
+                case ScalarType::Float16:
+                case ScalarType::BFloat16:
+                    return GenerationRecipe::uniformInteger({.lower = -2, .upper = 2});
+                case ScalarType::Int8:
+                    return GenerationRecipe::uniformInteger({.lower = 1, .upper = 3});
+                case ScalarType::Float4E2M1:
+                    return GenerationRecipe::uniformInteger({.lower = -4, .upper = 4});
+                case ScalarType::Float6E2M3:
+                    return GenerationRecipe::uniformInteger({.lower = -7, .upper = 7});
+                case ScalarType::Float6E3M2:
+                    return GenerationRecipe::uniformInteger({.lower = -28, .upper = 28});
+                case ScalarType::E8M0:
+                    return GenerationRecipe::randomEncodedExponent(
+                        {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3});
+                default:
+                    break;
+                }
+
+                if(category == ScalarCategory::SignedInteger
+                   || category == ScalarCategory::UnsignedInteger
+                   || category == ScalarCategory::FloatingPoint
+                   || category == ScalarCategory::Complex || category == ScalarCategory::Scale)
+                    return GenerationRecipe::uniformInteger({.lower = 1, .upper = 10});
+                throw std::invalid_argument(
+                    "Random-integer initialization requires an arithmetic tensor type.");
+            }();
+
+            if(configuration.alternating)
+                component = component.withAlternatingSign(
+                    {.dimensions = {0, 1}, .negativeWhenOdd = false});
+            return bindComponentRecipe(
+                type, std::move(component), configuration.complexPolicy, configuration.seed);
+        }
+
+        GenerationRecipe trigonometricRecipe(
+            ScalarType              type,
+            TrigonometricComponent  realComponent,
+            bool                    positiveOnly = false,
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::Cartesian,
+            uint64_t                seed = defaultInitializationSeed)
+        {
+            const TrigonometricComponent imaginaryComponent
+                = realComponent == TrigonometricComponent::Sine ? TrigonometricComponent::Cosine
+                                                                : TrigonometricComponent::Sine;
+            return bindComponentPairRecipe(type,
+                                           trigonometricComponent(realComponent, positiveOnly),
+                                           trigonometricComponent(imaginaryComponent, positiveOnly),
+                                           complexPolicy,
+                                           seed);
+        }
+
+        GenerationRecipe hplRecipe(ScalarType type, HplRecipeConfiguration configuration = {})
+        {
+            GenerationRecipe::Component component = [&] {
+                if(type == ScalarType::E8M0)
+                    return GenerationRecipe::randomEncodedExponent(
+                        {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3});
+                if(type == ScalarType::Int8)
+                    return GenerationRecipe::uniformInteger(
+                        {.lower = configuration.positiveOnly ? 0 : -1, .upper = 1});
+
+                GenerationRecipe::Component uniform
+                    = GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5});
+                return configuration.positiveOnly || type == ScalarType::E5M3
+                           ? uniform.withAbsoluteTransform()
+                           : uniform;
+            }();
+
+            if(configuration.alternating)
+                component = component.withAlternatingSign(
+                    {.dimensions = {0, 1}, .negativeWhenOdd = false});
+            return bindComponentRecipe(
+                type, std::move(component), configuration.complexPolicy, configuration.seed);
+        }
+
+        GenerationRecipe lowPrecisionRecipe(
+            ScalarType              type,
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::RealOnly,
+            uint64_t                seed = defaultInitializationSeed)
+        {
+            GenerationRecipe::Component component = [&] {
+                if(type == ScalarType::E8M0)
+                    return GenerationRecipe::randomEncodedExponent(
+                        {.lowerUnbiasedExponent = -3, .upperUnbiasedExponent = 3});
+                if(type == ScalarType::Int8)
+                    return GenerationRecipe::uniformInteger({.lower = -6, .upper = 6});
+
+                GenerationRecipe::Component uniform
+                    = GenerationRecipe::uniformReal({.lower = -6.0, .upper = 6.0});
+                return type == ScalarType::E5M3 ? uniform.withAbsoluteTransform() : uniform;
+            }();
+            return bindComponentRecipe(type, std::move(component), complexPolicy, seed);
+        }
+
+        GenerationRecipe nanRecipe(
+            ScalarType              type,
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::RealOnly,
+            uint64_t                seed = defaultInitializationSeed)
+        {
+            if(!scalarTypeInfo(type).supportsNaN)
+                return GenerationRecipe::realOnly(
+                    GenerationRecipe::randomRawBits(), {.seed = seed});
+            return bindComponentRecipe(type, GenerationRecipe::typeNaN(), complexPolicy, seed);
+        }
+
+        GenerationRecipe normalRecipe(
+            ScalarType              type,
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::RealOnly,
+            uint64_t                seed = defaultInitializationSeed)
+        {
+            return bindComponentRecipe(
+                type, GenerationRecipe::normal({}), complexPolicy, seed);
+        }
+
+        GenerationRecipe uniformZeroOneRecipe(
+            ScalarType              type,
+            ComplexGenerationPolicy complexPolicy = ComplexGenerationPolicy::RealOnly,
+            uint64_t                seed = defaultInitializationSeed)
+        {
+            const ScalarCategory category = scalarTypeInfo(type).category;
+            const bool integerDestination = category == ScalarCategory::Boolean
+                                            || category == ScalarCategory::SignedInteger
+                                            || category == ScalarCategory::UnsignedInteger;
+            GenerationRecipe::Component component
+                = integerDestination
+                      ? GenerationRecipe::uniformInteger({.lower = 0, .upper = 1})
+                      : GenerationRecipe::uniformReal({.lower = 0.0, .upper = 1.0});
+            return bindComponentRecipe(type, std::move(component), complexPolicy, seed);
+        }
+
         // First output of the historical 32-bit linear-congruential selector.
         // The second output always selected positive infinity by default.
         inline constexpr uint32_t legacyOneSpecialIndexSelection = 3'554'416'254u;

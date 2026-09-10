@@ -9,11 +9,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <hipblaslt/host_numerics/GenerationRecipes.hpp>
+#include <hipblaslt/host_numerics/InitializationPolicy.hpp>
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
 #include <hipblaslt_scaling_format.hpp>
 #include <optional>
+#include <roc/host_numerics/generation.hpp>
 #include <string_view>
 
 #include <roc/host_numerics/amd_gpu_layout/mx.hpp>
@@ -21,6 +22,12 @@
 
 namespace hipblaslt::host_numerics
 {
+    enum class TrigonometricComponent
+    {
+        Sine,
+        Cosine,
+    };
+
     enum class MatrixRole
     {
         A,
