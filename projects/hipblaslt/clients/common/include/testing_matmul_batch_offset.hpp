@@ -32,6 +32,9 @@
 #include "utility.hpp"
 #include <hipblaslt/host_numerics/Types.hpp>
 #include <limits>
+#include <roc/host_numerics/gemm.hpp>
+#include <roc/host_numerics/generation.hpp>
+#include <roc/host_numerics/tensor_operations.hpp>
 #include <roc/host_numerics/validation.hpp>
 #include <stdexcept>
 
@@ -79,14 +82,29 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     if(arg.batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
         GTEST_SKIP() << "Batch offset requires pointer-array batching";
 
-    using namespace roc::host_numerics;
-    using namespace hipblaslt::host_numerics;
+    using hipblaslt::host_numerics::scalarType;
+    using roc::host_numerics::ComparisonOptions;
+    using roc::host_numerics::IndexOrder;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::MatmulOptions;
+    using roc::host_numerics::OutputSelection;
+    using roc::host_numerics::ScalarType;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+    using roc::host_numerics::add;
+    using roc::host_numerics::compare;
+    using roc::host_numerics::generate;
+    using roc::host_numerics::multiply;
 
     const hipblasOperation_t transA = char_to_hipblas_operation(arg.transA);
     const hipblasOperation_t transB = char_to_hipblas_operation(arg.transB);
     const int64_t M = arg.M[0], N = arg.N[0], K = arg.K[0];
     const int64_t lda = arg.lda[0], ldb = arg.ldb[0], ldc = arg.ldc[0], ldd = arg.ldd[0];
     const int32_t batchCount = arg.batch_count;
+    if(batchCount < 0)
+        throw std::invalid_argument("Batch count must be non-negative.");
+    if(batchCount == 0)
+        return;
     const int64_t aRows = transA == HIPBLAS_OP_N ? M : K;
     const int64_t aColumns = transA == HIPBLAS_OP_N ? K : M;
     const int64_t bRows = transB == HIPBLAS_OP_N ? K : N;
@@ -97,70 +115,73 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     const auto cPlan = offsetMatrixPlan(size_t(ldc) * N, arg.batch_offset_c);
     const auto dPlan = offsetMatrixPlan(size_t(ldd) * N, arg.batch_offset_d);
 
-    host_vector<Ti> hostA(aPlan.allocationElements * batchCount);
-    host_vector<Ti> hostB(bPlan.allocationElements * batchCount);
-    host_vector<To> hostC(cPlan.allocationElements * batchCount);
-    host_vector<To> observedD(dPlan.allocationElements * batchCount);
-    host_vector<To> expectedD(dPlan.matrixElements * batchCount);
+    Tensor hostA(scalarType<Ti>(), Shape{aPlan.allocationElements * size_t(batchCount)});
+    Tensor hostB(scalarType<Ti>(), Shape{bPlan.allocationElements * size_t(batchCount)});
+    Tensor hostC(scalarType<To>(), Shape{cPlan.allocationElements * size_t(batchCount)});
+    Tensor observedD(scalarType<To>(), Shape{dPlan.allocationElements * size_t(batchCount)});
+    Tensor expectedD(scalarType<To>(), Shape{dPlan.matrixElements * size_t(batchCount)});
 
-    auto generate = [&](auto&                   storage,
-                        size_t                  rows,
-                        size_t                  columns,
-                        int64_t                 leadingDimension,
-                        const OffsetMatrixPlan& plan,
-                        const GenerationRecipe& recipe) {
-        auto tensor = copyTensorFromEncodedStorage(
-            storage.data(),
-            storage.size(),
+    auto generateMatrices = [&](Tensor                                    storage,
+                                size_t                                    rows,
+                                size_t                                    columns,
+                                int64_t                                   leadingDimension,
+                                const OffsetMatrixPlan&                   plan,
+                                const roc::host_numerics::GenerationRecipe& recipe) {
+        auto tensor = storage.shareStorageWithLayout(
             Layout(Shape{rows, columns, size_t(batchCount)},
                    {1, leadingDimension, ptrdiff_t(plan.allocationElements)},
                    plan.logicalStart()));
-        roc::host_numerics::generate(tensor, recipe);
-        copyTensorEncodedBackingStorageToBuffer(storage.data(), storage.size(), tensor);
+        generate(tensor, recipe);
     };
 
-    generate(hostA,
-             aRows,
-             aColumns,
-             lda,
-             aPlan,
-             GenerationRecipe::realOnly(
-                 GenerationRecipe::affineIndexRemainder(
-                     {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
-                     .withAffineValueMapping({.offset = 1})));
-    generate(hostB,
-             bRows,
-             bColumns,
-             ldb,
-             bPlan,
-             GenerationRecipe::realOnly(
-                 GenerationRecipe::affineIndexRemainder(
-                     {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
-                     .withAffineValueMapping({.offset = 1})));
-    generate(hostC,
-             M,
-             N,
-             ldc,
-             cPlan,
-             GenerationRecipe::realOnly(GenerationRecipe::affineIndexRemainder(
-                 {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3})));
+    generateMatrices(
+        hostA,
+        aRows,
+        aColumns,
+        lda,
+        aPlan,
+        roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+                {.dimensionCoefficients = {1, 1, 1}, .positiveDivisor = 7})
+                .withAffineValueMapping({.offset = 1})));
+    generateMatrices(
+        hostB,
+        bRows,
+        bColumns,
+        ldb,
+        bPlan,
+        roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+                {.dimensionCoefficients = {1, -1, 1}, .positiveDivisor = 5})
+                .withAffineValueMapping({.offset = 1})));
+    generateMatrices(hostC,
+                     M,
+                     N,
+                     ldc,
+                     cPlan,
+                     roc::host_numerics::GenerationRecipe::realOnly(
+                         roc::host_numerics::GenerationRecipe::affineIndexRemainder(
+                             {.dimensionCoefficients = {1, 1, 0}, .positiveDivisor = 3})));
 
     device_vector<Ti> deviceA(aPlan.allocationElements * batchCount);
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);
     device_vector<To> deviceC(cPlan.allocationElements * batchCount);
     device_vector<To> deviceD(dPlan.allocationElements * batchCount);
-    CHECK_HIP_ERROR(hipMemcpy(deviceA,
-                              hostA.data(),
-                              sizeof(Ti) * hostA.size(),
-                              hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(deviceB,
-                              hostB.data(),
-                              sizeof(Ti) * hostB.size(),
-                              hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(deviceC,
-                              hostC.data(),
-                              sizeof(To) * hostC.size(),
-                              hipMemcpyHostToDevice));
+    if(!hostA.rawEncodedBackingStorage().empty())
+        CHECK_HIP_ERROR(hipMemcpy(deviceA,
+                                  hostA.rawEncodedBackingStorage().data(),
+                                  hostA.rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
+    if(!hostB.rawEncodedBackingStorage().empty())
+        CHECK_HIP_ERROR(hipMemcpy(deviceB,
+                                  hostB.rawEncodedBackingStorage().data(),
+                                  hostB.rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
+    if(!hostC.rawEncodedBackingStorage().empty())
+        CHECK_HIP_ERROR(hipMemcpy(deviceC,
+                                  hostC.rawEncodedBackingStorage().data(),
+                                  hostC.rawEncodedBackingStorage().size(),
+                                  hipMemcpyHostToDevice));
 
     host_vector<uint64_t> pointersA(batchCount);
     host_vector<uint64_t> pointersB(batchCount);
@@ -263,39 +284,39 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t aColumnStride = transA == HIPBLAS_OP_N ? lda : 1;
         const ptrdiff_t bRowStride = transB == HIPBLAS_OP_N ? 1 : ldb;
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? ldb : 1;
-        auto result = copyTensorFromEncodedStorage(expectedD.data() + batch * dPlan.matrixElements,
-                                                   dPlan.matrixElements,
-                                                   Layout(Shape{size_t(M), size_t(N)}, {1, ldd}));
-        Tensor a      = copyTensorFromEncodedStorage(
-            hostA.data() + batch * aPlan.allocationElements + aPlan.logicalStart(),
-            aPlan.matrixElements,
-            Layout(Shape{size_t(M), size_t(K)}, {aRowStride, aColumnStride}));
-        Tensor b = copyTensorFromEncodedStorage(
-            hostB.data() + batch * bPlan.allocationElements + bPlan.logicalStart(),
-            bPlan.matrixElements,
-            Layout(Shape{size_t(K), size_t(N)}, {bRowStride, bColumnStride}));
-        Tensor      c = copyTensorFromEncodedStorage(hostC.data() + batch * cPlan.allocationElements
-                                                    + cPlan.logicalStart(),
-                                                cPlan.matrixElements,
-                                                Layout(Shape{size_t(M), size_t(N)}, {1, ldc}));
+        Tensor result = expectedD.shareStorageWithLayout(
+            Layout(Shape{size_t(M), size_t(N)},
+                   {1, ldd},
+                   ptrdiff_t(batch) * ptrdiff_t(dPlan.matrixElements)));
+        Tensor a = hostA.shareStorageWithLayout(
+            Layout(Shape{size_t(M), size_t(K)},
+                   {aRowStride, aColumnStride},
+                   ptrdiff_t(batch * aPlan.allocationElements) + aPlan.logicalStart()));
+        Tensor b = hostB.shareStorageWithLayout(
+            Layout(Shape{size_t(K), size_t(N)},
+                   {bRowStride, bColumnStride},
+                   ptrdiff_t(batch * bPlan.allocationElements) + bPlan.logicalStart()));
+        Tensor c = hostC.shareStorageWithLayout(
+            Layout(Shape{size_t(M), size_t(N)},
+                   {1, ldc},
+                   ptrdiff_t(batch * cPlan.allocationElements) + cPlan.logicalStart()));
         const ScalarType computeType = scalarType<Tc>();
         Tensor product = roc::host_numerics::matmul(a, b, computeType, MatmulOptions(computeType));
         Tensor scaledProduct
             = multiply(product, Tensor::scalar(computeType, alpha), computeType, computeType);
         Tensor scaledC = multiply(c, Tensor::scalar(computeType, beta), computeType, computeType);
         result.copyLogicalElementsFrom(add(scaledProduct, scaledC, computeType, computeType));
-        copyTensorEncodedBackingStorageToBuffer(
-            expectedD.data() + batch * dPlan.matrixElements, dPlan.matrixElements, result);
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;
     int passed = 0, failed = 0;
     for(int32_t algorithm = 0; algorithm < algorithmCount; ++algorithm)
     {
-        CHECK_HIP_ERROR(hipMemcpy(deviceD,
-                                  observedD.data(),
-                                  sizeof(To) * observedD.size(),
-                                  hipMemcpyHostToDevice));
+        if(!observedD.rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(deviceD,
+                                      observedD.rawEncodedBackingStorage().data(),
+                                      observedD.rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
                                               matmul,
                                               &alpha,
@@ -313,27 +334,32 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                                               algorithms[algorithm].workspaceSize,
                                               nullptr));
         CHECK_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(hipMemcpy(observedD.data(),
-                                  deviceD,
-                                  sizeof(To) * observedD.size(),
-                                  hipMemcpyDeviceToHost));
+        if(!observedD.rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(observedD.rawEncodedBackingStorage().data(),
+                                      deviceD,
+                                      observedD.rawEncodedBackingStorage().size(),
+                                      hipMemcpyDeviceToHost));
 
         bool matched = true;
         double maximumDifference = 0.0;
         for(int32_t batch = 0; batch < batchCount; ++batch)
         {
-            const To* observed = observedD.data() + batch * dPlan.allocationElements
-                                 + dPlan.logicalStart();
-            const To* expected = expectedD.data() + batch * dPlan.matrixElements;
-            const Layout layout(Shape{size_t(M), size_t(N)}, {1, ldd});
+            const Layout observedLayout(
+                Shape{size_t(M), size_t(N)},
+                {1, ldd},
+                ptrdiff_t(batch * dPlan.allocationElements) + dPlan.logicalStart());
+            const Layout expectedLayout(
+                Shape{size_t(M), size_t(N)},
+                {1, ldd},
+                ptrdiff_t(batch * dPlan.matrixElements));
             ComparisonOptions options{
                 .absoluteTolerance = std::nextafter(tolerance, 0.0),
                 .maxReportedMismatches = 0,
             };
             options.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
             const auto comparison
-                = compare(copyTensorFromEncodedStorage(observed, dPlan.matrixElements, layout),
-                          copyTensorFromEncodedStorage(expected, dPlan.matrixElements, layout),
+                = compare(observedD.shareStorageWithLayout(observedLayout),
+                          expectedD.shareStorageWithLayout(expectedLayout),
                           options);
             matched &= comparison.passed();
             maximumDifference
