@@ -179,9 +179,28 @@ namespace TensileLite::Client
             case ScalarType::Float64:
             case ScalarType::ComplexFloat64:
                 return 1e-12;
-            default:
+            case ScalarType::Boolean:
+            case ScalarType::UInt8:
+            case ScalarType::Int8:
+            case ScalarType::UInt16:
+            case ScalarType::Int16:
+            case ScalarType::UInt32:
+            case ScalarType::Int32:
+            case ScalarType::UInt64:
+            case ScalarType::Int64:
+            case ScalarType::Float6E2M3:
+            case ScalarType::Float6E3M2:
+            case ScalarType::Float4E2M1:
+            case ScalarType::Int4:
+            case ScalarType::E8M0:
+            case ScalarType::E8M0Zero:
+            case ScalarType::E5M3:
+            case ScalarType::E4M3:
                 return 0.0;
+            case ScalarType::Count:
+                break;
             }
+            throw std::invalid_argument("Invalid host-numerics comparison scalar type.");
         }();
         const double tolerance
             = scalarType == ScalarType::Float32 && threshold > 0.0 ? threshold : defaultTolerance;
