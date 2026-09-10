@@ -3,43 +3,11 @@
 
 #pragma once
 
-#include <optional>
 #include <roc/host_numerics/gemm.hpp>
 #include <string>
 #include <utility>
 
 namespace roc::host_numerics::detail {
-// Internal fused form retained for the implementation and exact compatibility
-// tests. Public callers compose matmul with tensor and epilogue operations.
-struct GemmOptions : MatmulOptions {
-    explicit GemmOptions(ScalarType accumulator = ScalarType::Float32)
-        : MatmulOptions(accumulator),
-          alpha(Tensor::scalar(accumulator, 1)),
-          beta(Tensor::scalar(accumulator, 0)),
-          scaleC(Tensor::scalar(accumulator, 1)),
-          outputScale(Tensor::scalar(accumulator, 1)),
-          activationParameter0(Tensor::scalar(accumulator, 0)),
-          activationParameter1(Tensor::scalar(accumulator, 0)) {}
-
-    explicit GemmOptions(const MatmulOptions& options) : GemmOptions(options.accumulatorType) {
-        static_cast<MatmulOptions&>(*this) = options;
-    }
-
-    Tensor alpha;
-    Tensor beta;
-    Tensor scaleC;
-    std::optional<Tensor> bias;
-    std::optional<Tensor> scaleAlpha;
-    std::optional<Tensor> scaleA;
-    std::optional<Tensor> scaleB;
-    Tensor outputScale;
-    OutputConversion outputConversion = OutputConversion::Default;
-    Activation activation = Activation::None;
-    Tensor activationParameter0;
-    Tensor activationParameter1;
-    OutputSelection outputSelection = OutputSelection::all();
-};
-
 struct GemmSupportInfo {
     bool supported = false;
     std::string reason;
@@ -50,49 +18,23 @@ struct GemmSupportInfo {
     }
 };
 
-// Private numerical specification used to share validation and execution code
-// between owning and caller-output entry points.
-struct GemmSpecification : GemmOptions {
-    GemmSpecification(Tensor aTensor, Tensor bTensor, Tensor cTensor, ScalarType output,
-                      ScalarType accumulator)
-        : GemmSpecification(std::move(aTensor), std::move(bTensor), std::move(cTensor), output,
-                            GemmOptions(accumulator)) {}
-
-    GemmSpecification(Tensor aTensor, Tensor bTensor, Tensor cTensor, ScalarType output,
-                      const GemmOptions& options)
-        : GemmOptions(options),
+// Bound matrix-multiplication state shared by the built-in and optional BLAS
+// implementations. Epilogue inputs are intentionally absent: callers compose
+// coefficient, addend, bias, activation, and output conversion operations.
+struct GemmInvocation : MatmulOptions {
+    GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor dTensor,
+                   const MatmulOptions& options = MatmulOptions{},
+                   OutputSelection selection = OutputSelection::all())
+        : MatmulOptions(options),
           a(std::move(aTensor)),
           b(std::move(bTensor)),
-          c(std::move(cTensor)),
-          outputType(output) {}
+          d(std::move(dTensor)),
+          outputSelection(std::move(selection)) {}
 
     Tensor a;
     Tensor b;
-    Tensor c;
-    ScalarType outputType;
-};
-
-// Private bound execution state shared by the built-in and optional BLAS
-// implementations. Public callers use matmul() or matmulInto().
-struct GemmInvocation : GemmSpecification {
-    GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor cTensor, Tensor dTensor,
-                   ScalarType accumulator)
-        : GemmInvocation(std::move(aTensor), std::move(bTensor), std::move(cTensor),
-                         std::move(dTensor), GemmOptions(accumulator)) {}
-
-    GemmInvocation(Tensor aTensor, Tensor bTensor, Tensor cTensor, Tensor dTensor,
-                   const GemmOptions& options)
-        : GemmSpecification(std::move(aTensor), std::move(bTensor), std::move(cTensor),
-                            dTensor.type(), options),
-          d(std::move(dTensor)) {}
-
-    GemmInvocation(GemmSpecification specification, Tensor dTensor,
-                   OutputSelection selection = OutputSelection::all())
-        : GemmSpecification(std::move(specification)), d(std::move(dTensor)) {
-        outputSelection = std::move(selection);
-    }
-
     Tensor d;
+    OutputSelection outputSelection;
 };
 
 struct GemmExecutionInfo {
@@ -110,8 +52,6 @@ GemmExecutionInfo executeBlasGemm(const GemmInvocation& invocation, GemmBackend 
 
 // Short implementation-only aliases used by compiled source files.
 namespace roc::host_numerics {
-using GemmSpecification = detail::GemmSpecification;
 using GemmInvocation = detail::GemmInvocation;
 using GemmExecutionInfo = detail::GemmExecutionInfo;
-using GemmOptions = detail::GemmOptions;
 }  // namespace roc::host_numerics

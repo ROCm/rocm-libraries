@@ -1,88 +1,117 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Test-only access to the internal fused GEMM implementation.
+"""Test utility implemented with public tensor operations.
 
-Public users compose ``matmul`` with tensor and epilogue operations. These
-helpers retain coverage of the fused implementation until numerical and
-performance evidence makes it safe to remove internally as well.
+The helper contains no fused GEMM implementation. Numerical oracle tests use
+``matmul``, elementwise arithmetic, and ``reference_epilogue_into`` as separate
+operations.
 """
 
+import numpy as np
+
 import roc_host_numerics as hn
-from roc_host_numerics import _roc_host_numerics as _native
 
 
 def _broadcast_vector(scale, axis):
     return scale.expand_dims(axis) if len(scale.shape) == 1 else scale
 
 
-def _options(
+def _scalar_value(value):
+    return value.item() if isinstance(value, hn.Tensor) else value
+
+
+def _scalar_tensor(value, scalar_type):
+    if isinstance(value, hn.Tensor):
+        return value
+    return hn.from_numpy(np.asarray(value)).to(scalar_type)
+
+
+def _product(
+    a,
+    b,
     accumulator_type,
+    *,
     alpha,
-    beta,
-    scale_c,
     compute_type_a,
     compute_type_b,
     math_mode,
-    activation,
-    activation_parameter0,
-    activation_parameter1,
-    output_selection,
     block_scale_a,
     block_scale_b,
     block_size_a,
     block_size_b,
     pre_quantization_scales_a,
     pre_quantization_scales_b,
-    bias,
-    scale_alpha,
-    scale_a,
-    scale_b,
-    output_scale,
-    output_conversion,
     accumulation_rounding,
     conjugate_a,
     conjugate_b,
+    scale_alpha,
+    scale_a,
+    scale_b,
 ):
-    options = _native._GemmOptions(accumulator_type)
-    options.accumulation_rounding = accumulation_rounding
-    options.math_mode = math_mode
-    options.compute_type_a = compute_type_a
-    options.compute_type_b = compute_type_b
-    options.pre_quantization_scales_a = [
-        _broadcast_vector(scale, 1)
-        for scale in (
-            [] if pre_quantization_scales_a is None else pre_quantization_scales_a
-        )
-    ]
-    options.pre_quantization_scales_b = [
-        _broadcast_vector(scale, 0)
-        for scale in (
-            [] if pre_quantization_scales_b is None else pre_quantization_scales_b
-        )
-    ]
-    options.block_scale_a = block_scale_a
-    options.block_scale_b = block_scale_b
-    options.block_size_a = block_size_a
-    options.block_size_b = block_size_b
-    options.conjugate_a = conjugate_a
-    options.conjugate_b = conjugate_b
-    options.alpha = alpha
-    options.beta = beta
-    options.scale_c = scale_c
-    options.bias = bias
-    options.scale_alpha = scale_alpha
-    options.scale_a = None if scale_a is None else _broadcast_vector(scale_a, 1)
-    options.scale_b = None if scale_b is None else _broadcast_vector(scale_b, 0)
-    options.output_scale = output_scale
-    options.output_conversion = output_conversion
-    options.activation = activation
-    options.activation_parameter0 = activation_parameter0
-    options.activation_parameter1 = activation_parameter1
-    options.output_selection = (
-        hn.OutputSelection.all() if output_selection is None else output_selection
+    output_shape = hn.Shape([a.shape[0], b.shape[1]])
+    product = hn.Tensor(accumulator_type, output_shape)
+    if _scalar_value(alpha) == 0 or a.shape[1] == 0:
+        return product
+
+    product = hn.matmul(
+        a,
+        b,
+        accumulator_type,
+        accumulator_type,
+        compute_type_a=compute_type_a,
+        compute_type_b=compute_type_b,
+        math_mode=math_mode,
+        block_scale_a=block_scale_a,
+        block_scale_b=block_scale_b,
+        block_size_a=block_size_a,
+        block_size_b=block_size_b,
+        pre_quantization_scales_a=pre_quantization_scales_a,
+        pre_quantization_scales_b=pre_quantization_scales_b,
+        accumulation_rounding=accumulation_rounding,
+        conjugate_a=conjugate_a,
+        conjugate_b=conjugate_b,
     )
-    return options
+    product = hn.multiply(
+        product,
+        alpha,
+        output_type=accumulator_type,
+        compute_type=accumulator_type,
+    )
+    for scale, axis in ((scale_a, 1), (scale_b, 0), (scale_alpha, None)):
+        if scale is not None:
+            if axis is not None:
+                scale = _broadcast_vector(scale, axis)
+            product = hn.multiply(
+                product,
+                scale,
+                output_type=accumulator_type,
+                compute_type=accumulator_type,
+            )
+    return product
+
+
+def _combined_input(product, c, accumulator_type, beta, scale_c):
+    if _scalar_value(beta) == 0:
+        return product
+    coefficient = hn.multiply(
+        _scalar_tensor(beta, accumulator_type),
+        scale_c,
+        output_type=accumulator_type,
+        compute_type=accumulator_type,
+    )
+    addend = hn.multiply(
+        c,
+        coefficient,
+        output_type=accumulator_type,
+        compute_type=accumulator_type,
+    )
+    return hn.add(
+        product,
+        addend,
+        output_type=accumulator_type,
+        compute_type=accumulator_type,
+    )
 
 
 def reference_gemm(
@@ -97,9 +126,6 @@ def reference_gemm(
     compute_type_a=None,
     compute_type_b=None,
     math_mode=hn.MathMode.Default,
-    activation=hn.Activation.None_,
-    activation_parameter0=0.0,
-    activation_parameter1=0.0,
     output_selection=None,
     backend=hn.GemmBackend.Automatic,
     block_scale_a=None,
@@ -119,42 +145,43 @@ def reference_gemm(
     conjugate_b=False,
     output_layout=None,
 ):
-    return _native._reference_gemm(
+    output = hn.Tensor(
+        output_type,
+        output_layout
+        if output_layout is not None
+        else hn.Shape([a.shape[0], b.shape[1]]),
+    )
+    reference_gemm_into(
         a,
         b,
         c,
-        output_type,
-        _options(
-            accumulator_type,
-            alpha,
-            beta,
-            scale_c,
-            compute_type_a,
-            compute_type_b,
-            math_mode,
-            activation,
-            activation_parameter0,
-            activation_parameter1,
-            output_selection,
-            block_scale_a,
-            block_scale_b,
-            block_size_a,
-            block_size_b,
-            pre_quantization_scales_a,
-            pre_quantization_scales_b,
-            bias,
-            scale_alpha,
-            scale_a,
-            scale_b,
-            output_scale,
-            output_conversion,
-            accumulation_rounding,
-            conjugate_a,
-            conjugate_b,
-        ),
-        output_layout,
+        output,
+        accumulator_type,
+        alpha,
+        beta,
+        scale_c,
+        compute_type_a,
+        compute_type_b,
+        math_mode,
+        output_selection,
         backend,
+        block_scale_a,
+        block_scale_b,
+        block_size_a,
+        block_size_b,
+        pre_quantization_scales_a,
+        pre_quantization_scales_b,
+        bias,
+        scale_alpha,
+        scale_a,
+        scale_b,
+        output_scale,
+        output_conversion,
+        accumulation_rounding,
+        conjugate_a,
+        conjugate_b,
     )
+    return output
 
 
 def reference_gemm_into(
@@ -169,9 +196,6 @@ def reference_gemm_into(
     compute_type_a=None,
     compute_type_b=None,
     math_mode=hn.MathMode.Default,
-    activation=hn.Activation.None_,
-    activation_parameter0=0.0,
-    activation_parameter1=0.0,
     output_selection=None,
     backend=hn.GemmBackend.Automatic,
     block_scale_a=None,
@@ -190,38 +214,37 @@ def reference_gemm_into(
     conjugate_a=False,
     conjugate_b=False,
 ):
-    return _native._reference_gemm_into(
+    if backend not in (hn.GemmBackend.Automatic, hn.GemmBackend.Blocked):
+        raise ValueError("Python matmul exposes the built-in blocked backend")
+    selection = hn.OutputSelection.all() if output_selection is None else output_selection
+    product = _product(
         a,
         b,
-        c,
+        accumulator_type,
+        alpha=alpha,
+        compute_type_a=compute_type_a,
+        compute_type_b=compute_type_b,
+        math_mode=math_mode,
+        block_scale_a=block_scale_a,
+        block_scale_b=block_scale_b,
+        block_size_a=block_size_a,
+        block_size_b=block_size_b,
+        pre_quantization_scales_a=pre_quantization_scales_a,
+        pre_quantization_scales_b=pre_quantization_scales_b,
+        accumulation_rounding=accumulation_rounding,
+        conjugate_a=conjugate_a,
+        conjugate_b=conjugate_b,
+        scale_alpha=scale_alpha,
+        scale_a=scale_a,
+        scale_b=scale_b,
+    )
+    combined = _combined_input(product, c, accumulator_type, beta, scale_c)
+    hn.reference_epilogue_into(
+        combined,
         d,
-        _options(
-            accumulator_type,
-            alpha,
-            beta,
-            scale_c,
-            compute_type_a,
-            compute_type_b,
-            math_mode,
-            activation,
-            activation_parameter0,
-            activation_parameter1,
-            output_selection,
-            block_scale_a,
-            block_scale_b,
-            block_size_a,
-            block_size_b,
-            pre_quantization_scales_a,
-            pre_quantization_scales_b,
-            bias,
-            scale_alpha,
-            scale_a,
-            scale_b,
-            output_scale,
-            output_conversion,
-            accumulation_rounding,
-            conjugate_a,
-            conjugate_b,
-        ),
-        backend,
+        accumulator_type,
+        bias=bias,
+        output_scale=output_scale,
+        output_conversion=output_conversion,
+        output_selection=selection,
     )

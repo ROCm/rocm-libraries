@@ -76,17 +76,6 @@ void fillTensor(const roc::host_numerics::Tensor& tensor, float value) {
     }
 }
 
-void configureFinalizer(GemmTestCase& problem, const std::vector<float>& columnBias) {
-    using namespace roc::host_numerics;
-
-    problem.alpha = 1.25;
-    problem.beta = -0.5;
-    problem.bias = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{columnBias.size()}),
-        std::span<const float>(columnBias));
-    problem.activation = Activation::Relu;
-}
-
 Tensor expectedFloatResult(const GemmTestCase& problem) {
     using namespace roc::host_numerics;
 
@@ -95,10 +84,6 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
     const size_t columns = problem.b.shape()[1];
     Tensor expected = makeOutput(rows, columns, untouchedValue);
     const auto selected = problem.outputSelection.indices(problem.d.elementCount());
-    const auto scaleValue = [&](const std::optional<Tensor>& scale, size_t row, size_t column) {
-        return scale ? scale->broadcastTo(Shape{rows, columns}).loadAs<float>({row, column}) : 1.0f;
-    };
-
     for (const size_t linearIndex : selected) {
         const auto coordinates =
             problem.d.shape().coordinates(linearIndex, problem.outputSelection.indexOrder());
@@ -135,18 +120,7 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
             blockBase = blockEnd;
         }
 
-        float result = problem.alpha.item<float>() * scaleValue(problem.scaleA, row, column) *
-                           scaleValue(problem.scaleB, row, column) *
-                           scaleValue(problem.scaleAlpha, row, column) * accumulation +
-                       problem.beta.item<float>() * problem.scaleC.item<float>() *
-                           problem.c.loadAs<float>({row, column});
-        if (problem.bias)
-            result += problem.bias->broadcastTo(Shape{rows, columns}).loadAs<float>({row, column});
-        if (problem.activation == Activation::Relu) result = std::max(0.0f, result);
-        require(problem.activation == Activation::None || problem.activation == Activation::Relu,
-                "The test-only float oracle received an unsupported activation.");
-        result *= problem.outputScale.item<float>();
-        expected.storeFrom({row, column}, result);
+        expected.storeFrom({row, column}, accumulation);
     }
     return expected;
 }
@@ -284,34 +258,25 @@ void requireOnlySelectedOutputsStored(const roc::host_numerics::Tensor& output,
     }
 }
 
-void testFinalizerAndSmallEdgeBlock() {
+void testSmallEdgeBlock() {
     using namespace roc::host_numerics;
 
     const std::array<float, 6> a{1, 4, 2, 5, 3, 6};
     const std::array<float, 6> b{7, 9, 11, 8, 10, 12};
     const std::array<float, 4> c{1, 1, 1, 1};
-    const std::array<float, 2> bias{1, -1000};
     Tensor d(ScalarType::Float32, Shape{2, 2});
     GemmTestCase problem(
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)),
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 2}, {1, 2}), std::span<const float>(c)),
         d.shareStorageWithLayout(Layout(Shape{2, 2}, {1, 2})), ScalarType::Float32);
-    problem.alpha = 2;
-    problem.beta = 3;
-    problem.bias =
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{2}),
-                                         std::span<const float>(bias))
-            .expandDims(1);
-    problem.activation = Activation::Relu;
-
     require(queryGemmSupport(problem, GemmBackend::Blocked).supported,
             "Blocked backend unexpectedly rejected the test GEMM.");
     const GemmTestRunInfo full = referenceGemm(problem, GemmBackend::Blocked);
     require(full.outputElementsWritten == 4 && full.outputElementsCovered == 4,
             "Full blocked GEMM reported the wrong output counts.");
     const Tensor expected =
-        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{120, 0, 132, 0});
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{58, 139, 64, 154});
     require(compare(d, expected).passed(), "Blocked backend result mismatch.");
 
     fillTensor(d, untouchedValue);
@@ -319,7 +284,7 @@ void testFinalizerAndSmallEdgeBlock() {
     const GemmTestRunInfo selected = referenceGemm(problem, GemmBackend::Blocked);
     require(selected.outputElementsWritten == 1 && selected.outputElementsCovered == 4,
             "Selected blocked GEMM reported the wrong write or coverage count.");
-    require(d.loadAs<float>({0, 0}) == 120 && d.loadAs<float>({0, 1}) == untouchedValue &&
+    require(d.loadAs<float>({0, 0}) == 58 && d.loadAs<float>({0, 1}) == untouchedValue &&
                 d.loadAs<float>({1, 0}) == untouchedValue &&
                 d.loadAs<float>({1, 1}) == untouchedValue,
             "Blocked backend partial output selection mismatch.");
@@ -340,7 +305,6 @@ void testExplicitSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 1);
     const std::vector<float> b = makeValues(reductionElements, columns, 2);
     const std::vector<float> c = makeValues(rows, columns, 3);
-    const std::vector<float> bias = makeValues(1, columns, 4);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::explicitIndices({
         44 * columns + 69,
@@ -353,8 +317,6 @@ void testExplicitSelectionBlockPlan() {
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
     blockedProblem.outputSelection = selection;
-    configureFinalizer(blockedProblem, bias);
-
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Explicit blocked selection result mismatch.");
     require(run.outputElementsWritten == 4 && run.outputElementsCovered == 1518,
@@ -370,15 +332,12 @@ void testStridedSelectionBlockPlan() {
     const std::vector<float> a = makeValues(rows, reductionElements, 5);
     const std::vector<float> b = makeValues(reductionElements, columns, 6);
     const std::vector<float> c = makeValues(rows, columns, 7);
-    const std::vector<float> bias = makeValues(1, columns, 8);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
     const OutputSelection selection = OutputSelection::strided(3, 509);
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
     blockedProblem.outputSelection = selection;
-    configureFinalizer(blockedProblem, bias);
-
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Strided blocked selection result mismatch.");
     require(run.outputElementsWritten == 6 && run.outputElementsCovered == 2272,
@@ -503,15 +462,13 @@ void testOneSidedBlockScalingWithZeroReductionExtent() {
     const Tensor emptyScale(ScalarType::Float32, Shape{rows, 0});
     blockedProblem.blockScaleA = emptyScale;
     blockedProblem.blockSizeA = 8;
-    blockedProblem.beta = 2.0f;
-
     runAndCheck(blockedProblem, blockedOutput,
                 "One-sided block scaling read scales for an empty reduction dimension.");
     require(compare(blockedOutput,
                     Tensor::copyNativeValues<float>(Shape{rows, columns},
-                                                    std::array<float, 4>{2.0f, 4.0f, 6.0f, 8.0f}))
+                                                    std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}))
                 .passed(),
-            "One-sided zero-K block scaling did not apply beta to C.");
+            "One-sided zero-K block scaling did not produce a null product.");
 }
 
 void testFullSelection() {
@@ -522,13 +479,10 @@ void testFullSelection() {
     const std::vector<float> a = makeValues(rows, reductionElements, 11);
     const std::vector<float> b = makeValues(reductionElements, columns, 12);
     const std::vector<float> c = makeValues(rows, columns, 13);
-    const std::vector<float> bias = makeValues(1, columns, 14);
     Tensor blockedOutput = makeOutput(rows, columns, untouchedValue);
 
     GemmTestCase blockedProblem =
         makeProblem(a, b, c, blockedOutput, rows, reductionElements, columns);
-    configureFinalizer(blockedProblem, bias);
-
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Full blocked selection result mismatch.");
     require(
@@ -611,7 +565,7 @@ void testOverlappingOutputIsRejectedAcrossBackends() {
             "Automatic GEMM accepted overlapping destination elements.");
 }
 
-void testOutputAliasingContract() {
+void testOutputCannotAliasInputs() {
     using namespace roc::host_numerics;
 
     constexpr size_t extent = 2;
@@ -619,30 +573,11 @@ void testOutputAliasingContract() {
     const std::vector<float> b{5, 6, 7, 8};
     const std::vector<float> c{9, 10, 11, 12};
 
-    GemmTestCase exactCAndD =
-        makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
-    exactCAndD.d = exactCAndD.c;
-    require(static_cast<bool>(queryGemmSupport(exactCAndD, GemmBackend::Blocked)),
-            "GEMM rejected an exact in-place C and D tensor.");
-    exactCAndD.beta = 1.0;
-    referenceGemm(exactCAndD, GemmBackend::Blocked);
-    const Tensor expectedCAndD =
-        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{28, 32, 54, 62});
-    require(compare(exactCAndD.d, expectedCAndD).passed(),
-            "Blocked GEMM mishandled an exact in-place C and D tensor.");
-
     GemmTestCase overlapsA =
         makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
     overlapsA.d = overlapsA.a;
     require(!queryGemmSupport(overlapsA, GemmBackend::Blocked),
             "GEMM accepted destination storage that overlaps A.");
-
-    GemmTestCase differentlyMappedCAndD =
-        makeProblem(a, b, c, makeOutput(extent, extent, 0), extent, extent, extent);
-    differentlyMappedCAndD.d =
-        differentlyMappedCAndD.c.shareStorageWithLayout(Layout(Shape{extent, extent}, {1, 2}));
-    require(!queryGemmSupport(differentlyMappedCAndD, GemmBackend::Blocked),
-            "GEMM accepted differently mapped overlapping C and D tensors.");
 }
 
 void testParallelSparseSelection() {
@@ -685,7 +620,7 @@ void testParallelSparseSelection() {
 int main() {
     testReducedPrecisionAccumulators();
     testSelectedBlockAccumulatorFamilies();
-    testFinalizerAndSmallEdgeBlock();
+    testSmallEdgeBlock();
     testExplicitSelectionBlockPlan();
     testStridedSelectionBlockPlan();
     testBlockScaledSelectionBlockPlan();
@@ -696,7 +631,7 @@ int main() {
     testAutomaticSelectionUsesBlockedBackend();
     testParallelFullSelection();
     testOverlappingOutputIsRejectedAcrossBackends();
-    testOutputAliasingContract();
+    testOutputCannotAliasInputs();
     testParallelSparseSelection();
     return 0;
 }
