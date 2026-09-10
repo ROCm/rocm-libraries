@@ -83,6 +83,10 @@ int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& out
 {
     const std::string command = std::string("cd ") + HIPDNN_UHD_GEN_TOOLS_DIR + " && "
                                 + HIPDNN_UHD_GEN_PYTHON + " -m uhd_gen"
+                                // `train` is a subcommand: the tool also exports benchmarks,
+                                // evaluates regret and promotes a model, and argparse requires
+                                // the verb rather than defaulting to training.
+                                + " train"
                                 + " --input " + csv.string()
                                 + " --features q.M kernel.tile_m"
                                 + " --target tflops"
@@ -96,6 +100,67 @@ int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& out
                                 // why, and it lands in the test's output.
                                 + " 1>&2";
     return std::system(command.c_str());
+}
+
+/// A UHD whose features are `$derived.*`, written by the tool and read by the runtime.
+///
+/// The rest of this suite trains a plain signature, so nothing here exercised RFC 0019 §6.4
+/// end to end: the expressions live in the descriptor, the tool folds them into
+/// `features_hash`, and the runtime recomputes that hash from the block it parsed. A
+/// disagreement fails §6.3 check 1 and degrades to declared order -- silently, because a
+/// degraded ranking is a legal one -- so only a round trip through both languages says the
+/// two renderings agree on a real artifact rather than on a pinned literal.
+TEST(TestUhdGenArtifactDerived, TheRuntimeRecomputesTheHashOfWhatTheToolDeclared)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_derived");
+
+    // The trainer fits on values, so the corpus carries a column per derived name; the
+    // runtime recomputes those same values from the expressions below.
+    const auto csv = dir.path() / "corpus.csv";
+    {
+        std::ofstream out(csv);
+        out << "q.M,derived.twice_m,kernel.tile_m,tflops\n";
+        for(const int64_t tileM : {64, 128, 256})
+        {
+            for(int row = 0; row < 25; ++row)
+            {
+                const double m = 1024.0 + (row * 128.0);
+                out << static_cast<int64_t>(m) << "," << static_cast<int64_t>(m * 2) << ","
+                    << tileM << "," << ((static_cast<double>(tileM) / 4.0) + (m / 4096.0))
+                    << "\n";
+            }
+        }
+    }
+
+    const auto outputDir = dir.path() / "out";
+    const std::string command = std::string(HIPDNN_UHD_GEN_PYTHON) + " -m uhd_gen train"
+                                + " --input " + csv.string()
+                                + " --features derived.twice_m kernel.tile_m"
+                                + R"( --derived 'twice_m={"*":["$q.M",2]}')"
+                                + " --target tflops"
+                                + " --output-dir " + outputDir.string()
+                                + " --name 'uhd_gen derived test'"
+                                + " --num-boost-round 40 --early-stopping 10 1>&2";
+    ASSERT_EQ(std::system(("cd " + std::string(HIPDNN_UHD_GEN_TOOLS_DIR) + " && " + command).c_str()),
+              0);
+
+    const auto path = outputDir / "heuristic.uhd.json";
+    std::ifstream file(path);
+    const auto document = nlohmann::json::parse(file);
+    const auto descriptor
+        = hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(document, path);
+
+    ASSERT_EQ(descriptor.derived.size(), 1u);
+    EXPECT_EQ(descriptor.derived.front().name, "twice_m");
+
+    // The contract: what the tool wrote equals what the runtime computes from the parsed
+    // block. Constructing the extractor is how the runtime does it.
+    const hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor extractor(
+        descriptor.featuresSignature,
+        {{descriptor.derived.front().name, descriptor.derived.front().expression}},
+        descriptor.categoricalEncoding);
+    EXPECT_EQ(extractor.getSignatureHash(), descriptor.featuresHash);
 }
 
 class TestUhdGenArtifact : public ::testing::Test
