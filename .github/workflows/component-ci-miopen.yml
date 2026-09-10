@@ -151,13 +151,13 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
 
-      - name: Build rocjitsu KMD
+      - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'
         run: |
           apt-get update && apt-get install -y libdrm-dev
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
+          cmake --build rocjitsu-build --target rocjitsu_shared -j$(nproc)
 
       - name: Configure build
         run: |
@@ -206,7 +206,7 @@ jobs:
       - name: Run miopen_gtest_check (rocjitsu)
         if: matrix.job_id == 'hip-package-build'
         run: |
-          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
-          LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
+          LD_PRELOAD=$(pwd)/rocjitsu-build/librocjitsu.so \
             ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list
