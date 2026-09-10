@@ -99,8 +99,8 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 ### How It Works
 
 1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
-2. **Hash Function**: The `hipdnn_plugin_sdk::engine_names::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
-3. **Registration**: Engine names are registered in the Plugin SDK header for discoverability
+2. **Hash Function**: The `hipdnn_data_sdk::utilities::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
+3. **Registration**: Engine names built into the hipDNN tree are registered in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` for discoverability
 
 ### Using Engine IDs
 
@@ -126,7 +126,9 @@ public:
 
 ### Registering New Engine Names
 
-To add your engine name to the official registry:
+Registering an engine name is optional — a plugin can report its own names instead. See "Engine names" in [Develop plugins](./user-guides/how-to/develop-plugins.rst).
+
+Engines built into the hipDNN tree are registered as follows:
 
 1. **Choose a Unique Name**:
    - Use UPPER_CASE with underscores
@@ -137,18 +139,15 @@ To add your engine name to the official registry:
    HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
-3. **Test Locally First**: You can use unregistered names during development - they'll generate a warning but work correctly
-
 ### Benefits
 
 - **Deterministic**: Same name always produces same ID
-- **No Collisions**: Hash algorithm minimizes collision risk
+- **Collision-resistant**: Hash algorithm minimizes collision risk
 - **Human-Readable**: Debug logs can show meaningful engine names
 - **Forward Compatible**: New engines can be used without registry updates
 
 > [!TIP]
-> 💡 The engine ID system ensures globally unique identifiers across all plugins. You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
-
+> 💡 You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
 
 ## Creating a Kernel Engine Plugin
 
@@ -769,6 +768,7 @@ nm -gD your_plugin.so | grep " T "
 # hipdnnEnginePluginCreate
 # hipdnnEnginePluginDestroy
 # hipdnnEnginePluginGetAllEngineIds
+# hipdnnEnginePluginGetEngineName
 # ... (other plugin API functions)
 ```
 

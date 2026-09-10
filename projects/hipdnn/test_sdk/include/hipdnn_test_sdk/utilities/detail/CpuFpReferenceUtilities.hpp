@@ -8,9 +8,11 @@
 #include <cmath>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -228,6 +230,23 @@ template <typename F>
 auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimensions)
 {
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
+}
+
+/**
+ * @brief Reject a ragged tensor with a message identifying which argument it was.
+ *
+ * @param tensor The tensor to check.
+ * @param errorPrefix Prefix identifying the calling CPU reference (e.g. "MyOp: ").
+ * @param name The argument name to report if the tensor is ragged.
+ */
+inline void validateNoRaggedTensor(const hipdnn_data_sdk::utilities::ITensor& tensor,
+                                   const std::string& errorPrefix,
+                                   const char* name)
+{
+    if(tensor.raggedIterationInfo().has_value())
+    {
+        throw std::runtime_error(errorPrefix + "ragged " + name + " tensor is not supported");
+    }
 }
 
 } // namespace hipdnn_test_sdk::detail

@@ -19,6 +19,11 @@
 - [Adding Peephole Patterns](developer/adding-peephole-patterns.md) -- Declarative pattern-based optimizations
 - [Adding Intrinsics](developer/adding-intrinsics.md) -- Define reusable high-level operations
 - [Pattern Grammar Reference](developer/pattern-grammar.md) -- Complete syntax for the pattern language
+- [Wait-Aware Schedule Repair Pass](developer/wait-aware-schedule-repair-pass.md) -- Reopen WMMA issue windows after final wait insertion, leaving wait immediates untouched
+- [SSA representation](developer/ssa-representation.md) -- SSA value/use-list model on Function, BasicBlock, and StinkyInstruction
+- [Lift Asm Registers to SSA Pass](developer/lift-asm-registers-to-ssa-pass.md) -- Physical VGPR/SGPR lift to attached SSA on Function
+- [Register Allocation](developer/register-allocation.md) -- Allocator interface, live intervals, region scope, arch-dependent rules, and verification on attached SSA
+- [The Greedy Allocator](developer/register-allocation-GreedyAllocator.md) -- The greedy and greedy-compact colouring policies in detail, including how they honour the rules table
 
 ## [Known Issues](known-issues.md)
 

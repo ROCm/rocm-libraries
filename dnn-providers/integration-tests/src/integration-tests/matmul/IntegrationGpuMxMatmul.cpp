@@ -144,9 +144,25 @@ using IntegrationGpuMxMatmulE2M1ToFp16 = MxMatmul<fp4_e2m1, half>;
 using IntegrationGpuMxMatmulE2M1ToBf16 = MxMatmul<fp4_e2m1, bfloat16>;
 using IntegrationGpuMxMatmulE2M1ToFp32 = MxMatmul<fp4_e2m1, float>;
 
+// Input (FP6 E2M3 / E3M2) × output (FP16 / BF16 / FP32) combinations.
+using IntegrationGpuMxMatmulE2M3ToFp16 = MxMatmul<fp6_e2m3, half>;
+using IntegrationGpuMxMatmulE2M3ToBf16 = MxMatmul<fp6_e2m3, bfloat16>;
+using IntegrationGpuMxMatmulE2M3ToFp32 = MxMatmul<fp6_e2m3, float>;
+using IntegrationGpuMxMatmulE3M2ToFp16 = MxMatmul<fp6_e3m2, half>;
+using IntegrationGpuMxMatmulE3M2ToBf16 = MxMatmul<fp6_e3m2, bfloat16>;
+using IntegrationGpuMxMatmulE3M2ToFp32 = MxMatmul<fp6_e3m2, float>;
+
 // Mixed operands: FP8 OCP A × FP4 B (and the reverse) → FP16.
 using IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16 = MxMatmulMixed<fp8_e4m3, fp4_e2m1, half>;
 using IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16 = MxMatmulMixed<fp4_e2m1, fp8_e4m3, half>;
+
+// Mixed operands spanning the two FP6 encodings, and FP6 paired with the other
+// MX widths. FP8 OCP A x FP6 B is deliberately absent -- the plugin rejects it;
+// see WORKAROUND_ISSUE_10811 in the provider's Workarounds.hpp.
+using IntegrationGpuMxMatmulMixedE2M3E3M2ToFp16 = MxMatmulMixed<fp6_e2m3, fp6_e3m2, half>;
+using IntegrationGpuMxMatmulMixedE2M3E4M3ToFp16 = MxMatmulMixed<fp6_e2m3, fp8_e4m3, half>;
+using IntegrationGpuMxMatmulMixedE2M1E2M3ToFp16 = MxMatmulMixed<fp4_e2m1, fp6_e2m3, half>;
+using IntegrationGpuMxMatmulMixedE2M3E2M1ToFp16 = MxMatmulMixed<fp6_e2m3, fp4_e2m1, half>;
 
 } // namespace
 
@@ -216,6 +232,66 @@ TEST_P(IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16, Correctness)
     runGraphTest();
 }
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M3ToFp16);
+TEST_P(IntegrationGpuMxMatmulE2M3ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M3ToBf16);
+TEST_P(IntegrationGpuMxMatmulE2M3ToBf16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M3ToFp32);
+TEST_P(IntegrationGpuMxMatmulE2M3ToFp32, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE3M2ToFp16);
+TEST_P(IntegrationGpuMxMatmulE3M2ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE3M2ToBf16);
+TEST_P(IntegrationGpuMxMatmulE3M2ToBf16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE3M2ToFp32);
+TEST_P(IntegrationGpuMxMatmulE3M2ToFp32, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE2M3E3M2ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE2M3E3M2ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE2M3E4M3ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE2M3E4M3ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE2M1E2M3ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE2M1E2M3ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE2M3E2M1ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE2M3E2M1ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuMxMatmulE4M3ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));
@@ -258,4 +334,44 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M3ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M3ToBf16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M3ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE3M2ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE3M2ToBf16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE3M2ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE2M3E3M2ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE2M3E4M3ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE2M1E2M3ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE2M3E2M1ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));
