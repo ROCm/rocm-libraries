@@ -30,18 +30,16 @@ GlobalParameters:
     - MatrixInstruction:
       - [16, 16, 32, 1, 1, 1, 1, 1, 1] # gfx1250 WMMA bf16 16x16x32
     - WavefrontSize: [32]
-    - DepthU: [64]
-    - PrefetchGlobalRead: [2]
+    - DepthU: [32]
+    - PrefetchGlobalRead: [1]
     - PrefetchLocalRead: [1]
     - TransposeLDS: [-1]
     - WorkGroupMapping: [1]
-    - 1LDSBuffer: [0]
+    - 1LDSBuffer: [-1]
     - GlobalSplitU: [1]
     - GlobalSplitUAlgorithm: ["MultipleBuffer"]
     # ============ StinkyTofu scheduling + AGNTAB/AG multi-body under test ============
-    - ScheduleIterAlg: [4]
-    - TDMInst: [3]
-    - LDSTrInst: [True]
+    - ScheduleIterAlg: [0, 1, 2, 3, 4]
     - AdaptiveGemm: [0, 1]
     - AdaptiveGemmNTAB: [0, 1]
     - InitCIterWmma: [0, 1]
