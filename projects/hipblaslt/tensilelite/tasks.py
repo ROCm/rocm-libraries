@@ -71,7 +71,6 @@ def get_gpu_arch(c):
         print(cmake_gpu_target(detected))
 
 
-
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
@@ -85,9 +84,8 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False,
            stinkytofu="auto", rebuild_stinkytofu=False):
     """Install rocisa editably for source development.
 
-    This is a separate rocisa developer workflow. TensileLite packaging and
-    ``invoke build-client`` consume an already importable rocisa and do not call
-    this task or make decisions about rocisa's release packaging.
+    This is a separate rocisa developer workflow for generator commands and
+    compound development tasks. ``invoke build-client`` does not invoke it.
 
     Pass --static to build stinkytofu static instead of shared — useful for
     exercising the static-plugin path covered by
@@ -329,8 +327,6 @@ def build_client(
     enable_sdma=False,
 ):
     """Build the tensilelite-client C++ executable.
-
-    rocisa must already be importable in the invoking Python environment.
     """
 
     if enable_asan and enable_tsan:

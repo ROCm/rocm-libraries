@@ -12,8 +12,16 @@ _CODEGEN_DIR = os.path.join(os.path.dirname(__file__), "characterization", "_cod
 if _CODEGEN_DIR not in sys.path:
     sys.path.insert(0, _CODEGEN_DIR)
 
+_TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
+
+_UNIT_DIR = os.path.dirname(__file__)
+if _UNIT_DIR not in sys.path:
+    sys.path.insert(0, _UNIT_DIR)
+
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 
 @pytest.fixture(autouse=True)

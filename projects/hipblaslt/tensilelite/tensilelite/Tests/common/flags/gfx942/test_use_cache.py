@@ -26,7 +26,7 @@ import re
 from pathlib import Path
 
 from tensilelite import tensilelite
-from tensilelite.Tests.gpu_detection import has_arch
+from gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to
 # prevent test_config.py's findConfigs() from picking it up as a standalone
