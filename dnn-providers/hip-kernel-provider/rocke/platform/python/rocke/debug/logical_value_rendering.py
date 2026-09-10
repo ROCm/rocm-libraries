@@ -58,6 +58,19 @@ def _render_cell_value(cell: dict[str, Any]) -> str:
     return value_text(cell.get("value"), cell.get("class"), cell.get("sign"))
 
 
+def _render_cell_sources(cell: dict[str, Any]) -> str:
+    """Format the physical lane/register provenance for one logical cell."""
+    rendered = []
+    for source in cell["sources"]:
+        prefix = (
+            "~"
+            if source["active"] is False
+            else ("?" if source["active"] is None else "")
+        )
+        rendered.append(f"{prefix}L{source['lane']}/{source['machine_location']}")
+    return ",".join(rendered)
+
+
 def present_logical_value(
     record: dict[str, Any], *, schema: str, bit_width: int
 ) -> dict[str, Any]:
@@ -75,9 +88,7 @@ def present_logical_value(
                 cell["raw_hex"] = None
             cell["value_text"] = _render_cell_value(cell)
             for source in cell["sources"]:
-                source["raw_hex"] = (
-                    f"0x{source['raw_bits']:0{bit_width // 4}x}"
-                )
+                source["raw_hex"] = f"0x{source['raw_bits']:0{bit_width // 4}x}"
                 source["value_text"] = _render_cell_value(source)
     return result
 
@@ -111,7 +122,9 @@ def decode_logical_value(
     )
 
 
-def values_human(records: Sequence[dict[str, Any]]) -> str:
+def render_readable(
+    records: Sequence[dict[str, Any]], *, show_sources: bool = False
+) -> str:
     """Render semantic or presentation-rich logical-value records for humans."""
     lines = []
     for record in records:
@@ -138,4 +151,11 @@ def values_human(records: Sequence[dict[str, Any]]) -> str:
                 )
                 rendered.append(prefix + _render_cell_value(cell))
             lines.append(f"  {row:>3}: " + " ".join(rendered))
+        if show_sources:
+            lines.append("  sources (lane/register):")
+            for row, cells in enumerate(record["tile"]):
+                lines.append(
+                    f"  {row:>3}: "
+                    + " ".join(_render_cell_sources(cell) for cell in cells)
+                )
     return "\n".join(lines)

@@ -6,8 +6,14 @@ from __future__ import annotations
 
 import pytest
 from rocke.core import (
+    DEBUG_DESCRIPTION_MAGIC,
+    DEBUG_DESCRIPTION_SCHEMA,
+    IRBuilder,
+    automatic_debug_description,
     bind_logical_value,
+    debug_description_symbol,
     debug_manifest,
+    embed_debug_description,
     evaluate_layout,
     logical_value_description,
     register_value_binding,
@@ -137,3 +143,31 @@ def test_manifest_rejects_invalid_shapes_locations_and_duplicate_names():
     value = _bound_mfma_acc_value()
     with pytest.raises(ValueError, match="unique"):
         debug_manifest(value, value)
+
+
+def test_automatic_description_is_binding_free_and_embeddable():
+    builder = IRBuilder("debug_description", capture_loc=True)
+    accumulator = builder.mfma_f32_16x16x16_f16(
+        builder.zero_vec_f16(4),
+        builder.zero_vec_f16(4),
+        builder.zero_vec_f32_4(),
+    )
+    builder.debug_value(accumulator)
+    builder.ret()
+
+    description = automatic_debug_description(builder.kernel)
+    assert description is not None
+    assert description["schema"] == DEBUG_DESCRIPTION_SCHEMA
+    assert description["kernel"] == "debug_description"
+    assert description["values"][0]["dwarf"] == {
+        "name": accumulator.name[1:],
+        "type": "vec<f32x4>",
+    }
+    assert "binding" not in description["values"][0]
+
+    llvm = 'target triple = "amdgcn-amd-amdhsa"\n\ndefine void @k() { ret void }\n'
+    embedded = embed_debug_description(llvm, builder.kernel)
+    assert f"@{debug_description_symbol('debug_description')}" in embedded
+    assert 'section ".rocke.debug"' in embedded
+    assert embedded.endswith("define void @k() { ret void }\n")
+    assert "".join(f"\\{byte:02X}" for byte in DEBUG_DESCRIPTION_MAGIC) in embedded

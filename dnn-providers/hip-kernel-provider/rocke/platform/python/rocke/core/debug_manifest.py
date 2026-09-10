@@ -9,10 +9,14 @@ physical register binding and wraps bound values in a manifest.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 DEBUG_MANIFEST_SCHEMA = "rocke-debug-manifest/v1"
+DEBUG_DESCRIPTION_SCHEMA = "rocke-debug-description/v1"
+DEBUG_DESCRIPTION_MAGIC = b"ROCKEDBG"
 _STORAGE_WIDTHS = {
     "f32": 1,
     "f16x2": 2,
@@ -73,3 +77,64 @@ def debug_manifest(*values: dict[str, Any]) -> dict[str, Any]:
     if len(set(names)) != len(names):
         raise ValueError(f"logical value names must be unique: {names!r}")
     return {"schema": DEBUG_MANIFEST_SCHEMA, "values": list(values)}
+
+
+def debug_description_symbol(kernel_name: str) -> str:
+    """Return the ELF symbol carrying one kernel's logical debug metadata."""
+    suffix = hashlib.sha256(kernel_name.encode("utf-8")).hexdigest()[:16]
+    return f"__rocke_debug_description_{suffix}"
+
+
+def automatic_debug_description(kernel: Any) -> dict[str, Any] | None:
+    """Build the binding-free description embedded in a compiled code object."""
+    selections = kernel.attrs.get("debug_values", [])
+    values = []
+    for selection in selections:
+        logical = selection.get("logical")
+        if logical is None:
+            continue
+        values.append(
+            {
+                "logical": dict(logical),
+                "dwarf": {
+                    "name": str(selection["name"]),
+                    "type": str(selection["type"]),
+                },
+            }
+        )
+    if not values:
+        return None
+    return {
+        "schema": DEBUG_DESCRIPTION_SCHEMA,
+        "kernel": kernel.name,
+        "values": values,
+    }
+
+
+def embed_debug_description(llvm_text: str, kernel: Any) -> str:
+    """Embed logical metadata as inert, discoverable code-object data."""
+    description = automatic_debug_description(kernel)
+    if description is None:
+        return llvm_text
+    description_bytes = json.dumps(
+        description, allow_nan=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    payload = (
+        DEBUG_DESCRIPTION_MAGIC
+        + len(description_bytes).to_bytes(8, byteorder="little")
+        + description_bytes
+    )
+    encoded = "".join(f"\\{byte:02X}" for byte in payload)
+    symbol = debug_description_symbol(kernel.name)
+    declaration = (
+        f"@{symbol} = protected addrspace(4) constant [{len(payload)} x i8] "
+        f'c"{encoded}", section ".rocke.debug", align 1\n'
+        f"@llvm.used = appending global [1 x ptr] "
+        f"[ptr addrspacecast (ptr addrspace(4) @{symbol} to ptr)], "
+        'section "llvm.metadata"\n\n'
+    )
+    marker = "define "
+    offset = llvm_text.find(marker)
+    if offset < 0:
+        raise ValueError("cannot embed debug description: LLVM has no definition")
+    return llvm_text[:offset] + declaration + llvm_text[offset:]
