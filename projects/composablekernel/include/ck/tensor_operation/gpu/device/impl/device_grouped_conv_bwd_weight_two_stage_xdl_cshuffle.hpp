@@ -2124,7 +2124,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         if constexpr(!LargeTensors)
         {
             const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb<float>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                     tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
             return Argument{p_in_grid,
                             p_wei_grid,
@@ -2236,7 +2236,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         else
         {
             const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb<float>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                     tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
@@ -2308,7 +2308,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         if constexpr(!LargeTensors)
         {
             const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb<float>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                     tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
@@ -2422,7 +2422,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         else
         {
             const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb<float>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<AccDataType>(e_g_k_c_xs_lengths) ||
                                     tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;

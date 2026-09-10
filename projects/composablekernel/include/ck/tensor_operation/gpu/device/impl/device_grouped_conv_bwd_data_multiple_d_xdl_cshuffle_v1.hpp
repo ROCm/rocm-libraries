@@ -1996,32 +1996,15 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         bool is_size_valid = true;
         for(std::size_t i = 0; i < arg.a_grid_desc_m_k_container_.size(); i++)
         {
-            constexpr long_index_t TwoGB = (long_index_t{1} << 31);
-            const long_index_t a_element_space_size =
-                arg.a_grid_desc_m_k_container_[i].GetElementSpaceSize();
-            const long_index_t b_element_space_size =
-                arg.b_grid_desc_n_k_container_[i].GetElementSpaceSize();
-            const long_index_t e_element_space_size =
-                arg.e_grid_desc_m_n_container_[i].GetElementSpaceSize();
-            // element space size stored in int32_t so max value is TwoGB - 1, while
-            // element space size bytes stored in uint32_t so max value is TwoGB
             static_for<0, NumDTensor, 1>{}([&](auto j) {
                 using DDataType = remove_cvref_t<tuple_element_t<j.value, DsDataType>>;
-                const long_index_t d_element_space_size =
-                    arg.ds_grid_desc_m_n_container_[i][j].GetElementSpaceSize();
-                if(d_element_space_size * sizeof(DDataType) > TwoGB ||
-                   d_element_space_size >= TwoGB)
-                {
-                    is_size_valid = false;
-                }
+                is_size_valid &=
+                    !descriptor_exceeds_2gb<DDataType>(arg.ds_grid_desc_m_n_container_[i][j]);
             });
 
-            if(a_element_space_size * sizeof(ADataType) > TwoGB || a_element_space_size >= TwoGB ||
-               b_element_space_size * sizeof(BDataType) > TwoGB || b_element_space_size >= TwoGB ||
-               e_element_space_size * sizeof(EDataType) > TwoGB || e_element_space_size >= TwoGB)
-            {
-                is_size_valid = false;
-            }
+            is_size_valid &= !descriptor_exceeds_2gb<ADataType>(arg.a_grid_desc_m_k_container_[i]);
+            is_size_valid &= !descriptor_exceeds_2gb<BDataType>(arg.b_grid_desc_n_k_container_[i]);
+            is_size_valid &= !descriptor_exceeds_2gb<EDataType>(arg.e_grid_desc_m_n_container_[i]);
         }
         if(!is_size_valid)
         {
