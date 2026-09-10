@@ -24,10 +24,9 @@
  *
  *******************************************************************************/
 
-// An elementwise input carrying only a subset of the output modes would have to
-// be broadcast along the modes it lacks. That isn't implemented, and it used to
-// surface as HIPTENSOR_STATUS_INTERNAL_ERROR from the execute call long after
-// the descriptor and the plan had been accepted. See ROCm#6560.
+// An elementwise input may carry a strict subset of the output modes, in which case it is
+// broadcast along the modes it lacks. See ROCm#6560. What remains unsupported is an input
+// mode that the output does not carry, since that would have to be reduced away.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -38,9 +37,9 @@ constexpr int32_t nMode = 'n';
 
 constexpr uint32_t alignment = 256;
 
-// Fixture holding the descriptors shared by every case: a rank-2 {m,n} tensor,
-// a rank-2 {n,m} tensor that only reorders those modes, and a rank-1 {n} tensor
-// holding a strict subset of them.
+// Fixture holding the descriptors shared by every case: a rank-2 {m,n} tensor, a rank-2 {n,m}
+// tensor that only reorders those modes, a rank-1 {n} tensor holding a strict subset of them,
+// and a rank-2 tensor whose extent along the second mode disagrees with the others'.
 class ElementwiseModeTest : public ::testing::Test
 {
 protected:
@@ -48,9 +47,10 @@ protected:
     {
         ASSERT_EQ(hiptensorCreate(&mHandle), HIPTENSOR_STATUS_SUCCESS);
 
-        int64_t fullLengths[2]     = {2, 3};
-        int64_t permutedLengths[2] = {3, 2};
-        int64_t subsetLengths[1]   = {3};
+        int64_t fullLengths[2]        = {2, 3};
+        int64_t permutedLengths[2]    = {3, 2};
+        int64_t subsetLengths[1]      = {3};
+        int64_t wrongExtentLengths[2] = {2, 4};
 
         ASSERT_EQ(hiptensorCreateTensorDescriptor(
                       mHandle, &mFull, 2, fullLengths, nullptr, HIPTENSOR_R_32F, alignment),
@@ -61,10 +61,15 @@ protected:
         ASSERT_EQ(hiptensorCreateTensorDescriptor(
                       mHandle, &mSubset, 1, subsetLengths, nullptr, HIPTENSOR_R_32F, alignment),
                   HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hiptensorCreateTensorDescriptor(
+                mHandle, &mWrongExtent, 2, wrongExtentLengths, nullptr, HIPTENSOR_R_32F, alignment),
+            HIPTENSOR_STATUS_SUCCESS);
     }
 
     void TearDown() override
     {
+        hiptensorDestroyTensorDescriptor(mWrongExtent);
         hiptensorDestroyTensorDescriptor(mSubset);
         hiptensorDestroyTensorDescriptor(mPermuted);
         hiptensorDestroyTensorDescriptor(mFull);
@@ -75,19 +80,69 @@ protected:
     hiptensorTensorDescriptor_t mFull{};
     hiptensorTensorDescriptor_t mPermuted{};
     hiptensorTensorDescriptor_t mSubset{};
+    hiptensorTensorDescriptor_t mWrongExtent{};
 
     int32_t mFullModes[2]     = {mMode, nMode};
     int32_t mPermutedModes[2] = {nMode, mMode};
     int32_t mSubsetModes[1]   = {nMode};
+    int32_t mRepeatedModes[2] = {nMode, nMode};
 };
 
-TEST_F(ElementwiseModeTest, PermutationWithSubsetModesReturnsNotSupported)
+TEST_F(ElementwiseModeTest, PermutationWithSubsetModesIsSupported)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         mSubset,
+                                         mSubsetModes,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mFull,
+                                         mFullModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// The output has to carry every mode of the operation, so an input mode missing from it would
+// have to be reduced away rather than broadcast.
+TEST_F(ElementwiseModeTest, PermutationWithModeMissingFromOutputReturnsNotSupported)
 {
     hiptensorOperationDescriptor_t opDesc{};
     EXPECT_EQ(hiptensorCreatePermutation(mHandle,
                                          &opDesc,
+                                         mFull,
+                                         mFullModes,
+                                         HIPTENSOR_OP_IDENTITY,
                                          mSubset,
                                          mSubsetModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// A shared mode with disagreeing extents would send the walk over the output's index space
+// past the end of the input.
+TEST_F(ElementwiseModeTest, PermutationWithMismatchedExtentReturnsInvalidValue)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    EXPECT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         mWrongExtent,
+                                         mFullModes,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mFull,
+                                         mFullModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_INVALID_VALUE);
+}
+
+// A tensor that names the same mode twice cannot be aligned to the output's mode order.
+TEST_F(ElementwiseModeTest, PermutationWithRepeatedModeReturnsNotSupported)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    EXPECT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         mFull,
+                                         mRepeatedModes,
                                          HIPTENSOR_OP_IDENTITY,
                                          mFull,
                                          mFullModes,
@@ -110,10 +165,10 @@ TEST_F(ElementwiseModeTest, PermutationWithReorderedModesIsSupported)
     hiptensorDestroyOperationDescriptor(opDesc);
 }
 
-TEST_F(ElementwiseModeTest, BinaryWithSubsetModesReturnsNotSupported)
+TEST_F(ElementwiseModeTest, BinaryWithSubsetModesIsSupported)
 {
     hiptensorOperationDescriptor_t opDesc{};
-    EXPECT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+    ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
                                                &opDesc,
                                                mSubset,
                                                mSubsetModes,
@@ -123,6 +178,27 @@ TEST_F(ElementwiseModeTest, BinaryWithSubsetModesReturnsNotSupported)
                                                HIPTENSOR_OP_IDENTITY,
                                                mFull,
                                                mFullModes,
+                                               HIPTENSOR_OP_ADD,
+                                               HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// D carries every mode of the operation, so an input mode it lacks stays unsupported even
+// though a subset is now fine.
+TEST_F(ElementwiseModeTest, BinaryWithModeMissingFromOutputReturnsNotSupported)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    EXPECT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                               &opDesc,
+                                               mFull,
+                                               mFullModes,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               mSubset,
+                                               mSubsetModes,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               mSubset,
+                                               mSubsetModes,
                                                HIPTENSOR_OP_ADD,
                                                HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_NOT_SUPPORTED);
@@ -148,10 +224,10 @@ TEST_F(ElementwiseModeTest, BinaryWithReorderedModesIsSupported)
 }
 
 // The reproducer from issue(https://github.com/ROCm/ROCm/issues/6560): A{n} against B, C and D of {m,n}.
-TEST_F(ElementwiseModeTest, TrinaryWithSubsetModesReturnsNotSupported)
+TEST_F(ElementwiseModeTest, TrinaryWithSubsetModesIsSupported)
 {
     hiptensorOperationDescriptor_t opDesc{};
-    EXPECT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+    ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
                                                 &opDesc,
                                                 mSubset,
                                                 mSubsetModes,
@@ -164,6 +240,29 @@ TEST_F(ElementwiseModeTest, TrinaryWithSubsetModesReturnsNotSupported)
                                                 HIPTENSOR_OP_IDENTITY,
                                                 mFull,
                                                 mFullModes,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+TEST_F(ElementwiseModeTest, TrinaryWithModeMissingFromOutputReturnsNotSupported)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    EXPECT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                &opDesc,
+                                                mFull,
+                                                mFullModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mSubset,
+                                                mSubsetModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mSubset,
+                                                mSubsetModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mSubset,
+                                                mSubsetModes,
                                                 HIPTENSOR_OP_ADD,
                                                 HIPTENSOR_OP_ADD,
                                                 HIPTENSOR_COMPUTE_DESC_32F),
