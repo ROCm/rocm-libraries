@@ -72,7 +72,6 @@ def get_gpu_arch(c):
         print(cmake_gpu_target(detected))
 
 
-
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
