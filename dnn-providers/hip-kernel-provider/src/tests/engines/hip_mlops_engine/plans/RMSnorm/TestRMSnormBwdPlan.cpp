@@ -33,15 +33,15 @@ TEST(TestRMSnormBwdParams, ConstructsFromSingleNodeGraph)
     EXPECT_NO_THROW(const RMSnormBwdParams params(attr, graph.getTensorMap()));
 }
 
-TEST(TestRMSnormBwdParams, ConstructsFromTripleNodeGraph)
+TEST(TestRMSnormBwdParams, ConstructsFromDoubleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     EXPECT_NO_THROW(const RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap()));
@@ -70,16 +70,16 @@ TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForSing
     EXPECT_EQ(params.y(), nullptr); // Not set by single node graph
 }
 
-TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForTripleNodeGraph)
+TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForDoubleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     const RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -116,16 +116,16 @@ TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForSingleNodeGraph)
     EXPECT_EQ(params.dbias()->uid(), attr.dbias_tensor_uid().value());
 }
 
-TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForTripleNodeGraph)
+TEST(TestRMSnormBwdParams, TensorPointersMatchExpectedUidsForDoubleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     const RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -163,16 +163,16 @@ TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForSingleNodeGra
     EXPECT_EQ(params.y(), nullptr);
 }
 
-TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForTripleNodeGraph)
+TEST(TestRMSnormBwdParams, OptionalTensorsAreNullWhenNotProvidedForDoubleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph(
         {150528, 50176, 224, 1}, {1, 3, 224, 224}, false);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     const RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -204,15 +204,15 @@ TEST(TestRMSnormBwdParams, IsMoveConstructibleForSingleNodeGraph)
     EXPECT_NE(moved.x(), nullptr);
 }
 
-TEST(TestRMSnormBwdParams, IsMoveConstructibleForTripleNodeGraph)
+TEST(TestRMSnormBwdParams, IsMoveConstructibleForDoubleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -267,9 +267,9 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormBwdPlan>
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -381,7 +381,7 @@ TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZeroForSingleNodeGraph)
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZeroForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZeroForDoubleNodeGraph)
 {
     auto [fbb, plan] = createFusedActivationPlanFromGraph();
     const Handle handle;
@@ -397,7 +397,7 @@ TEST(TestRMSnormBwdPlan, IsMoveConstructibleForSingleNodeGraph)
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestRMSnormBwdPlan, IsMoveConstructibleForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, IsMoveConstructibleForDoubleNodeGraph)
 {
     auto [fbb, plan] = createFusedActivationPlanFromGraph();
 
@@ -420,7 +420,7 @@ TEST(TestRMSnormBwdPlan, CompileCallsCompilerWithCorrectKernelNameForSingleNodeG
     setupMockCompileChain();
 }
 
-TEST(TestRMSnormBwdPlan, CompileCallsCompilerWithCorrectKernelNameForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, CompileCallsCompilerWithCorrectKernelNameForDoubleNodeGraph)
 {
     setupFusedActivationMockCompileChain();
 }
@@ -447,7 +447,7 @@ TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefinesForSingleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefinesForTripleNodeGraph)
+TEST(TestRMSnormBwdPlanFp32, CompileSetsCorrectDefinesForDoubleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupFusedActivationMockCompileChain();
 
@@ -494,7 +494,7 @@ TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForSingleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForTripleNodeGraph)
+TEST(TestRMSnormBwdPlanFp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupFusedActivationMockCompileChain(
         {150528, 50176, 224, 1},
@@ -544,7 +544,7 @@ TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForSingleNodeGraph)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForTripleNodeGraph)
+TEST(TestRMSnormBwdPlanBfp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
 {
     auto [mockCompiler, capturedOptions] = setupFusedActivationMockCompileChain(
         {150528, 50176, 224, 1},
@@ -591,7 +591,7 @@ TEST(TestRMSnormBwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForSingl
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormBwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForDoubleNodeGraph)
 {
     auto [mockCompiler, capturedOptions]
         = setupFusedActivationMockCompileChain({150528, 1, 672, 3});
@@ -635,7 +635,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForSingleNodeGrap
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForDoubleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -645,9 +645,9 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedWorkgroupsThrowsForTripleNodeGrap
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
@@ -679,7 +679,7 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForSingleNodeGraph
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForTripleNodeGraph)
+TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForDoubleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -689,9 +689,9 @@ TEST(TestRMSnormBwdPlan, CompileWithUnsupportedDimensionThrowsForTripleNodeGraph
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& nodeActivation = graph.getNode(1);
+    const auto& nodeActivation = graph.getNode(0);
     const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
-    const auto& nodeBwd = graph.getNode(2);
+    const auto& nodeBwd = graph.getNode(1);
     const auto& attrBwd = *nodeBwd.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap());
