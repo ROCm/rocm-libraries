@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormCommon.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormFwdPlan.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockKernelCompiler.hpp"
@@ -89,6 +90,23 @@ TEST(TestRMSnormFwdParams, IsMoveConstructible)
 TEST(TestRMSnormFwdParams, IsNotCopyConstructible)
 {
     EXPECT_FALSE(std::is_copy_constructible_v<RMSnormFwdParams>);
+}
+
+TEST(TestRMSnormProblemDescription, ComputesExecutionGeometry)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attr = *graph.getNode(0).attributes_as_RMSNormAttributes();
+    const RMSnormFwdParams params(attr, graph.getTensorMap());
+
+    const ProblemDescription problem(params.x(), params.scale(), Direction::FORWARD);
+
+    EXPECT_EQ(problem.direction(), Direction::FORWARD);
+    EXPECT_EQ(problem.normalizeDim(), 1);
+    EXPECT_EQ(problem.outerSize(), 1);
+    EXPECT_EQ(problem.innerSize(), 150528);
+    EXPECT_EQ(problem.stride(), 1);
 }
 // ============================================================================
 // RMSnormFwdPlan - helpers
