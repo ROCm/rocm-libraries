@@ -127,10 +127,10 @@ static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileK == 64 ||
 static_assert(!kCompiledForGfx1250 ||
                   (SelectedKernel::WarpPerBlock_M * SelectedKernel::WarpPerBlock_N *
                    SelectedKernel::WarpPerBlock_K) <= 4,
-              "gfx1250 is wave32: a block of more than four warps is unreliable there "
-              "-- in a 14,208-row sweep the 8-warp maps aborted at launch 3,352 times "
-              "and returned wrong results 112 times, while also passing 192 times. "
-              "Nondeterministic, so refused rather than trusted.");
+              "gfx1250 is wave32: a block of more than four warps is not dependable "
+              "there. Paired with a legal tile in a 14,208-row sweep the 8-warp maps "
+              "aborted at launch 2,168 times and passed 192 times, with no wrong "
+              "answers -- unreliable rather than incorrect, so refused here.");
 
 extern "C" {
 
