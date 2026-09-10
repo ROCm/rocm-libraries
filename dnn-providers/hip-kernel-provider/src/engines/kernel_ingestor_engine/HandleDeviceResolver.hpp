@@ -34,13 +34,13 @@ public:
         // Null stream: default stream belongs to the current device.
         if(handle.getStream() != nullptr)
         {
-            if(hipStreamGetDevice(handle.getStream(), &deviceId) == hipSuccess && deviceId >= 0)
+            if(queryStreamDevice(handle.getStream(), &deviceId) == hipSuccess && deviceId >= 0)
             {
                 return deviceId;
             }
         }
 
-        if(hipGetDevice(&deviceId) != hipSuccess)
+        if(queryCurrentDevice(&deviceId) != hipSuccess)
         {
             return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
         }
@@ -85,6 +85,18 @@ public:
     }
 
 protected:
+    /// Test seam: lets a test model a runtime that reports success without an ordinal.
+    virtual hipError_t queryStreamDevice(hipStream_t stream, int* deviceId) const
+    {
+        return hipStreamGetDevice(stream, deviceId);
+    }
+
+    /// Test seam: lets a test pin the fallthrough ordinal without owning a device.
+    virtual hipError_t queryCurrentDevice(int* deviceId) const
+    {
+        return hipGetDevice(deviceId);
+    }
+
     /// Test seam: lets a test supply properties for devices this machine lacks.
     virtual hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
                                              hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
