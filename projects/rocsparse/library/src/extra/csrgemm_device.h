@@ -88,50 +88,50 @@ namespace rocsparse
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
 
-        // Each (sub)wavefront processes a row
-        J row = (hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x) / WFSIZE;
+        // (Sub)wavefront id within the block
+        int wid = hipThreadIdx_x / WFSIZE;
 
-        // Bounds check
-        if(row >= m)
+        // Each (sub)wavefront processes a row, grid-strided so a grid clamped to
+        // maxGridSize[0] still covers every row
+        for(J row = static_cast<J>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; row < m;
+            row += static_cast<J>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
-            return;
-        }
+            // Initialize intermediate product counter of current row
+            I nprod = 0;
 
-        // Initialize intermediate product counter of current row
-        I nprod = 0;
-
-        // alpha * A * B part
-        if(mul == true)
-        {
-            // Row begin and row end of A matrix
-            I row_begin_A = csr_row_ptr_A[row] - idx_base_A;
-            I row_end_A   = csr_row_ptr_A[row + 1] - idx_base_A;
-
-            // Loop over columns of A in current row
-            for(I j = row_begin_A + lid; j < row_end_A; j += WFSIZE)
+            // alpha * A * B part
+            if(mul == true)
             {
-                // Current column of A
-                J col_A = csr_col_ind_A[j] - idx_base_A;
+                // Row begin and row end of A matrix
+                I row_begin_A = csr_row_ptr_A[row] - idx_base_A;
+                I row_end_A   = csr_row_ptr_A[row + 1] - idx_base_A;
 
-                // Accumulate non zero entries of B in row col_A
-                nprod += (csr_row_ptr_B[col_A + 1] - csr_row_ptr_B[col_A]);
+                // Loop over columns of A in current row
+                for(I j = row_begin_A + lid; j < row_end_A; j += WFSIZE)
+                {
+                    // Current column of A
+                    J col_A = csr_col_ind_A[j] - idx_base_A;
+
+                    // Accumulate non zero entries of B in row col_A
+                    nprod += (csr_row_ptr_B[col_A + 1] - csr_row_ptr_B[col_A]);
+                }
+
+                // Gather nprod
+                nprod = rocsparse::wfreduce_sum<WFSIZE>(nprod);
             }
 
-            // Gather nprod
-            nprod = rocsparse::wfreduce_sum<WFSIZE>(nprod);
-        }
-
-        // Last lane writes result
-        if(lid == WFSIZE - 1)
-        {
-            // beta * D part
-            if(add == true)
+            // Last lane writes result
+            if(lid == WFSIZE - 1)
             {
-                nprod += (csr_row_ptr_D[row + 1] - csr_row_ptr_D[row]);
-            }
+                // beta * D part
+                if(add == true)
+                {
+                    nprod += (csr_row_ptr_D[row + 1] - csr_row_ptr_D[row]);
+                }
 
-            // Write number of intermediate products of the current row
-            int_prod[row] = nprod;
+                // Write number of intermediate products of the current row
+                int_prod[row] = nprod;
+            }
         }
     }
 

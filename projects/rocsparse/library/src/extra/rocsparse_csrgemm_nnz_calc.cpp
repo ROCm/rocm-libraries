@@ -109,7 +109,7 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
 #define CSRGEMM_SUB 8
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
         (rocsparse::csrgemm_intermediate_products<CSRGEMM_DIM, CSRGEMM_SUB>),
-        dim3((m - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1),
+        dim3(rocsparse::csrgemm_clamp_grid_size(handle, (m - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
         dim3(CSRGEMM_DIM),
         0,
         stream,
