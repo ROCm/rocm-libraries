@@ -13,7 +13,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 #include <unordered_map>
 #include <vector>
 
@@ -211,16 +215,45 @@ protected:
             {
                 GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
             }
-
+            // /proc/self/exe and GetModuleFileName both give this process's own
+            // executable path, which is the only reliable way to re-exec exactly this
+            // test binary regardless of where CTest or the CI runner placed it.
+#if defined(_WIN32)
+            std::string selfPath(MAX_PATH, '\0');
+            const DWORD n
+                = GetModuleFileNameA(nullptr, selfPath.data(), static_cast<DWORD>(selfPath.size()));
+            ASSERT_GT(n, 0U) << "could not resolve this test binary's own path via "
+                                "GetModuleFileName";
+            selfPath.resize(n);
+#else
             std::string selfPath(4096, '\0');
             const ssize_t n = readlink("/proc/self/exe", selfPath.data(), selfPath.size() - 1);
             ASSERT_GT(n, 0) << "could not resolve this test binary's own path via "
                                "/proc/self/exe";
             selfPath.resize(static_cast<size_t>(n));
+#endif
 
-            const std::string command
-                = "HIPDNN_STALL_RECOVERY_CHILD=1 \"" + selfPath + "\" --gtest_filter=" + testId;
+            // Set in this process, not via shell "VAR=1 cmd" prefix syntax: that syntax
+            // is POSIX-shell-only and cmd.exe does not support it. setenv/_putenv_s is
+            // inherited by the child regardless of which shell std::system() invokes.
+#if defined(_WIN32)
+            _putenv_s("HIPDNN_STALL_RECOVERY_CHILD", "1");
+#else
+            setenv("HIPDNN_STALL_RECOVERY_CHILD", "1", 1);
+#endif
+            const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
             const int rc = std::system(command.c_str());
+
+            // setenv/_putenv_s changed THIS process's own environment, not only the
+            // spawned child's: unset it now, or the next IntegrationAutotuneStallRecovery
+            // test in this same binary would see it already set, skip its own re-exec,
+            // and run unisolated in this process instead of a fresh one.
+#if defined(_WIN32)
+            _putenv_s("HIPDNN_STALL_RECOVERY_CHILD", "");
+#else
+            unsetenv("HIPDNN_STALL_RECOVERY_CHILD");
+#endif
+
             ASSERT_EQ(rc, 0) << "isolated child run of " << testId
                              << " failed (see its gtest output above)";
             return;
