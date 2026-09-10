@@ -1,8 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-add_library(hipsparselt)
-if(NOT BUILD_SHARED_LIBS)
+if(HIPSPARSELT_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
+    add_library(hipsparselt SHARED)
+else()
+    add_library(hipsparselt STATIC)
     target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_STATIC_LIB)
 endif()
 

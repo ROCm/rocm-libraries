@@ -1,8 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(HIPBLASLT_ENABLE_HOST)
+    set(_tensilelite_header_scope PUBLIC)
+else()
+    set(_tensilelite_header_scope PRIVATE)
+endif()
+
 target_sources(tensilelite-host
-    PUBLIC
+    ${_tensilelite_header_scope}
         FILE_SET tensilelite_public_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
@@ -114,7 +120,7 @@ if(HIPBLASLT_ENABLE_YAML)
     )
 else()
     target_sources(tensilelite-host
-        PUBLIC
+        ${_tensilelite_header_scope}
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
@@ -125,13 +131,15 @@ else()
     )
 endif()
 
-get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
-target_sources(tensilelite-host
-    PUBLIC
-        FILE_SET tensilelite_generated_headers TYPE HEADERS
-            BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
-            FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
-        FILE_SET rocisa_public_headers TYPE HEADERS
-            BASE_DIRS "${_rocisa_include_root}"
-            FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
-)
+if(HIPBLASLT_ENABLE_HOST)
+    get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
+    target_sources(tensilelite-host
+        ${_tensilelite_header_scope}
+            FILE_SET tensilelite_generated_headers TYPE HEADERS
+                BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
+                FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
+            FILE_SET rocisa_public_headers TYPE HEADERS
+                BASE_DIRS "${_rocisa_include_root}"
+                FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
+    )
+endif()
