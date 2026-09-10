@@ -6,12 +6,27 @@
 #include "SdpaPlanUtils.hpp"
 
 #include <cstdint>
+#include <flatbuffers/struct.h>
 #include <string>
 
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 namespace asm_sdpa_engine
 {
+
+struct SdpaFwdGroupModeParams
+{
+    int64_t qoRaggedOffsetUid;
+    int64_t kvRaggedOffsetUid;
+    std::optional<int64_t> qoCuSeqLengthsUid;
+    std::optional<int64_t> kvCuSeqLengthsUid;
+
+    SdpaFwdGroupModeParams(int64_t qoRaggedOffsetUidIn, int64_t kvRaggedOffsetUidIn)
+        : qoRaggedOffsetUid(qoRaggedOffsetUidIn)
+        , kvRaggedOffsetUid(kvRaggedOffsetUidIn)
+    {
+    }
+};
 
 /**
  * @brief Parameters for SDPA forward kernel execution.
@@ -26,7 +41,8 @@ struct SdpaFwdParams
     int64_t kUid;
     int64_t vUid;
     int64_t oUid;
-    int64_t lseUid = -1; // LSE output, -1 = disabled
+    std::optional<int64_t> lseUid;
+    std::optional<SdpaFwdGroupModeParams> group;
 
     // Tensor dimensions
     unsigned int batchSize; // B

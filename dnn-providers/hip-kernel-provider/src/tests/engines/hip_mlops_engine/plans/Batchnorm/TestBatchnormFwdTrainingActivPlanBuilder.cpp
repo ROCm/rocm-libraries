@@ -86,6 +86,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForThre
 {
     const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(3));
+    EXPECT_CALL(mockGraph, getGraph()).Times(::testing::AnyNumber());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, mockGraph));
 }

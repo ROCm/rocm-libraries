@@ -6,6 +6,7 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 
 namespace hip_kernel_provider
@@ -31,6 +32,9 @@ static void initializeHipKernelSettings(
 bool HipMlopsEngine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    const auto& tensorMap = opGraph.getTensorMap();
+    CHECK_NO_RAGGED_TENSORS(tensorMap);
+
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
     for(const auto& planBuilder : _planBuilders)

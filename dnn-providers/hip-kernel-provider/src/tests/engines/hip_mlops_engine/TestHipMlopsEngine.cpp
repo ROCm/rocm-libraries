@@ -122,6 +122,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -140,6 +141,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -149,6 +151,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     const HipMlopsEngine engine(0);
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
@@ -163,6 +166,7 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }

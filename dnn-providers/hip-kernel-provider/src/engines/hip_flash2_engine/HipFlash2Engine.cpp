@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
@@ -22,6 +23,9 @@ void HipFlash2Engine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 bool HipFlash2Engine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    const auto& tensorMap = opGraph.getTensorMap();
+    CHECK_NO_RAGGED_TENSORS(tensorMap);
+
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))

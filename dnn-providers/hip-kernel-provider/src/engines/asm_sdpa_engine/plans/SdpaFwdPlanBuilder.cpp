@@ -12,8 +12,10 @@
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -29,13 +31,6 @@ static RoundingMode
 {
     // TODO Cannot be specified in the graph, this will require specialized handling
     return RoundingMode::RTNE;
-}
-
-static BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
-{
-    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
-               ? BatchMode::GROUP
-               : BatchMode::BATCH;
 }
 
 static std::string getKernelNameKey(const std::string& archId,
@@ -195,6 +190,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::utilities;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
@@ -271,6 +267,35 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    BatchMode batchMode;
+    // Batch mode checks
+    {
+
+        std::vector<std::string> unsupportedRaggedTensorStrings;
+        for(auto id : listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid}))
+        {
+            const std::string unsupportedString
+                = std::to_string(id) + " (" + tensorMap.at(id)->name()->str() + ")";
+            unsupportedRaggedTensorStrings.push_back(unsupportedString);
+        }
+
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !unsupportedRaggedTensorStrings.empty(),
+            "Only the Q, K, V and O tensors can be ragged. The following "
+            "tensors are ragged and not supported: "
+                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorStrings));
+
+        const int numberRagged
+            = static_cast<int>(qTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(kTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
+
+        HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
+                                   "Either all or none of Q, K, V or O must be ragged");
+        batchMode = (numberRagged == 4) ? BatchMode::GROUP : BatchMode::BATCH;
+    }
 
     // Validate Q/K/V/O ranks before accessing their dims by index.
     HIP_KERNEL_RETURN_FALSE_IF(
@@ -372,7 +397,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
                                 getRoundingMode(attrs),
-                                getBatchMode(attrs),
+                                batchMode,
                                 &cfg_fmha_fwd);
 
     HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
@@ -499,7 +524,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
 
     // Extract optional LSE output metadata
-    int64_t lseUid = -1;
+    std::optional<int64_t> lseUid;
     unsigned int lseStrideHead = 0;
     const bool hasStats = hasStatsOutput(sdpaAttrs);
     if(hasStats)
@@ -554,6 +579,16 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.archString = deviceString;
     params.maskType = plan_utils::getMaskType(sdpaAttrs);
 
+    auto batchMode
+        = (qTensor->ragged_offset_tensor_uid().has_value()) ? BatchMode::GROUP : BatchMode::BATCH;
+
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
+    if(batchMode == BatchMode::GROUP)
+    {
+        params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),
+                                              kTensor->ragged_offset_tensor_uid().value()};
+    }
+
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
     auto kernelKey = getKernelNameKey(
@@ -564,7 +599,7 @@ void SdpaFwdPlanBuilder::buildPlan(
         static_cast<int>(headDimV),
         params.maskType,
         getRoundingMode(sdpaAttrs),
-        getBatchMode(sdpaAttrs),
+        batchMode,
         &cfg_fmha_fwd);
 
     if(kernelKey.empty())

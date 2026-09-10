@@ -50,9 +50,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.ptr_q = qPtr;
     args.ptr_k = kPtr;
     args.ptr_v = vPtr;
-    if(_params.lseUid >= 0)
+    if(_params.lseUid)
     {
-        args.ptr_lse = uidToPtrMap.at(_params.lseUid);
+        args.ptr_lse = uidToPtrMap.at(_params.lseUid.value());
     }
     else
     {
@@ -126,6 +126,29 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.s_descale_k_Hs = 0;
     args.s_descale_v_Bs = 0;
     args.s_descale_v_Hs = 0;
+
+    if(const auto& group = _params.group)
+    {
+        args.ptr_qseq_padding = uidToPtrMap[group->qoRaggedOffsetUid];
+        if(group->qoCuSeqLengthsUid)
+        {
+            args.ptr_qseq = uidToPtrMap[group->qoCuSeqLengthsUid.value()];
+        }
+        else
+        {
+            args.ptr_qseq = args.ptr_qseq_padding;
+        }
+
+        args.ptr_kseq_padding = uidToPtrMap[group->kvRaggedOffsetUid];
+        if(group->kvCuSeqLengthsUid)
+        {
+            args.ptr_kseq = uidToPtrMap[group->kvCuSeqLengthsUid.value()];
+        }
+        else
+        {
+            args.ptr_kseq = args.ptr_kseq_padding;
+        }
+    }
 
     if(!launchKernel("fwd",
                      _kernel->function(),

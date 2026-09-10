@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/ApplicabilityUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
@@ -505,6 +506,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
         "group mode (seq_len_q_tensor_uid or seq_len_kv_tensor_uid set) is not supported");
 
     const auto& tensorMap = opGraph.getTensorMap();
+    CHECK_NO_RAGGED_TENSORS(tensorMap);
 
     // Required input tensor UIDs
     const int64_t qUid = attrs.q_tensor_uid();
