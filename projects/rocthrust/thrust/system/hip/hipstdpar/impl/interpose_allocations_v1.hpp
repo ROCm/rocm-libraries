@@ -125,6 +125,7 @@ extern "C" {
         auto r = __hipstdpar_hidden_memalign(a, n);
 
         if (!hipstd::__initialised) return r;
+        if (n == 0) return r; // hipMemAdvise rejects zero-length ranges; nothing to advise.
 
         hipDevice_t d{};
         hipGetDevice(&d);
