@@ -1164,13 +1164,19 @@ void testing_matmul_with_bias(const Arguments&                                  
                   bool                                                      small = false) {
                   const auto scalar = hipblaslt::host_numerics::scalarType(type);
                   const auto seed   = initializationSeed(sequence);
-                  return small ? hipblaslt::host_numerics::randomIntegerRecipe(
-                                     scalar,
-                                     {.small = true,
-                                      .complexPolicy
-                                      = hipblaslt::host_numerics::ComplexGenerationPolicy::RealOnly,
-                                      .seed = seed})
-                               : hipblaslt::host_numerics::realOnlyRandomRecipe(scalar, seed);
+                  if(small)
+                  {
+                      return roc::host_numerics::GenerationRecipe::realOnly(
+                          roc::host_numerics::GenerationRecipe::uniformInteger(
+                              {.lower = 1, .upper = 10})
+                              .withAffineValueMapping({.scale = 0.1}),
+                          {.seed = seed});
+                  }
+                  return hipblaslt::host_numerics::initializationRecipe(
+                      scalar,
+                      hipblaslt_initialization::rand_int,
+                      seed,
+                      hipblaslt::host_numerics::TrigonometricComponent::Cosine);
               };
 
         const auto initializeHostMatrix = [&](HipHostBuffer&                         buffer,
