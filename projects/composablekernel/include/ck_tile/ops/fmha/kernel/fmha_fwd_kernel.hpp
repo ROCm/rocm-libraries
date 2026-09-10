@@ -281,10 +281,7 @@ struct FmhaFwdKernel
         ck_tile::index_t nhead_stride_q_descale;
         ck_tile::index_t nhead_stride_k_descale;
         ck_tile::index_t nhead_stride_v_descale;
-    };
 
-    struct FmhaFwdBatchPerHeadKargs : public FmhaFwdCommonPerHeadKargs
-    {
         ck_tile::index_t batch_stride_q_descale;
         ck_tile::index_t batch_stride_k_descale;
         ck_tile::index_t batch_stride_v_descale;
@@ -421,7 +418,7 @@ struct FmhaFwdKernel
                       QScaleEnum == BlockAttentionQuantScaleEnum::MX,
                       FmhaFwdBatchMXKargs,
                       std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD,
-                                         FmhaFwdBatchPerHeadKargs,
+                                         FmhaFwdCommonPerHeadKargs,
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
@@ -998,6 +995,9 @@ struct FmhaFwdKernel
                   ck_tile::index_t nhead_stride_q_descale,
                   ck_tile::index_t nhead_stride_k_descale,
                   ck_tile::index_t nhead_stride_v_descale,
+                  ck_tile::index_t batch_stride_q_descale,
+                  ck_tile::index_t batch_stride_k_descale,
+                  ck_tile::index_t batch_stride_v_descale,
                   ck_tile::index_t window_size_left,
                   ck_tile::index_t window_size_right,
                   ck_tile::index_t sink_size,
@@ -1127,6 +1127,10 @@ struct FmhaFwdKernel
             kargs.nhead_stride_q_descale = nhead_stride_q_descale;
             kargs.nhead_stride_k_descale = nhead_stride_k_descale;
             kargs.nhead_stride_v_descale = nhead_stride_v_descale;
+
+            kargs.batch_stride_q_descale = batch_stride_q_descale;
+            kargs.batch_stride_k_descale = batch_stride_k_descale;
+            kargs.batch_stride_v_descale = batch_stride_v_descale;
         }
         if constexpr(kHasDropout)
         {
@@ -1207,6 +1211,9 @@ struct FmhaFwdKernel
               ck_tile::index_t nhead_stride_q_descale,
               ck_tile::index_t nhead_stride_k_descale,
               ck_tile::index_t nhead_stride_v_descale,
+              ck_tile::index_t batch_stride_q_descale,
+              ck_tile::index_t batch_stride_k_descale,
+              ck_tile::index_t batch_stride_v_descale,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
@@ -1266,6 +1273,9 @@ struct FmhaFwdKernel
             nhead_stride_q_descale,
             nhead_stride_k_descale,
             nhead_stride_v_descale,
+            batch_stride_q_descale,
+            batch_stride_k_descale,
+            batch_stride_v_descale,
             window_size_left,
             window_size_right,
             sink_size,
@@ -1328,6 +1338,9 @@ struct FmhaFwdKernel
               ck_tile::index_t nhead_stride_q_descale,
               ck_tile::index_t nhead_stride_k_descale,
               ck_tile::index_t nhead_stride_v_descale,
+              ck_tile::index_t batch_stride_q_descale,
+              ck_tile::index_t batch_stride_k_descale,
+              ck_tile::index_t batch_stride_v_descale,
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
@@ -1387,6 +1400,9 @@ struct FmhaFwdKernel
             nhead_stride_q_descale,
             nhead_stride_k_descale,
             nhead_stride_v_descale,
+            batch_stride_q_descale,
+            batch_stride_k_descale,
+            batch_stride_v_descale,
             window_size_left,
             window_size_right,
             sink_size,
@@ -3031,7 +3047,7 @@ struct FmhaFwdKernel
                             make_tuple(sequence<0>{}, sequence<1, 2>{}),
                             make_tuple(sequence<0>{}, sequence<1>{}));
                     }
-                } // end else (qr_tdm dispatch above returns v_dram_pad early)
+                } // end else (qr_tdm dispatch above returns v_dram_naive early)
             };
 
             const auto v_dram = [&]() {
@@ -3191,7 +3207,7 @@ struct FmhaFwdKernel
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_k_descale;
                 descale_offset_v =
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v_descale;
-                if constexpr(!kIsGroupMode)
+                if constexpr(kPerHeadQScale || !kIsGroupMode)
                 {
                     descale_offset_q +=
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale;
@@ -3200,7 +3216,7 @@ struct FmhaFwdKernel
                     descale_offset_v +=
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale;
                 }
-                else if constexpr(kBlockQScale)
+                else
                 {
                     descale_offset_q += kargs.block_scale_seqstart_q_ptr[i_batch];
                     descale_offset_k += kargs.block_scale_seqstart_k_ptr[i_batch];

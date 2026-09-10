@@ -484,17 +484,18 @@ class QuantScale
 {
 };
 
-// hdim 128 is where perhead and blockscale exist; every seqlen is a non-multiple of the tile
-// so the seqlen-padded instances get selected. No fp8 pipeline is generated with bias.
+// hdim 128 is where perhead and blockscale exist; the non-multiple seqlens select the
+// seqlen-padded instances. No fp8 pipeline is generated with bias.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QuantScale,
     Combine(ModeValues,
             QScaleValues,
-            Values(std::tuple{2, 2, 1, 55, 256, "0"},      // GQA, seqlen_q << seqlen_k
-                   std::tuple{1, 3, -1, 100, 51, "0"},     // plain MHA, seqlen_q > seqlen_k
-                   std::tuple{2, 1, -1, 99, 256, "1"},     // causal
-                   std::tuple{1, 2, 1, 1024, 256, "2"}))); // GQA, causal bottom-right
+            Values(std::tuple{2, 2, 1, 55, 256, "0"},     // GQA, seqlen_q << seqlen_k
+                   std::tuple{1, 3, -1, 100, 51, "0"},    // plain MHA, seqlen_q > seqlen_k
+                   std::tuple{2, 1, -1, 99, 256, "1"},    // causal
+                   std::tuple{1, 2, 1, 1024, 256, "2"},   // GQA, causal bottom-right
+                   std::tuple{1, 4, 2, 256, 256, "0"}))); // Pack-GQA: ratio 2, no mask, s%128==0
 
 // init=3 fills Q/K/V up to the fp8 maximum, which only stands for a real tensor when a
 // descale maps that maximum back to qkv_max. Without a descale the values stay at the fp8
