@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,15 +48,14 @@ T set_half_bits(uint16_t value)
 
 // Numeric limits which also supports custom_test_type<U> classes
 template<class T>
-struct numeric_limits : _HIPCUB_STD::numeric_limits<T>
+struct numeric_limits : std::numeric_limits<T>
 {};
 
 template<>
-struct numeric_limits<test_utils::half> : public _HIPCUB_STD::numeric_limits<test_utils::half>
+struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half>
 {
 public:
     using T = test_utils::half;
-    static constexpr bool is_specialized = true;
     static inline T min()
     {
         return T(0.00006104f);
@@ -75,11 +74,11 @@ public:
     };
     static inline T quiet_NaN()
     {
-        return T(_HIPCUB_STD::numeric_limits<float>::quiet_NaN());
+        return T(std::numeric_limits<float>::quiet_NaN());
     };
     static inline T signaling_NaN()
     {
-        return T(_HIPCUB_STD::numeric_limits<float>::signaling_NaN());
+        return T(std::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
     {
@@ -88,19 +87,17 @@ public:
 };
 
 template<>
-class numeric_limits<test_utils::bfloat16>
-    : public _HIPCUB_STD::numeric_limits<test_utils::bfloat16>
+class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16>
 {
 public:
     using T = test_utils::bfloat16;
-    static constexpr bool is_specialized = true;
     static inline T max()
     {
         return set_half_bits<T>(0x7f7f);
     };
     static inline T min()
     {
-        return T(_HIPCUB_STD::numeric_limits<float>::min());
+        return T(std::numeric_limits<float>::min());
     };
     static inline T lowest()
     {
@@ -112,11 +109,11 @@ public:
     };
     static inline T quiet_NaN()
     {
-        return T(_HIPCUB_STD::numeric_limits<float>::quiet_NaN());
+        return T(std::numeric_limits<float>::quiet_NaN());
     };
     static inline T signaling_NaN()
     {
-        return T(_HIPCUB_STD::numeric_limits<float>::signaling_NaN());
+        return T(std::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
     {
@@ -125,41 +122,40 @@ public:
 };
 
 template<>
-class numeric_limits<float> : public _HIPCUB_STD::numeric_limits<float>
+class numeric_limits<float> : public std::numeric_limits<float>
 {
 public:
     static inline float infinity_neg()
     {
-        return -_HIPCUB_STD::numeric_limits<float>::infinity();
+        return -std::numeric_limits<float>::infinity();
     };
 };
 // End of extended numeric_limits
 
-#if _CCCL_HAS_INT128()
+#if HIPCUB_IS_INT128_ENABLED
 template<class T>
-using is_int128 = _HIPCUB_STD::is_same<__int128_t, typename std::remove_cv<T>::type>;
+using is_int128 = std::is_same<__int128_t, typename std::remove_cv<T>::type>;
 template<class T>
-using is_uint128 = _HIPCUB_STD::is_same<__uint128_t, typename std::remove_cv<T>::type>;
+using is_uint128 = std::is_same<__uint128_t, typename std::remove_cv<T>::type>;
 #else
 template<class T>
 using is_int128 = std::false_type;
 template<class T>
 using is_uint128 = std::false_type;
-#endif // _CCCL_HAS_INT128()
+#endif // HIPCUB_IS_INT128_ENABLED
 
 template<class T>
-using is_half = _HIPCUB_STD::is_same<test_utils::half, typename std::remove_cv<T>::type>;
+using is_half = std::is_same<test_utils::half, typename std::remove_cv<T>::type>;
 
 template<class T>
-using is_bfloat16 = _HIPCUB_STD::is_same<test_utils::bfloat16, typename std::remove_cv<T>::type>;
+using is_bfloat16 = std::is_same<test_utils::bfloat16, typename std::remove_cv<T>::type>;
 
 template<class T>
-using is_native_half
-    = _HIPCUB_STD::is_same<test_utils::native_half, typename std::remove_cv<T>::type>;
+using is_native_half = std::is_same<test_utils::native_half, typename std::remove_cv<T>::type>;
 
 template<class T>
 using is_native_bfloat16
-    = _HIPCUB_STD::is_same<test_utils::native_bfloat16, typename std::remove_cv<T>::type>;
+    = std::is_same<test_utils::native_bfloat16, typename std::remove_cv<T>::type>;
 
 template<class T>
 struct convert_to_native_t_impl
@@ -337,12 +333,12 @@ void add_special_values(std::vector<T>& source, int seed_value)
 // Actually causes problems with signed/unsigned char on Windows using clang.
 template<typename T>
 struct is_valid_for_int_distribution
-    : std::integral_constant<bool,
-                             std::is_same_v<short, T> || std::is_same_v<unsigned short, T>
-                                 || std::is_same_v<int, T> || std::is_same_v<unsigned int, T>
-                                 || std::is_same_v<long, T> || std::is_same_v<unsigned long, T>
-                                 || std::is_same_v<long long, T>
-                                 || std::is_same_v<unsigned long long, T>>
+    : std::integral_constant<
+          bool,
+          std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
+              || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
+              || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
+              || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value>
 {};
 
 template<class T>
@@ -364,8 +360,8 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
     typename std::enable_if<!std::is_integral<T>::value && !is_custom_test_type<T>::value
-                                && !std::is_same_v<T, __int128_t>
-                                && !std::is_same_v<T, __uint128_t>,
+                                && !std::is_same<T, __int128_t>::value
+                                && !std::is_same<T, __uint128_t>::value,
                             std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
@@ -380,7 +376,7 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
 
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
-    typename std::enable_if<std::is_same_v<T, __int128_t>, std::vector<T>>::type
+    typename std::enable_if<std::is_same<T, __int128_t>::value, std::vector<T>>::type
 {
     std::default_random_engine             gen(seed_value);
     std::uniform_int_distribution<int64_t> distribution(static_cast<int64_t>(min),
@@ -394,7 +390,7 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
 
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
-    typename std::enable_if<std::is_same_v<T, __uint128_t>, std::vector<T>>::type
+    typename std::enable_if<std::is_same<T, __uint128_t>::value, std::vector<T>>::type
 {
     std::default_random_engine              gen(seed_value);
     std::uniform_int_distribution<uint64_t> distribution(static_cast<uint64_t>(min),
@@ -464,21 +460,16 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     std::bernoulli_distribution distribution(p);
     std::vector<T>              data(size);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
+                  data.begin() + std::min(size, max_random_size),
                   [&]() { return convert_to_device<T>(distribution(gen)); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }
 
-// Windows HIP cannot support allocations >= 4 GiB.
-#ifdef _WIN32
-template<unsigned int MaxPow2 = 27>
-#else
 template<unsigned int MaxPow2 = 35>
-#endif
 inline std::vector<size_t> get_large_sizes(int seed_value)
 {
     // clang-format off
@@ -489,7 +480,7 @@ inline std::vector<size_t> get_large_sizes(int seed_value)
     // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(2,
-                                              (size_t{1} << (MaxPow2 - 5)) + 1,
+                                              (size_t{1} << 30) + 1,
                                               (size_t{1} << MaxPow2) - 2,
                                               seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());

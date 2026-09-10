@@ -126,16 +126,19 @@ public:
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            if(refValue == std::numeric_limits<T>::max()
-               || implValue == std::numeric_limits<T>::max())
+            if constexpr(!std::is_same_v<T, bool>)
             {
-                HIPDNN_SDK_LOG_ERROR(
-                    "Sentinel value detected at indices "
-                    << StreamVec(indices) << ": reference value = " << refValue
-                    << ", implementation value = " << implValue
-                    << ". This may indicate an output element was not written by the operation.");
-                result.store(false, std::memory_order_relaxed);
-                return result.load(std::memory_order_relaxed);
+                if(refValue == std::numeric_limits<T>::max()
+                   || implValue == std::numeric_limits<T>::max())
+                {
+                    HIPDNN_SDK_LOG_ERROR("Sentinel value detected at indices "
+                                         << StreamVec(indices) << ": reference value = " << refValue
+                                         << ", implementation value = " << implValue
+                                         << ". This may indicate an output element was not written "
+                                            "by the operation.");
+                    result.store(false, std::memory_order_relaxed);
+                    return result.load(std::memory_order_relaxed);
+                }
             }
 
             T absDiff = static_cast<T>(hipdnn_data_sdk::types::abs(implValue - refValue));

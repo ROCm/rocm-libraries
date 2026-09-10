@@ -246,5 +246,27 @@ public:
     {
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
+
+    /**
+     * @brief Custom equality hook for layer-norm-backward-specific attributes
+     *
+     * Compares the normalized dimension count, which defines the semantics
+     * of the backward normalization rather than tensor layout, so logical
+     * and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const LayernormBackwardAttributes& other) const
+    {
+        return normalized_dim_count == other.normalized_dim_count;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const LayernormBackwardAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
+
+typedef LayernormBackwardAttributes
+    Layernorm_backward_attributes; // NOLINT(readability-identifier-naming)
 } // namespace hipdnn_frontend::graph

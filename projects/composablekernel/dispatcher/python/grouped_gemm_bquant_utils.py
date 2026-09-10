@@ -401,8 +401,8 @@ class BQuantGpuGemmRunner:
                 f"for kernel {self.kernel_name}"
             )
 
-        # permute_n epilogue writes C with N-columns riffled into r groups
-        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        # permute_n epilogue riffles N-columns within each tile of width tile_n.
+        # Undo it per-tile so the caller gets logical (row-major) C.
         _name = self.kernel_name
         if 'permute_n' in _name:
             import re as _re
@@ -410,9 +410,12 @@ class BQuantGpuGemmRunner:
             if _m:
                 _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
                 _r = _tile_n // _wt_n // _warp_n
-                if _r > 1 and (N % _r) == 0:
-                    _half = N // _r
-                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
+                if _r > 1 and (N % _tile_n) == 0:
+                    _half = _tile_n // _r
+                    _logical = [
+                        (c // _tile_n) * _tile_n + (c % _tile_n % _r) * _half + (c % _tile_n // _r)
+                        for c in range(N)
+                    ]
                     _Cp = np.empty_like(C)
                     _Cp[:, _logical] = C
                     C = _Cp
@@ -591,7 +594,6 @@ def _compile_bquant_kernel(
 
     obj_path.unlink(missing_ok=True)
     return True
-
 
 # =============================================================================
 # setup_multiple_bquant_dispatchers — build pipeline
@@ -1210,5 +1212,64 @@ def default_mx_bf16fp4_config(
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+# =============================================================================
+# gfx1250 (MI400) default configs
+# =============================================================================
+# Empirically (on-GPU, MI400/gfx1250, HIP_VISIBLE_DEVICES=0, via the
+# test_bquant_gpu_correctness fp32-dequant reference), the BQuant fp8/bf8 kernels
+# are correct on gfx1250 with the SAME config that gfx9 uses: the CompV3 FlatMM
+# tile with warp_tile_k=128. warp_tile_k=16 (gfx12 WMMA) returns all-zeros on
+# gfx1250. So the gfx1250 helpers simply return the stock fp8/bf8 config
+# (warp_tile_k=128); no distinct gfx1250 tile is required for BQuant.
+#
+#   fp8: warp_tile 16x16x128 -> nonzero, max_rel_err ~5e-4  (PASS)
+#   bf8: warp_tile 16x16x128 -> nonzero, max_rel_err ~5e-4  (PASS)
+#
+# The compile path injects -DCK_USE_OCP_FP8 / -DCK_TILE_USE_OCP_FP8 for gfx12
+# archs, so fp8/bf8 use the OCP encoding on gfx1250.
+#
+# fp8i4 / bf8i4 (pk_int4 weights) do NOT compile on gfx1250 at any warp_tile_k
+# (no gfx12 instruction for the packed-int4 quant path). Those variants are not
+# enabled on gfx1250: the C++ ctypes arch-gate is opened, but on-GPU correctness
+# is deferred pending kernel work. No gfx1250 config helper is provided for i4
+# because it would emit a non-buildable kernel.
+
+_GFX1250_ARCH = "gfx1250"
+
+
+def default_fp8_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """fp8 BQuant config for gfx1250 (compv3, FlatMM warp_tile_k=128).
+
+    Identical to the stock fp8 config; GPU-verified on MI400/gfx1250 with
+    max_rel_err ~5e-4 vs. fp32 dequant reference. warp_tile_k=16 zeros out.
+    """
+    return default_fp8_config(
+        quant_group_k=quant_group_k,
+        quant_group_n=quant_group_n,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_bf8_config_gfx1250(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _GFX1250_ARCH,
+) -> BQuantKernelConfig:
+    """bf8 BQuant config for gfx1250 (compv3, FlatMM warp_tile_k=128).
+
+    Identical to the stock bf8 config; GPU-verified on MI400/gfx1250 with
+    max_rel_err ~5e-4 vs. fp32 dequant reference.
+    """
+    return default_bf8_config(
+        quant_group_k=quant_group_k,
+        quant_group_n=quant_group_n,
         gfx_arch=gfx_arch,
     )

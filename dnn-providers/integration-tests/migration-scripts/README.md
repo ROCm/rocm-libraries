@@ -56,7 +56,7 @@ for graph in /tmp/captured/*/*/*.json; do
     [[ "$graph" == *.meta.json ]] && continue
     python3 migration-scripts/import_graph.py \
         --graph "$graph" \
-        --bundle-dir dnn-providers/integration-tests/integration_test_bundles \
+        --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
         --meta reference_source="c++ integration suite: $(basename "$(dirname "$graph")")"
 done
 ```
@@ -74,7 +74,7 @@ to attach as `.tensors.dvc`/`.bin`. Golden data is optional (see [RFC 0011
 §4.1](../../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md));
 a graph-only case still runs and is verified against the GPU/CPU reference
 executor. Generate and commit golden tensors separately (a per-op generator
-script, see `integration_test_bundles/README.md`) only if you want the more
+script, see `integration-test-bundles/README.md`) only if you want the more
 sensitive golden-comparison mode for that case too.
 
 **Note:** `import_graph.py` does not read the `.meta.json` sidecar that

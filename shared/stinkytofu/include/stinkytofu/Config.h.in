@@ -31,6 +31,7 @@
 #cmakedefine STINKYTOFU_ARCH_GFX942
 #cmakedefine STINKYTOFU_ARCH_GFX950
 #cmakedefine STINKYTOFU_ARCH_GFX1250
+#cmakedefine STINKYTOFU_ARCH_GFX1250V0
 
 // List of all enabled architectures (for debugging/logging)
 #define STINKYTOFU_ENABLED_ARCHS "@STINKYTOFU_ARCHS@"

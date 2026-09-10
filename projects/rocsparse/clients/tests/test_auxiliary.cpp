@@ -96,6 +96,51 @@ TEST(auxiliary_pre_checkin, HandleCreateDestroy)
     ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }
 
+// A handle created via rocsparse_create_handle must be immediately usable for
+// computation without the caller allocating or synchronizing a stream. This
+// exercises the handle's internally-managed stream and device workspace
+// (rocsparse_?doti uses handle->buffer on handle->stream).
+TEST(auxiliary_pre_checkin, HandleCreateComputeReady)
+{
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+
+    ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+              rocsparse_status_success);
+
+    constexpr rocsparse_int nnz         = 3;
+    constexpr rocsparse_int y_size      = 5;
+    const float             hx_val[nnz] = {1.0f, 2.0f, 3.0f};
+    const rocsparse_int     hx_ind[nnz] = {0, 2, 4};
+    const float             hy[y_size]  = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+
+    float*         dx_val = nullptr;
+    rocsparse_int* dx_ind = nullptr;
+    float*         dy     = nullptr;
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_val), sizeof(float) * nnz), hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_ind), sizeof(rocsparse_int) * nnz),
+              hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dy), sizeof(float) * y_size), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_val, hx_val, sizeof(float) * nnz, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dy, hy, sizeof(float) * y_size, hipMemcpyHostToDevice), hipSuccess);
+
+    float result = -1.0f;
+    ASSERT_EQ(rocsparse_sdoti(handle, nnz, dx_val, dx_ind, dy, &result, rocsparse_index_base_zero),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // x = {1@0, 2@2, 3@4}, y = {1,2,3,4,5} => 1*1 + 2*3 + 3*5 = 22
+    ASSERT_FLOAT_EQ(result, 22.0f);
+
+    ASSERT_EQ(hipFree(dx_val), hipSuccess);
+    ASSERT_EQ(hipFree(dx_ind), hipSuccess);
+    ASSERT_EQ(hipFree(dy), hipSuccess);
+    ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+}
+
 TEST(auxiliary_pre_checkin, HandleCreateNullptr)
 {
     ASSERT_EQ(rocsparse_create_handle(nullptr), rocsparse_status_invalid_pointer);
@@ -2121,7 +2166,7 @@ TEST(auxiliary_pre_checkin, SpmatGetSetStridedBatch)
     ASSERT_EQ(rocsparse_spmat_set_strided_batch(descr, batch_count), rocsparse_status_success);
 
     // Get strided batch
-    int batch_count_out;
+    rocsparse_int batch_count_out;
     ASSERT_EQ(rocsparse_spmat_get_strided_batch(descr, &batch_count_out), rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
 
@@ -5213,8 +5258,8 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatch)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
@@ -5242,8 +5287,8 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatchRowMajor)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);

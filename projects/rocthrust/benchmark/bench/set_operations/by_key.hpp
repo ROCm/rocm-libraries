@@ -28,158 +28,123 @@
 
 #pragma once
 
-// Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
-
-// rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
 #include <string>
-#include <vector>
 
-struct by_key
+#include "bench_utils.hpp"
+
+template <typename T, typename K, class OpT>
+struct by_key_set_benchmark : public primbench::benchmark_interface
 {
-  template <typename KeyT, typename ValueT, typename OpT, typename Policy>
-  float64_t
-  run(thrust::device_vector<KeyT>& in_keys,
-      thrust::device_vector<ValueT>& in_vals,
-      thrust::device_vector<KeyT>& out_keys,
-      thrust::device_vector<ValueT>& out_vals,
-      const std::size_t elements_in_A,
-      const OpT op,
-      Policy policy)
+  by_key_set_benchmark(size_t items, const char* algo_name, const int entropy_reduction, const size_t input_size_ratio)
+      : m_items(items)
+      , algo_name(algo_name)
+      , entropy_reduction(entropy_reduction)
+      , input_size_ratio(input_size_ratio)
+  {}
+
+  primbench::json meta() const override
   {
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    op(policy,
-       in_keys.cbegin(),
-       in_keys.cbegin() + elements_in_A,
-       in_keys.cbegin() + elements_in_A,
-       in_keys.cend(),
-       in_vals.cbegin(),
-       in_vals.cbegin() + elements_in_A,
-       out_keys.begin(),
-       out_vals.begin());
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", algo_name)
+      .add("subalgo", "by_key")
+      .add("key_type", primbench::name<K>())
+      .add("value_type", primbench::name<T>())
+      .add("elements", m_items)
+      .add("entropy", std::to_string(bench_utils::get_entropy_percentage(entropy_reduction)))
+      .add("input_size_ratio", input_size_ratio);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    const auto entropy    = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
+    const auto items_in_A = static_cast<std::size_t>(static_cast<double>(input_size_ratio * m_items) / 100.0f);
+
+    thrust::device_vector<K> in_keys = bench_utils::generate(m_items, state.seed, entropy);
+    thrust::device_vector<K> out_keys(m_items);
+
+    thrust::device_vector<T> in_vals(m_items);
+    thrust::device_vector<T> out_vals(m_items);
+
+    thrust::sort(in_keys.begin(), in_keys.begin() + items_in_A);
+    thrust::sort(in_keys.begin() + items_in_A, in_keys.end());
+
+    OpT op{};
+
+    // not a warm-up run, we need to run once to determine the size of the output
+    auto result_ends = op(
+      policy(alloc).on(state.stream),
+      in_keys.cbegin(),
+      in_keys.cbegin() + items_in_A,
+      in_keys.cbegin() + items_in_A,
+      in_keys.cend(),
+      in_vals.cbegin(),
+      in_vals.cbegin() + items_in_A,
+      out_keys.begin(),
+      out_vals.begin());
+
+    const size_t item_in_AB  = thrust::distance(out_keys.begin(), result_ends.first);
+    const size_t values_read = OpT::read_all_values ? m_items : items_in_A;
+
+    state.set_items(m_items);
+    state.add_reads<T>(values_read);
+    state.add_reads<K>(m_items);
+    state.add_writes<T>(item_in_AB);
+    state.add_writes<K>(item_in_AB);
+
+    state.run([&] {
+      op(policy(alloc).on(state.stream),
+         in_keys.cbegin(),
+         in_keys.cbegin() + items_in_A,
+         in_keys.cbegin() + items_in_A,
+         in_keys.cend(),
+         in_vals.cbegin(),
+         in_vals.cbegin() + items_in_A,
+         out_keys.begin(),
+         out_vals.begin());
+    });
+  }
+
+private:
+  size_t m_items;
+  const char* algo_name;
+  const int entropy_reduction;
+  const size_t input_size_ratio;
 };
 
-template <class KeyT, class ValueT, class OpT>
-void run_benchmark(benchmark::State& state,
-                   const std::size_t elements,
-                   const std::string seed_type,
-                   const int entropy_reduction,
-                   const std::size_t input_size_ratio)
-{
-  // Benchmark object
-  by_key benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  const auto entropy       = bench_utils::get_entropy_percentage(entropy_reduction) / 100.0f;
-  const auto elements_in_A = static_cast<std::size_t>(static_cast<double>(input_size_ratio * elements) / 100.0f);
-
-  thrust::device_vector<KeyT> in_keys = bench_utils::generate(elements, seed_type, entropy);
-  thrust::device_vector<KeyT> out_keys(elements);
-
-  thrust::device_vector<ValueT> in_vals(elements);
-  thrust::device_vector<ValueT> out_vals(elements);
-
-  thrust::sort(in_keys.begin(), in_keys.begin() + elements_in_A);
-  thrust::sort(in_keys.begin() + elements_in_A, in_keys.end());
-
-  OpT op{};
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-  // not a warm-up run, we need to run once to determine the size of the output
-  auto result_ends = op(
-    policy(alloc),
-    in_keys.cbegin(),
-    in_keys.cbegin() + elements_in_A,
-    in_keys.cbegin() + elements_in_A,
-    in_keys.cend(),
-    in_vals.cbegin(),
-    in_vals.cbegin() + elements_in_A,
-    out_keys.begin(),
-    out_vals.begin());
-  const std::size_t elements_in_AB = thrust::distance(out_keys.begin(), result_ends.first);
-
-  for (auto _ : state)
-  {
-    float64_t duration =
-      benchmark.template run<KeyT, ValueT>(in_keys, in_vals, out_keys, out_vals, elements_in_A, op, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
+#define QUEUE(K, OpT, algo_name, entropy_reduction, input_size_ratio)                                              \
+  {                                                                                                                \
+    for (size_t size : bench_utils::sizes(2 * sizeof(int8_t) + sizeof(K)))                                         \
+    {                                                                                                              \
+      executor.queue<by_key_set_benchmark<int8_t, K, OpT>>(size, algo_name, entropy_reduction, input_size_ratio);  \
+    }                                                                                                              \
+    for (size_t size : bench_utils::sizes(2 * sizeof(int64_t) + sizeof(K)))                                        \
+    {                                                                                                              \
+      executor.queue<by_key_set_benchmark<int64_t, K, OpT>>(size, algo_name, entropy_reduction, input_size_ratio); \
+    }                                                                                                              \
   }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  const std::size_t global_memory_key_bytes   = (elements + elements_in_AB) * sizeof(KeyT);
-  const std::size_t global_memory_value_reads = OpT::read_all_values ? elements : elements_in_A;
-  const std::size_t global_memory_value_bytes = (global_memory_value_reads + elements_in_AB) * sizeof(ValueT);
-  state.SetBytesProcessed(state.iterations() * (global_memory_key_bytes + global_memory_value_bytes));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(KeyT, ValueT, Elements, EntropyReduction, InputSizeRatio)                                    \
-  benchmark::RegisterBenchmark(                                                                                       \
-    bench_utils::bench_naming::format_name(                                                                           \
-      "{algo:" + algo_name + ",subalgo:by_key" + ",key_type:" #KeyT + ",value_type:" #ValueT                          \
-      + ",elements:" + bench_utils::format_pow2(Elements) + ",entropy:"                                               \
-      + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)) + ",input_size_ratio:" #InputSizeRatio) \
-      .c_str(),                                                                                                       \
-    run_benchmark<KeyT, ValueT, OpT>,                                                                                 \
-    Elements,                                                                                                         \
-    seed_type,                                                                                                        \
-    EntropyReduction,                                                                                                 \
-    InputSizeRatio)
-
-#define BENCHMARK_ELEMENTS(key_type, value_type, elements, entropy)            \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 25)); \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 50)); \
-  bs.push_back(CREATE_BENCHMARK(key_type, value_type, elements, entropy, 75));
-
-#define BENCHMARK_VALUE_TYPE(key_type, value_type, entropy)                                                  \
-  for (size_t size : bench_utils::sizes)                                                                     \
-  {                                                                                                          \
-    if ((sizeof(key_type) * size + sizeof(value_type) * size) <= bench_utils::system.devProp.totalGlobalMem) \
-      BENCHMARK_ELEMENTS(key_type, value_type, size, entropy)                                                \
-  }
-
-#define BENCHMARK_KEY_TYPE_ENTROPY(key_type, entropy) \
-  BENCHMARK_VALUE_TYPE(key_type, int8_t, entropy)     \
-  BENCHMARK_VALUE_TYPE(key_type, int64_t, entropy)
 
 template <class OpT>
-void add_benchmarks(
-  const std::string& algo_name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
+void queue_benchmarks(const char* algo_name, const primbench::executor& executor)
 {
   constexpr int entropy_reductions[] = {0, 4}; // 1.000, 0.201;
+  constexpr int input_size_ratios[]  = {25, 50, 75};
 
-  for (int entropy_reduction : entropy_reductions)
+  for (int e : entropy_reductions)
   {
-    std::vector<benchmark::Benchmark*> bs;
-    BENCHMARK_KEY_TYPE_ENTROPY(int8_t, entropy_reduction)
-    BENCHMARK_KEY_TYPE_ENTROPY(int16_t, entropy_reduction)
-    BENCHMARK_KEY_TYPE_ENTROPY(int32_t, entropy_reduction)
-    BENCHMARK_KEY_TYPE_ENTROPY(int64_t, entropy_reduction)
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+    for (int i : input_size_ratios)
+    {
+      QUEUE(int8_t, OpT, algo_name, e, i);
+      QUEUE(int16_t, OpT, algo_name, e, i);
+      QUEUE(int32_t, OpT, algo_name, e, i);
+      QUEUE(int64_t, OpT, algo_name, e, i);
+    }
   }
 }

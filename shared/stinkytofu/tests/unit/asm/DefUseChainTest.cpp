@@ -497,6 +497,64 @@ TEST_F(DefUseChainTest, IteratedDominanceFrontier) {
 }
 
 // =============================================================================
+// Rebuilding removes a stale PHI that is not at block entry.
+//
+// entry(v0 = entryDef) -> choice -> direct -----------------> join(PHI) -> use(v0)
+//                           |
+//                           +-----> redef -------------------+
+//                                   v0 = exitDef
+//                                   v0 = stale PHI (appended)
+//
+// The stale PHI models a PHI moved after `exitDef` by CFG flattening. A rebuild
+// must remove it before placing new PHIs; otherwise it shadows `exitDef` as the
+// reaching definition supplied to the join PHI.
+// =============================================================================
+TEST_F(DefUseChainTest, RebuildRemovesNonLeadingStalePhi) {
+    Function func("non_leading_stale_phi");
+    setFunctionArch(func, arch);
+
+    BasicBlock* entry = func.createBasicBlock("entry");
+    BasicBlock* choice = func.createBasicBlock("choice");
+    BasicBlock* direct = func.createBasicBlock("direct");
+    BasicBlock* redef = func.createBasicBlock("redef");
+    BasicBlock* join = func.createBasicBlock("join");
+
+    func.addEdge(entry, choice);
+    func.addEdge(choice, direct);
+    func.addEdge(choice, redef);
+    func.addEdge(direct, join);
+    func.addEdge(redef, join);
+
+    StinkyInstruction* entryDef = createVAddInBlock(entry, arch, 0, 1, 2);
+    StinkyInstruction* exitDef = createVAddInBlock(redef, arch, 0, 5, 6);
+    StinkyInstruction* use = createVAddInBlock(join, arch, 7, 0, 8);
+
+    buildUseDefChain(func, false);
+
+    AsmIRBuilder staleBuilder(*redef, arch);
+    StinkyInstruction* stalePhi = staleBuilder.createPhi(RegType::V, 0);
+    redef->removeIR(stalePhi);
+    redef->appendIR(stalePhi);
+
+    buildUseDefChain(func, true);
+
+    verifyDefUseChainConsistency(func);
+    verifyUsersSourcesConsistency(func);
+
+    StinkyInstruction* joinPhi = findPhi(*join, RegType::V, 0);
+    ASSERT_NE(joinPhi, nullptr);
+
+    EXPECT_EQ(findPhi(*redef, RegType::V, 0), nullptr);
+
+    ASSERT_EQ(joinPhi->getSources().size(), 2u);
+    EXPECT_EQ(joinPhi->getSources()[0], entryDef);
+    EXPECT_EQ(joinPhi->getSources()[1], exitDef);
+
+    ASSERT_EQ(use->getSources().size(), 1u);
+    EXPECT_EQ(use->getSources()[0], joinPhi);
+}
+
+// =============================================================================
 // 2. Nested Loops — chains through both loop-header PHIs
 // =============================================================================
 

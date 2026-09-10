@@ -47,10 +47,16 @@ def _add_installed_python_paths() -> None:
                 found.append(path)
     if script.parent not in found:
         found.append(script.parent)
-    # The harness' attention families build library kernels, so `kernels` and
-    # `builders` must resolve too. They are staged under tests/library/ in an
-    # install (the destination TheRock's test-artifact globs capture) and live in
-    # the sibling library tree in a checkout.
+    # An install co-locates the parity harness with this script (covered by
+    # script.parent above); a checkout keeps it under tests/instances/.
+    harness_dir = script.parent / "instances"
+    if (harness_dir / "rocke_ir_parity_harness.py").is_file():
+        if harness_dir not in found:
+            found.append(harness_dir)
+    # Some harness families (attention and KDA) build library kernels, so
+    # `kernels` and `builders` must resolve too. They are staged under
+    # tests/library/ in an install (the destination TheRock's test-artifact
+    # globs capture) and live in the sibling library tree in a checkout.
     lib_roots = [script.parent / "tests" / "library"]
     if len(script.parents) > 2:
         lib_roots.append(script.parents[2] / "library")
@@ -86,7 +92,11 @@ def _find_golden() -> Path:
 def main() -> int:
     _add_installed_python_paths()
 
-    from rocke_ir_parity_harness import GOLDEN_FLAVORS, check_golden
+    from rocke_ir_parity_harness import (
+        GOLDEN_FLAVORS,
+        QUARANTINED_CASES,
+        check_golden,
+    )
 
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)
@@ -94,7 +104,11 @@ def main() -> int:
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    print(f"rocKE installed golden gate: PASS ({flavors}, golden={golden.name})")
+    quarantined = f", {len(QUARANTINED_CASES)} quarantined" if QUARANTINED_CASES else ""
+    print(
+        f"rocKE installed golden gate: PASS "
+        f"({flavors}, golden={golden.name}{quarantined})"
+    )
     return 0
 
 

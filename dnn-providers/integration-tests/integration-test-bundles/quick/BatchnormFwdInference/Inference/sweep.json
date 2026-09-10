@@ -832,7 +832,9 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "generator": "ported from c++ tests",
+        "reference_source": "to be deleted upon full port of c++ to bundle sweeps"
       }
     },
     {
@@ -940,7 +942,9 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "generator": "ported from c++ tests",
+        "reference_source": "to be deleted upon full port of c++ to bundle sweeps"
       }
     },
     {
@@ -1048,7 +1052,9 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "generator": "ported from c++ tests",
+        "reference_source": "to be deleted upon full port of c++ to bundle sweeps"
       }
     }
   ]

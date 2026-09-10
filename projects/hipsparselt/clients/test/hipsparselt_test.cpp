@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -416,7 +416,6 @@ bool hipsparselt_client_global_filters(const Arguments& args)
     char* archName;
     if(hipsparseLtGetArchName(&archName) != HIPSPARSE_STATUS_SUCCESS)
         return false;
-    //printf("%s %s\n", deviceProperties.gcnArchName, args.gpu_arch);
     bool match = true;
     if(args.gpu_arch[0] && !gpu_arch_match(archName, args.gpu_arch))
         match = false;

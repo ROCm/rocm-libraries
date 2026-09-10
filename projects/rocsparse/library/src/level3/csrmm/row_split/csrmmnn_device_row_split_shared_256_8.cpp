@@ -34,6 +34,7 @@
             bool                 conj_B,                                                       \
             J                    m,                                                            \
             J                    n,                                                            \
+            int64_t              batch_count,                                                  \
             int64_t              offsets_batch_stride_A,                                       \
             int64_t              columns_values_batch_stride_A,                                \
             const I*             csr_row_ptr,                                                  \
@@ -58,6 +59,7 @@
             bool                 conj_B,                        \
             J                    m,                             \
             J                    n,                             \
+            int64_t              batch_count,                   \
             int64_t              offsets_batch_stride_A,        \
             int64_t              columns_values_batch_stride_A, \
             const I*             csr_row_ptr,                   \

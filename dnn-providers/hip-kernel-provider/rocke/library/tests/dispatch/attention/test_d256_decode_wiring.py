@@ -93,13 +93,13 @@ class TestD256DecodeSupportGates(unittest.TestCase):
 
     def test_rejects_non_gfx942_gfx950_arch(self):
         with _PinnedArch("gfx950"):
-            ok, why = self._candidate().supports(_gfx950_d256_decode(arch="gfx1250"))
+            ok, why = self._candidate().admits(_gfx950_d256_decode(arch="gfx1250"))
             self.assertFalse(ok)
             self.assertIn("gfx942", why)
 
     def test_rejects_non_bf16_dtype(self):
         with _PinnedArch("gfx950"):
-            ok, why = self._candidate().supports(_gfx950_d256_decode(dtype="fp16"))
+            ok, why = self._candidate().admits(_gfx950_d256_decode(dtype="fp16"))
             self.assertFalse(ok)
             self.assertIn("bf16", why)
 
@@ -109,30 +109,49 @@ class TestD256DecodeSupportGates(unittest.TestCase):
             req = _gfx950_d256_decode(
                 batch=2, nhead_q=16, nhead_k=2, seqlen_q=512, seqlen_k=512
             )
-            ok, why = self._candidate().supports(req)
+            ok, why = self._candidate().admits(req)
             self.assertFalse(ok)
             # Either the cohort predicate (not all_decode) or the path check fires.
             self.assertTrue("cohort" in why or "3d" in why or "2d" in why)
 
+    # The three rejections below are declared in the candidate's capability, so
+    # they are answered by the prefilter and never reach the cohort predicate.
+    # The predicate still refuses them; these assert the earlier, sharper reason.
     def test_rejects_non_d256_head_size(self):
         with _PinnedArch("gfx950"):
-            ok, why = self._candidate().supports(
+            ok, why = self._candidate().admits(
                 _gfx950_d256_decode(hdim_q=128, hdim_v=128)
             )
             self.assertFalse(ok)
-            self.assertIn("cohort", why)
+            self.assertIn("hdim_q=128 not in (256,)", why)
 
     def test_rejects_sliding_window(self):
         with _PinnedArch("gfx950"):
-            ok, why = self._candidate().supports(_gfx950_d256_decode(sliding_window=64))
+            ok, why = self._candidate().admits(_gfx950_d256_decode(sliding_window=64))
             self.assertFalse(ok)
-            self.assertIn("cohort", why)
+            self.assertIn("cannot serve features ['sliding_window']", why)
 
     def test_rejects_sinks(self):
         with _PinnedArch("gfx950"):
-            ok, why = self._candidate().supports(_gfx950_d256_decode(use_sinks=True))
+            ok, why = self._candidate().admits(_gfx950_d256_decode(use_sinks=True))
             self.assertFalse(ok)
-            self.assertIn("cohort", why)
+            self.assertIn("cannot serve features ['sinks']", why)
+
+    def test_cohort_predicate_still_refuses_what_capability_declares(self):
+        """Capability must never be the only thing saying no: if the prefilter
+        were dropped the predicate must still reject, or the two have drifted."""
+        from kernels.common.attention_unified import _d256_decode_cohort
+
+        from dispatch.attention import _problem
+
+        with _PinnedArch("gfx950"):
+            for label, req in (
+                ("head_size", _gfx950_d256_decode(hdim_q=128, hdim_v=128)),
+                ("sliding_window", _gfx950_d256_decode(sliding_window=64)),
+                ("sinks", _gfx950_d256_decode(use_sinks=True)),
+            ):
+                with self.subTest(rejected_by=label):
+                    self.assertFalse(_d256_decode_cohort(_problem(req)))
 
 
 class TestD256DecodeRouting(unittest.TestCase):

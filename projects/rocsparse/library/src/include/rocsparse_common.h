@@ -44,6 +44,16 @@ namespace rocsparse
     rocsparse_status
         scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array);
 
+    // Overload that takes the scalar pointer mode explicitly instead of reading it from the
+    // handle. Useful when the scalar's memory space is described elsewhere (e.g. a dense vector
+    // descriptor) and the handle pointer mode should not be involved.
+    template <typename I, typename A, typename T>
+    rocsparse_status scale_array(rocsparse_handle       handle,
+                                 I                      length,
+                                 rocsparse_pointer_mode pointer_mode,
+                                 const T*               scalar_device_host,
+                                 A*                     array);
+
     template <typename I, typename X, typename Y, typename T>
     rocsparse_status axpby_array_batched(rocsparse_handle handle,
                                          I                length,

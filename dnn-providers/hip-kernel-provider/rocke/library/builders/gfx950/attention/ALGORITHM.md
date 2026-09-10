@@ -240,7 +240,7 @@ selector so CK DSL and Triton make the same algorithmic choice. The rule, in
 spirit:
 
 - **2D** when the q-block × kv-head grid already saturates the device
-  (`target = num_sms · 4`), or for short context ($S_k \le 512$), or under a
+  (`target = num_cus · 4`), or for short context ($S_k \le 512$), or under a
   sliding window — the split-KV segments would only add launch overhead.
 - **3D split-KV** otherwise — long, full-context sequences where the 2D grid is
   too small to fill the device.
@@ -409,7 +409,7 @@ session, each pinned to its config (grid / decode / V-pad / lazy):
 The clock-invariant deltas are the load-bearing part: **hkv/qb ≈ 1.04×** (L2 hit
 57%→~93%), **V-pad 0→32 ≈ +5%**, **lazy ≈ +2%** — and the shipped default
 (`persistent=True`, `persist_decode="auto"`, `lazy_rescale=True`,
-`ROCKE_DENSE_VPAD=32`, the last row) is byte-identical IR to a re-measure, so the
+`lds_v_row_pad=32`, the last row) is byte-identical IR to a re-measure, so the
 ratio reproduces regardless of the absolute clock. The persistent variant is the
 production choice for dense prefill.
 

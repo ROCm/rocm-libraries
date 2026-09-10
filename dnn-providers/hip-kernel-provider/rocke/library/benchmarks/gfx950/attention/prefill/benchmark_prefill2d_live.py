@@ -50,6 +50,13 @@ from typing import Any, Optional
 
 from rocke.assets import shape_utils_dir
 
+from benchmarks.common.attention_sweep import (
+    all_variant_keys,
+    expand_variant_keys,
+    record_sweep_entries,
+    run_sweep,
+)
+
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
 
 
@@ -348,6 +355,8 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             base["tile_mult"] = 1
         elif t == "t4":
             base["tile_mult"] = 4
+        elif t == "t8":
+            base["tile_mult"] = 8
         elif t == "mw16":
             base["block_m_per_warp"] = 16
         elif t == "nomlim":
@@ -381,9 +390,9 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: Optional[str] = None, num_sms: int = 256):
+    def __init__(self, *, compile_backend: Optional[str] = None, num_cus: int = 256):
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
     def _problem(self, shape, sliding_window: int, is_fp8: bool):
@@ -405,7 +414,7 @@ class CkVariantBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=is_fp8,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
         )
 
@@ -711,7 +720,9 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=["prod", "combo", "fallback"],
-        help="rocke variants to sweep: prod combo fallback r4_t32 combo_sw",
+        help="rocke variants to sweep: prod combo fallback r4_t32 combo_sw sweep. "
+        "'sweep' times every engine the dispatcher registry offers for each "
+        "problem (one entry per launched path).",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -726,7 +737,7 @@ def main() -> int:
     # to a production-representative cap. Measured: bf16 cohort 0.90x at
     # cap=8192 vs 1.11x at cap=65536.
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument("--num-cus", type=int, default=256)
     ap.add_argument(
         "--compile-backend",
         choices=("auto", "llvm", "hipcc"),
@@ -773,7 +784,7 @@ def main() -> int:
     print(f"shapes: {len(shapes)}  variants: {args.variants}  flydsl={args.flydsl}")
 
     _cb = None if args.compile_backend == "auto" else args.compile_backend
-    bench = CkVariantBench(num_sms=args.num_sms, compile_backend=_cb)
+    bench = CkVariantBench(num_cus=args.num_cus, compile_backend=_cb)
     results = []
     n_fly_supported = 0
     n_fly_correct = 0
@@ -783,13 +794,18 @@ def main() -> int:
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
         try:
             data = make_inputs(shape, seed=args.seed, cap_blocks=args.cap_blocks)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{tag}  INPUT FAIL: {exc!r}")
+            traceback.print_exc()
+            continue
+
+        tri_out, tri_ms = None, None
+        try:
             tri_out, tri_ms = _run_triton_live(
                 shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  TRITON FAIL: {exc!r}")
-            traceback.print_exc()
-            continue
+            print(f"{tag}  TRITON SKIP: {exc!r}")
 
         # AOTriton flash baseline (best-effort; skipped for FP8 / ineligible shapes).
         aot_ms = None
@@ -851,6 +867,38 @@ def main() -> int:
         best = None
         for v in args.variants:
             try:
+                if v == "sweep":
+                    # Multi-engine lane: time every engine the registry offers for
+                    # this problem (one entry per launched path). Emitted as
+                    # "sweep:<path>" sub-records so each is comparable to the
+                    # single-kernel variants above.
+                    from kernels.common.attention_unified import (
+                        _resolve_attention_arch,
+                    )
+
+                    sweep_entries = run_sweep(
+                        shape,
+                        data,
+                        sw,
+                        is_fp8,
+                        bench,
+                        arch=_resolve_attention_arch(),
+                        stream_handle=_bench_stream_handle(),
+                        warmup=args.warmup,
+                        iters=args.iterations,
+                    )
+                    if not sweep_entries:
+                        print(f"  [sweep] no eligible engines for {tag} sw={sw}")
+                    best = record_sweep_entries(
+                        rec,
+                        sweep_entries,
+                        tri_out=tri_out,
+                        tri_ms=tri_ms,
+                        tol=args.tol,
+                        compare=_compare,
+                        best=best,
+                    )
+                    continue
                 if v in ("prod", "ck3d"):
                     # production dispatch via run_unified_attention_torch
                     ck_out, ck_ms, kname = _run_prod(
@@ -873,9 +921,9 @@ def main() -> int:
                         warmup=args.warmup,
                         iters=args.iterations,
                     )
-                err = _compare(ck_out, tri_out)
-                ok = err <= args.tol
-                spd = tri_ms / ck_ms if ck_ms > 0 else 0.0
+                err = _compare(ck_out, tri_out) if tri_out is not None else None
+                ok = err <= args.tol if err is not None else True
+                spd = tri_ms / ck_ms if (tri_ms and ck_ms > 0) else 0.0
                 rec["variants"][v] = {
                     "ms": ck_ms,
                     "speedup": spd,
@@ -883,13 +931,18 @@ def main() -> int:
                     "ok": ok,
                     "kernel": kname,
                 }
-                if ok and (best is None or spd > best[1]):
-                    best = (v, spd)
+                if ok and (best is None or ck_ms < best[1]):
+                    best = (v, ck_ms)
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup_vs_triton"] = best[1] if best else 0.0
         best_ms = rec["variants"][best[0]]["ms"] if best else None
+        rec["best_ms"] = best_ms
+        rec["best_speedup_vs_triton"] = (
+            tri_ms / best_ms
+            if (tri_ms and best_ms is not None and best_ms > 0)
+            else None
+        )
         rec["best_speedup_vs_aoTriton"] = (
             aot_ms / best_ms
             if (aot_ms is not None and best_ms is not None and best_ms > 0)
@@ -900,19 +953,24 @@ def main() -> int:
             if (fly_ms is not None and best_ms is not None and best_ms > 0)
             else None
         )
+        flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
+        rec["flops"] = flops
+        rec["best_tflops"] = (
+            flops / (best_ms * 1e-3) / 1e12
+            if (best_ms is not None and best_ms > 0)
+            else None
+        )
         results.append(rec)
+        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         vs = "  ".join(
-            f"{v}={rec['variants'][v].get('speedup', 0):.2f}x"
+            f"{v}={rec['variants'][v]['ms'] * 1000:.1f}us"
             f"{'' if rec['variants'][v].get('ok') else '!'}"
-            for v in args.variants
-            if "speedup" in rec["variants"][v]
+            for v in expand_variant_keys(args.variants, rec["variants"])
+            if "ms" in rec["variants"].get(v, {})
         )
-        aot_spd_str = (
-            f" aot_spd={rec['best_speedup_vs_aoTriton']:.2f}x"
-            if rec["best_speedup_vs_aoTriton"] is not None
-            else ""
-        )
+        best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
+        tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
         fly_str = ""
         if args.flydsl:
             fly_spd_str = ""
@@ -920,12 +978,12 @@ def main() -> int:
                 fly_spd_str = f"({tri_ms / fly_ms:.2f}x tri)"
             fly_best_spd_str = (
                 f" fly_spd={rec['best_speedup_vs_flydsl']:.2f}x"
-                if rec["best_speedup_vs_flydsl"] is not None
+                if rec.get("best_speedup_vs_flydsl") is not None
                 else ""
             )
             fly_str = f" | fly={fly_status}{fly_spd_str}{fly_best_spd_str}"
         print(
-            f"{tag} sw={sw} fp8={int(is_fp8)} tri={tri_ms * 1000:.1f}us {aot_str} | {vs} | best={rec['best_variant']}={rec['best_speedup_vs_triton']:.2f}x(tri){aot_spd_str}{fly_str}"
+            f"{tag} sw={sw} fp8={int(is_fp8)} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}={best_str}{tf_str}{fly_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -945,7 +1003,7 @@ def main() -> int:
     for b in sorted(buckets):
         rs = buckets[b]
         tri_spds = [
-            r["best_speedup_vs_triton"] for r in rs if r["best_speedup_vs_triton"] > 0
+            r["best_speedup_vs_triton"] for r in rs if r.get("best_speedup_vs_triton")
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]
@@ -955,16 +1013,26 @@ def main() -> int:
         fly_spds = [
             r["best_speedup_vs_flydsl"] for r in rs if r.get("best_speedup_vs_flydsl")
         ]
-        tri_part = f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+        best_us = [r["best_ms"] * 1000 for r in rs if r.get("best_ms")]
+        tflops = [r["best_tflops"] for r in rs if r.get("best_tflops")]
+        lat_part = f"best_lat_gm={_gm(best_us):.1f}us (n={len(best_us)})"
+        tf_part = f"  tflops_gm={_gm(tflops):.1f}" if tflops else ""
+        tri_part = (
+            f"  vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+            if tri_spds
+            else ""
+        )
         aot_part = (
             f"  vs_aot={_gm(aot_spds):.3f}x (n={len(aot_spds)})" if aot_spds else ""
         )
         fly_part = (
             f"  vs_fly={_gm(fly_spds):.3f}x (n={len(fly_spds)})" if fly_spds else ""
         )
-        print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {tri_part}{aot_part}{fly_part}")
+        print(
+            f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
+        )
     print("\n=== per-variant geomean (correct shapes only) ===")
-    for v in args.variants:
+    for v in all_variant_keys(args.variants, results):
         sp = [
             r["variants"][v]["speedup"]
             for r in results
@@ -1052,7 +1120,7 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_cus,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").

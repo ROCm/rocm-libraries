@@ -710,7 +710,7 @@ public:
                                     const I* __restrict__ lptr_begin_,
                                     const I* __restrict__ lptr_end_,
                                     const J* __restrict__ lind_,
-                                    T* __restrict__ lval_,
+                                    T*                   lval_,
                                     rocsparse_index_base lbase_,
                                     rocsparse_diag_type  udiag_type_,
                                     rocsparse_direction  udir_,
@@ -719,10 +719,10 @@ public:
                                     const I* __restrict__ uptr_end_,
                                     const J* __restrict__ uind_,
 
-                                    T* __restrict__ uval_,
+                                    T*                   uval_,
                                     rocsparse_index_base ubase_,
-                                    T* __restrict__ dval_,
-                                    size_t buffer_size_,
+                                    T*                   dval_,
+                                    size_t               buffer_size_,
                                     void* __restrict__ buffer_)
         {
             hipStream_t stream  = handle_->stream;

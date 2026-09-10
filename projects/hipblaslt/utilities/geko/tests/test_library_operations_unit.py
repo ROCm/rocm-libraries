@@ -208,6 +208,164 @@ def test_from_dataframe_happy_path(tmp_path: Path) -> None:
     assert len(libs[0].sizes) == 1
 
 
+def test_from_dataframe_reuses_solution_for_multiple_sizes(tmp_path: Path) -> None:
+    """Regression test: multiple sizes may map to the same source solution.
+
+    run_search-style selections can include different GEMM sizes that resolve to the
+    same source solution index. The generated library should keep one solution and
+    reference it from each size mapping.
+    """
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+
+    data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [
+            [[16, 16, 1, 16], [0, 100.0]],
+            [[32, 16, 1, 16], [0, 95.0]],
+        ],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+    ]
+    yaml.safe_dump(data, (lib_dir / "a.yaml").open("w"), sort_keys=False)
+
+    df = pd.DataFrame(
+        [
+            {
+                "lib": "a.yaml",
+                "M": 16,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+            },
+            {
+                "lib": "a.yaml",
+                "M": 32,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+            },
+        ]
+    )
+
+    libs = operations.from_dataframe(df, lib_dir)
+    assert len(libs) == 1
+    assert libs[0].name == "a.yaml"
+    assert len(libs[0].sizes) == 2
+
+    # Expected behavior: both sizes should point to the same deduplicated solution.
+    assert len(libs[0].solutions) == 1
+    assert libs[0].sizes[0][1][0] == 0
+    assert libs[0].sizes[1][1][0] == 0
+
+
+def test_from_full_dataframe_reuses_tuned_solution_for_multiple_sizes(tmp_path: Path) -> None:
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+
+    data = [
+        None,
+        None,
+        "gfx950",
+        None,
+        {
+            "TransposeA": 0,
+            "TransposeB": 0,
+            "DataType": 0,
+            "DestDataType": 0,
+            "ComputeDataType": 0,
+        },
+        [{"SolutionIndex": 0, "StaggerU": 0}],
+        [2, 3, 0, 1],
+        [
+            [[16, 16, 1, 16], [0, 100.0]],
+            [[32, 16, 1, 16], [0, 95.0]],
+        ],
+        None,
+        None,
+        "DeviceEfficiency",
+        "Equality",
+    ]
+    yaml.safe_dump(data, (lib_dir / "a.yaml").open("w"), sort_keys=False)
+
+    match_table = tmp_path / "MatchTable.yaml"
+    yaml.safe_dump({}, match_table.open("w"), sort_keys=False)
+
+    df = pd.DataFrame(
+        [
+            {
+                "lib": "a.yaml",
+                "M": 16,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+                "winner": "tuned",
+                "solutionIdx_reference": 0,
+            },
+            {
+                "lib": "a.yaml",
+                "M": 32,
+                "N": 16,
+                "K": 16,
+                "batch_count": 1,
+                "transA": "N",
+                "transB": "N",
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "f32_r",
+                "winner": "tuned",
+                "solutionIdx_reference": 0,
+            },
+        ]
+    )
+
+    libs = operations.from_full_dataframe(df, lib_dir, match_table)
+
+    assert len(libs) == 1
+    assert libs[0].name == "a.yaml"
+    assert len(libs[0].sizes) == 2
+    assert len(libs[0].solutions) == 1
+    assert libs[0].sizes[0][1][0] == 0
+    assert libs[0].sizes[1][1][0] == 0
+
+
 def test_extract_solutions_requires_solution_idx(tmp_path: Path) -> None:
     df = pd.DataFrame([{"m": 16}])
     with pytest.raises(ValueError, match="solutionIdx"):

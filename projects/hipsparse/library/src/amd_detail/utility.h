@@ -21,6 +21,8 @@
 *
 * ************************************************************************ */
 
+#include "hipsparse-config.h"
+
 #include <vector>
 
 #define TO_STR2(x) #x
