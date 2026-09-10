@@ -466,9 +466,9 @@ TEST(HostNumericsDataInitializationBridge, GroupedGemmDefinesHplAndSpecialRecipe
 
     std::tie(a, b, c, bias) = initialize(hipblaslt_initialization::special);
     for(const float value : a)
-        EXPECT_EQ(value, hipblaslt::host_numerics::specialInitializationAValue);
+        EXPECT_EQ(value, 65'280.0f);
     for(const float value : b)
-        EXPECT_EQ(value, hipblaslt::host_numerics::specialInitializationBValue);
+        EXPECT_EQ(value, 0.0000607967376708984375f);
     expectHplRange(c);
     expectHplRange(bias);
 }
@@ -589,14 +589,18 @@ TEST(HostNumericsDataInitializationBridge, DirectMatrixNormalGenerationIsRepeata
         std::ranges::equal(first.rawEncodedBackingStorage(), second.rawEncodedBackingStorage()));
 }
 
-TEST(HostNumericsDataInitializationBridge, RandomHelpersUseComponentRecipes)
+TEST(HostNumericsDataInitializationBridge, TranslatesInitializationModesToComponentRecipes)
 {
     using namespace roc::host_numerics;
     using namespace hipblaslt::host_numerics;
 
     const Layout layout(Shape{2, 2}, {1, 3});
-    const Tensor values
-        = generate(ScalarType::Float32, layout, realOnlyRandomRecipe(ScalarType::Float32));
+    const Tensor values = generate(
+        ScalarType::Float32,
+        layout,
+        initializationRecipe(ScalarType::Float32,
+                             hipblaslt_initialization::rand_int,
+                             defaultInitializationSeed));
 
     for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
     {
@@ -608,25 +612,12 @@ TEST(HostNumericsDataInitializationBridge, RandomHelpersUseComponentRecipes)
     }
     EXPECT_EQ(values.shareStorageWithLayout(Layout(Shape{5}, {1})).loadAs<float>({2}), 0);
 
-    const Tensor small = generate(
+    const Tensor nanValues = generate(
         ScalarType::Float32,
-        layout,
-        randomIntegerRecipe(ScalarType::Float32,
-                            {.small = true, .complexPolicy = ComplexGenerationPolicy::RealOnly}));
-    for(const size_t index : {size_t{0}, size_t{1}, size_t{3}, size_t{4}})
-    {
-        const float value
-            = small.shareStorageWithLayout(Layout(Shape{5}, {1})).loadAs<float>({index});
-        EXPECT_GE(value, 0.1f);
-        EXPECT_LE(value, 1.0f);
-        EXPECT_FLOAT_EQ(value * 10, std::round(value * 10));
-    }
-    EXPECT_EQ(small.shareStorageWithLayout(Layout(Shape{5}, {1})).loadAs<float>({2}), 0);
-
-    const Tensor nanValues
-        = generate(ScalarType::Float32,
-                   Shape{8},
-                   nanRecipe(ScalarType::Float32, ComplexGenerationPolicy::RealOnly));
+        Shape{8},
+        initializationRecipe(ScalarType::Float32,
+                             hipblaslt_initialization::nan,
+                             defaultInitializationSeed));
     for(size_t index = 0; index < nanValues.elementCount(); ++index)
         EXPECT_TRUE(std::isnan(nanValues.loadAs<float>({index})));
 
@@ -647,7 +638,7 @@ TEST(HostNumericsDataInitializationBridge, RandomHelpersUseComponentRecipes)
         const Tensor zeroOrOne = generate(
             type,
             Shape{64},
-            uniformZeroOneRecipe(type, ComplexGenerationPolicy::RealOnly, 17));
+            initializationRecipe(type, hipblaslt_initialization::uniform_01, 17));
         for(size_t index = 0; index < zeroOrOne.elementCount(); ++index)
         {
             const int64_t value = zeroOrOne.loadAs<int64_t>({index});
@@ -750,9 +741,10 @@ TEST(HostNumericsDataInitializationBridge,
 
     Tensor baseline(ScalarType::Float32, expectedLayout);
     generate(baseline,
-             normalRecipe(ScalarType::Float32,
-                          ComplexGenerationPolicy::RealOnly,
-                          seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A)));
+             initializationRecipe(
+                 ScalarType::Float32,
+                 hipblaslt_initialization::norm_dist,
+                 seedForMatrixRole(oneSpecialInitializationSeed, MatrixRole::A)));
 
     constexpr size_t  expectedSpecialLogicalIndex = 6;
     const size_t      storageElements = actual.rawEncodedBackingStorage().size() / sizeof(float);
