@@ -104,12 +104,12 @@ void validateBlocked(const GemmInvocation& problem) {
 }
 
 template <typename Accumulator, bool QuantizeAccumulator>
-detail::RuntimeGemmFinalizer<Accumulator> makeFinalizer(const GemmInvocation& problem) {
+detail::RuntimeGemmArithmetic<Accumulator> makeArithmetic(const GemmInvocation& problem) {
     if constexpr (QuantizeAccumulator)
-        return detail::RuntimeGemmFinalizer<Accumulator>(
+        return detail::RuntimeGemmArithmetic<Accumulator>(
             problem, detail::gemmAccumulatorQuantizer<Accumulator>(problem));
     else
-        return detail::RuntimeGemmFinalizer<Accumulator>(problem);
+        return detail::RuntimeGemmArithmetic<Accumulator>(problem);
 }
 
 template <typename Accumulator, bool QuantizeAccumulator = false>
@@ -138,24 +138,23 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     const RuntimeMatrixBlockReader<Accumulator> bBlockReader(problem.b);
     const RuntimeQuantizer<Accumulator> quantizeA(problem.computeTypeA);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.computeTypeB);
-    const RuntimeGemmFinalizer<Accumulator> finalizer =
-        makeFinalizer<Accumulator, QuantizeAccumulator>(problem);
+    const RuntimeGemmArithmetic<Accumulator> arithmetic =
+        makeArithmetic<Accumulator, QuantizeAccumulator>(problem);
     const auto multiply = [&](Accumulator left, Accumulator right) {
         if constexpr (needsExplicitArithmetic)
-            return finalizer.multiply(left, right);
+            return arithmetic.multiply(left, right);
         else
             return left * right;
     };
     const auto add = [&](Accumulator left, Accumulator right) {
         if constexpr (needsExplicitArithmetic)
-            return finalizer.add(left, right);
+            return arithmetic.add(left, right);
         else
             return left + right;
     };
-    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d, problem.outputConversion);
-    std::optional<RuntimeMatrixOutputWriter<Accumulator>> selectedOutputWriter;
-    if (selectedOutput != nullptr)
-        selectedOutputWriter.emplace(*selectedOutput, problem.outputConversion);
+    const RuntimeMatrixWriter<Accumulator> output(problem.d);
+    std::optional<RuntimeMatrixWriter<Accumulator>> selectedOutputWriter;
+    if (selectedOutput != nullptr) selectedOutputWriter.emplace(*selectedOutput);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
     std::vector<RuntimeMatrixReader<Accumulator>> preScalesA;
@@ -250,13 +249,13 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             }
         };
 
-        if (!finalizer.skipsProduct() && !hasBlockScale) {
+        if (!hasBlockScale) {
             for (size_t reductionBase = 0; reductionBase < k;
                  reductionBase += reductionBlockElements) {
                 const size_t reductions = std::min(reductionBlockElements, k - reductionBase);
                 accumulateTile(accumulator, reductionBase, reductions);
             }
-        } else if (!finalizer.skipsProduct()) {
+        } else {
             for (size_t reductionBase = 0; reductionBase < k;) {
                 size_t reductions = std::min(reductionBlockElements, k - reductionBase);
                 if (blockScaleA)
@@ -312,16 +311,14 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t column = 0; column < columns; ++column) {
                     output.store(rowBase + row, columnBase + column,
-                                 finalizer.finalize(rowBase + row, columnBase + column,
-                                                    accumulator[row * columns + column]));
+                                 accumulator[row * columns + column]);
                 }
             }
         } else {
             for (const SelectedOutputLocation& selected : selectedOutputs) {
                 const size_t row = selected.localIndex / outputBlockColumns;
                 const size_t column = selected.localIndex % outputBlockColumns;
-                const Accumulator value = finalizer.finalize(rowBase + row, columnBase + column,
-                                                             accumulator[row * columns + column]);
+                const Accumulator value = accumulator[row * columns + column];
                 if (selectedOutputWriter)
                     selectedOutputWriter->store(0, selected.selectedIndex, value);
                 else
@@ -332,7 +329,7 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     };
 
     const bool parallelOutput = detail::canParallelizeGemmOutput(problem);
-    const size_t reductionWork = finalizer.skipsProduct() ? 0 : k;
+    const size_t reductionWork = k;
     if (problem.outputSelection.selectsAll()) {
         const size_t rowBlockCount = (m + outputBlockRows - 1) / outputBlockRows;
         const size_t columnBlockCount = (n + outputBlockColumns - 1) / outputBlockColumns;
@@ -407,8 +404,7 @@ GemmExecutionInfo detail::runBlockedGemmToSelectedOutput(const GemmInvocation& p
         throw std::invalid_argument("Streaming blocked GEMM requires a partial selection.");
     const size_t selectedCount =
         problem.outputSelection.selectedCount(problem.d.shape().elementCount());
-    if (selectedOutput.type() != problem.outputType ||
-        selectedOutput.shape() != Shape{1, selectedCount})
+    if (selectedOutput.type() != problem.d.type() || selectedOutput.shape() != Shape{1, selectedCount})
         throw std::invalid_argument("Streaming blocked GEMM output shape or type mismatch.");
 
     switch (problem.accumulatorType) {

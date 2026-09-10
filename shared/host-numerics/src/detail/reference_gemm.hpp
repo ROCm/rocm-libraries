@@ -34,28 +34,18 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     }
 }
 
-template <typename Accumulator>
-void validateRuntimeGemmScalars(const GemmSpecification& problem) {
-    (void)runtimeScalar<Accumulator>(problem.alpha, "alpha");
-    (void)runtimeScalar<Accumulator>(problem.beta, "beta");
-    (void)runtimeScalar<Accumulator>(problem.scaleC, "C scale");
-    (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
-    (void)runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0");
-    (void)runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1");
-}
-
-inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
+inline void validateRuntimeGemm(const GemmInvocation& problem) {
     requireRank(problem.a.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.shape(), 2, "Reference GEMM", "B");
-    requireRank(problem.c.shape(), 2, "Reference GEMM", "C");
+    requireRank(problem.d.shape(), 2, "Reference GEMM", "output");
 
     const size_t m = problem.a.shape()[0];
     const size_t k = problem.a.shape()[1];
     const size_t n = problem.b.shape()[1];
     if (problem.b.shape()[0] != k)
         throw std::invalid_argument("Reference GEMM K dimension mismatch.");
-    if (problem.c.shape() != Shape{m, n})
-        throw std::invalid_argument("Reference GEMM C shape mismatch.");
+    if (problem.d.shape() != Shape{m, n})
+        throw std::invalid_argument("Reference GEMM output shape mismatch.");
     if (!isRuntimeGemmAccumulator(problem.accumulatorType))
         throw std::invalid_argument(
             "Runtime reference GEMM currently supports F16, BF16, F32, F64, I32, C64, and "
@@ -79,9 +69,8 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
     };
     validateOperandType(problem.a.type(), "A");
     validateOperandType(problem.b.type(), "B");
-    validateOperandType(problem.c.type(), "C");
-    validateOperandType(problem.outputType, "D");
-    if (complexAccumulator != isComplexScalarType(problem.outputType))
+    validateOperandType(problem.d.type(), "output");
+    if (complexAccumulator != isComplexScalarType(problem.d.type()))
         throw std::invalid_argument("Reference GEMM complex accumulator/output mismatch.");
 
     auto validateComputeType = [&](const Tensor& operand,
@@ -116,66 +105,6 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
 
     if (problem.mathMode == MathMode::XFloat32 && problem.accumulatorType != ScalarType::Float32)
         throw std::invalid_argument("XFloat32 math mode requires a Float32 accumulator.");
-    if (complexAccumulator && problem.activation != Activation::None)
-        throw std::invalid_argument("Complex reference GEMM does not support activation.");
-    if (problem.accumulatorType == ScalarType::Int32) {
-        switch (problem.activation) {
-            case Activation::None:
-            case Activation::Absolute:
-            case Activation::ClippedRelu:
-            case Activation::Relu:
-            case Activation::LeakyRelu:
-            case Activation::ReluDerivative:
-            case Activation::Clamp:
-                break;
-            default:
-                throw std::invalid_argument(
-                    "Int32 reference GEMM does not support floating-point activation.");
-        }
-    }
-    switch (problem.accumulatorType) {
-        case ScalarType::Float16:
-        case ScalarType::BFloat16:
-        case ScalarType::Float32:
-            validateRuntimeGemmScalars<float>(problem);
-            break;
-        case ScalarType::Float64:
-            validateRuntimeGemmScalars<double>(problem);
-            break;
-        case ScalarType::Int32:
-            validateRuntimeGemmScalars<int32_t>(problem);
-            break;
-        case ScalarType::ComplexFloat32:
-            validateRuntimeGemmScalars<std::complex<float>>(problem);
-            break;
-        case ScalarType::ComplexFloat64:
-            validateRuntimeGemmScalars<std::complex<double>>(problem);
-            break;
-        default:
-            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
-    }
-    if (problem.outputConversion == OutputConversion::SaturatingInt8 &&
-        problem.outputType != ScalarType::Int8)
-        throw std::invalid_argument(
-            "Reference GEMM saturating output conversion currently requires Int8 output.");
-
-    const Shape outputShape{m, n};
-    auto validateEpilogueTensor = [&](const Tensor& values, const char* name) {
-        try {
-            (void)values.broadcastTo(outputShape);
-        } catch (const std::invalid_argument&) {
-            throw std::invalid_argument(std::string("Reference GEMM ") + name +
-                                        " is not broadcast-compatible with D.");
-        }
-        if (!complexAccumulator && isComplexScalarType(values.type()))
-            throw std::invalid_argument(
-                std::string("Reference GEMM real accumulator cannot consume complex ") + name +
-                ".");
-    };
-    if (problem.bias) validateEpilogueTensor(*problem.bias, "bias");
-    if (problem.scaleAlpha) validateEpilogueTensor(*problem.scaleAlpha, "scale-alpha");
-    if (problem.scaleA) validateEpilogueTensor(*problem.scaleA, "scale-A");
-    if (problem.scaleB) validateEpilogueTensor(*problem.scaleB, "scale-B");
 
     auto validateBlockScale = [&](const std::optional<Tensor>& scale, size_t blockSize,
                                   size_t freeExtent, const char* name) {
@@ -207,30 +136,12 @@ inline void validateRuntimeGemmProblem(const GemmSpecification& problem) {
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
-}
-
-inline bool canParallelizeGemmOutput(const GemmInvocation& problem) {
-    return hasProvablyIndependentElements(problem.d);
-}
-
-inline bool hasSameStorageTypeAndLayout(const Tensor& left, const Tensor& right) {
-    const auto leftStorage = left.rawEncodedBackingStorage();
-    const auto rightStorage = right.rawEncodedBackingStorage();
-    return left.type() == right.type() && left.layout() == right.layout() &&
-           leftStorage.data() == rightStorage.data() && leftStorage.size() == rightStorage.size();
-}
-
-inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
     if (!hasProvablyDistinctElementOffsets(problem.d.layout()))
         throw std::invalid_argument(
             "Reference GEMM requires distinct logical destination elements.");
 
     if (storageOverlaps(problem.d, problem.a) || storageOverlaps(problem.d, problem.b))
         throw std::invalid_argument("Reference GEMM destination must not overlap A or B.");
-
-    if (storageOverlaps(problem.d, problem.c) && !hasSameStorageTypeAndLayout(problem.d, problem.c))
-        throw std::invalid_argument(
-            "Reference GEMM permits C and D to overlap only as the same tensor layout.");
 
     for (const Tensor& scale : problem.preQuantizationScalesA)
         if (storageOverlaps(problem.d, scale))
@@ -246,32 +157,15 @@ inline void validateGemmOutputAliasing(const GemmInvocation& problem) {
     if (problem.blockScaleB && storageOverlaps(problem.d, *problem.blockScaleB))
         throw std::invalid_argument(
             "Reference GEMM destination must not overlap the B block scale.");
-    if (problem.bias && storageOverlaps(problem.d, *problem.bias))
-        throw std::invalid_argument("Reference GEMM destination must not overlap the bias.");
-    if (problem.scaleAlpha && storageOverlaps(problem.d, *problem.scaleAlpha))
-        throw std::invalid_argument("Reference GEMM destination must not overlap the alpha scale.");
-    if (problem.scaleA && storageOverlaps(problem.d, *problem.scaleA))
-        throw std::invalid_argument("Reference GEMM destination must not overlap scale A.");
-    if (problem.scaleB && storageOverlaps(problem.d, *problem.scaleB))
-        throw std::invalid_argument("Reference GEMM destination must not overlap scale B.");
+    (void)problem.outputSelection.selectedCount(problem.d.shape().elementCount());
 }
 
-inline void validateRuntimeGemm(const GemmInvocation& problem) {
-    validateRuntimeGemmProblem(problem);
-    requireRank(problem.d.shape(), 2, "Reference GEMM", "D");
-
-    const Shape expectedShape{problem.a.shape()[0], problem.b.shape()[1]};
-    if (problem.d.shape() != expectedShape)
-        throw std::invalid_argument("Reference GEMM D shape mismatch.");
-    if (problem.d.type() != problem.outputType)
-        throw std::invalid_argument(
-            "Reference GEMM destination type does not match the problem output type.");
-    (void)problem.outputSelection.selectedCount(problem.d.shape().elementCount());
-    validateGemmOutputAliasing(problem);
+inline bool canParallelizeGemmOutput(const GemmInvocation& problem) {
+    return hasProvablyIndependentElements(problem.d);
 }
 
 template <typename Accumulator>
-RuntimeQuantizer<Accumulator> gemmAccumulatorQuantizer(const GemmSpecification& problem) {
+RuntimeQuantizer<Accumulator> gemmAccumulatorQuantizer(const MatmulOptions& problem) {
     const bool typeRoundsAfterEachStep = problem.accumulatorType == ScalarType::Float16 ||
                                          problem.accumulatorType == ScalarType::BFloat16;
     const bool roundAfterEachStep =
@@ -283,34 +177,12 @@ RuntimeQuantizer<Accumulator> gemmAccumulatorQuantizer(const GemmSpecification& 
 }
 
 template <typename Accumulator>
-class RuntimeGemmFinalizer {
+class RuntimeGemmArithmetic {
    public:
-    explicit RuntimeGemmFinalizer(
-        const GemmSpecification& problem,
+    explicit RuntimeGemmArithmetic(
+        const MatmulOptions&,
         RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
-        : m_problem(problem),
-          m_c(problem.c),
-          m_quantizeAccumulator(std::move(quantizeAccumulator)),
-          m_alpha(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.alpha, "alpha"))),
-          m_beta(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.beta, "beta"))),
-          m_scaleC(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.scaleC, "C scale"))),
-          m_outputScale(runtimeScalar<Accumulator>(problem.outputScale, "output scale")),
-          m_activationParameter0(m_quantizeAccumulator(
-              runtimeScalar<Accumulator>(problem.activationParameter0, "activation parameter 0"))),
-          m_activationParameter1(m_quantizeAccumulator(
-              runtimeScalar<Accumulator>(problem.activationParameter1, "activation parameter 1"))),
-          m_skipProduct(m_alpha == Accumulator(0) || problem.a.shape()[1] == 0),
-          m_betaIsZero(m_beta == Accumulator(0)) {
-        if (problem.bias) m_bias.emplace(problem.bias->broadcastTo(problem.c.shape()));
-        if (problem.scaleAlpha)
-            m_scaleAlpha.emplace(problem.scaleAlpha->broadcastTo(problem.c.shape()));
-        if (problem.scaleA) m_scaleA.emplace(problem.scaleA->broadcastTo(problem.c.shape()));
-        if (problem.scaleB) m_scaleB.emplace(problem.scaleB->broadcastTo(problem.c.shape()));
-    }
-
-    bool skipsProduct() const {
-        return m_skipProduct;
-    }
+        : m_quantizeAccumulator(std::move(quantizeAccumulator)) {}
 
     Accumulator multiply(Accumulator left, Accumulator right) const {
         return m_quantizeAccumulator(wrappingMultiply(left, right));
@@ -320,49 +192,8 @@ class RuntimeGemmFinalizer {
         return m_quantizeAccumulator(wrappingAdd(left, right));
     }
 
-    // Finalize a backend-produced raw accumulator.
-    Accumulator finalize(size_t row, size_t column, Accumulator accumulation) const {
-        Accumulator result = Accumulator(0);
-        if (!m_skipProduct) {
-            Accumulator effectiveAlpha = m_alpha;
-            if (m_scaleA) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleA)(row, column));
-            if (m_scaleB) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleB)(row, column));
-            if (m_scaleAlpha)
-                effectiveAlpha = multiply(effectiveAlpha, (*m_scaleAlpha)(row, column));
-            result = multiply(effectiveAlpha, accumulation);
-        }
-
-        if (!m_betaIsZero)
-            result = add(result, multiply(multiply(m_beta, m_scaleC), m_c(row, column)));
-        return finalizeCombined(row, column, result);
-    }
-
-    // Finalize a value whose alpha/beta combination was already performed by
-    // the backend, preserving that backend's established floating-point order.
-    Accumulator finalizeCombined(size_t row, size_t column, Accumulator result) const {
-        if (m_bias) result = add(result, (*m_bias)(row, column));
-        result = m_quantizeAccumulator(applyActivation(
-            m_problem.activation, result, m_activationParameter0, m_activationParameter1));
-        result = multiply(result, m_outputScale);
-        return result;
-    }
-
    private:
-    const GemmSpecification& m_problem;
-    RuntimeMatrixReader<Accumulator> m_c;
     RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
-    std::optional<RuntimeMatrixReader<Accumulator>> m_bias;
-    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleAlpha;
-    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleA;
-    std::optional<RuntimeMatrixReader<Accumulator>> m_scaleB;
-    Accumulator m_alpha;
-    Accumulator m_beta;
-    Accumulator m_scaleC;
-    Accumulator m_outputScale;
-    Accumulator m_activationParameter0;
-    Accumulator m_activationParameter1;
-    bool m_skipProduct;
-    bool m_betaIsZero;
 };
 
 }  // namespace detail
