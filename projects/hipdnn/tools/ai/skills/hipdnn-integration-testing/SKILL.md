@@ -94,17 +94,24 @@ Three distinct `test_categories*.yaml` scopes exist within
 
 Each `test_categories:` entry defines `description`, `test_patterns`
 (GTest-glob, matched literally including `/` and `_`), `exclude`, and
-cumulative `labels`. `execution_settings.category_timeouts` sets per-tier
-CTest timeouts.
+`labels`. `execution_settings.category_timeouts` sets per-tier CTest
+timeouts. Labels are cumulative only where the YAML author made them so:
+`dnn-providers/integration-tests/test_categories.yaml` does cascade them
+(`quick` carries `standard`), but the provider
+`test_categories_integration.yaml` files do **not** — there `quick` is
+`[quick, pre-commit, smoke]` and `standard` is `[standard, pr, precheckin]`,
+with the tier cascade expressed by duplicated `test_patterns` instead.
+Check the file you are editing rather than assuming either shape.
 
 Tiers cascade: `ctest -L quick` → smoke only; `ctest -L standard` → quick +
 standard; `comprehensive` and `full` keep adding. Bundle dir tier prefixes
 (`quick/`, `standard/`, `comprehensive/`, `full/`) and GTest prefixes (no
 prefix/`Smoke`, `Standard`, `Comprehensive`, `Full`) mirror each other.
-**(Verified live)**: `ctest -L quick` for `miopen-provider` selected exactly
-the `pre-commit`/`quick`/`smoke`/`slow`/`standard`-labelled suites (11 tests)
-and ran the `miopen-provider-external-integration_quick_suite` bundle run as
-part of it (161 s), 100% pass.
+**(Verified live)**: `ctest -L quick -N` for `miopen-provider` listed 13
+suites (11 enabled + 2 `(Disabled)`), including
+`miopen-provider-external-integration_quick_suite`; that bundle run alone is
+~161 s and passes 100%. Note the selection is by label, so no suite *named*
+`*_standard_suite` appears.
 
 **Smoke is a catch-all.** The quick/smoke suite is built from an *exclusion*
 filter (`-Standard*:Comprehensive*:Full*`), so anything that does not start
@@ -115,7 +122,9 @@ infrastructure regressed.
 
 GTest filter syntax gotcha: only a single leading `-` starts the negative
 section (`-Standard*:Comprehensive*:Full*`); `:-` between patterns does not
-negate the next one — the dash becomes a literal character.
+negate the next one — the dash becomes a literal character. (This is GTest's
+documented filter grammar; the repo's own YAML/parser layer does not restate
+it.)
 
 `ffm-quick`/`ffm-full` labels exist for the fast-feedback mechanism and are
 usually a curated, hand-picked subset (see the miopen-provider
@@ -130,13 +139,27 @@ A `test_categories*.yaml` can also carry an `exclude_gpu:` top-level map,
 independent of `test_categories:`. Each key `exclude_gpu_<arch>[_windows|_linux]`
 (e.g. `exclude_gpu_gfx110X_windows`) contributes `test_patterns` + `labels`
 that get appended as a **negative** filter for the categories its labels
-name, plus an `ex_gpu_<arch>` label of its own. Matching is hierarchical:
-`gfx1150` matches both a general `exclude_gpu_gfx11X` entry and a specific
-`exclude_gpu_gfx1150` one; `gfx1151` matches only the family (`gfx11X`)
-entry. This resolves at **configure time** against the build's GPU target,
-not at ctest runtime — `ctest -N` on this exact box (built with
-`GPU_TARGETS=gfx1151`) showed the `_gfx110X` suites already listed
-`(Disabled)` before anything ran **(verified live)**.
+name, plus an `ex_gpu_<arch>` label of its own.
+
+**The suites are generated per `ex_gpu_<arch>` label declared in the YAML —
+not against the build's GPU target.** `parse_test_categories.py` collects
+every `ex_gpu_*` label in the file and emits a `<name>_<category>_<arch>_suite`
+for each (`shared/ctest/parse_test_categories.py:742-759`); the device/build
+arch is never consulted. The only configure-time host resolution is the
+`_windows`/`_linux` key suffix (`exclude_gpu_key_applies()`). The
+hierarchical `gfx1150` → `gfx115X` → `gfx11X` matching in
+`gpu_arch_matches()` (:300) compares the *label's* arch against the other
+keys in the same file, to decide which patterns that label's suites inherit
+— it is not "does my GPU match".
+
+Practical consequence **(verified live)** on a `GPU_TARGETS=gfx1151` build:
+15 `_gfx110X` suites exist. The 5
+`miopen-provider-external-integration_*_gfx110X` ones are `(Disabled)`
+because that YAML's pattern is `"*"` (see below) — but the 10
+`miopen_plugin_*_gfx110X` suites from the sibling `test_categories.yaml`
+(pattern `"*Integration*"`) are **enabled, and `ctest -L quick` selects
+them**, running a redundant slice whose exclusion is irrelevant to this
+arch. So `(Disabled)` tracks the match-everything pattern, not your GPU.
 
 A match-everything pattern (`"*"`, `"**"`, `"*.*"`) under an `exclude_gpu`
 entry means "this whole suite does not run on this arch" — a gtest filter
@@ -174,8 +197,12 @@ filters = ["*ConvFwdBiasActiv*"]
 reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for ConvBiasActiv fusion"
 ```
 
-- `filters` are GTest-style globs matched against the **full GTest name** —
-  the same string a `--gtest_filter` would match.
+- `filters` are **POSIX-style globs** (`*` and `?` only) matched against the
+  full GTest name — `PathMatchSpecA` on Windows, `fnmatch` on Linux
+  (`src/harness/PlatformUtils.hpp:47-56`). The *name* they match is the same
+  string `--gtest_filter` matches, but the *syntax* is not `--gtest_filter`
+  syntax: `:` does not separate alternatives and a leading `-` does not
+  negate. Use one array element per pattern.
 - **`tolerance_overrides`: later entries win** when multiple filters match
   the same test — this is a "last write wins" merge.
 - **`test_skips`: the first matching entry wins** — this is the opposite
@@ -190,9 +217,11 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   `HIP_MLOPS_ENGINE` produced the exact `GTEST_SKIP` text
   `[arch gfx1151] RMSNormBackward Pure-Bfp16 is flaky at large reduction
   shapes — root cause under investigation` for every case matching that
-  entry's `filters` — the skip message format is `[arch <gcnArchName>]
-  <reason>`, i.e. the arch that matched is prepended to your `reason`
-  string verbatim.
+  entry's `filters`. The message format is `[arch <gcnArchName>]
+  <reason>`. The arch shown is always the **current device's**
+  `gcnArchName`, not "the arch that matched" — the harness prepends it
+  unconditionally (`"[arch " << TestConfig::get().getCurrentArch() << "] "`),
+  and the entry that produced this message has no `archs` key at all.
 
 ## 5. CMake / CTest wiring
 
@@ -216,23 +245,32 @@ if(TARGET hipdnn_integration_tests)                       # superbuild target al
         INSTALL_SUBDIR miopen_plugin
         TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
         TEST_CATEGORIES_YAML ${MIOPENPROVIDER_INTEGRATION_CATEGORIES_YAML}
-    )
+    )                       # also accepts ENVIRONMENT, ENVIRONMENT_MODIFICATION,
+                            # FIXTURES_REQUIRED, REFERENCE_EXECUTOR and more —
+                            # 14 keywords total; see the cmake_parse_arguments
+                            # call in HipdnnIntegrationTestHelpers.cmake
 endif()
 ```
 
 This produces the resolved invocation:
 
 ```
-hipdnn_integration_tests --test-article <plugin.so> --test-engine <ENGINE> [--test-config <toml>] [--gtest_filter=...]
+hipdnn_integration_tests --test-article <plugin.so> --test-engine <ENGINE> [--test-config <toml>] [--reference-executor <cpu|gpu>] [--gtest_filter=...]
 ```
 
 When `TEST_CATEGORIES_YAML` is supplied, the helper additionally creates
 tier-labelled CTest suites (via the shared `apply_test_category_labels()`
 from `shared/ctest/TestCategories.cmake`) so `ctest -L quick|standard|...`
 selects tiers for the external cross-provider run the same way it does for
-native tests — this is what makes `ctest -L quick` work uniformly across
-`hipdnn-check`, `miopen-provider-check`, and
-`miopen-provider-external-integration-check`.
+native tests. **These suites are registered in the provider's own build
+subdirectory**, so run ctest from there
+(`build/dnn-providers/miopen-provider`), or configure the superbuild with
+`-DROCM_LIBS_ENABLE_ROOT_CTEST=ON` to aggregate them at the root. That
+option defaults to the `ROCM_LIBS_ENABLE_ROOT_CTEST` env var, i.e. OFF
+(`CMakeLists.txt:115-124`); CI sets it explicitly. Without it, `ctest -N` at
+the superbuild root reports `Total Tests: 0` and `ctest -L quick` prints
+`No tests were found!!!` and **exits 0** — §8.1's trap, triggered by
+running ctest from the wrong directory **(verified live)**.
 
 **`hip-kernel-provider` registers per-engine external-integration-check
 targets, not one combined target.** `docs/Building.md` says
@@ -297,8 +335,12 @@ Practical notes for each:
   time-budget lever once category recategorization isn't enough.
 - **`--no-bundles`** (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) drops layers 2–6 as
   they apply to bundles entirely, leaving only the compiled-in C++ tests.
-  **Verified live**: against `MIOPEN_ENGINE` this cut the run from 2958
-  registered tests to 20 (100% pass) — the always-built C++ tests only.
+  **Verified live**: against `MIOPEN_ENGINE` on a default
+  (`BUILD_CPP_GRAPH_TESTS=OFF`) build this cut the run from 5638 *registered*
+  tests to 20 (100% pass) — the always-built C++ tests only. Keep
+  *registered* and *selected* counts straight when comparing runs: the same
+  build selects 2976 tests under the quick tier's
+  `--gtest_filter=quick_*:Smoke/*-*DISABLED*`.
 - **`--verification-mode`**/`HIPDNN_TEST_VERIFICATION_MODE` (`auto` →
   golden → GPU ref → CPU ref → skip; or pin one of `golden`/`gpu`/`cpu`/
   `golden-check`) changes *how a bundle that does run is checked*, not
@@ -347,18 +389,34 @@ Flags (see `src/main.cpp`'s argparse block for the authoritative list):
 | `--vm`, `--verification-mode auto\|golden\|gpu\|cpu\|golden-check` | How **bundle** output is verified (independent of `--reference-executor`). `auto` tries golden → GPU ref → CPU ref → skip, in that order. Also `HIPDNN_TEST_VERIFICATION_MODE`. |
 | `--no-bundles` | Disable bundle/sweep registration, leaving only compiled-in C++ tests. Also `HIPDNN_TEST_ALLOW_BUNDLES=0`. |
 | `--gd`, `--golden-data-dir <path>` | Bundle data root. Defaults to `<exe>/../lib/integration-test-bundles/`. Also `HIPDNN_TEST_GOLDEN_DATA_DIR`. |
-| `--fail-on-unsupported` | FAIL instead of SKIP when no engine supports a graph (off by default — default behavior is SKIP; see §8.2). |
+| `--fail-on-unsupported` | FAIL instead of SKIP when no engine supports a graph. **C++ graph tests only** — `failOnUnsupported()` is checked in `IntegrationGraphVerificationHarness.hpp:95-112`; the bundle harness's `skipEngineCouldNotRun()` (`IntegrationBundleVerificationHarness.cpp:165-178`) always `GTEST_SKIP`s regardless. Useless in a default bundle-only build; see §8.2. |
 | `--skip-graph-validation` | PASS immediately after confirming engine support, without executing/validating the graph. |
-| `--generate-support-matrix [file]` | Emit a markdown support matrix (default `support_matrix.md`) summarizing which engines accepted which graphs during this run. Use this to diff coverage across runs — see §8.2. |
+| `--generate-support-matrix [file]` | Emit a markdown support matrix (default `support_matrix.md`). **Records C++ graph tests only** — the sole `recordGraphSupport()` call site is `IntegrationGraphVerificationHarness.hpp:80`, so with `BUILD_CPP_GRAPH_TESTS=OFF` (the default) it writes a header-only file. See §8.2. |
 | `--capture-bundles <dir>` | Dump compiled-in C++ graph tests as JSON bundles (migration tooling, not day-to-day). |
 | `--gtest_filter=<pattern>` | Standard GTest filter, passed through after hipDNN's own args are parsed — see §6 for its semantics and footguns. |
 
-Via CTest, from a provider's build/install dir:
+Via CTest, from the provider's build subdirectory (see §5 — not the
+superbuild root, unless it was configured with
+`-DROCM_LIBS_ENABLE_ROOT_CTEST=ON`):
 
 ```bash
-cmake --build build --target miopen-provider-external-integration-check   # exact CI invocation
-ctest -L quick                                                            # tier-filtered, once built once
+cd build/dnn-providers/miopen-provider
+ctest -L quick                    # tier-filtered — what a local check should use
+ctest -L quick --no-tests=error   # ...and how to make a typo'd label fail loudly
 ```
+
+Or build the provider's custom target to run the suite **unfiltered**:
+
+```bash
+cmake --build build --target miopen-provider-external-integration-check
+```
+
+That target is the whole cross-provider suite, not a tier: **verified live**
+at 15m28s / 5638 tests / `Passed: 2457, Skipped: 3181, Failed: 0`, exit 0.
+It is *not* what CI runs — `hipdnn-superbuild-ci.yml:199` runs
+`ctest --test-dir build --output-on-failure` against a root-ctest-enabled
+build, plus a nightly `ctest ... -L external_integration_test` with
+`HIPDNN_TEST_VERIFICATION_MODE=golden-check` (:419-425).
 
 ## 8. Failure modes that let a broken suite look green
 
@@ -452,12 +510,13 @@ to the bundle claims that engine as supported (moot today since none
 exist, but the code path has no gate even if one did).
 
 **This is not hypothetical — it's the normal, currently-observed behavior
-of the suite.** Running the `quick_*` bundle tier against
-`HIPBLASLT_ENGINE` on this exact hardware (gfx1151, Windows) produced:
+of the suite.** Running the quick tier's exact filter
+(`--gtest_filter=quick_*:Smoke/*-*DISABLED*`) against `HIPBLASLT_ENGINE` on
+this exact hardware (gfx1151, Windows) produced:
 
 ```
-Passed:  0 / 2958 (0.0%)
-Skipped: 2958
+Passed:  0 / 2976 (0.0%)
+Skipped: 2976
 Failed:  0
 ```
 
@@ -475,9 +534,19 @@ tells them apart.
 - A bare "ctest passed" / "0 failed" result is **not** evidence that an
   engine still supports what it supported yesterday. If you're
   investigating "did engine X regress on graph Y," don't stop at exit
-  code — check the `Skipped: N` line in the "TEST COVERAGE SUMMARY", or
-  run with `--generate-support-matrix` and diff the emitted markdown
-  against a prior run.
+  code — check the `Skipped: N` line in the "TEST COVERAGE SUMMARY" and
+  **read the skip reasons**. A TOML `test_skips` entry prints
+  `[arch <arch>] <reason>`; an engine declining the graph prints the
+  harness's `EngineNotApplicableError` skip instead. Those two look alike in
+  a summary and mean completely different things.
+- **Neither `--generate-support-matrix` nor `--fail-on-unsupported` helps
+  here in a default build**, despite appearances: both are wired only into
+  the C++ graph-test harness (`IntegrationGraphVerificationHarness.hpp:80`
+  and `:95-112`), which `BUILD_CPP_GRAPH_TESTS=OFF` compiles out. **Verified
+  live**: `--generate-support-matrix` over 114 skipped bundle cases wrote a
+  27-byte `support_matrix.md` containing only its `# Engine Support Matrix`
+  header. Until RFC 0015's enforcement lands, comparing skip *reasons* run
+  over run is the only real detection available for bundles.
 - A `support.json`/`{Name}.support.json` existing next to a bundle today
   would be informational/aspirational only — it is not a live gate. Don't
   tell a user "this is protected by a support claim" as if it fails CI; it
@@ -517,13 +586,18 @@ override an existing one).
 A "this C++ integration test doesn't run" report for a test under
 `src/integration-tests/{op}/` is very often just this flag (default off; the
 provider CI checks run bundles only) — confirm the build option before
-treating it as a regression. One exception: `resample/` has no bundle
-equivalent yet and stays always-built migration debt.
+treating it as a regression. Note there is no "always-built anyway"
+exception among the op directories: `resample/` registers through
+`add_cpp_graph_test_sources()` like the rest
+(`src/integration-tests/resample/CMakeLists.txt:4-6`) and does have bundles
+(`integration-test-bundles/quick/ResampleFwd/`). Always-built files are only
+the ones explicitly listed in `HIPDNN_IT_ALWAYS_BUILT_SOURCES`.
 
 ### 8.7 `GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST` can hide a fully-unsupported legacy C++ suite
 
-Pre-bundle-era `INSTANTIATE_TEST_SUITE_P(..., BuildEngineTestMatrix<...>(...))`
-calls carry this macro so that zero engines supporting a fixture doesn't
+Pre-bundle-era `INSTANTIATE_TEST_SUITE_P` calls over an engine-derived
+parameter generator carry this macro so that zero engines supporting a
+fixture doesn't
 hard-fail GTest registration — but it also means an entire suite can
 register 0 test cases without comment. Only relevant with
 `BUILD_CPP_GRAPH_TESTS=ON`; bundles (§1) don't have this failure mode
@@ -533,18 +607,24 @@ because bundle registration counts are checked by the §8.1 guard instead.
 
 1. **"Does this graph run and match a reference on an engine?"** → add/extend
    a bundle. Prefer a template-sweep over a single-graph bundle unless there
-   is exactly one concrete graph with no axis to vary. Use
+   is exactly one concrete graph with no axis to vary. To capture existing
+   C++ graph tests as bundles, run the binary with `--capture-bundles <dir>`
+   and place the result with `migration-scripts/place_bundles.py`; to add one
+   graph incrementally use
    `migration-scripts/import_graph.py --graph <file>.json --bundle-dir integration-test-bundles/`
-   — it dedups by structure hash and appends or creates as needed; never
-   hand-write a `sweep.json`.
+   (flags: `--graph --bundle-dir --tier --meta --seed --dry-run --force
+   --strict`) — it dedups by structure hash and appends or creates as needed.
+   Never hand-write a `sweep.json`.
 2. **Anything else** (unhappy paths, API-contract behavior, serialization
    round-trips, benchmarking knobs, determinism) → C++ via
    `add_always_built_test_sources()` plus a
    `HIPDNN_IT_ALWAYS_BUILT_SOURCES` entry explaining why it can't be a
    bundle.
 3. **Validating the reference executor itself** (not an engine) → C++ under
-   `tests/gpu-ref/`, always defining all four tiers
-   (Smoke/Standard/Comprehensive/Full instantiations).
+   `tests/gpu-ref/`, defining all four tiers. Mind the inconsistent first
+   tier prefix: Convolution/Dgrad/Wgrad instantiate `Smoke`, while
+   Pointwise/RMSNormFwd/RMSNormBwd instantiate `Quick`. Match the file you
+   are extending.
 
 ## See also
 
