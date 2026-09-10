@@ -44,13 +44,7 @@ namespace
         const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
         return hipblaslt::client::prepareMatmulProblems(arguments,
                                                         problems,
-                                                        arguments.a_type,
-                                                        arguments.b_type,
-                                                        arguments.c_type,
-                                                        arguments.d_type,
-                                                        dataTypes.computeScalar,
-                                                        dataTypes.coefficient,
-                                                        dataTypes.biasStorage,
+                                                        dataTypes,
                                                         swizzleA,
                                                         swizzleB,
                                                         scaleLayoutA,
@@ -327,6 +321,20 @@ TEST(MatmulPreparation, CountsDistinctCAndDStorageTypes)
     EXPECT_EQ(preparation.rotatingBytes, 376);
 }
 
+TEST(MatmulPreparation, CountsAuxiliaryStorageUsingItsOwnType)
+{
+    auto arguments              = baseArguments();
+    arguments.use_e             = true;
+    arguments.aux_type          = HIP_R_16F;
+    arguments.activation_type   = hipblaslt_activation_type::relu;
+
+    const auto preparation = prepare(arguments);
+
+    // Base storage is 316 bytes. E has 10 * 5 half elements, independently
+    // of the Float32 D storage type.
+    EXPECT_EQ(preparation.rotatingBytes, 416);
+}
+
 TEST(MatmulPreparation, IsolatesSwizzledDeviceGeometry)
 {
     auto arguments        = baseArguments();
@@ -384,4 +392,37 @@ TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlans)
     EXPECT_EQ(prepared.b.mxScaleStorage->naturalShape, (std::array<size_t, 2>{33, 8}));
     EXPECT_EQ(prepared.a.scaleElements, 256);
     EXPECT_EQ(prepared.b.scaleElements, 512);
+}
+
+TEST(MatmulPreparation, CountsEveryBatchOfByteEncodedMxScales)
+{
+    using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
+
+    auto arguments        = baseArguments();
+    arguments.a_type      = HIP_R_4F_E2M1;
+    arguments.b_type      = HIP_R_6F_E2M3;
+    arguments.batch_count = 3;
+    arguments.stride_a[0] = 28;
+    arguments.stride_b[0] = 40;
+    arguments.stride_c[0] = 30;
+    arguments.stride_d[0] = 45;
+    arguments.scaleA      = hipblaslt_scaling_format::Block_32_UE8M0;
+    arguments.scaleB      = hipblaslt_scaling_format::Block_32_UE8M0;
+
+    const auto problems    = hipblaslt::client::normalizeMatmulProblems(arguments);
+    const auto preparation = prepare(arguments,
+                                     false,
+                                     false,
+                                     MxScaleStorageLayout::Natural,
+                                     MxScaleStorageLayout::Natural);
+    const auto& problem  = problems.front();
+    const auto& prepared = preparation.problems.front();
+    const size_t expectedBytes
+        = prepared.a.elements * realDataTypeSize(arguments.a_type)
+          + prepared.b.elements * realDataTypeSize(arguments.b_type)
+          + problem.d.allocationElements * realDataTypeSize(arguments.d_type)
+          + (prepared.a.scaleElements + prepared.b.scaleElements)
+                * static_cast<size_t>(problem.batchCount);
+
+    EXPECT_EQ(preparation.rotatingBytes, expectedBytes);
 }

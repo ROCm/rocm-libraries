@@ -556,13 +556,7 @@ void testing_matmul_with_bias(const Arguments&                                  
 
     auto  preparation          = hipblaslt::client::prepareMatmulProblems(arg,
                                                                 matmulProblems,
-                                                                TiA,
-                                                                TiB,
-                                                                TiC,
-                                                                To,
-                                                                Tc,
-                                                                Talpha,
-                                                                Tbias,
+                                                                dataTypes,
                                                                 do_swizzle_a,
                                                                 do_swizzle_b,
                                                                 mxScaleLayout(arg.scaleA),
@@ -652,6 +646,17 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                               rotating,
                                                               preparation.rotatingBytes);
     int32_t block_count = plan.block_count;
+    if(block_count <= 0)
+        throw std::logic_error("Rotating-buffer planning produced no storage blocks.");
+    const auto rotatingBlockAddress = [block_count](HipDeviceBuffer& buffer, int32_t block) {
+        if(block < 0 || block >= block_count)
+            throw std::out_of_range("Rotating-buffer block index is out of range.");
+        const size_t blockCount = static_cast<size_t>(block_count);
+        if(buffer.getNumBytes() % blockCount != 0)
+            throw std::logic_error("Rotating-buffer allocation cannot be divided into blocks.");
+        return static_cast<void*>(buffer.as<std::byte>()
+                                  + static_cast<size_t>(block) * (buffer.getNumBytes() / blockCount));
+    };
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
@@ -2116,9 +2121,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 // Update bias, E
                 if(arg.bias_vector)
                 {
-                    const void* bias_addr = (const void*)(dBias[i].as<char>()
-                                                          + b * preparedProblem.biasElements
-                                                                * realDataTypeSize(Tbias));
+                    const void* bias_addr = rotatingBlockAddress(dBias[i], b);
                     EXPECT_HIPBLAS_STATUS(
                         hipblasLtMatmulDescSetAttribute(blockMatmul,
                                                         HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
@@ -2128,9 +2131,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 }
                 if(arg.use_e)
                 {
-                    void* e_addr = (void*)(dE[i].as<char>()
-                                           + b * problem.auxiliaryAllocationElements()
-                                                 * realDataTypeSize(Taux));
+                    void* e_addr = rotatingBlockAddress(dE[i], b);
                     CHECK_HIPBLASLT_ERROR(
                         hipblasLtMatmulDescSetAttribute(blockMatmul,
                                                         HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
@@ -2141,8 +2142,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(arg.scaleA != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
-                void*                           scaleA_addr
-                    = (void*)(dScaleA[i].as<char>() + b * preparedProblem.a.scaleElements);
+                void* scaleA_addr = rotatingBlockAddress(dScaleA[i], b);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     blockMatmul, attr, &scaleA_addr, sizeof(void*)));
             }
@@ -2150,8 +2150,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(arg.scaleB != hipblaslt_scaling_format::none)
             {
                 hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-                void*                           scaleB_addr
-                    = (void*)(dScaleB[i].as<char>() + b * preparedProblem.b.scaleElements);
+                void* scaleB_addr = rotatingBlockAddress(dScaleB[i], b);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     blockMatmul, attr, &scaleB_addr, sizeof(void*)));
             }
@@ -2264,9 +2263,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 if(arg.bias_vector)
                 {
                     bias_type = arg.bias_type;
-                    bias_addr
-                        = (void*)(dBias[gemmIdx].as<char>()
-                                  + b * preparedProblem.biasElements * realDataTypeSize(bias_type));
+                    bias_addr = rotatingBlockAddress(dBias[gemmIdx], b);
                 }
                 if(arg.use_e)
                 {
@@ -2288,28 +2285,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                     extepilogue[gemmIdx].setScalingBType(
                         hipblaslt::client::matmulScaleMode(arg.scaleB));
                 }
-                extinputs[b][gemmIdx].setA(
-                    (void*)((dA[gemmIdx].as<char>())
-                            + b * preparedProblem.a.elements * realDataTypeSize(TiA)));
-                extinputs[b][gemmIdx].setB(
-                    (void*)((dB[gemmIdx].as<char>())
-                            + b * preparedProblem.b.elements * realDataTypeSize(TiB)));
-                extinputs[b][gemmIdx].setC(
-                    (void*)((dC[gemmIdx].as<char>())
-                            + b * problem.c.allocationElements * realDataTypeSize(TiC)));
-                extinputs[b][gemmIdx].setD(
-                    (void*)((dOutput[gemmIdx].as<char>())
-                            + b * problem.d.allocationElements * realDataTypeSize(To)));
+                extinputs[b][gemmIdx].setA(rotatingBlockAddress(dA[gemmIdx], b));
+                extinputs[b][gemmIdx].setB(rotatingBlockAddress(dB[gemmIdx], b));
+                extinputs[b][gemmIdx].setC(rotatingBlockAddress(dC[gemmIdx], b));
+                extinputs[b][gemmIdx].setD(rotatingBlockAddress(dOutput[gemmIdx], b));
                 extinputs[b][gemmIdx].setAlpha(&preparedProblem.alpha);
                 extinputs[b][gemmIdx].setBeta(&preparedProblem.beta);
                 extinputs[b][gemmIdx].setBias(bias_addr);
                 extinputs[b][gemmIdx].setScaleA(arg.scaleA != hipblaslt_scaling_format::none
-                                                    ? (void*)((dScaleA[gemmIdx].as<char>())
-                                                              + b * preparedProblem.a.scaleElements)
+                                                    ? rotatingBlockAddress(dScaleA[gemmIdx], b)
                                                     : nullptr);
                 extinputs[b][gemmIdx].setScaleB(arg.scaleB != hipblaslt_scaling_format::none
-                                                    ? (void*)((dScaleB[gemmIdx].as<char>())
-                                                              + b * preparedProblem.b.scaleElements)
+                                                    ? rotatingBlockAddress(dScaleB[gemmIdx], b)
                                                     : nullptr);
                 extinputs[b][gemmIdx].setScaleC(arg.scaleC ? dScaleC[gemmIdx].as<char>() : nullptr);
                 extinputs[b][gemmIdx].setScaleD(arg.scaleD ? dScaleD[gemmIdx].as<char>() : nullptr);
@@ -2317,14 +2304,10 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                              : nullptr);
                 extinputs[b][gemmIdx].setAmaxD(arg.amaxD ? dAmaxD[gemmIdx].as<char>() : nullptr);
                 if(arg.use_e)
-                    extinputs[b][gemmIdx].setAux((void*)((dE[gemmIdx].as<char>())
-                                                         + b * problem.auxiliaryAllocationElements()
-                                                               * realDataTypeSize(Taux)));
+                    extinputs[b][gemmIdx].setAux(rotatingBlockAddress(dE[gemmIdx], b));
                 if(arg.scaleAlpha_vector)
                     extinputs[b][gemmIdx].setScaleAlphaVec(
-                        (void*)((dScaleAlphaVec[gemmIdx].as<char>())
-                                + b * preparedProblem.scaleAlphaElements
-                                      * realDataTypeSize(Talpha)));
+                        rotatingBlockAddress(dScaleAlphaVec[gemmIdx], b));
             }
         }
         extproblemtype.setOpA(transA);
@@ -2354,15 +2337,10 @@ void testing_matmul_with_bias(const Arguments&                                  
             const auto& preparedProblem = preparedProblems[gemmIdx];
             for(int32_t b = 0; b < block_count; b++)
             {
-                da[b][gemmIdx] = (void*)((dA[gemmIdx].as<char>())
-                                         + b * preparedProblem.a.elements * realDataTypeSize(TiA));
-                db[b][gemmIdx] = (void*)((dB[gemmIdx].as<char>())
-                                         + b * preparedProblem.b.elements * realDataTypeSize(TiB));
-                dc[b][gemmIdx]
-                    = (void*)((dC[gemmIdx].as<char>())
-                              + b * problem.c.allocationElements * realDataTypeSize(TiC));
-                dd[b][gemmIdx] = (void*)((dOutput[gemmIdx].as<char>())
-                                         + b * problem.d.allocationElements * realDataTypeSize(To));
+                da[b][gemmIdx] = rotatingBlockAddress(dA[gemmIdx], b);
+                db[b][gemmIdx] = rotatingBlockAddress(dB[gemmIdx], b);
+                dc[b][gemmIdx] = rotatingBlockAddress(dC[gemmIdx], b);
+                dd[b][gemmIdx] = rotatingBlockAddress(dOutput[gemmIdx], b);
             }
         }
     }
@@ -2374,18 +2352,14 @@ void testing_matmul_with_bias(const Arguments&                                  
         {
             for(int gemmIdx = 0; gemmIdx < binding_count; gemmIdx++)
             {
-                da1[gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dA[gemmIdx].as<char>())
-                    + b * firstPreparedProblem.a.elements * realDataTypeSize(TiA));
-                db1[gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dB[gemmIdx].as<char>())
-                    + b * firstPreparedProblem.b.elements * realDataTypeSize(TiB));
-                dc1[gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dC[gemmIdx].as<char>())
-                    + b * firstProblem.c.allocationElements * realDataTypeSize(TiC));
-                dd1[gemmIdx] = reinterpret_cast<uint64_t*>(
-                    dOutput[gemmIdx].as<char>()
-                    + b * firstProblem.d.allocationElements * realDataTypeSize(To));
+                da1[gemmIdx]
+                    = reinterpret_cast<uint64_t*>(rotatingBlockAddress(dA[gemmIdx], b));
+                db1[gemmIdx]
+                    = reinterpret_cast<uint64_t*>(rotatingBlockAddress(dB[gemmIdx], b));
+                dc1[gemmIdx]
+                    = reinterpret_cast<uint64_t*>(rotatingBlockAddress(dC[gemmIdx], b));
+                dd1[gemmIdx]
+                    = reinterpret_cast<uint64_t*>(rotatingBlockAddress(dOutput[gemmIdx], b));
             }
             CHECK_HIP_ERROR(hipMemcpy(
                 dda[b], da1.data(), binding_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
@@ -2571,19 +2545,17 @@ void testing_matmul_with_bias(const Arguments&                                  
             {
                 CHECK_HIPBLASLT_ERROR(gemmVec[block].setProblem(
                     firstRuntimeProblem.matmulDescriptors[block],
-                    firstRuntimeProblem.alphaPointer,
-                    dA[0].as<char>()
-                        + block * firstPreparedProblem.a.elements * realDataTypeSize(TiA),
+                    arg.scaleAlpha_vector
+                        ? rotatingBlockAddress(dScaleAlphaVec[0], block)
+                        : firstRuntimeProblem.alphaPointer,
+                    rotatingBlockAddress(dA[0], block),
                     firstRuntimeProblem.matrixA,
-                    dB[0].as<char>()
-                        + block * firstPreparedProblem.b.elements * realDataTypeSize(TiB),
+                    rotatingBlockAddress(dB[0], block),
                     firstRuntimeProblem.matrixB,
                     &firstPreparedProblem.beta,
-                    dC[0].as<char>()
-                        + block * firstProblem.c.allocationElements * realDataTypeSize(TiC),
+                    rotatingBlockAddress(dC[0], block),
                     firstRuntimeProblem.matrixC,
-                    dOutput[0].as<char>()
-                        + block * firstProblem.d.allocationElements * realDataTypeSize(To),
+                    rotatingBlockAddress(dOutput[0], block),
                     firstRuntimeProblem.matrixD));
             }
         }
@@ -3586,9 +3558,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     {
                         auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[i % block_count];
                         auto  ptr_alpha  = arg.scaleAlpha_vector
-                                               ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count)
-                                                         * firstPreparedProblem.scaleAlphaElements
+                                               ? rotatingBlockAddress(
+                                                     dScaleAlphaVec[0], i % block_count)
                                                : firstRuntimeProblem.alphaPointer;
                         // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
                         // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
@@ -3649,8 +3620,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                             int   b          = static_cast<int>(i % block_count);
                             auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[b];
                             auto  ptr_alpha  = arg.scaleAlpha_vector
-                                                   ? (dScaleAlphaVec[0].as<char>())
-                                                       + b * firstPreparedProblem.scaleAlphaElements
+                                                   ? rotatingBlockAddress(dScaleAlphaVec[0], b)
                                                    : firstRuntimeProblem.alphaPointer;
                             void* ptrA       = firstPreparedProblem.a.elements ? dda[b] : nullptr;
                             void* ptrB       = firstPreparedProblem.b.elements ? ddb[b] : nullptr;
@@ -3691,32 +3661,23 @@ void testing_matmul_with_bias(const Arguments&                                  
                     {
                         auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[i % block_count];
                         auto  ptr_alpha  = arg.scaleAlpha_vector
-                                               ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count)
-                                                         * firstPreparedProblem.scaleAlphaElements
+                                               ? rotatingBlockAddress(
+                                                     dScaleAlphaVec[0], i % block_count)
                                                : firstRuntimeProblem.alphaPointer;
 
                         EXPECT_HIPBLAS_STATUS(
                             hipblasLtMatmul(
                                 handle,
                                 ptr_matmul,
-                                alpha_ptr,
-                                dA[0].as<char>()
-                                    + (i % block_count) * firstPreparedProblem.a.elements
-                                          * realDataTypeSize(TiA),
+                                ptr_alpha,
+                                rotatingBlockAddress(dA[0], i % block_count),
                                 firstRuntimeProblem.matrixA,
-                                dB[0].as<char>()
-                                    + (i % block_count) * firstPreparedProblem.b.elements
-                                          * realDataTypeSize(TiB),
+                                rotatingBlockAddress(dB[0], i % block_count),
                                 firstRuntimeProblem.matrixB,
                                 beta_ptr,
-                                dC[0].as<char>()
-                                    + (i % block_count) * firstProblem.c.allocationElements
-                                          * realDataTypeSize(TiC),
+                                rotatingBlockAddress(dC[0], i % block_count),
                                 firstRuntimeProblem.matrixC,
-                                dOutput[0].as<char>()
-                                    + (i % block_count) * firstProblem.d.allocationElements
-                                          * realDataTypeSize(To),
+                                rotatingBlockAddress(dOutput[0], i % block_count),
                                 firstRuntimeProblem.matrixD,
                                 &heuristicResult[sol].algo,
                                 *dWorkspace,
@@ -3752,29 +3713,20 @@ void testing_matmul_with_bias(const Arguments&                                  
                             int   b          = static_cast<int>(i % block_count);
                             auto& ptr_matmul = firstRuntimeProblem.matmulDescriptors[b];
                             auto  ptr_alpha  = arg.scaleAlpha_vector
-                                                   ? (dScaleAlphaVec[0].as<char>())
-                                                       + b * firstPreparedProblem.scaleAlphaElements
+                                                   ? rotatingBlockAddress(dScaleAlphaVec[0], b)
                                                    : firstRuntimeProblem.alphaPointer;
                             EXPECT_HIPBLAS_STATUS(
                                 hipblasLtMatmul(handle,
                                                 ptr_matmul,
-                                                alpha_ptr,
-                                                dA[0].as<char>()
-                                                    + b * firstPreparedProblem.a.elements
-                                                          * realDataTypeSize(TiA),
+                                                ptr_alpha,
+                                                rotatingBlockAddress(dA[0], b),
                                                 firstRuntimeProblem.matrixA,
-                                                dB[0].as<char>()
-                                                    + b * firstPreparedProblem.b.elements
-                                                          * realDataTypeSize(TiB),
+                                                rotatingBlockAddress(dB[0], b),
                                                 firstRuntimeProblem.matrixB,
                                                 beta_ptr,
-                                                dC[0].as<char>()
-                                                    + b * firstProblem.c.allocationElements
-                                                          * realDataTypeSize(TiC),
+                                                rotatingBlockAddress(dC[0], b),
                                                 firstRuntimeProblem.matrixC,
-                                                dOutput[0].as<char>()
-                                                    + b * firstProblem.d.allocationElements
-                                                          * realDataTypeSize(To),
+                                                rotatingBlockAddress(dOutput[0], b),
                                                 firstRuntimeProblem.matrixD,
                                                 &heuristicResult[sol].algo,
                                                 *dWorkspace,
