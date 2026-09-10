@@ -54,8 +54,8 @@ TEST(TestRMSnormValidator, ValidBackwardActivation)
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    const auto& node1 = graph.getNode(1);
-    const auto& node2 = graph.getNode(2);
+    const auto& node1 = graph.getNode(0);
+    const auto& node2 = graph.getNode(1);
     const auto& activationAttr = *node1.attributes_as_PointwiseAttributes();
     const auto& bwdAttr = *node2.attributes_as_RMSNormBackwardAttributes();
 
@@ -120,8 +120,8 @@ TEST(TestRMSnormValidator, UnsupportedDimBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
-    const auto& node1 = graph.getNode(1);
-    const auto& node2 = graph.getNode(2);
+    const auto& node1 = graph.getNode(0);
+    const auto& node2 = graph.getNode(1);
     const auto& activationAttr = *node1.attributes_as_PointwiseAttributes();
     const auto& bwdAttr = *node2.attributes_as_RMSNormBackwardAttributes();
 
@@ -429,54 +429,32 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
         builder, 1, "dy", dyType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "x", xType, &strides, &dims));
+        builder, 2, "y", yType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", scaleType, &derivedStrides, &derivedDims));
+        builder, 3, "x", xType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 4, "dx", dxType, &strides, &dims));
+        builder, 4, "scale", scaleType, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 5, "dscale", dscaleType, &derivedStrides, &derivedDims));
+        builder, 5, "dx", dxType, &strides, &dims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 6, "dbias", dbiasType, &derivedStrides, &derivedDims));
+        builder, 6, "dscale", dscaleType, &derivedStrides, &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "dbias", dbiasType, &derivedStrides, &derivedDims));
 
     // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
     const std::vector<int64_t> invRMSDims{2, 1, 1, 1};
     const std::vector<int64_t> invRMSStrides{1, 1, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 7, "inv_rms", invRMSType, &invRMSStrides, &invRMSDims));
-
-    // Epsilon (pass-by-value)
-    const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        8,
-        "epsilon",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &passByValueDims,
-        &passByValueDims,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-        builder.CreateStruct(epsilonVal).Union()));
+        builder, 8, "inv_rms", invRMSType, &invRMSStrides, &invRMSDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 9, "y", yType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 10, "dyActiv", dyActivType, &strides, &dims));
-
-    auto rmsnormAttributes
-        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
-                                                                        1, // x uid
-                                                                        3, // scale uid
-                                                                        8, // epsilon uid
-                                                                        9 // y uid
-        );
+        builder, 9, "dyActiv", dyActivType, &strides, &dims, true));
 
     auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
@@ -486,9 +464,9 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
         std::nullopt,
         std::nullopt,
         1, // dy uid
-        9, // y uid
+        2, // y uid
         std::nullopt,
-        10, // dyActiv uid
+        9, // dyActiv uid
         std::nullopt,
         std::nullopt,
         std::nullopt);
@@ -496,24 +474,16 @@ flatbuffers::FlatBufferBuilder createExplicitTypeRMSNormBackwardActivationGraph(
     auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
-            10, // dyActiv uid
-            2, // x uid
-            3, // scale uid
-            7, // invRMS uid
-            4, // dx uid
-            5, // dscale uid
-            flatbuffers::Optional<int64_t>(6) // dbias uid
+            9, // dyActiv uid
+            3, // x uid
+            4, // scale uid
+            8, // invRMS uid
+            5, // dx uid
+            6, // dscale uid
+            flatbuffers::Optional<int64_t>(7) // dbias uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto nodeFwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "rmsnorm",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
-        rmsnormAttributes.Union());
-    nodes.push_back(nodeFwd);
-
     auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
@@ -625,10 +595,10 @@ TEST(TestRMSnormValidator, MismatchIOTypesBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // Data type of x and y tensors don't need to match
     RMSnormValidator validator(graph.getTensorMap());
@@ -719,10 +689,10 @@ TEST(TestRMSnormValidator, UnsupportedScaleTypeBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // Data type of scale should be the same as bias, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -814,10 +784,10 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSTypeBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // only FLOAT inv_rms type is supported at the moment, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -941,7 +911,13 @@ flatbuffers::FlatBufferBuilder
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+        builder,
+        2,
+        "y",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &yStrides,
+        &yDims,
+        true));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
@@ -1180,11 +1156,14 @@ flatbuffers::FlatBufferBuilder
         &dyDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
+        builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
+
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &xStrides, &xDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        3,
+        4,
         "scale",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &scaleStrides,
@@ -1192,7 +1171,7 @@ flatbuffers::FlatBufferBuilder
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        4,
+        5,
         "dx",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &dxStrides,
@@ -1200,7 +1179,7 @@ flatbuffers::FlatBufferBuilder
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        5,
+        6,
         "dscale",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &dscaleStrides,
@@ -1208,7 +1187,7 @@ flatbuffers::FlatBufferBuilder
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        6,
+        7,
         "dbias",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &dbiasStrides,
@@ -1216,44 +1195,20 @@ flatbuffers::FlatBufferBuilder
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        7,
+        8,
         "inv_rms",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &invRMSStrides,
         &invRMSDims));
 
-    // Epsilon (pass-by-value)
-    const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
-        8,
-        "epsilon",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &passByValueDims,
-        &passByValueDims,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-        builder.CreateStruct(epsilonVal).Union()));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 9, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        10,
+        9,
         "dyActiv",
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &dyActivStrides,
-        &dyActivDims));
-
-    auto rmsnormAttributes
-        = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
-                                                                        1, // x uid
-                                                                        3, // scale uid
-                                                                        8, // epsilon uid
-                                                                        9 // y uid
-        );
+        &dyActivDims,
+        true));
 
     auto pointwiseAttributes = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder,
@@ -1263,9 +1218,9 @@ flatbuffers::FlatBufferBuilder
         std::nullopt,
         std::nullopt,
         1, // dy uid
-        9, // y uid
+        2, // y uid
         std::nullopt,
-        10, // dyActiv uid
+        9, // dyActiv uid
         std::nullopt,
         std::nullopt,
         std::nullopt);
@@ -1273,24 +1228,16 @@ flatbuffers::FlatBufferBuilder
     auto rmsnormBwdAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormBackwardAttributes(
             builder,
-            10, // dyActiv uid
-            2, // x uid
-            3, // scale uid
-            7, // invRMS uid
-            4, // dx uid
-            5, // dscale uid
-            flatbuffers::Optional<int64_t>(6) // dbias uid
+            9, // dyActiv uid
+            3, // x uid
+            4, // scale uid
+            8, // invRMS uid
+            5, // dx uid
+            6, // dscale uid
+            flatbuffers::Optional<int64_t>(7) // dbias uid
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    auto nodeFwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "rmsnorm",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes,
-        rmsnormAttributes.Union());
-    nodes.push_back(nodeFwd);
-
     auto nodePointwise = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "pointwise",
@@ -1490,10 +1437,10 @@ TEST(TestRMSnormValidator, MismatchIOShapesBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // Shape of x and y tensors should match, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -1676,10 +1623,10 @@ TEST(TestRMSnormValidator, MismatchAffineDimsBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // Shape of scale and bias tensors should match, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -1842,10 +1789,10 @@ TEST(TestRMSnormValidator, UnsupportedScaleShapeBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // Scale not normalized correctly, throw if this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -2000,10 +1947,10 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShapeBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -2155,10 +2102,10 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1BackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -2309,10 +2256,10 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2BackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -2462,10 +2409,10 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3BackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
@@ -2617,10 +2564,10 @@ TEST(TestRMSnormValidator, Valid4DChannelLastBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_NO_THROW(validator.checkBwdActivationTensorConfigSupported(activationAttr, bwdAttr));
@@ -2784,10 +2731,10 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayoutsBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_THROW(validator.checkBwdActivationTensorConfigSupported(activationAttr, bwdAttr),
@@ -2942,10 +2889,10 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayoutBackwardActivation)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
+    const auto& graphNode0 = graph.getNode(0);
     const auto& graphNode1 = graph.getNode(1);
-    const auto& graphNode2 = graph.getNode(2);
-    const auto& activationAttr = *graphNode1.attributes_as_PointwiseAttributes();
-    const auto& bwdAttr = *graphNode2.attributes_as_RMSNormBackwardAttributes();
+    const auto& activationAttr = *graphNode0.attributes_as_PointwiseAttributes();
+    const auto& bwdAttr = *graphNode1.attributes_as_RMSNormBackwardAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
     EXPECT_THROW(validator.checkBwdActivationTensorConfigSupported(activationAttr, bwdAttr),

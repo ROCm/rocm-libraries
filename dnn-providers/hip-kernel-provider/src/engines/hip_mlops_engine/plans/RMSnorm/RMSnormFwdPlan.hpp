@@ -18,7 +18,6 @@
 namespace hip_kernel_provider
 {
 
-using namespace core::utils;
 using namespace compilation;
 
 namespace rmsnorm
@@ -54,7 +53,7 @@ public:
     double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
-    const std::optional<ActivationParams>& optActivation() const;
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
@@ -65,7 +64,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
     hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
-    std::optional<ActivationParams> _optActivation;
+    std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 

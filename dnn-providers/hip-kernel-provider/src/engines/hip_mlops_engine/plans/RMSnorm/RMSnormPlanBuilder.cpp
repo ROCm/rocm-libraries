@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <set>
 
+using namespace hip_kernel_provider::core::utils;
+
 namespace hip_kernel_provider::rmsnorm
 {
 

@@ -25,6 +25,8 @@ set(HIPDNN_IT_ALWAYS_BUILT_SOURCES
     conv/IntegrationConvForwardSerializeRoundTrip.cpp
     layernorm/IntegrationGpuLayernormBackward.cpp
     resample/IntegrationGpuResampleBackward.cpp
+    rmsnorm/IntegrationGpuRMSNormActivation.cpp
+    rmsnorm/IntegrationGpuRMSNormBackwardActivation.cpp
 )
 
 foreach(_rel IN LISTS HIPDNN_IT_ALWAYS_BUILT_SOURCES)
