@@ -1511,7 +1511,7 @@ namespace TensileLite
                                           tensors[i],
                                           DataInitializationKey{
                                               m_initializationSeed,
-                                              stableDataInitializationStream(m_vdata[i].name)});
+                                              stableDataInitializationStream(m_vdata[i].name) + j});
                                 // FIXME: Should we init unused part to 0?
                                 if((problem.gemms[j].sparse() == 1
                                     && i == ContractionProblemGemm::TENSOR::A)
@@ -1791,20 +1791,18 @@ namespace TensileLite
                 if(pristineScale.initDescriptor.size() == 1)
                     pristineScale.initDescriptor[0] = scaleDesc;
 
-                // Element-size-aware byte stride: FP4 (0.5), FP6 (0.75), FP8 (1.0).
-                size_t dataBatchStrideBytes  = 0;
                 size_t scaleBatchStrideBytes = 0;
                 if(batchCount > 1)
-                {
-                    dataBatchStrideBytes
-                        = multiplyElementSize(dataDesc.strides()[2], dataDesc.elementBytes());
                     scaleBatchStrideBytes = scaleDesc.strides()[scaleDesc.sizes().size() - 1];
-                }
-                auto mxBatchOutput =
+                auto mxScaleBatchOutput =
                     [](void* buffer, size_t bufferBytes, size_t offset, size_t batchBytes) {
                         if(offset > bufferBytes)
                             throw std::invalid_argument(
                                 "MX output offset exceeds host buffer capacity.");
+                        if(bufferBytes == 0)
+                            return std::span<uint8_t>{};
+                        if(buffer == nullptr)
+                            throw std::invalid_argument("MX scale output buffer is null.");
                         size_t capacity = bufferBytes - offset;
                         if(batchBytes != 0)
                             capacity = std::min(capacity, batchBytes);
@@ -1817,8 +1815,26 @@ namespace TensileLite
                                                   ? scaleInitMode
                                                   : dataInitMode;
 
-                std::memset(
-                    pristineScale.cpuInput.valid.get(), 0x00, scaleDesc.totalAllocatedBytes());
+                if(scaleDesc.totalAllocatedBytes() != 0)
+                {
+                    if(!pristineScale.cpuInput.valid)
+                        throw std::invalid_argument("TensileLite MX scale buffer is null.");
+                    std::memset(
+                        pristineScale.cpuInput.valid.get(), 0x00, scaleDesc.totalAllocatedBytes());
+                }
+
+                const auto dataType = toHostNumericsScalarType(dataDesc.dataType());
+                const auto completeDataLayout = hostNumericsLayout(dataDesc);
+                if(completeDataLayout.shape().rank() < 2)
+                    throw std::invalid_argument("TensileLite MX data must have rank at least two.");
+                const size_t dataBytes = dataDesc.totalAllocatedBytes();
+                if(dataBytes != 0 && !pristineData.cpuInput.valid)
+                    throw std::invalid_argument("TensileLite MX data buffer is null.");
+                const auto dataStorage = std::span<std::byte>(
+                    static_cast<std::byte*>(pristineData.cpuInput.valid.get()), dataBytes);
+                const uint64_t operandSeed
+                    = m_initializationSeed
+                      + stableDataInitializationStream(m_vdata[dataTensorEnum].name);
 
                 auto const boundIdx
                     = isMatrixA ? problem.boundIndices()[0].a : problem.boundIndices()[0].b;
@@ -1834,14 +1850,40 @@ namespace TensileLite
                 size_t                 gpuScaleBytesPerBatch = 0;
                 for(size_t b = 0; b < batchCount; b++)
                 {
-                    auto dataOutput  = mxBatchOutput(pristineData.cpuInput.valid.get(),
-                                                     dataDesc.totalAllocatedBytes(),
-                                                     b * dataBatchStrideBytes,
-                                                     dataBatchStrideBytes);
-                    auto scaleOutput = mxBatchOutput(pristineScale.cpuInput.valid.get(),
-                                                     scaleDesc.totalAllocatedBytes(),
-                                                     b * scaleBatchStrideBytes,
-                                                     scaleBatchStrideBytes);
+                    std::vector<size_t> batchCoordinates(completeDataLayout.shape().rank(), 0);
+                    ptrdiff_t batchOffset = completeDataLayout.offset();
+                    if(batchCoordinates.size() > 2)
+                    {
+                        batchCoordinates[2] = b;
+                        std::vector<size_t> batchAddressShape(batchCoordinates.size(), 1);
+                        batchAddressShape[2] = completeDataLayout.shape()[2];
+                        std::vector<ptrdiff_t> batchAddressStrides(batchCoordinates.size(), 0);
+                        batchAddressStrides[2] = completeDataLayout.stride(2);
+                        batchOffset = roc::host_numerics::Layout(
+                                          roc::host_numerics::Shape(
+                                              std::move(batchAddressShape)),
+                                          std::move(batchAddressStrides),
+                                          completeDataLayout.offset())
+                                          .elementOffset(batchCoordinates);
+                    }
+                    auto dataOutput = roc::host_numerics::Tensor::shareExternalMutableBackingStorage(
+                        dataType,
+                        roc::host_numerics::Layout(
+                            roc::host_numerics::Shape{rows, cols},
+                            {completeDataLayout.stride(0), completeDataLayout.stride(1)},
+                            batchOffset),
+                        pristineData.cpuInput.valid,
+                        dataStorage);
+                    auto scaleOutput
+                        = mxScaleBatchOutput(pristineScale.cpuInput.valid.get(),
+                                             scaleDesc.totalAllocatedBytes(),
+                                             b * scaleBatchStrideBytes,
+                                             scaleBatchStrideBytes);
+                    const size_t seedBatch
+                        = completeDataLayout.shape().rank() > 2
+                                  && completeDataLayout.stride(2) == 0
+                              ? 0
+                              : b;
                     auto generated   = HostNumerics::detail::generateMxData(
                         dataDesc.dataType(),
                         scaleEltType,
@@ -1851,12 +1893,8 @@ namespace TensileLite
                         mxBlock,
                         dataInitMode,
                         effectiveScaleInitMode,
-                        m_initializationSeed);
-                    const auto dataStorage = generated.data.rawEncodedBackingStorage();
-                    if(dataOutput.size() < dataStorage.size())
-                        throw std::invalid_argument("TensileLite MX data output is too small.");
-                    if(!dataStorage.empty())
-                        std::memcpy(dataOutput.data(), dataStorage.data(), dataStorage.size());
+                        operandSeed + seedBatch);
+                    dataOutput.copyLogicalElementsFrom(generated.data);
                     auto canonicalScales
                         = generated.scales.copyWithZeroPadding(paddedScaleShape);
                     canonicalScales.copyLogicalElementsToEncodedStorage(
@@ -1890,9 +1928,10 @@ namespace TensileLite
                             throw std::logic_error(
                                 "TensileLite MX scale layout size changed between batches.");
                         }
-                        std::memcpy(gpuScaleStorage.data() + b * gpuScaleBytesPerBatch,
-                                    physicalScale.data(),
-                                    physicalScale.size());
+                        if(!physicalScale.empty())
+                            std::memcpy(gpuScaleStorage.data() + b * gpuScaleBytesPerBatch,
+                                        physicalScale.data(),
+                                        physicalScale.size());
                     }
                 }
 
