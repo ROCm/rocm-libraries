@@ -186,8 +186,7 @@ void testSelectedBlockAccumulatorFamilies() {
     const std::vector<float> reducedB(reductions * columns, 0.1f);
     for (const ScalarType accumulatorType : {ScalarType::Float16, ScalarType::BFloat16}) {
         Tensor output = makeOutput(rows, columns, untouchedValue);
-        GemmTestCase problem =
-            makeProblem(reducedA, reducedB, output, rows, reductions, columns);
+        GemmTestCase problem = makeProblem(reducedA, reducedB, output, rows, reductions, columns);
         problem.accumulatorType = accumulatorType;
         problem.outputSelection = selection;
 
