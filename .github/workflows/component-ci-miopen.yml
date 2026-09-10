@@ -157,7 +157,7 @@ jobs:
           apt-get update && apt-get install -y libdrm-dev
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build rocjitsu-build --target rocjitsu_shared -j$(nproc)
+          cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
 
       - name: Configure build
         run: |
@@ -206,7 +206,7 @@ jobs:
       - name: Run miopen_gtest_check (rocjitsu)
         if: matrix.job_id == 'hip-package-build'
         run: |
-          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
-          LD_PRELOAD=$(pwd)/rocjitsu-build/librocjitsu.so \
-            ./build/bin/miopen_gtest --gtest_list_tests > test_list
+          rocjitsu-build/tools/rocjitsu/rocjitsu \
+            --config rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
+            -- ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list
