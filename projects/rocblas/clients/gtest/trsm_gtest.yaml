@@ -1337,6 +1337,7 @@ Tests:
   alpha_beta: *complex_alpha_range
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
+  user_allocated_workspace: [0, 1000000]
   graph_test: true
 
 - name: trsm_repeatability_check
