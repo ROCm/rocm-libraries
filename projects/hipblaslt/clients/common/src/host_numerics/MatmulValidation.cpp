@@ -13,7 +13,18 @@
 
 namespace hipblaslt::host_numerics
 {
-    using namespace roc::host_numerics;
+    using roc::host_numerics::ComparisonOptions;
+    using roc::host_numerics::ComparisonReport;
+    using roc::host_numerics::ComparisonTolerance;
+    using roc::host_numerics::IndexOrder;
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::OutputSelection;
+    using roc::host_numerics::ScalarType;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+    using roc::host_numerics::allCloseComparisonOptions;
+    using roc::host_numerics::compare;
+    using roc::host_numerics::findAllCloseTolerance;
 
     namespace
     {

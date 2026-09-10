@@ -156,7 +156,8 @@ namespace TensileLite::Client
     inline roc::host_numerics::ComparisonOptions
         validationComparisonOptions(rocisa::DataType type, double threshold)
     {
-        using namespace roc::host_numerics;
+        using roc::host_numerics::ComparisonOptions;
+        using roc::host_numerics::ScalarType;
 
         const ScalarType scalarType = toHostNumericsScalarType(type);
         const double defaultTolerance = [&] {

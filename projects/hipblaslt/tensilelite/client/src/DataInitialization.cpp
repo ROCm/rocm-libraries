@@ -162,7 +162,10 @@ namespace TensileLite
                                                        roc::host_numerics::Shape shape,
                                                        const void*                 source)
         {
-            using namespace roc::host_numerics;
+            using roc::host_numerics::Layout;
+            using roc::host_numerics::ScalarType;
+            using roc::host_numerics::Tensor;
+            using roc::host_numerics::storageBytesForLayout;
 
             const ScalarType type   = swizzleScalarType(dataType, kind);
             Layout           layout = Layout::contiguousLastDimensionFastest(shape);
@@ -1651,7 +1654,6 @@ namespace TensileLite
             }
         }
 
-        using namespace HostNumerics::detail;
         using roc::host_numerics::amd_gpu_layout::MxScaleStorageLayout;
 
         static bool isConstantScaleInitMode(InitMode mode)
