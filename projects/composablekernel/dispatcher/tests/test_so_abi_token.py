@@ -80,7 +80,7 @@ _RUN_GEMM = (
     "int64_t stride_BQ, int64_t stride_C, int64_t QK_A, int64_t QK_B, "
     "int k_batch, float* time_ms)"
 )
-_COMMON_EXPORTS = (
+_EXPORTS_TEMPLATE = (
     "const char* dispatcher_get_kernel_name()",
     "int dispatcher_get_kernel_count()",
     "int dispatcher_get_pad_n()",
@@ -90,9 +90,19 @@ _COMMON_EXPORTS = (
     _RUN_GEMM,
     "void dispatcher_cleanup()",
 )
+# One concrete tuple per operator, deliberately NOT a shared alias. The two
+# operators export the same ABI today, so the tuples are equal and both tokens
+# are the same value; that is correct, and the .so name keeps the caches apart
+# anyway via cfg.name. But while they shared ONE object, editing that object to
+# change one operator's ABI moved BOTH tokens and still passed every test here:
+# the other operator's cache was invalidated for nothing, and the diff did not
+# say which operator changed. Diverging one operator is now an edit to its own
+# entry rather than a fork of a shared constant.
 FROZEN_EXPORTS = {
-    "rowcolquant": _COMMON_EXPORTS,
-    "tensorquant": _COMMON_EXPORTS,
+    # (*x,) and not tuple(x): tuple() on a tuple returns the same object back,
+    # which would leave the two entries aliased exactly as before.
+    "rowcolquant": (*_EXPORTS_TEMPLATE,),
+    "tensorquant": (*_EXPORTS_TEMPLATE,),
 }
 
 
