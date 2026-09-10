@@ -229,6 +229,21 @@ struct UniversalGemmKernel
     };
     static constexpr bool PersistentKernel = has_persistent_kernel::value;
 
+    // Not every pipeline exposes LargeTensors; when absent the default 32-bit path is used.
+    struct has_large_tensors
+    {
+        template <typename T>
+        using has_large_tensors_type = decltype(T::LargeTensors);
+
+        static constexpr bool value = []() {
+            if constexpr(is_detected<has_large_tensors_type, GemmPipeline>{})
+                return GemmPipeline::LargeTensors;
+            else
+                return false;
+        }();
+    };
+    static constexpr bool LargeTensors = has_large_tensors::value;
+
     static constexpr bool ClusterLaunch =
         (TilePartitioner::BlockGemmShape::kclusterM * TilePartitioner::BlockGemmShape::kclusterN *
              TilePartitioner::BlockGemmShape::kclusterK >
@@ -447,6 +462,45 @@ struct UniversalGemmKernel
                 return false;
         }();
     };
+
+    // Large single-dimension support (a byte extent exceeding the 2GB buffer-addressing limit)
+    // is routed through 64-bit global load/store instead of buffer addressing. Two B layouts are
+    // excluded: PermuteB addresses B through a merged K0/K1 transform chain, and Preshuffle uses
+    // a flat (kFlatN, kFlatK) descriptor whose tile extents do not match the NPerBlock/KPerBlock
+    // pad guards below, so neither can be masked correctly on the unmasked global path.
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorGlobalLoadSupported()
+    {
+        return !GemmPipeline::BlockGemmShape::PermuteB && !GemmPipeline::Preshuffle;
+    }
+
+    // Whether the compile-time LargeTensors opt-in is active and the configuration is one the
+    // global load/store path supports.
+    CK_TILE_HOST_DEVICE static constexpr bool UseLargeTensorGlobalLoad()
+    {
+        return LargeTensors && IsLargeTensorGlobalLoadSupported();
+    }
+
+    // Pad/guard sequence for a 2D block tile. The leading (strided) dimension carries the
+    // 64-bit global-path OOB guard (that path has no hardware bounds check); the contiguous
+    // dimension carries its tile pad, plus the guard when it is the contraction (K) dimension
+    // on the global path -- the prefetch-past-end case.
+    template <bool GlobalLoad,
+              bool LeadingIsDim0,
+              bool PadContiguous,
+              bool ContiguousIsContractionK>
+    CK_TILE_DEVICE static constexpr auto MakeBlockPadSequence()
+    {
+        constexpr bool leading_pad    = GlobalLoad;
+        constexpr bool contiguous_pad = (ContiguousIsContractionK && GlobalLoad) || PadContiguous;
+        if constexpr(LeadingIsDim0)
+        {
+            return sequence<leading_pad, contiguous_pad>{};
+        }
+        else
+        {
+            return sequence<contiguous_pad, leading_pad>{};
+        }
+    }
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
@@ -686,6 +740,65 @@ struct UniversalGemmKernel
             }
         }
 
+        // A tensor whose single-dimension byte extent reaches the 2GB buffer-addressing limit
+        // overflows the 32-bit offset arithmetic. Only the 64-bit global load/store path can
+        // address it, so without that path the argument must be rejected rather than silently
+        // producing wrong results.
+        if constexpr(!UseLargeTensorGlobalLoad())
+        {
+            auto is_large_tensor = [](auto layout,
+                                      index_t rows,
+                                      index_t cols,
+                                      index_t stride,
+                                      auto data_type) {
+                constexpr size_t SizeLimit = (size_t{1} << 31);
+                constexpr size_t PackedSize =
+                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
+
+                const size_t n =
+                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
+                        ? static_cast<size_t>(rows)
+                        : static_cast<size_t>(cols);
+                return n * static_cast<size_t>(stride) * sizeof(data_type) / PackedSize >=
+                       SizeLimit;
+            };
+
+            const bool any_large_tensor = [&]() {
+                bool r = false;
+
+                static_for<0, NumATensor, 1>{}([&](auto i) {
+                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
+                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
+                    r                = r || is_large_tensor(
+                                 AiLayout{}, kargs.M, kargs.K, kargs.stride_As[i], AiDataType{});
+                });
+                static_for<0, NumBTensor, 1>{}([&](auto i) {
+                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
+                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
+                    r                = r || is_large_tensor(
+                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
+                });
+                static_for<0, NumDTensor, 1>{}([&](auto i) {
+                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                    r                = r || is_large_tensor(
+                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+                });
+                r = r || is_large_tensor(CLayout{}, kargs.M, kargs.N, kargs.stride_E, EDataType{});
+
+                return r;
+            }();
+
+            if(any_large_tensor)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Can't support large tensors without the LargeTensors trait!");
+                }
+                return false;
+            }
+        }
+
         return AsTensorIsValid && BsTensorIsValid && DTensorIsValid;
     }
 
@@ -826,12 +939,18 @@ struct UniversalGemmKernel
                       const AsTensorDesc& as_desc,
                       const index_t i_m)
     {
+        // Route A through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kAGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor views
         const auto& as_tensor_view = generate_tuple(
             [&](auto i) {
                 using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<const AiDataType*>(as_ptr[i]), as_desc[i]);
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::coherence_default,
+                                        kAGlobalLoad>(static_cast<const AiDataType*>(as_ptr[i]),
+                                                      as_desc[i]);
             },
             number<NumATensor>{});
 
@@ -841,17 +960,19 @@ struct UniversalGemmKernel
                 using AiLayout = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
                 if constexpr(std::is_same_v<AiLayout, tensor_layout::gemm::RowMajor>)
                 {
-                    return pad_tensor_view(as_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                      number<TilePartitioner::KPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadK>{});
+                    return pad_tensor_view(
+                        as_tensor_view[i],
+                        make_tuple(number<TilePartitioner::MPerBlock>{},
+                                   number<TilePartitioner::KPerBlock>{}),
+                        MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadK, true>());
                 }
                 else
                 {
-                    return pad_tensor_view(as_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                      number<TilePartitioner::MPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadM>{});
+                    return pad_tensor_view(
+                        as_tensor_view[i],
+                        make_tuple(number<TilePartitioner::KPerBlock>{},
+                                   number<TilePartitioner::MPerBlock>{}),
+                        MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadM, false>());
                 }
             },
             number<NumATensor>{});
@@ -903,12 +1024,18 @@ struct UniversalGemmKernel
                       const BsTensorDesc& bs_desc,
                       const index_t i_n)
     {
+        // Route B through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kBGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor views
         const auto& bs_tensor_view = generate_tuple(
             [&](auto i) {
                 using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<const BiDataType*>(bs_ptr[i]), bs_desc[i]);
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::coherence_default,
+                                        kBGlobalLoad>(static_cast<const BiDataType*>(bs_ptr[i]),
+                                                      bs_desc[i]);
             },
             number<NumBTensor>{});
 
@@ -918,17 +1045,21 @@ struct UniversalGemmKernel
                 using BiLayout = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
                 if constexpr(std::is_same_v<BiLayout, tensor_layout::gemm::ColumnMajor>)
                 {
-                    return pad_tensor_view(bs_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::NPerBlock>{},
-                                                      number<TilePartitioner::KPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadK>{});
+                    // ColumnMajor B is (N, K), so K is dim1; on the unmasked 64-bit global path
+                    // it must also carry the pad guard or the reduction-loop tail read faults.
+                    return pad_tensor_view(
+                        bs_tensor_view[i],
+                        make_tuple(number<TilePartitioner::NPerBlock>{},
+                                   number<TilePartitioner::KPerBlock>{}),
+                        MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadK, true>());
                 }
                 else
                 {
-                    return pad_tensor_view(bs_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                      number<TilePartitioner::NPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadN>{});
+                    return pad_tensor_view(
+                        bs_tensor_view[i],
+                        make_tuple(number<TilePartitioner::KPerBlock>{},
+                                   number<TilePartitioner::NPerBlock>{}),
+                        MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadN, false>());
                 }
             },
             number<NumBTensor>{});
@@ -992,12 +1123,18 @@ struct UniversalGemmKernel
                                                  const index_t i_m,
                                                  const index_t i_n)
     {
+        // Route Ds through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kDGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
                 using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<const DDataType_*>(ds_ptr[i]), ds_desc[i]);
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::coherence_default,
+                                        kDGlobalLoad>(static_cast<const DDataType_*>(ds_ptr[i]),
+                                                      ds_desc[i]);
             },
             number<NumDTensor>{});
 
@@ -1007,17 +1144,19 @@ struct UniversalGemmKernel
                 using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
                 if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
                 {
-                    return pad_tensor_view(ds_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                      number<TilePartitioner::NPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadN>{});
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::MPerBlock>{},
+                                   number<TilePartitioner::NPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadN, false>());
                 }
                 else
                 {
-                    return pad_tensor_view(ds_tensor_view[i],
-                                           make_tuple(number<TilePartitioner::NPerBlock>{},
-                                                      number<TilePartitioner::MPerBlock>{}),
-                                           sequence<false, GemmPipeline::kPadM>{});
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::NPerBlock>{},
+                                   number<TilePartitioner::MPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadM, false>());
                 }
             },
             number<NumDTensor>{});
@@ -1069,30 +1208,40 @@ struct UniversalGemmKernel
         const index_t i_n,
         const ETensorDesc& e_desc) // Argument order differs from A,B,D to disambiguate overloads
     {
+        // Route C through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kCGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for E/C tensor
-        const auto& e_tensor_view =
-            make_tensor_view<address_space_enum::global, DstInMemOp>(e_ptr, e_desc);
+        const auto& e_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     DstInMemOp,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     kCGlobalLoad>(e_ptr, e_desc);
 
         // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
         // Add padding for not contiguous dim due to the lack of OOB check
         constexpr bool pad_not_contiguous_dim =
             std::is_same_v<EDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
 
+        // The 64-bit global path is likewise unmasked, so it needs the same guard.
+        constexpr bool pad_leading_dim = pad_not_contiguous_dim || kCGlobalLoad;
+
         // Step 2: Create padded view
         const auto& e_pad_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
-                return pad_tensor_view(e_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<pad_not_contiguous_dim, GemmPipeline::kPadN>{});
+                return pad_tensor_view(
+                    e_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<pad_leading_dim, true, GemmPipeline::kPadN, false>());
             }
             else
             {
-                return pad_tensor_view(e_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<GemmPipeline::kPadM, pad_not_contiguous_dim>{});
+                return pad_tensor_view(
+                    e_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<pad_leading_dim, false, GemmPipeline::kPadM, false>());
             }
         }();
 
