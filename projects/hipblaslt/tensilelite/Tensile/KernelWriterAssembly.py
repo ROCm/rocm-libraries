@@ -8158,6 +8158,45 @@ class KernelWriterAssembly(KernelWriter):
                             comment="restart shard loop"))
     return module
 
+  def a2aWaitFlag(self, kernel):
+    """Spin until the next shard's segment has landed in gathered.
+
+    Polls flag[b][A2AShardIdx]; must be emitted before A2AShardIdx advances.
+    """
+    from .Components.Signature import (FUSED_A2A_MODE1_FLAG_OFFSET,
+                                       fusedA2AKernArgLayout)
+    module = Module("a2aWaitFlag")
+    layout = fusedA2AKernArgLayout()
+    spin   = Label("A2AWaitFlag", "")
+
+    vOff = self.vgprPool.checkOut(1, tag="a2aWaitFlag_offset")
+    vVal = self.vgprPool.checkOut(1, tag="a2aWaitFlag_value")
+    with self.allocTmpSgpr(1, tag="a2aWaitFlag_slot") as tmpSgprInfo:
+      s = tmpSgprInfo.idx
+      module.add(self.argLoader.loadKernArg(s, "KernArgAddress",
+          sgprOffset=hex(self.states.fusedA2AKernArgBase + layout["FusedW"]), dword=1))
+      module.add(SWaitCnt(kmcnt=0, comment="wait FusedW"))
+      module.add(SSubU32(dst=sgpr(s), src0=sgpr(s), src1=1, comment="W - 1"))
+      module.add(SMulI32(dst=sgpr(s), src0=sgpr("WorkGroup1"), src1=sgpr(s), comment="b * (W-1)"))
+      module.add(SAddU32(dst=sgpr(s), src0=sgpr(s), src1=sgpr("A2AShardIdx"),
+                         comment="flag slot = b*(W-1) + i"))
+      module.add(SLShiftLeftB32(dst=sgpr(s), shiftHex=2, src=sgpr(s),
+                                comment="flag slot byte offset"))
+      module.add(VMovB32(dst=vgpr(vOff), src=sgpr(s), comment="poll offset"))
+
+    module.add(spin)
+    module.add(GlobalLoadB32(dst=vgpr(vVal), vaddr=vgpr(vOff),
+        saddr=sgpr("A2ACounterPtr", 2),
+        modifier=GLOBALModifiers(offset=FUSED_A2A_MODE1_FLAG_OFFSET, glc=True, slc=True,
+                                 scope=CacheScope.SCOPE_NONE, isStore=False),
+        comment="poll flag[b][i] at system scope"))
+    module.add(SWaitCnt(vlcnt=0, comment="wait the flag poll"))
+    module.add(VCmpLtU32(VCC(), vgpr(vVal), 1, comment="flag < 1?"))
+    module.add(SCBranchVCCNZ(labelName=spin.getLabelName(), comment="segment short -> poll again"))
+    self.vgprPool.checkIn(vVal)
+    self.vgprPool.checkIn(vOff)
+    return module
+
   def a2aTransitionPhase(self, kernel, tPA, tPB):
     module = Module("a2aTransitionPhase")
     if kernel["ProblemType"]["FusedA2AMode"] != 1:
@@ -8167,6 +8206,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCmpEQI32(src0=sgpr("A2AShardCounter"), src1=1, comment="last shard round"))
     module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
                             comment="skip the next round's setup"))
+    module.add(self.a2aWaitFlag(kernel))
     module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
                        comment="next shard"))
     for tP in (tPA, tPB):

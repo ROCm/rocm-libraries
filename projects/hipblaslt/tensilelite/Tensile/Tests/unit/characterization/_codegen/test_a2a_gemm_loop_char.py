@@ -578,6 +578,87 @@ class TestA2AGemmTransitionPhase:
         )
 
 
+class TestA2AGemmFlagSpin:
+    """The consumer's wait on the local arrival flag, one per shard boundary."""
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _body(self):
+        src = self._src()
+        return src[src.index("A2A_TRANSITION begin"):src.index("A2A_TRANSITION end")]
+
+    def _poll(self, body):
+        import re
+
+        m = re.search(r"^global_load_dword [^\n]*$", body, re.M)
+        assert m, "no flag poll in the transition phase"
+        return m.group(0)
+
+    def test_poll_bypasses_the_cache(self):
+        line = self._poll(self._body())
+        assert " sc0" in line and " sc1" in line, (
+            "the poll leaves the flag cacheable in L2"
+        )
+
+    def test_poll_spins_on_the_flag(self):
+        import re
+
+        assert re.search(
+            r"^(label_A2AWaitFlag\w*):\n"
+            r"global_load_dword[^\n]*\n"
+            r"s_waitcnt[^\n]*\n"
+            r"v_cmp_lt_u32 vcc, v\d+, 1[^\n]*\n"
+            r"s_cbranch_vccnz \1",
+            self._body(),
+            re.M,
+        ), "the flag is read once instead of polled until the segment lands"
+
+    def test_poll_reads_this_device_flag_block(self):
+        from Tensile.Components.Signature import FUSED_A2A_MODE1_FLAG_OFFSET
+
+        line = self._poll(self._body())
+        assert "s[sgprA2ACounterPtr:sgprA2ACounterPtr+1]" in line, (
+            "the poll does not read this device's counter block"
+        )
+        assert "offset:%d" % FUSED_A2A_MODE1_FLAG_OFFSET in line, (
+            "the poll misses the mode-1 flag block offset"
+        )
+
+    def test_flag_slot_is_indexed_by_the_queue_not_the_rank(self):
+        import re
+
+        body = self._body()
+        m = re.search(
+            r"s_sub_u32 s(\d+), s\d+, 1[^\n]*\n"
+            r"s_mul_i32 s\1, s\[sgprWorkGroup1\], s\1[^\n]*\n"
+            r"s_add_u32 s\1, s\1, s\[sgprA2AShardIdx\][^\n]*\n"
+            r"s_lshl_b32 s\1, s\1, 2",
+            body,
+        )
+        assert m, "the polled slot is not b*(W-1) + queue index"
+        assert m.start() < body.index("s_add_u32 s[sgprA2AShardIdx]"), (
+            "the slot is taken after the shard index advances, naming the next "
+            "round's queue"
+        )
+
+    def test_poll_precedes_the_gathered_rebind(self):
+        body = self._body()
+        assert body.index("label_A2AWaitFlag") < body.index("sgprSrdB"), (
+            "the next round's B addresses are set up before the segment is known "
+            "to have landed"
+        )
+
+    def test_poll_is_branched_over_on_the_final_round(self):
+        body = self._body()
+        assert body.index("s_cbranch_scc1 label_A2ATransitionEnd") \
+            < body.index("label_A2AWaitFlag"), (
+            "the last round waits for a segment nobody sends"
+        )
+
+
 @pytest.mark.parametrize("config", [_CONFIG, _CONFIG_ODD_TRIP])
 class TestA2AGemmPerRoundState:
     """State the shard loop body re-establishes on every round."""
