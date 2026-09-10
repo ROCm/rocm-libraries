@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -157,9 +159,12 @@ int main(int argc, char** argv) noexcept
             .default_value(false)
             .implicit_value(true)
             .help("Observe live engine support and write .support.json sidecars. "
-                  "Requires --test-article (mode B: all engines, or mode C with "
-                  "--test-engine). Implies --allow-bundles, since bundles are what "
-                  "carry the claims. Idempotent: no support change = zero git diff.");
+                  "Requires --test-article and --golden-data-dir (mode B: all "
+                  "engines, or mode C with --test-engine). Implies --allow-bundles, "
+                  "since bundles are what carry the claims. Idempotent: no support "
+                  "change = zero git diff. Run one at a time: concurrent "
+                  "--write-support-claims runs against the same bundle tree race "
+                  "on the sidecars and the last writer wins.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -321,6 +326,19 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
+           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
+        {
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
+            return 1;
+        }
+
         if(opts.writeSupportClaims && opts.enforceSupportClaims)
         {
             std::cerr << "--write-support-claims and --enforce-support-claims are "
@@ -446,25 +464,22 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
-            const auto writeSummary = hipdnn_integration_tests::bundle::writeObservedSupportClaims(
-                hipdnn_integration_tests::bundle::SupportObservationLog::get().all());
-            std::cerr << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
-                      << "  written: " << writeSummary.filesWritten
-                      << "  unchanged: " << writeSummary.filesUnchanged
-                      << "  skipped: " << writeSummary.filesSkipped
-                      << "  errors: " << writeSummary.errors.size() << "\n";
-            for(const auto& error : writeSummary.errors)
-            {
-                std::cerr << "  ERROR: " << error << "\n";
-            }
-            if(!writeSummary.errors.empty())
+            auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+
+            const auto authoring = hipdnn_integration_tests::bundle::authorSupportClaims(
+                observationLog.all(),
+                observationLog.graphsObserved(),
+                observationLog.graphsUnobserved(),
+                hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound,
+                std::cerr);
+
+            if(authoring.shouldFail)
             {
                 exitCode = 1;
             }
         }
 
-        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()
-           && hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
+        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {

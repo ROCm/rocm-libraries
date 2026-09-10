@@ -54,18 +54,20 @@
 
 namespace TensileLite
 {
-    // Elements in one GSU (MBSK) reduction region. Usage there is
-    // synchronizerSizePerWG * numTiles * batch, which runs into the tens of
-    // thousands, so this keeps the size it has always had and a solution whose
-    // usage exceeds it is not selected (SynchronizerSizeCheck, both in
-    // ContractionSolution and in the predicate of the same name).
+    // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
+    // synchronizerSizePerWG * numTiles * batch, tens of thousands on the shapes
+    // MBSK is selected for. A grouped GEMM is handed the slot at its problem
+    // index and bounded by it; a non-grouped GEMM is handed the base and bounded
+    // by the whole buffer (this * SynchronizerGroupedSlots). A solution over its
+    // bound is not selected (SynchronizerSizeCheck, both in ContractionSolution
+    // and in the predicate of the same name).
     //
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlotElements.
     constexpr uint32_t GsuSynchronizerElements = 409600;
 
-    // Problems a grouped GEMM can be given private regions for. A wider group
-    // cannot be isolated per problem, so no solution that uses these flags may
-    // be selected for it.
+    // Slots in the GSU buffer, and so the problems a grouped GEMM can be given
+    // private regions for. A wider group cannot be isolated per problem, so no
+    // solution that uses these flags may be selected for it.
     //
     // Must stay in sync with _rocblaslt_handle::c_syncGsuSlots.
     constexpr uint32_t SynchronizerGroupedSlots = 16;

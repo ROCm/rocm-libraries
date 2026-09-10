@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <ostream>
 #include <set>
 #include <string>
 #include <utility>
@@ -20,287 +21,433 @@ namespace hipdnn_integration_tests::bundle
 namespace
 {
 
-void overlaySingleGraphCell(SupportClaims& existing,
-                            const std::string& engineName,
-                            const std::string& arch,
-                            const std::string& platform,
-                            bool engineIsSupported)
+using EngineName = ObservedGraphSupport::EngineName;
+using CaseId = ObservedGraphSupport::CaseId;
+
+// The parsers reject any version but 1, so a claim set that survived a read is
+// version 1 and a claim set we invented starts there.
+constexpr int K_SUPPORT_CLAIMS_VERSION = K_SUPPORT_CLAIMS_SCHEMA_VERSION;
+
+// "" is a legal JSON key, so an observation with an empty engine, arch, or
+// platform serializes without complaint and lands an entry in a checked-in
+// sidecar that no enforcement run can ever match or clear. An empty arch is the
+// realistic one: it is what a failed device probe leaves behind in the policy.
+std::string observationDefect(const ObservedGraphSupport& observation)
 {
-    if(engineIsSupported)
+    if(observation.claimLocator.sidecarPath.empty())
     {
-        existing.claims[engineName][arch].insert(platform);
+        return "empty sidecar path";
     }
-    else
+    if(observation.engineName.empty())
     {
-        auto engineIt = existing.claims.find(engineName);
-        if(engineIt == existing.claims.end())
+        return "empty engine name";
+    }
+    if(observation.arch.empty())
+    {
+        return "empty arch";
+    }
+    if(observation.platform.empty())
+    {
+        return "empty platform";
+    }
+    return {};
+}
+
+// Returns the reason this whole sidecar must be left alone, or "" to proceed.
+// One bad observation condemns the file rather than itself: the write is an
+// overlay onto checked-in claims, so applying the good half of a set we do not
+// trust can erase a claim that is still true.
+std::string sidecarDefect(const std::vector<ObservedGraphSupport>& observations)
+{
+    const bool isSweep = observations.front().claimLocator.isSweep();
+
+    for(const auto& observation : observations)
+    {
+        // Single-graph and sweep sidecars have incompatible shapes, so one of
+        // the two readings of this file is wrong. Which one is not knowable
+        // here, and writing under either would destroy the other's structure.
+        if(observation.claimLocator.isSweep() != isSweep)
+        {
+            return "refusing to write a sidecar observed as both single-graph and sweep: "
+                   + observation.claimLocator.sidecarPath.string();
+        }
+
+        const std::string defect = observationDefect(observation);
+        if(!defect.empty())
+        {
+            return "refusing to write from a malformed observation (" + defect + "): '"
+                   + observation.claimLocator.diagnosticPath + "'";
+        }
+    }
+
+    return {};
+}
+
+// Both sidecar shapes are the same claim set underneath: a single-graph bundle
+// is the one-case sweep. Flattening to this on load, and only re-imposing the
+// on-disk shape on serialize, keeps the whole middle of the writer shape-agnostic
+// -- one overlay, not one per format (RFC §9.2: flatten → overlay → regroup).
+class ClaimSet
+{
+public:
+    static ClaimSet load(const std::filesystem::path& sidecarPath, bool isSweep)
+    {
+        ClaimSet result;
+        if(!std::filesystem::exists(sidecarPath))
+        {
+            return result;
+        }
+
+        if(isSweep)
+        {
+            for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecarPath).claims)
+            {
+                for(const auto& group : groups)
+                {
+                    if(group.support.empty())
+                    {
+                        continue;
+                    }
+                    for(const auto& caseId : group.cases)
+                    {
+                        result._cells[engine][caseId] = group.support;
+                    }
+                }
+            }
+        }
+        else
+        {
+            for(const auto& [engine, support] : loadSupportClaimsFromPath(sidecarPath).claims)
+            {
+                if(!support.empty())
+                {
+                    result._cells[engine][CaseId{}] = support;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    void apply(const ObservedGraphSupport& observation)
+    {
+        const CaseId& caseId = observation.claimLocator.caseId;
+
+        if(observation.engineIsSupported)
+        {
+            _cells[observation.engineName][caseId][observation.arch].insert(observation.platform);
+            return;
+        }
+
+        auto engineIt = _cells.find(observation.engineName);
+        if(engineIt == _cells.end())
         {
             return;
         }
-        auto archIt = engineIt->second.find(arch);
-        if(archIt == engineIt->second.end())
+        auto caseIt = engineIt->second.find(caseId);
+        if(caseIt == engineIt->second.end())
         {
             return;
         }
-        archIt->second.erase(platform);
+        auto archIt = caseIt->second.find(observation.arch);
+        if(archIt == caseIt->second.end())
+        {
+            return;
+        }
+
+        archIt->second.erase(observation.platform);
         if(archIt->second.empty())
         {
-            engineIt->second.erase(archIt);
+            caseIt->second.erase(archIt);
+        }
+        if(caseIt->second.empty())
+        {
+            engineIt->second.erase(caseIt);
         }
         if(engineIt->second.empty())
         {
-            existing.claims.erase(engineIt);
+            _cells.erase(engineIt);
         }
     }
-}
 
-// Per-case support: engine -> caseId -> ArchPlatformMap
-using FlatSweepMap = std::map<std::string, std::map<std::string, ArchPlatformMap>>;
-
-FlatSweepMap flattenSweepClaims(const SweepSupportClaims& existing)
-{
-    FlatSweepMap flat;
-    for(const auto& [engine, groups] : existing.claims)
+    std::string serialize(bool isSweep) const
     {
-        for(const auto& group : groups)
+        if(!isSweep)
         {
-            for(const auto& caseId : group.cases)
+            SupportClaims out;
+            out.version = K_SUPPORT_CLAIMS_VERSION;
+            for(const auto& [engine, byCase] : _cells)
             {
-                flat[engine][caseId] = group.support;
+                const auto caseIt = byCase.find(CaseId{});
+                if(caseIt != byCase.end())
+                {
+                    out.claims[engine] = caseIt->second;
+                }
+            }
+            return dumpCanonical(toJson(out));
+        }
+
+        SweepSupportClaims out;
+        out.version = K_SUPPORT_CLAIMS_VERSION;
+        for(const auto& [engine, byCase] : _cells)
+        {
+            std::map<ArchPlatformMap, std::vector<CaseId>> casesByFootprint;
+            for(const auto& [caseId, support] : byCase)
+            {
+                casesByFootprint[support].push_back(caseId);
+            }
+
+            std::vector<SweepClaimGroup> groups;
+            groups.reserve(casesByFootprint.size());
+            for(auto& [support, cases] : casesByFootprint)
+            {
+                groups.push_back({std::move(cases), support});
+            }
+
+            std::sort(groups.begin(),
+                      groups.end(),
+                      [](const SweepClaimGroup& a, const SweepClaimGroup& b) {
+                          return a.cases.front() < b.cases.front();
+                      });
+
+            if(!groups.empty())
+            {
+                out.claims[engine] = std::move(groups);
             }
         }
-    }
-    return flat;
-}
 
-SweepSupportClaims regroupSweepClaims(const FlatSweepMap& flat, int version)
-{
-    SweepSupportClaims result;
-    result.version = version;
-
-    for(const auto& [engine, caseMap] : flat)
-    {
-        // Bucket cases by identical support footprint. ArchPlatformMap is a
-        // std::map of std::sets, so it is directly usable as a map key — two
-        // cases land in the same bucket exactly when their support is equal.
-        std::map<ArchPlatformMap, std::vector<std::string>> casesByFootprint;
-
-        for(const auto& [caseId, supportMap] : caseMap)
-        {
-            if(supportMap.empty())
-            {
-                continue;
-            }
-            casesByFootprint[supportMap].push_back(caseId);
-        }
-
-        std::vector<SweepClaimGroup> groups;
-        for(auto& [supportMap, cases] : casesByFootprint)
-        {
-            std::sort(cases.begin(), cases.end());
-            groups.push_back({std::move(cases), supportMap});
-        }
-
-        // Order groups by their first case id.
-        std::sort(
-            groups.begin(), groups.end(), [](const SweepClaimGroup& a, const SweepClaimGroup& b) {
-                return a.cases.front() < b.cases.front();
-            });
-
-        if(!groups.empty())
-        {
-            result.claims[engine] = std::move(groups);
-        }
+        return dumpCanonical(toJson(out));
     }
 
-    return result;
+    bool empty() const
+    {
+        return _cells.empty();
+    }
+
+private:
+    std::map<EngineName, std::map<CaseId, ArchPlatformMap>> _cells;
+};
+
+enum class WriteOutcome
+{
+    WRITTEN,
+    UNCHANGED,
+    OPEN_FAILED,
+    WRITE_FAILED,
+};
+
+std::filesystem::path makeTempPath(const std::filesystem::path& filePath)
+{
+    auto tempPath = filePath;
+    tempPath += ".tmp";
+    return tempPath;
 }
 
-bool writeIfChanged(const std::filesystem::path& filePath,
-                    const std::string& newContent,
-                    WriteSummary& summary)
+// error_code overloads throughout: an unreadable path must skip one sidecar,
+// not unwind past the caller's summary and abandon every target after it.
+WriteOutcome writeIfChanged(const std::filesystem::path& filePath, const std::string& newContent)
 {
-    if(std::filesystem::exists(filePath))
+    std::error_code ec;
+
+    if(std::filesystem::exists(filePath, ec))
     {
-        std::ifstream existingFile(filePath);
+        std::ifstream existingFile(filePath, std::ios::binary);
         if(existingFile)
         {
             const std::string existingContent((std::istreambuf_iterator<char>(existingFile)),
                                               std::istreambuf_iterator<char>());
             if(existingContent == newContent)
             {
-                ++summary.filesUnchanged;
-                return true;
+                return WriteOutcome::UNCHANGED;
             }
         }
     }
 
-    std::ofstream outputFile(filePath);
-    if(!outputFile)
+    const auto tempPath = makeTempPath(filePath);
+
     {
-        summary.errors.push_back("could not open for writing: " + filePath.string());
-        return false;
+        std::ofstream outputFile(tempPath, std::ios::binary);
+        if(!outputFile)
+        {
+            return WriteOutcome::OPEN_FAILED;
+        }
+        outputFile << newContent;
+        outputFile.close();
+        if(!outputFile)
+        {
+            std::filesystem::remove(tempPath, ec);
+            return WriteOutcome::WRITE_FAILED;
+        }
     }
-    outputFile << newContent;
-    if(!outputFile)
+
+    std::filesystem::rename(tempPath, filePath, ec);
+    if(ec)
     {
-        summary.errors.push_back("write failed: " + filePath.string());
-        return false;
+        std::filesystem::remove(tempPath, ec);
+        return WriteOutcome::WRITE_FAILED;
     }
-    ++summary.filesWritten;
-    return true;
+
+    return WriteOutcome::WRITTEN;
+}
+
+// Groups observations by the file they land in. Keyed on the normalized path so
+// that two spellings of one file ("d/x.json" and "d/./x.json") cannot become two
+// targets and write it twice, the second write overlaying claims the first had
+// already replaced.
+std::map<std::filesystem::path, std::vector<ObservedGraphSupport>>
+    groupBySidecarPath(const std::vector<ObservedGraphSupport>& observations)
+{
+    std::map<std::filesystem::path, std::vector<ObservedGraphSupport>> bySidecarPath;
+    for(const auto& observation : observations)
+    {
+        bySidecarPath[observation.claimLocator.sidecarPath.lexically_normal()].push_back(
+            observation);
+    }
+    return bySidecarPath;
 }
 
 } // namespace
 
-WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& observations)
+WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>& observations)
 {
     WriteSummary summary;
 
-    // One sidecar file's worth of work. isSweep is a property of the bundle,
-    // not of the engine queried, so every observation landing here agrees on it.
-    struct SidecarTarget
+    // A sidecar nothing observed is never a key here, which is the RFC §9.2
+    // empty-write guard: an absent observation set cannot reach the file, let
+    // alone null a claim in it. Each target is independent -- a refusal below
+    // skips one file and leaves the rest of the run to finish.
+    for(const auto& [sidecarPath, sidecarObservations] : groupBySidecarPath(observations))
     {
-        bool isSweep = false;
-        std::vector<ObservedSupportCell> observations;
-    };
-
-    std::map<std::filesystem::path, SidecarTarget> targetsBySidecarPath;
-    for(const auto& observation : observations)
-    {
-        auto& target = targetsBySidecarPath[observation.claimLocator.sidecarPath];
-        target.isSweep = observation.claimLocator.isSweep();
-        target.observations.push_back(observation);
-    }
-
-    for(const auto& [sidecarPath, target] : targetsBySidecarPath)
-    {
-        const auto& fileObservations = target.observations;
-        const bool fileExisted = std::filesystem::exists(sidecarPath);
-
-        if(target.isSweep)
+        if(const std::string defect = sidecarDefect(sidecarObservations); !defect.empty())
         {
-            SweepSupportClaims existing;
-            existing.version = 1;
-            if(fileExisted)
-            {
-                try
-                {
-                    auto loaded = loadSweepSupportClaims(sidecarPath.parent_path());
-                    if(loaded.has_value())
-                    {
-                        existing = std::move(*loaded);
-                    }
-                }
-                catch(const std::exception& e)
-                {
-                    summary.errors.push_back("refusing to overwrite unparseable sidecar: "
-                                             + sidecarPath.string() + ": " + e.what());
-                    continue;
-                }
-            }
-
-            auto flat = flattenSweepClaims(existing);
-
-            for(const auto& obs : fileObservations)
-            {
-                const auto& caseId = obs.claimLocator.caseId;
-                if(obs.engineIsSupported)
-                {
-                    flat[obs.engineName][caseId][obs.arch].insert(obs.platform);
-                }
-                else
-                {
-                    auto engineIt = flat.find(obs.engineName);
-                    if(engineIt == flat.end())
-                    {
-                        continue;
-                    }
-                    auto caseIt = engineIt->second.find(caseId);
-                    if(caseIt == engineIt->second.end())
-                    {
-                        continue;
-                    }
-                    auto archIt = caseIt->second.find(obs.arch);
-                    if(archIt == caseIt->second.end())
-                    {
-                        continue;
-                    }
-                    archIt->second.erase(obs.platform);
-                    if(archIt->second.empty())
-                    {
-                        caseIt->second.erase(archIt);
-                    }
-                    if(caseIt->second.empty())
-                    {
-                        engineIt->second.erase(caseIt);
-                    }
-                    if(engineIt->second.empty())
-                    {
-                        flat.erase(engineIt);
-                    }
-                }
-            }
-
-            const auto regrouped = regroupSweepClaims(flat, existing.version);
-
-            if(!fileExisted && regrouped.claims.empty())
-            {
-                ++summary.filesSkipped;
-                continue;
-            }
-
-            const auto jsonContent = dumpCanonical(toJson(regrouped));
-            writeIfChanged(sidecarPath, jsonContent, summary);
+            summary.errors.push_back(defect);
+            ++summary.filesSkipped;
+            continue;
         }
-        else
+
+        const bool isSweep = sidecarObservations.front().claimLocator.isSweep();
+
+        ClaimSet claims;
+        try
         {
-            SupportClaims existing;
-            existing.version = 1;
-            if(fileExisted)
-            {
-                std::ifstream existingFile(sidecarPath);
-                if(existingFile)
-                {
-                    auto json
-                        = nlohmann::json::parse(existingFile, nullptr, /*allow_exceptions=*/false);
-                    if(json.is_discarded())
-                    {
-                        summary.errors.push_back("refusing to overwrite unparseable sidecar: "
-                                                 + sidecarPath.string());
-                        continue;
-                    }
-                    try
-                    {
-                        existing = parseSupportClaimsJson(json, sidecarPath.string());
-                    }
-                    catch(const std::exception& e)
-                    {
-                        summary.errors.push_back("refusing to overwrite unparseable sidecar: "
-                                                 + sidecarPath.string() + ": " + e.what());
-                        continue;
-                    }
-                }
-            }
-
-            for(const auto& obs : fileObservations)
-            {
-                overlaySingleGraphCell(
-                    existing, obs.engineName, obs.arch, obs.platform, obs.engineIsSupported);
-            }
-
-            if(!fileExisted && existing.claims.empty())
-            {
-                ++summary.filesSkipped;
-                continue;
-            }
-
-            const auto jsonContent = dumpCanonical(toJson(existing));
-            writeIfChanged(sidecarPath, jsonContent, summary);
+            claims = ClaimSet::load(sidecarPath, isSweep);
         }
+        catch(const std::exception& e)
+        {
+            summary.errors.push_back("refusing to overwrite unparseable sidecar: "
+                                     + sidecarPath.string() + ": " + e.what());
+            ++summary.filesSkipped;
+            continue;
+        }
+
+        for(const auto& observation : sidecarObservations)
+        {
+            claims.apply(observation);
+        }
+
+        // Every engine declined and there is no file to correct: writing one
+        // would check in a sidecar that claims nothing.
+        std::error_code ec;
+        if(claims.empty() && !std::filesystem::exists(sidecarPath, ec))
+        {
+            ++summary.filesSkipped;
+            continue;
+        }
+
+        // Counted per outcome, so the number says what reached a file.
+        // All four WriteOutcome arms are listed; -Wswitch catches a future addition.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-default"
+        switch(writeIfChanged(sidecarPath, claims.serialize(isSweep)))
+        {
+        case WriteOutcome::WRITTEN:
+            summary.observationsApplied += sidecarObservations.size();
+            ++summary.filesWritten;
+            break;
+        case WriteOutcome::UNCHANGED:
+            summary.observationsApplied += sidecarObservations.size();
+            ++summary.filesUnchanged;
+            break;
+        case WriteOutcome::OPEN_FAILED:
+            summary.errors.push_back("could not open for writing: " + sidecarPath.string());
+            ++summary.filesSkipped;
+            break;
+        case WriteOutcome::WRITE_FAILED:
+            summary.errors.push_back("write failed: " + sidecarPath.string());
+            ++summary.filesSkipped;
+            break;
+        }
+#pragma GCC diagnostic pop
     }
 
     return summary;
+}
+
+AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
+                                    const std::size_t graphsObserved,
+                                    const std::size_t graphsUnobserved,
+                                    const std::size_t graphsRegistered,
+                                    std::ostream& log)
+{
+    AuthoringResult result;
+
+    const std::size_t graphsNeverReached
+        = graphsRegistered > graphsObserved + graphsUnobserved
+              ? graphsRegistered - graphsObserved - graphsUnobserved
+              : 0;
+
+    if(graphsObserved == 0 && graphsUnobserved == 0)
+    {
+        log << "\n--write-support-claims: no graphs were observed; "
+               "nothing was written.\n"
+               "Usual causes:\n"
+               "  - no engine plugins were loaded (check plugin paths)\n"
+               "  - the GPU failed to initialise\n"
+               "  - a --gtest_filter or --test-article selected no graphs\n";
+        result.shouldFail = true;
+        return result;
+    }
+
+    result.writeSummary = writeObservedSupportClaims(observations);
+
+    const auto& ws = result.writeSummary;
+
+    log << "\n==== SUPPORT CLAIM WRITE SUMMARY ====\n"
+        << "  graphs registered: " << graphsRegistered << "  observed: " << graphsObserved
+        << "  not observed: " << graphsUnobserved << "  never reached: " << graphsNeverReached
+        << "\n"
+        << "  observations: " << ws.observationsApplied << "  written: " << ws.filesWritten
+        << "  unchanged: " << ws.filesUnchanged << "  skipped: " << ws.filesSkipped
+        << "  errors: " << ws.errors.size() << "\n";
+
+    if(graphsUnobserved > 0)
+    {
+        log << "  claims for the " << graphsUnobserved
+            << " unobserved graph(s) were left as-is; see the warnings "
+               "above for which, and re-run them.\n";
+    }
+
+    if(graphsNeverReached > 0)
+    {
+        log << "  " << graphsNeverReached
+            << " graph(s) never reached the observer, so their claims are "
+               "stale.\n"
+               "  A [[test_skips]] entry, an arch or VRAM guard, or a missing "
+               "device skips\n"
+               "  a bundle in SetUp, before anything can be observed.\n";
+    }
+
+    for(const auto& error : ws.errors)
+    {
+        log << "  ERROR: " << error << "\n";
+    }
+
+    if(!ws.errors.empty() || graphsUnobserved > 0 || graphsNeverReached > 0)
+    {
+        result.shouldFail = true;
+    }
+
+    return result;
 }
 
 } // namespace hipdnn_integration_tests::bundle

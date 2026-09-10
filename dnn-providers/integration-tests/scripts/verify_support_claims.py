@@ -27,7 +27,6 @@ Exit codes
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import List
@@ -48,6 +47,9 @@ def _validate_arch_platform_map(
         _error(path, f"{context}: support must be an object", errors)
         return
     for arch, platforms in data.items():
+        if not arch:
+            _error(path, f"{context}: empty arch key", errors)
+            continue
         if not isinstance(platforms, list):
             _error(
                 path,
@@ -88,6 +90,9 @@ def validate_single_graph_schema(data: dict, path: Path, errors: List[str]) -> N
         _error(path, "claims must be an object", errors)
         return
     for engine_name, arch_map in claims.items():
+        if not engine_name:
+            _error(path, "empty engine name in claims", errors)
+            continue
         _validate_arch_platform_map(arch_map, path, f"claims.{engine_name}", errors)
 
 
@@ -107,6 +112,9 @@ def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
         _error(path, "claims must be an object", errors)
         return
     for engine_name, groups in claims.items():
+        if not engine_name:
+            _error(path, "empty engine name in claims", errors)
+            continue
         if not isinstance(groups, list):
             _error(
                 path,
@@ -132,6 +140,8 @@ def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
                             f" got {type(case_id).__name__}",
                             errors,
                         )
+                    elif not case_id:
+                        _error(path, f"{ctx}: empty case id", errors)
                     elif case_id in seen_case_ids:
                         _error(
                             path,
@@ -171,9 +181,9 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
     if not meta_path.exists():
         return
     try:
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(meta_path, f"cannot read metadata: {exc}", errors)
         return
     level = meta.get("enforcement_level")
@@ -191,9 +201,9 @@ def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None
     if not sweep_path.exists():
         return
     try:
-        with open(sweep_path) as f:
+        with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
         return
     cases = sweep.get("cases", [])
@@ -220,16 +230,12 @@ def check_sweep_case_ids(
 ) -> None:
     sweep_path = support_path.parent / "sweep.json"
     if not sweep_path.exists():
-        _error(
-            support_path,
-            "sweep support.json has no sibling sweep.json",
-            errors,
-        )
+        # check_orphaned_sweep already reports this; no duplicate error.
         return
     try:
-        with open(sweep_path) as f:
+        with open(sweep_path, encoding="utf-8") as f:
             sweep = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
         _error(sweep_path, f"cannot read sweep: {exc}", errors)
         return
     valid_ids = set()
@@ -281,6 +287,13 @@ def is_sweep_sidecar(path: Path) -> bool:
     return path.name == "support.json"
 
 
+def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
+    canonical = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    raw = support_path.read_bytes().decode("utf-8")
+    if raw != canonical:
+        _error(support_path, "not in canonical form (re-run the writer)", errors)
+
+
 def verify_all(bundle_root: Path) -> List[str]:
     errors: List[str] = []
     if not bundle_root.is_dir():
@@ -288,14 +301,18 @@ def verify_all(bundle_root: Path) -> List[str]:
 
     for support_path in sorted(bundle_root.rglob("*.support.json")):
         try:
-            with open(support_path) as f:
+            with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)
             continue
+        except UnicodeDecodeError as exc:
+            _error(support_path, f"not valid UTF-8: {exc}", errors)
+            continue
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
             continue
+        check_canonical_form(support_path, data, errors)
         validate_single_graph_schema(data, support_path, errors)
         check_orphaned_single_graph(support_path, errors)
         if _has_non_empty_claims(data):
@@ -303,14 +320,18 @@ def verify_all(bundle_root: Path) -> List[str]:
 
     for support_path in sorted(bundle_root.rglob("support.json")):
         try:
-            with open(support_path) as f:
+            with open(support_path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             _error(support_path, f"invalid JSON: {exc}", errors)
             continue
+        except UnicodeDecodeError as exc:
+            _error(support_path, f"not valid UTF-8: {exc}", errors)
+            continue
         except OSError as exc:
             _error(support_path, f"cannot read: {exc}", errors)
             continue
+        check_canonical_form(support_path, data, errors)
         validate_sweep_schema(data, support_path, errors)
         check_orphaned_sweep(support_path, errors)
         if _has_non_empty_claims(data):
@@ -320,33 +341,7 @@ def verify_all(bundle_root: Path) -> List[str]:
     return errors
 
 
-def has_staged_changes(bundle_root: Path) -> bool:
-    """Check if any files under bundle_root are staged in git."""
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--", str(bundle_root)],
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
-    except FileNotFoundError:
-        print(
-            "verify_support_claims: git not found, running full validation",
-            file=sys.stderr,
-        )
-        return True
-    except Exception as e:
-        print(
-            f"verify_support_claims: git check failed ({e}), running full validation",
-            file=sys.stderr,
-        )
-        return True
-
-
 def main() -> int:
-    if not has_staged_changes(BUNDLE_ROOT):
-        return 0
-
     errors = verify_all(BUNDLE_ROOT)
     if errors:
         print(

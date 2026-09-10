@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -16,10 +17,23 @@ struct WriteSummary
 {
     size_t filesWritten = 0;
     size_t filesUnchanged = 0; // on-disk bytes already matched — no mtime bump
-    size_t filesSkipped = 0; // net-new file would have empty claims — not created
+    size_t filesSkipped = 0; // left untouched: nothing to claim, or refused
+    size_t observationsApplied = 0;
     std::vector<std::string> errors;
 };
 
-WriteSummary writeObservedSupportClaims(const std::vector<ObservedSupportCell>& observations);
+WriteSummary writeObservedSupportClaims(const std::vector<ObservedGraphSupport>& observations);
+
+struct AuthoringResult
+{
+    WriteSummary writeSummary;
+    bool shouldFail = false;
+};
+
+AuthoringResult authorSupportClaims(const std::vector<ObservedGraphSupport>& observations,
+                                    std::size_t graphsObserved,
+                                    std::size_t graphsUnobserved,
+                                    std::size_t graphsRegistered,
+                                    std::ostream& log);
 
 } // namespace hipdnn_integration_tests::bundle

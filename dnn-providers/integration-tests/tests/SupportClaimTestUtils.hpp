@@ -16,49 +16,35 @@
 #include <iterator>
 #include <string>
 
-#include <gtest/gtest.h>
-
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
-
-#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 namespace hipdnn_integration_tests::bundle::test_utils
 {
 
-inline hipdnn_test_sdk::utilities::ScopedDirectory makeScopedTestDir(const std::string& prefix)
-{
-    auto path
-        = std::filesystem::temp_directory_path()
-          / (prefix + "_"
-             + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-    std::filesystem::remove_all(path);
-    return {path};
-}
-
 inline std::string readFile(const std::filesystem::path& filePath)
 {
-    std::ifstream file(filePath);
+    std::ifstream file(filePath, std::ios::binary);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
-/// One observed cell of a single-graph bundle, as the harness would record it.
-inline ObservedSupportCell singleGraphObservation(const std::filesystem::path& bundleJsonPath,
-                                                  const std::string& engineName,
-                                                  const std::string& arch,
-                                                  const std::string& platform,
-                                                  bool engineIsSupported)
+/// One observation for a single-graph bundle, as the harness would record it.
+inline ObservedGraphSupport singleGraphObservation(const std::filesystem::path& bundleJsonPath,
+                                                   const std::string& engineName,
+                                                   const std::string& arch,
+                                                   const std::string& platform,
+                                                   bool engineIsSupported)
 {
     return {singleGraphClaimLocator(bundleJsonPath), engineName, arch, platform, engineIsSupported};
 }
 
-/// One observed cell of a single case of a template sweep.
-inline ObservedSupportCell sweepCaseObservation(const std::filesystem::path& sweepJsonPath,
-                                                const std::string& caseId,
-                                                const std::string& engineName,
-                                                const std::string& arch,
-                                                const std::string& platform,
-                                                bool engineIsSupported)
+/// One observation for a single case of a template sweep.
+inline ObservedGraphSupport sweepCaseObservation(const std::filesystem::path& sweepJsonPath,
+                                                 const std::string& caseId,
+                                                 const std::string& engineName,
+                                                 const std::string& arch,
+                                                 const std::string& platform,
+                                                 bool engineIsSupported)
 {
     return {sweepCaseClaimLocator(sweepJsonPath, caseId),
             engineName,

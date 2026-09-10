@@ -32,6 +32,10 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestGpuLayernormBwdSignatureKey.cpp
+    TestGpuLayernormBwdPlan.cpp
+    TestGpuLayernormFwdSignatureKey.cpp
+    TestGpuLayernormFwdPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
@@ -52,6 +56,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestEnforcementRungs.cpp
     TestSupportClaimRoundTrip.cpp
     TestSupportClaimWriter.cpp
+    TestObserveSupportOnly.cpp
     TestSupportVerdict.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
@@ -80,11 +85,6 @@ target_link_libraries(hipdnn_integration_tests_unit_tests
 target_compile_options(hipdnn_integration_tests_unit_tests
     PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})
 
-# Same bundle source path the main binary is built with, so BundleRegistration.hpp
-# compiles identically in both (set in the parent CMakeLists).
-target_compile_definitions(hipdnn_integration_tests_unit_tests PRIVATE
-    HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR="${HIPDNN_INTEGRATION_TEST_BUNDLES_SOURCE_DIR}")
-
 clang_tidy_check(hipdnn_integration_tests_unit_tests)
 
 add_unit_test_target(hipdnn_integration_tests_unit_tests ${CMAKE_CURRENT_BINARY_DIR})
@@ -98,6 +98,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
     gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
+    gpu-ref/TestGpuFpReferenceReduction.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
@@ -107,6 +108,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestShallowGpuTensor.cpp
     gpu-ref/TestGpuFpReferenceCommon.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

@@ -205,65 +205,63 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
-// Records raw ObservedSupportCells (does this engine take the graph, yes or no)
-// rather than the SupportResults the claim path produces, so it reads the session's
-// ranked list itself instead of going through the claim observer.
-//
-// Mode B authors claims for every loaded engine off a single run, so this walks the
-// engine table rather than the one engine under test.
-void IntegrationBundleVerificationHarness::observeSupportOnly(const GraphSession& session)
+std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
+    const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
     if(!session.buildError.empty())
     {
         HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
                                                                              << session.buildError);
-        return;
+        return {};
     }
 
     if(!isResolved(session.engines.status.get_code()))
     {
         HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
                                << _bundlePath << ": " << session.engines.status.get_message());
-        return;
-    }
-
-    auto engines = LoadedEngineTable::get().all();
-    if(TestConfig::get().hasEngineName())
-    {
-        const std::string targetName(TestConfig::get().getEngineName());
-        engines.erase(std::remove_if(engines.begin(),
-                                     engines.end(),
-                                     [&](const LoadedEngine& e) { return e.name != targetName; }),
-                      engines.end());
+        return {};
     }
 
     const std::string arch = baseArchToken(_deps.policy.arch);
     const auto& rankedIds = session.engines.rankedIds;
 
-    for(const auto& engine : engines)
-    {
+    auto observe = [&](const LoadedEngine& engine) {
         const bool engineIsSupported
             = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
+        return ObservedGraphSupport{
+            _claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported};
+    };
 
-        SupportObservationLog::get().record(
-            {_claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported});
+    std::vector<ObservedGraphSupport> observations;
+
+    if(_engineUnderTest)
+    {
+        // --test-engine was given: observe only that engine.
+        observations.push_back(observe(*_engineUnderTest));
     }
+    else
+    {
+        // No --test-engine: observe every loaded engine plugin.
+        observations.reserve(engines.size());
+        for(const auto& engine : engines)
+        {
+            observations.push_back(observe(engine));
+        }
+    }
+
+    return observations;
+}
+
+void IntegrationBundleVerificationHarness::observeAndRecordSupport(const GraphSession& session)
+{
+    // Handed over whole, empty result included -- the early returns above leave a
+    // graph this run cannot refresh, and the log counts those for the summary.
+    SupportObservationLog::get().recordGraph(
+        observeSupportOnly(session, LoadedEngineTable::get().all()));
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)
 {
-    // Authoring mode records what the engines actually take and stops: it has no
-    // verdict to give about the graph, so nothing below it may run. SKIPPED at
-    // NOT_REACHED is the honest outcome and keeps TestBody()'s "passed without
-    // reaching the required depth" guard quiet, which a PASSED here would trip.
-    if(TestConfig::get().writeSupportClaims())
-    {
-        observeSupportOnly(session);
-        return VerificationOutcome::skipped(VerificationDepth::NOT_REACHED,
-                                            "support-claim authoring run "
-                                            "(--write-support-claims)");
-    }
-
     // A graph that would not load is the engine's problem, at every level, and it is
     // the reason nothing below can run. Checked once, here, so the rungs and the
     // modes can all assume a usable session.
