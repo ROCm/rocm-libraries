@@ -20190,7 +20190,18 @@ class KernelWriterAssembly(KernelWriter):
                  and kernel.get("_TDMIterateMode%s" % tc, False))
     # WS mode shares one load between A and B; when either tile is iterate,
     # the non-iterate side must also init Group2/3 (read by the shared load;
-    # stale data corrupts the non-iterate load). MXS* never share SGPRs.
+    # stale data corrupts the non-iterate load).
+    #
+    # MXS* do share SGPRs under the non-default TDM groupings: those seat
+    # MXSA/MXSB on a data tensor's register range, so on a wave where a scale
+    # programs a set whose data member is in iterate mode, Group2/3 hold
+    # whatever that data member left and the 4-operand load still reads them.
+    # At TDMFuse=1 with TDMIterateModeA on gfx1250 every write to tdmAGroup2
+    # sits inside the even-wave branch, while the odd waves reach the same load
+    # through the MXSA branch with no reaching definition of Group2/3. Whether
+    # an operand the member ignores (its own iterate_enable is 0) can corrupt it
+    # is not established, so this records the hole rather than widening
+    # needGroup23 on an assumption.
     needGroup23 = isTdmIter or (tc in ("A", "B")
                                 and self.isTdmWaveSeparated(kernel)
                                 and (kernel.get("_TDMIterateModeA", False)
@@ -20520,6 +20531,14 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmApplyStreamKTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    # tdm<tcA><tcB>Incs is always allocated for (A,B); for (MXSA,MXSB) it is
+    # allocated only while the scales own their own descriptor set, since the
+    # defineSgpr is guarded by `not self.tdmFuseAMx(kernel)`. Unlike
+    # tdmApplyStreamKOffsetWaveSeparated this helper carries no A/B special
+    # case, so a shared-set grouping would both name an unallocated increment
+    # and offset A's pointer twice while leaving B's untouched. Solution refuses
+    # PAP for those groupings (Components/TDMFuse.tdmPapRejectReason); if that
+    # rejection is ever lifted, this helper needs the special case first.
     mod = Module("TDM StreamK tail K-offset Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -20595,6 +20614,14 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True) -> Module:
+    # Called once per (A,B) and once per (MXSA,MXSB), and the bank preserve /
+    # restore below names exactly one register range per call. Those are two
+    # distinct ranges only under the default grouping: a grouping that seats a
+    # scale on a data tensor's set aliases them, and the second call would then
+    # restore the first call's range a second time while the range it actually
+    # re-initialised keeps the wrong bank. Solution refuses PAP for every such
+    # grouping (Components/TDMFuse.tdmPapRejectReason), which is what holds the
+    # one-range-per-call assumption here.
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -20646,6 +20673,11 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def papTdmRestoreLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    # The A/B shift and the MX shift below are unconditional adds, not the
+    # normalize-then-add of papTdmSetTailLdsBank, so they are NOT idempotent:
+    # tdmAGroup0 and tdmMXSAGroup0 have to be distinct register ranges or one
+    # range moves twice and the other never moves. Solution refuses PAP for the
+    # groupings that alias them (Components/TDMFuse.tdmPapRejectReason).
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     mod = Module("TDM restore PAP LDS bank for primed path")
     skipLbl = Label(self.labels.getNameInc("SkipPapBankRestore"), "")

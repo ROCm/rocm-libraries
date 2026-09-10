@@ -203,6 +203,60 @@ def partitionedGroups(ks, grouping=None):
     return tuple(g for g in liveGroups(ks, grouping) if len(g) > 1)
 
 
+# The descriptor-set ownership every PrefetchAcrossPersistent helper is written
+# against: the data tensors on one register range, the scale tensors on another.
+TDM_DATA_TENSORS = ("A", "B")
+TDM_SCALE_TENSORS = ("MXSA", "MXSB")
+
+
+def tdmScaleSharesDataSet(ks, grouping=None):
+    """Live groups that carry a data tensor and a scale tensor on one set.
+
+    Read off the resolved grouping rather than a TDMFuse integer, so a grouping
+    TDMFuse asked for but `_tdmFuseCanShareDescriptors` declined answers with
+    the fallback the writer actually gets, and a scale-less type answers with
+    its degenerate groups -- it has no MXSA/MXSB left to share anything.
+    """
+    return tuple(g for g in liveGroups(ks, grouping)
+                 if any(tc in TDM_DATA_TENSORS for tc in g)
+                 and any(tc in TDM_SCALE_TENSORS for tc in g))
+
+
+def tdmPapRejectReason(ks):
+    """Why PrefetchAcrossPersistent cannot ride this grouping, or None.
+
+    PAP hands a persistent tile over by rebuilding the TDM descriptors and by
+    saving and restoring the LDS bank the next-tile prefetch landed in. Every
+    one of those helpers walks the tensors as the two pairs (A, B) and
+    (MXSA, MXSB) and applies exactly one offset per pair, which is correct only
+    for the ownership the default grouping has: {A,B} on one descriptor set and
+    {MXSA,MXSB} on another, allocated as two distinct register ranges.
+
+    A grouping that seats a scale tensor on a data tensor's set makes
+    `tdmMXSAGroup0` / `tdmMXSBGroup0` RegSet aliases of `tdmAGroup0` /
+    `tdmBGroup0`. The two per-pair offsets then land on one physical range
+    twice while its sibling range is never offset at all, and the tail reset
+    reads `tdmMXSAMXSBIncs`, which is not allocated once both scales ride A's
+    set. The two failures are not alike: the first is silent, the second
+    reaches the assembler as an undefined symbol.
+
+    Derived from group membership, so a new grouping row inherits the right
+    answer with no branch here, and the reason names the sharing group rather
+    than the parameter value that happened to select it.
+    """
+    shared = tdmScaleSharesDataSet(ks)
+    if not shared:
+        return None
+    return ("PrefetchAcrossPersistent requires every TDM scale tensor to own its "
+            "own descriptor set, and the %s grouping seats one on a data "
+            "tensor's set (%s). That aliases tdmMXSAGroup0/tdmMXSBGroup0 onto "
+            "tdmAGroup0/tdmBGroup0, so the persistent-tile handoff offsets one "
+            "register range twice and its sibling range not at all, and the "
+            "tail reset reads the unallocated tdmMXSAMXSBIncs"
+            % (tdmGrouping(ks).name,
+               " + ".join("{%s}" % ",".join(g) for g in shared)))
+
+
 def _waveShares(numWaves, numMembers, layout):
     """(waves, numComp) for each member of a group of `numMembers`."""
     if numMembers <= 1:

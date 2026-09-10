@@ -47,7 +47,8 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        divergentPairUnsupportedReason, \
                                        resolvePrefetchGlobalReadSpecialValues
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmFuseAMx, tdmFusePaired, \
-                                       tdmCrossRejectReason, tdmWaveLdsBytes
+                                       tdmCrossRejectReason, tdmWaveLdsBytes, \
+                                       tdmPapRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3048,6 +3049,17 @@ class Solution(collections.abc.Mapping):
                  "TDMFuse=1 passed its solution-level guards but tdmFusePaired declined the "
                  "solution, so the writer would emit a different grouping than the name claims")
           return
+
+    # PAP's persistent-tile handoff addresses the TDM descriptor sets as the
+    # pairs (A,B) and (MXSA,MXSB) and offsets each pair exactly once, which only
+    # holds while the scales own a register range of their own. Asked of the
+    # resolved grouping rather than of TDMFuse, and placed after TDMFuse's own
+    # guards so a grouping that cannot be built reports its own reason first.
+    if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
+      papGroupingReason = tdmPapRejectReason(state)
+      if papGroupingReason:
+        reject(state, printRejectionReason, papGroupingReason)
+        return
 
     # TDMCross rearranges which wave issues which member of a group that
     # TDMFuse already chose. Every reject above therefore has precedence: an
