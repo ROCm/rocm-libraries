@@ -1068,14 +1068,14 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 78
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 28,
+          "attention_dense": 32,
           "conv": 9,
           "conv_dgrad": 11,
           "conv_wgrad": 13,
@@ -1087,7 +1087,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 132
       }
     },
     "llvm22": {
@@ -2158,14 +2158,14 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 78
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 28,
+          "attention_dense": 32,
           "conv": 9,
           "conv_dgrad": 11,
           "conv_wgrad": 13,
@@ -2177,7 +2177,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 132
       }
     },
     "llvm23": {
@@ -3248,14 +3248,14 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 78
         },
         "expected_failures": 0,
         "families": {
           "attention": 14,
           "attention_d128_swa": 1,
           "attention_d256": 2,
-          "attention_dense": 28,
+          "attention_dense": 32,
           "conv": 9,
           "conv_dgrad": 11,
           "conv_wgrad": 13,
@@ -3267,7 +3267,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 132
       }
     }
   },
