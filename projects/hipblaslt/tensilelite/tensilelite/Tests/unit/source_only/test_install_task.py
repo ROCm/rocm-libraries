@@ -127,6 +127,30 @@ def test_build_client_forwards_the_selected_rocm_root(tmp_path, monkeypatch):
     assert f"-DCMAKE_C_COMPILER={compiler_dir / 'amdclang'}" in configure_command
     assert f"-DCMAKE_CXX_COMPILER={compiler_dir / 'amdclang++'}" in configure_command
 
+def test_build_client_does_not_configure_rocisa_python_extension(tmp_path):
+    """The focused client build must not select the code-generation extension."""
+
+    class RecordingContext:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command):
+            self.commands.append(command)
+
+    context = RecordingContext()
+    tasks.build_client.body(
+        context,
+        build_dir=str(tmp_path / "build"),
+        gpu_targets="gfx942",
+        build=False,
+    )
+
+    assert all(
+        "HIPBLASLT_BUNDLE_PYTHON_DEPS" not in command
+        and "ROCISA_BUILD_PYTHON" not in command
+        for command in context.commands
+    )
+
 
 class TestBuildTaskCommandLine:
     """invoke assigns short flags in signature order, so a new parameter's
