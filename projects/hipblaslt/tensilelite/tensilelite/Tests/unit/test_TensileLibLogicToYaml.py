@@ -468,7 +468,7 @@ def mockLibLogicFile():
 
 
 def findAvailableArchs():
-    from tensilelite.Tests.gpu_detection import get_available_archs
+    from gpu_detection import get_available_archs
     return get_available_archs()
 
 @pytest.mark.skipif(
