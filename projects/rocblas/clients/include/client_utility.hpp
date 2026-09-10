@@ -120,6 +120,7 @@ class rocblas_local_handle
     std::string    m_stream_order_saved_status = "";
     bool           m_hipblaslt_env_set{false};
     bool           m_stream_order_env_set{false};
+    bool           m_graph_test{false};
 
     void rocblas_stream_begin_capture();
     void rocblas_stream_end_capture();
@@ -164,6 +165,8 @@ public:
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_end_capture() : NOOP;
 #endif
+        m_graph_test = arg.graph_test; // save the graph test flag
+
         if(arg.alpha_beta_stride && arg.pointer_mode_device)
         {
             rocblas_set_batch_alpha_stride(m_handle, 0);

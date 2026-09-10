@@ -499,8 +499,8 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
 
     if(status == rocblas_status_success)
     {
-        // If the test specifies user allocated workspace, allocate and use it
-        if(arg.user_allocated_workspace)
+        // If the test specifies user allocated workspace, allocate and use it if not graph test
+        if(arg.user_allocated_workspace && !arg.graph_test)
         {
             if((hipMalloc)(&m_memory, arg.user_allocated_workspace) != hipSuccess)
                 throw std::bad_alloc();
@@ -539,6 +539,11 @@ rocblas_local_handle::~rocblas_local_handle()
     if(m_stream_order_env_set)
     {
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+    }
+
+    if(m_graph_test)
+    {
+        PRINT_IF_HIP_ERROR(hipDeviceReset());
     }
 }
 
