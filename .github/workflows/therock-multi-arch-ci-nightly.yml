@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe.
+# TheRock ref: pinned to ROCm/TheRock release/therock-10.1.
 
 on:
   schedule:
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/therock-10.1
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows).
@@ -47,8 +47,9 @@ jobs:
       windows_test_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
+      stage_reuse_mode: off
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: release/therock-10.1
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   log_therock_ref:
@@ -75,7 +76,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@release/therock-10.1
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -88,7 +89,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: release/therock-10.1
     permissions:
       contents: read
       id-token: write
@@ -101,7 +102,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@release/therock-10.1
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -112,7 +113,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+      ref: release/therock-10.1
     permissions:
       contents: read
       id-token: write
@@ -130,7 +131,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ada7d4dc61fc198cf772a808bfc72e5f9a74f9fe # 2026-09-03
+          ref: release/therock-10.1
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
