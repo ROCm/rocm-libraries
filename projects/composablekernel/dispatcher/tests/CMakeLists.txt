@@ -130,6 +130,21 @@ set_tests_properties(dispatcher_test_codegen_common PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# .so cache key vs the ctypes export set. The failure this guards is a stale cached
+# artifact being reused after an export is added -- an "undefined symbol" that surfaces
+# on a different machine long after the change. CPU-only, no compilation.
+add_test(
+    NAME dispatcher_test_so_abi_token
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_so_abi_token.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_so_abi_token PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # gfx1250 compile-time tile guard in the RowColQuant/TensorQuant ctypes libs. It is
 # the only one of the three gfx1250 guards that outlives Tile-Engine deprecation, so
 # it needs coverage of its own. Needs no GPU and no ROCm: the test extracts the guard

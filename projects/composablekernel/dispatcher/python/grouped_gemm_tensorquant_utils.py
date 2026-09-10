@@ -21,9 +21,11 @@ ADataType=BDataType=fp8/bf8; AQDataType=BQDataType=float; CDataType=half.
 """
 
 import ctypes
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -58,22 +60,70 @@ from codegen_common import (  # noqa: E402
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
-# ABI revision of the compiled .so, folded into the artifact filename.
+# ABI token of the compiled .so, folded into the artifact filename.
 #
 # setup_multiple_tensorquant_dispatchers() reuses an existing .so when the name
-# matches, and callers that pass a persistent output_dir (the validation
-# harnesses do, precisely to get cache hits) can therefore be handed an artifact
-# built by an older revision of this module. The name used to be keyed on
-# (kernel name, arch) only, which does not describe the exported symbol set, so
-# a .so predating the dispatcher_get_tile_n()/dispatcher_get_pad_n() exports
-# would be selected and then fail at attribute-lookup time with a bare
-# "undefined symbol". Bump this whenever the exported C ABI of
-# bindings/ctypes/grouped_gemm_tensorquant_ctypes_lib.cpp changes; the new name
-# simply cannot collide with the stale artifact, which is then ignored rather
-# than papered over with a runtime fallback.
-#   1 -> original export set
-#   2 -> added dispatcher_get_tile_n() / dispatcher_get_pad_n()
-_SO_ABI = 2
+# matches, and callers that pass a persistent output_dir (the validation harnesses
+# do, precisely to get cache hits) can therefore be handed an artifact built by an
+# older revision of this module. The name used to be keyed on (kernel name, arch)
+# only, which does not describe the exported symbol set, so a .so predating the
+# dispatcher_get_tile_n()/dispatcher_get_pad_n() exports would be selected and then
+# fail at attribute-lookup time with a bare "undefined symbol".
+#
+# A hand-maintained integer would fix that only for as long as everyone remembers to
+# bump it, and nothing in the build or the tests can tell that they did not -- the
+# symptom appears later, on someone else's machine, in a cache directory. So derive
+# the token from the thing it is supposed to describe: the export signatures in
+# bindings/ctypes/grouped_gemm_tensorquant_ctypes_lib.cpp. Add, remove or
+# re-type an exported function and the cache key moves by itself; edit a comment or a
+# function body and it does not.
+#
+# Derived from signatures rather than the whole file so that unrelated edits do not
+# invalidate every cached artifact. Falls back to a fixed revision if the source
+# cannot be read or the scan finds nothing, so a packaging change degrades to the old
+# hand-bumped behaviour instead of silently keying every build the same.
+_SO_ABI_FALLBACK = "r2"
+
+_EXPORT_SIGNATURE_RE = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*\*)?(?:\s+[A-Za-z_][A-Za-z0-9_]*)?(?:\s*\*)?)"
+    r"\s+(dispatcher_[A-Za-z0-9_]+)\s*\(([^)]*)\)",
+    re.MULTILINE,
+)
+
+
+def _ctypes_abi_token() -> str:
+    """Short hash of the exported C ABI of the ctypes source.
+
+    Changes exactly when an exported dispatcher_* function is added, removed,
+    renamed, or has its return type or parameter list changed.
+    """
+    try:
+        text = _CTYPES_LIB_SRC.read_text()
+    except OSError:
+        log.warning(
+            "cannot read %s to derive the .so ABI token; falling back to %s",
+            _CTYPES_LIB_SRC, _SO_ABI_FALLBACK,
+        )
+        return _SO_ABI_FALLBACK
+
+    signatures = {
+        "{} {}({})".format(
+            " ".join(ret.split()), name, ",".join(" ".join(a.split()) for a in args.split(","))
+        )
+        for ret, name, args in _EXPORT_SIGNATURE_RE.findall(text)
+    }
+    if not signatures:
+        log.warning(
+            "found no dispatcher_* export signatures in %s; falling back to %s",
+            _CTYPES_LIB_SRC, _SO_ABI_FALLBACK,
+        )
+        return _SO_ABI_FALLBACK
+
+    digest = hashlib.sha256(";".join(sorted(signatures)).encode()).hexdigest()
+    return digest[:10]
+
+
+_SO_ABI = _ctypes_abi_token()
 
 
 # =============================================================================
