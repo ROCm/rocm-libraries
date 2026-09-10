@@ -68,9 +68,10 @@ bool g_enableESM2TrackValuVsrc = false;
 // Set once per function in setupArch, alongside g_enableESM2TrackValuVsrc.
 const HWModel::WaitHide* g_waitHide = nullptr;
 
-// Shared-VA-order refinement, from InsertWaitAluOptions. Off leaves the pass on the
+// Shared-VA-order refinements, from InsertWaitAluOptions. Off leaves the pass on the
 // per-pipe ordinals alone, which is always correct and always stricter.
 bool g_sharedOrderCountFollowers = true;
+bool g_sharedOrderDrainRetires = true;
 
 // Render one WaitHide entry for the debug banner; 0 reads as off.
 inline std::string waitHideStr(int v) {
@@ -610,6 +611,15 @@ class WaitcntBrackets {
     }
 
     unsigned vaFollowers(const VgprStamp& s) const {
+        // An emitted count bounds the shared order, so the shared floor is the precise
+        // retirement test; a per-pipe floor rises more slowly and can still call a drained
+        // producer live. Zero means every path retired it or never had it -- same answer.
+        if (g_sharedOrderDrainRetires && hasVaProducer(s) &&
+            (s.vaOrdShared == 0 || s.vaOrdShared <= vaLB)) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drained by shared order [ord="
+                                 << s.vaOrdShared << " vaLB=" << vaLB << "]\n");
+            return ~0u;
+        }
         unsigned f = ~0u;
         for (int p = 0; p < NUM_VA_PIPE; ++p) {
             if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p]) {
@@ -1000,6 +1010,7 @@ class InsertWaitAluPassImpl : public Pass {
     explicit InsertWaitAluPassImpl(const InsertWaitAluOptions& opts) {
         g_enableESM2TrackValuVsrc = opts.enableESM2TrackValuVsrc;
         g_sharedOrderCountFollowers = opts.sharedOrderCountFollowers;
+        g_sharedOrderDrainRetires = opts.sharedOrderDrainRetires;
     }
 
    private:
@@ -1377,6 +1388,7 @@ class InsertWaitAluPassImpl : public Pass {
                              << " vmVsrcBridge=" << waitHideStr(g_waitHide->vmVsrcBridge) << "\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
                              << " countFollowers=" << g_sharedOrderCountFollowers
+                             << " drainRetires=" << g_sharedOrderDrainRetires
                              << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
     }
 

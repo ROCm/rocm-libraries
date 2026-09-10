@@ -41,6 +41,9 @@ struct InsertWaitAluOptions {
     /// own pipe, while XDL and CSMACC are the only units in flight and so complete in
     /// issue order. Weaker wait, same guarantee.
     bool sharedOrderCountFollowers = true;
+    /// Treat a producer as retired once an emitted count drained the shared order past
+    /// it. A per-pipe floor rises more slowly and still reports such a producer live.
+    bool sharedOrderDrainRetires = true;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
