@@ -103,7 +103,7 @@ def _pr_metadata(repo: str, pr_number: int) -> dict[str, Any]:
             "--repo",
             repo,
             "--json",
-            "number,headRefOid,baseRefName,state",
+            "number,headRefOid,headRefName,headRepository,baseRefName,state",
         ),
         "pull request",
     )
@@ -113,6 +113,8 @@ def collect_overview(repo: str, pr_number: int) -> dict[str, list[dict[str, Any]
     """Collect normalized required checks and top-level workflow runs."""
     pr = _pr_metadata(repo, pr_number)
     head_sha = _string(pr.get("headRefOid"), "pull request headRefOid")
+    head_ref = _string(pr.get("headRefName"), "pull request headRefName")
+    head_repository = _head_repository_name(pr)
     base_ref = _string(pr.get("baseRefName"), "pull request baseRefName")
 
     expected_contexts = _required_contexts(repo, base_ref)
@@ -124,7 +126,13 @@ def collect_overview(repo: str, pr_number: int) -> dict[str, list[dict[str, Any]
         for item in reported_required
         if (run_id := _run_id_from_link(item.get("link"))) is not None
     }
-    runs = _workflow_runs(repo, head_sha, pr_number)
+    runs = _workflow_runs(
+        repo,
+        head_sha,
+        pr_number,
+        head_repository=head_repository,
+        head_ref=head_ref,
+    )
     gating_workflow_ids = {
         workflow_id
         for run in runs
@@ -278,7 +286,14 @@ def _reported_required_checks(repo: str, pr_number: int) -> list[dict[str, Any]]
     return [item for item in result if isinstance(item, dict)]
 
 
-def _workflow_runs(repo: str, head_sha: str, pr_number: int) -> list[dict[str, Any]]:
+def _workflow_runs(
+    repo: str,
+    head_sha: str,
+    pr_number: int,
+    *,
+    head_repository: str,
+    head_ref: str,
+) -> list[dict[str, Any]]:
     pages = gh_json(
         "api",
         "--paginate",
@@ -293,15 +308,40 @@ def _workflow_runs(repo: str, head_sha: str, pr_number: int) -> list[dict[str, A
             for item in page_runs:
                 if not isinstance(item, dict):
                     continue
-                pull_requests = item.get("pull_requests")
-                if not isinstance(pull_requests, list):
-                    continue
-                if any(
-                    isinstance(pr, dict) and pr.get("number") == pr_number
-                    for pr in pull_requests
+                if _run_matches_pr(
+                    item,
+                    pr_number,
+                    head_repository=head_repository,
+                    head_ref=head_ref,
                 ):
                     runs.append(item)
     return runs
+
+
+def _run_matches_pr(
+    run: Mapping[str, Any],
+    pr_number: int,
+    *,
+    head_repository: str,
+    head_ref: str,
+) -> bool:
+    pull_requests = run.get("pull_requests")
+    if isinstance(pull_requests, list) and any(
+        isinstance(pr, dict) and pr.get("number") == pr_number for pr in pull_requests
+    ):
+        return True
+    if pull_requests:
+        return False
+
+    # GitHub currently returns an empty pull_requests array for fork-originated
+    # workflow runs. The query is already restricted to the exact head SHA;
+    # matching its source repository and branch ties that otherwise-unassociated
+    # run back to this PR without admitting another fork or branch.
+    repository = run.get("head_repository")
+    run_repository = (
+        repository.get("full_name") if isinstance(repository, dict) else None
+    )
+    return run_repository == head_repository and run.get("head_branch") == head_ref
 
 
 def _normalize_required(
@@ -448,6 +488,14 @@ def _object(value: object, description: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise GitHubError(f"{description} response must be an object")
     return value
+
+
+def _head_repository_name(pr: Mapping[str, Any]) -> str:
+    repository = pr.get("headRepository")
+    if not isinstance(repository, dict):
+        return ""
+    name = repository.get("nameWithOwner")
+    return name if isinstance(name, str) else ""
 
 
 def _comment_author(comment: Mapping[str, Any]) -> str:

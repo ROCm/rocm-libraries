@@ -295,6 +295,8 @@ def test_collect_overview_produces_condensed_gate_based_report(
         lambda *args, **_kwargs: {
             "number": 42,
             "headRefOid": "abc123",
+            "headRefName": "feature",
+            "headRepository": {"nameWithOwner": "owner/fork"},
             "baseRefName": "develop",
         },
     )
@@ -326,7 +328,7 @@ def test_collect_overview_produces_condensed_gate_based_report(
     monkeypatch.setattr(
         sut,
         "_workflow_runs",
-        lambda _repo, _sha, _pr: [
+        lambda _repo, _sha, _pr, **_kwargs: [
             {
                 "id": 1,
                 "workflow_id": 10,
@@ -369,14 +371,37 @@ def test_workflow_runs_are_filtered_to_the_requested_pr(
                 "workflow_runs": [
                     {"id": 1, "pull_requests": [{"number": 42}]},
                     {"id": 2, "pull_requests": [{"number": 99}]},
-                    {"id": 3, "pull_requests": []},
+                    {
+                        "id": 3,
+                        "pull_requests": [],
+                        "head_repository": {"full_name": "owner/fork"},
+                        "head_branch": "feature",
+                    },
+                    {
+                        "id": 4,
+                        "pull_requests": [],
+                        "head_repository": {"full_name": "other/fork"},
+                        "head_branch": "feature",
+                    },
                 ]
             }
         ],
     )
 
-    assert sut._workflow_runs("ROCm/rocm-libraries", "abc", 42) == [
-        {"id": 1, "pull_requests": [{"number": 42}]}
+    assert sut._workflow_runs(
+        "ROCm/rocm-libraries",
+        "abc",
+        42,
+        head_repository="owner/fork",
+        head_ref="feature",
+    ) == [
+        {"id": 1, "pull_requests": [{"number": 42}]},
+        {
+            "id": 3,
+            "pull_requests": [],
+            "head_repository": {"full_name": "owner/fork"},
+            "head_branch": "feature",
+        },
     ]
 
 
