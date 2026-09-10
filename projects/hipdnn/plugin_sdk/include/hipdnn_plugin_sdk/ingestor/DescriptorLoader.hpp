@@ -59,9 +59,10 @@
  * file's folder means nothing here. The seven suffixes above are the only loadable
  * spellings: a file whose name misses all of them is a WARN and skip, not an error. That
  * includes every `.jsonc`, which no suffix can match and which is therefore diagnosed
- * rather than read -- the loader has no comment-stripping parser. Every file carries a
- * required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
- * major matches and the minor is no newer.
+ * rather than read -- the loader has no comment-stripping parser. Every descriptor carries
+ * a required `version`, gated per type (FILE_TYPES below) by RFC 0017 §4: accept iff the
+ * major matches and the minor is no newer. An inline kernel gates against the UKD row; its
+ * pack's own version gates the pack.
  *
  * A KDP names its kernels either inline or by id: an entry of `kernelDescriptors` is an
  * object (the kernel itself) or a bare UUID string naming a `.ukd.json`. The two are
@@ -72,12 +73,16 @@
  * completed metadata tuples collide on the catalog key.
  *
  * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Five deliberate divergences, pending an amendment:
+ * their own follow-ups land. Six deliberate divergences, pending an amendment:
  *
  *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
  *    file whose name and body disagree has no correct reading.
  *  - RFC 0020 §4.2: `version` required on every type, not just the UED -- a type with no
  *    version can't be gated by §11.1 at all.
+ *  - RFC 0020 §4.2 lists no `graph_match`: an object naming the graph-topology pattern
+ *    this engine matches, with one inner key today, `native`, a symbol resolved through
+ *    GraphMatchRegistry. Its amendment lands with the finalized declarative pattern this
+ *    key is the escape hatch for.
  *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
  *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
  *    built against that arch. The other five types stay keyed by id alone.
@@ -121,6 +126,10 @@ struct CatalogEntry
     /// ignores key order/whitespace, unlike adding operator== to all seven struct types.
     nlohmann::json source;
     std::filesystem::path path; ///< first file that defined this id
+    /// The root this file was found under. Stamped by settleCatalog when the root's pass
+    /// finishes, since that is the one place that already knows both the root and which
+    /// entries it contributed -- the seven FileType insert rows do not see the root.
+    std::filesystem::path treeRoot;
     bool conflicted = false; ///< two files disagreed; treat as absent
     /// Set once the root this came from is fully read. A later root may add descriptors
     /// beside a settled one but never redefine it: the drop-all rule below exists because
@@ -171,9 +180,8 @@ inline constexpr std::string_view SUFFIX_UKD = ".ukd.json";
 
 /// One row per descriptor file type: the suffix that selects it, the `major.minor` this
 /// build accepts per RFC 0017 §4 (per type, not a build-wide pair, so one type reaching
-/// 1.1 can't widen what the others accept), and the parse-and-insert function. Declared
-/// ahead of the parse functions so versionIsSupported() below can take a row by
-/// reference; FILE_TYPES itself is assembled further down.
+/// 1.1 can't widen what the others accept), and the parse-and-insert function. FILE_TYPES
+/// itself is assembled further down, once the parse functions its rows name exist.
 struct FileType
 {
     std::string_view suffix;
@@ -274,6 +282,12 @@ struct DescriptorVersion
     int minor = 0;
 };
 
+/// The UKD version this build reads. Named here as well as in the UKD row, which reads
+/// these, because an inline kernel gates against them from above where FILE_TYPES is
+/// assembled.
+inline constexpr int UKD_VERSION_MAJOR = 1;
+inline constexpr int UKD_VERSION_MINOR = 0;
+
 /// Parses `<major>.<minor>` as two separate integers, not a decimal fraction: RFC 0020
 /// §11.1 compares them as integers, so `1.10` is newer than `1.9` -- reading the field as
 /// a float would order those two backwards.
@@ -305,25 +319,25 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
 /// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
 /// drop for its version alone and leave the descriptors it would have collided with
 /// standing.
+///
+/// Serves every descriptor, file or not, so @p where is the caller's locator: a file names
+/// itself by path, an inline `kernelDescriptors` entry by its position in a pack.
 inline bool versionIsSupported(const nlohmann::json& document,
-                               const FileType& fileType,
-                               const std::filesystem::path& path)
+                               int major,
+                               int minor,
+                               const std::string& where)
 {
-    const std::string where{fileType.suffix};
-    if(document.find("version") == document.end())
-    {
-        fail("missing required key 'version' in " + where);
-    }
-
+    // requireKey() inside requireString() fails a missing `version` with this same key and
+    // locator, so there is no presence check here.
     const auto version = parseDescriptorVersion(requireString(document, "version", where), where);
-    if(version.major != fileType.major || version.minor > fileType.minor)
+    if(version.major != major || version.minor > minor)
     {
         // Warning, not error: a descriptor from a newer toolchain landing beside an older
         // provider is a version skew the operator can act on, not a malformed file.
-        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: "
-                               << path << " declares " << where << " version " << version.major
-                               << "." << version.minor << "; this build reads " << fileType.major
-                               << "." << fileType.minor << " and earlier minors; skipping");
+        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: " << where << " declares version "
+                                                     << version.major << "." << version.minor
+                                                     << "; this build reads " << major << "."
+                                                     << minor << " and earlier minors; skipping");
         return false;
     }
     return true;
@@ -699,7 +713,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "metadata",
                       "knobs",
                       "behavior_notes",
-                      "numerical_notes"},
+                      "numerical_notes",
+                      "graph_match"},
                      where);
 
     EngineDescriptor engine;
@@ -747,6 +762,18 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
             fail("key 'sdk_version' in " + where + " is not a version: " + error.what());
         }
     }
+
+    // The graph-topology match this engine declares. Absent leaves the symbol empty,
+    // meaning this engine binds no tokens and is admitted or declined by its UMDs
+    // alone. The only inner key today is the native escape hatch; a declarative
+    // `nodes`/`criteria` pattern is a future sibling of `native`, not a replacement.
+    if(const auto it = root.find("graph_match"); it != root.end())
+    {
+        const std::string graphMatchWhere = where + " graph_match";
+        requireObject(*it, graphMatchWhere);
+        requireKnownKeys(*it, {"native"}, graphMatchWhere);
+        engine.graphMatchNativeSymbol = requireString(*it, "native", graphMatchWhere);
+    }
     return engine;
 }
 
@@ -777,11 +804,9 @@ inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root,
 inline KernelSource parseKernelSource(const nlohmann::json& root, const std::string& where)
 {
     requireObject(root, where);
-    // `library`/`toc_key`/`symbol`/`sha256` belong to the `kpack` kind and are named here
-    // before any adapter reads them: this check runs ahead of the kind switch, so leaving
-    // them out would fail a packaged descriptor with "unknown key 'library'" instead of
-    // the honest "no implementation yet" below. They are not modelled on KernelSource
-    // until something can dispatch them.
+    // The union of every kind's keys, checked ahead of the kind switch so that a key
+    // belonging to a kind this build cannot dispatch fails with the honest "no
+    // implementation yet" below rather than a misleading "unknown key".
     requireKnownKeys(
         root,
         {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
@@ -790,10 +815,9 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
     source.kind = kernelSourceKindFromString(kindText, where);
-    // Only EMBEDDED_SOURCE has an implementation the dispatch handler can call, and that
-    // handler never inspects source.kind -- so accepting another kind here would let
-    // applicability advertise a kernel that throws inside getKernelSrc("") at
-    // plan-build time instead of failing cleanly at load.
+    // Kinds are accepted only where an adapter can call them: the dispatch handler never
+    // inspects source.kind, so accepting one it cannot serve would let applicability
+    // advertise a kernel that throws at plan-build time instead of failing cleanly at load.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
         // Not cross-checked against the provider's embedded kernel map: that map is
@@ -805,20 +829,41 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
         source.sourceFile = requireString(root, "source_file", where);
         source.entryPoint = requireString(root, "entry_point", where);
     }
+    else if(source.kind == KernelSourceKind::KPACK)
+    {
+        // All four are mandatory: the packager emits them together, and an adapter needs
+        // every one of them to name a code object. None is validated here -- see
+        // KernelSource for what each carries.
+        source.library = requireString(root, "library", where);
+        source.tocKey = requireString(root, "toc_key", where);
+        source.symbol = requireString(root, "symbol", where);
+        source.sha256 = requireString(root, "sha256", where);
+    }
     else
     {
         fail("kernel source kind '" + kindText + "' in " + where
-             + " has no implementation yet; only 'embedded_source' can be dispatched");
+             + " has no implementation yet; only 'embedded_source' and 'kpack' can be dispatched");
     }
     return source;
 }
 
-/// The fields a kernel carries in either form: inline in a KDP's `kernelDescriptors`, or
-/// alone in a `.ukd.json`. The caller owns the allow-list, because the two forms differ by
-/// exactly one key -- a file carries `version`, an inline entry has no file to version.
-inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
-                                                  const std::string& entryLabel)
+/// UKD: one launchable kernel, in either spelling -- alone in a `.ukd.json`, or inline in
+/// a KDP's `kernelDescriptors`. One function because there is one schema; @p entryLabel is
+/// the caller's locator. A file exists so a kernel can ship separately from the pack that
+/// binds it, or be shared by packs of different engines.
+///
+/// Callers gate `version` before calling this: the FILE_TYPES walk for a file,
+/// parseInlineKernelDescriptor() for an entry. The key is accepted here but not checked,
+/// so a new caller must gate too or it reads a descriptor this build may not understand.
+/// `arch` is optional in both spellings: the devices this one kernel runs on, which must
+/// stay within what its pack claims. Absent, it inherits the pack.
+inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
+                                              const std::string& entryLabel)
 {
+    requireKnownKeys(root,
+                     {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"},
+                     entryLabel);
+
     KernelDescriptor kernel;
     kernel.id = requireId(root, "id", entryLabel);
     kernel.name = requireString(root, "name", entryLabel);
@@ -848,36 +893,26 @@ inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
         }
         kernel.priority = requireInt64(*it, where + " priority");
     }
+
+    kernel.arch = requireArchList(root, entryLabel);
     return kernel;
 }
 
-/// A kernel spelled inside its pack. Takes the pack's file, so a diagnostic about an
-/// inline kernel names the file it is spelled in rather than only its shape. `arch` is
-/// optional here and means the same as on a `.ukd.json`: the devices this one kernel
-/// runs on, which must stay within what its pack claims. Absent, it inherits the pack.
-inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
-                                              const std::string& packWhere)
+/// A kernel spelled inside its pack: the same descriptor, plus the locator and the version
+/// gate a file gets from the walk instead. Takes the pack's file, so a diagnostic about an
+/// inline kernel names the file it is spelled in rather than only its shape.
+///
+/// The rest of the descriptor is only validated if the version is acceptable.
+inline std::optional<KernelDescriptor> parseInlineKernelDescriptor(const nlohmann::json& root,
+                                                                   const std::string& packWhere)
 {
     const std::string where = "a 'kernelDescriptors' entry in " + packWhere;
     requireObject(root, where);
-    requireKnownKeys(root, {"id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
-    auto kernel = parseKernelDescriptorBody(root, where);
-    kernel.arch = requireArchList(root, where);
-    return kernel;
-}
-
-/// UKD: a kernel shipped in its own file, named from a pack by bare id. Identical to an
-/// inline one once loaded, `arch` included -- the file exists so a kernel can ship
-/// separately from the pack that binds it, or be shared by packs of different engines,
-/// and only this form carries `version`, since only this form is a file.
-inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root,
-                                                        const std::string& where)
-{
-    requireKnownKeys(
-        root, {"version", "id", "name", "kernel_source", "metadata", "priority", "arch"}, where);
-    auto kernel = parseKernelDescriptorBody(root, where);
-    kernel.arch = requireArchList(root, where);
-    return kernel;
+    if(!versionIsSupported(root, UKD_VERSION_MAJOR, UKD_VERSION_MINOR, where))
+    {
+        return std::nullopt;
+    }
+    return parseKernelDescriptor(root, where);
 }
 
 /// A UUID string from an array-valued key, with the key named in any failure. Shared by
@@ -941,18 +976,22 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         }
         else
         {
-            auto kernel = parseKernelDescriptor(entry, where);
+            auto kernel = parseInlineKernelDescriptor(entry, where);
+            if(!kernel)
+            {
+                continue;
+            }
             // Checked here rather than at resolution, because an inline kernel has exactly
             // one parent and it is already parsed: a kernel reaching past its pack is a
             // property of this file alone, so it fails the file instead of every pack that
             // might bind it.
-            if(!archCovers(pack.arch, kernel.arch))
+            if(!archCovers(pack.arch, kernel->arch))
             {
-                fail("kernel '" + kernel.name + "' in " + where + " declares arch "
-                     + describeArch(kernel.arch) + ", which reaches past the pack's "
+                fail("kernel '" + kernel->name + "' in " + where + " declares arch "
+                     + describeArch(kernel->arch) + ", which reaches past the pack's "
                      + describeArch(pack.arch));
             }
-            pack.kernels.push_back(std::move(kernel));
+            pack.kernels.push_back(std::move(*kernel));
         }
     }
     return pack;
@@ -1014,7 +1053,7 @@ inline void insertCatalogEntry(Map& map,
     const std::string name = descriptor.name;
 
     auto [it, inserted] = map.try_emplace(
-        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, false});
+        std::move(key), CatalogEntry<T>{std::move(descriptor), source, path, {}, false, false});
     if(inserted)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: loaded " << path << " " << description
@@ -1075,6 +1114,15 @@ struct KernelMatch
 {
     const KernelDescriptor* kernel = nullptr;
     std::string reason; ///< empty iff @c kernel is set; the pack's drop diagnostic otherwise
+    /// The file that defined @c kernel, whose directory a referenced kernel resolves its own
+    /// relative paths against -- a per-arch shard layout puts it elsewhere than the pack's.
+    /// Set iff @c kernel is.
+    std::filesystem::path path;
+    /// The root @c path was found under, which is the containment boundary for anything
+    /// the kernel names. A referenced kernel can come from a different root than its pack,
+    /// so this travels with @c path rather than being taken from the pack. Set iff
+    /// @c kernel is.
+    std::filesystem::path treeRoot;
 };
 
 /// The kernel @p id names, as seen by a pack targeting @p packArch.
@@ -1121,24 +1169,30 @@ inline KernelMatch findKernelForPack(const KernelMap& kernels,
         // catalog order. Nothing in the format ranks them, and an arch-specific spelling
         // silently shadowing an arch-independent one is the shadowing the drop-in rule
         // refuses elsewhere.
-        return {nullptr, names + ", which several descriptors define within the pack's arch"};
+        return {
+            nullptr, names + ", which several descriptors define within the pack's arch", {}, {}};
     }
     if(covered != nullptr)
     {
         // A conflicted definition is unusable, and falling through to another would hide
         // the collision the conflict recorded.
-        return covered->conflicted ? KernelMatch{nullptr, names + ", which no descriptor defines"}
-                                   : KernelMatch{&covered->descriptor, {}};
+        return covered->conflicted
+                   ? KernelMatch{nullptr, names + ", which no descriptor defines", {}, {}}
+                   : KernelMatch{&covered->descriptor, {}, covered->path, covered->treeRoot};
     }
     if(!reaching.empty())
     {
         return {nullptr,
                 names + ", which declares arch " + reaching + " reaching past the pack's "
-                    + describeArch(packArch)};
+                    + describeArch(packArch),
+                {},
+                {}};
     }
     return {nullptr,
             exists ? names + ", which is defined only for another arch"
-                   : names + ", which no descriptor defines"};
+                   : names + ", which no descriptor defines",
+            {},
+            {}};
 }
 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
@@ -1283,11 +1337,10 @@ inline constexpr std::array FILE_TYPES{
                  insertCatalogEntry(c.packs, parseKernelDescriptorPack(d, p.string()), d, p);
              }},
     FileType{SUFFIX_UKD,
-             1,
-             0,
+             UKD_VERSION_MAJOR,
+             UKD_VERSION_MINOR,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
-                 insertCatalogEntry(
-                     c.kernels, parseStandaloneKernelDescriptor(d, p.string()), d, p);
+                 insertCatalogEntry(c.kernels, parseKernelDescriptor(d, p.string()), d, p);
              }},
 };
 static_assert(FILE_TYPES.size() == 7, "one row per descriptor file type");
@@ -1433,11 +1486,22 @@ inline void
 
 /// Marks everything read so far as belonging to an earlier root, which is what makes a
 /// later root additive: insertCatalogEntry refuses a redefinition of a settled entry.
-inline void settleCatalog(DescriptorCatalog& catalog)
+///
+/// Also stamps @p root onto everything that root contributed. An entry is this root's iff
+/// it is not yet settled -- every earlier root's entries were settled by its own call --
+/// so the same pass that closes a root identifies its entries for free. The seven
+/// FileType insert rows never see the root, which is why the stamp lands here rather than
+/// at insertion.
+inline void settleCatalog(DescriptorCatalog& catalog, const std::filesystem::path& root)
 {
-    const auto settle = [](auto& map) {
+    const auto settle = [&root](auto& map) {
         for(auto& entry : map)
         {
+            if(entry.second.settled)
+            {
+                continue;
+            }
+            entry.second.treeRoot = root;
             entry.second.settled = true;
         }
     };
@@ -1491,7 +1555,7 @@ inline void
             // version it names rather than for whatever its body does with keys this build
             // has never heard of, and RFC 0020 §10.2.1's version-before-duplicate ordering
             // is unaffected.
-            if(!versionIsSupported(document, *fileType, path))
+            if(!versionIsSupported(document, fileType->major, fileType->minor, path.string()))
             {
                 continue;
             }
@@ -1530,7 +1594,7 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem
         std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
         detail::collectDescriptorFiles(root, files);
         detail::loadDescriptorFiles(files, catalog);
-        detail::settleCatalog(catalog);
+        detail::settleCatalog(catalog, root);
     }
 
     return catalog;
@@ -1651,12 +1715,14 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             continue;
         }
 
-        std::vector<const KernelDescriptorPack*> packEntries;
+        // The whole entry, not just its descriptor: the file a pack came from is what its
+        // inline kernels resolve their relative paths against.
+        std::vector<const CatalogEntry<KernelDescriptorPack>*> packEntries;
         for(const auto& [key, entry] : catalog.packs)
         {
             if(!entry.conflicted && entry.descriptor.engineId == engine.id)
             {
-                packEntries.push_back(&entry.descriptor);
+                packEntries.push_back(&entry);
             }
         }
 
@@ -1683,7 +1749,15 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
-            KernelDescriptorPack pack = *packEntry;
+            KernelDescriptorPack pack = packEntry->descriptor;
+            // An inline kernel is defined by the pack's own file. Referenced kernels are
+            // stamped with their own file below. treeRoot comes from the catalog entry
+            // rather than the path, since only the loader knows which root it walked.
+            for(auto& kernel : pack.kernels)
+            {
+                kernel.originDirectory = packEntry->path.parent_path();
+                kernel.treeRoot = packEntry->treeRoot;
+            }
             std::vector<const MatchDescriptor*> packMatchers;
             std::string reason;
 
@@ -1730,6 +1804,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                         break;
                     }
                     pack.kernels.push_back(*match.kernel);
+                    pack.kernels.back().originDirectory = match.path.parent_path();
+                    pack.kernels.back().treeRoot = match.treeRoot;
                 }
             }
 
@@ -1910,7 +1986,7 @@ inline std::vector<DescriptorSet>
         for(const auto& matcher : set.matchers)
         {
             const bool registered = matcher.scope == MatchScope::GRAPH
-                                        ? GraphMatcherRegistry::isRegistered(matcher.matchSymbol)
+                                        ? GraphCriterionRegistry::isRegistered(matcher.matchSymbol)
                                         : KernelMatcherRegistry::isRegistered(matcher.matchSymbol);
             if(!registered)
             {
@@ -1919,6 +1995,15 @@ inline std::vector<DescriptorSet>
                                         << matcher.matchSymbol << "'; dropping it");
                 resolvable = false;
             }
+        }
+        if(!set.engine.graphMatchNativeSymbol.empty()
+           && !GraphMatchRegistry::isRegistered(set.engine.graphMatchNativeSymbol))
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                    << set.engine.name
+                                    << "' names unregistered graph_match symbol '"
+                                    << set.engine.graphMatchNativeSymbol << "'; dropping it");
+            resolvable = false;
         }
         for(const auto& dispatch : set.dispatches)
         {
@@ -1985,7 +2070,7 @@ inline std::vector<DescriptorSet>
             // construct. Extracting validateAndIndexPacks() into a shared predicate would
             // remove this discarded second walk, and with it the duplicate warning an
             // engine shipping no heuristic gets: once here, once at real construction.
-            auto probe = makeStateManager<THandle>(set);
+            auto probe = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
             static_cast<void>(probe);
         }
         catch(const std::exception& error)

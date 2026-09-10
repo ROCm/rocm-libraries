@@ -759,3 +759,50 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
     return rocke_b_inline_asm(
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
 }
+
+/* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----
+ *
+ * These emit AMDGPU exec-mask manipulation instructions used by the wavelet
+ * pipeline's MFMA variant to split math-wave and load-wave execution paths
+ * without divergent LLVM branches (which would deadlock barriers).
+ *
+ * Python counterparts in IRBuilder: exec_and_saveexec / exec_xor /
+ * exec_or_saveexec / exec_or (core/ir.py lines 2985-3025).
+ */
+
+rocke_value_t* rocke_b_exec_and_saveexec(rocke_ir_builder_t* b, rocke_value_t* mask)
+{
+    if(!rocke_i_live(b) || !mask)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_AND_SAVEEXEC, &mask, 1, &i64_t, 1, NULL, NULL, 0, "exec_save", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_xor(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_XOR, &saved, 1, &i64_t, 1, NULL, NULL, 0, "exec_compl", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_or_saveexec(rocke_ir_builder_t* b, rocke_value_t* compl_v)
+{
+    if(!rocke_i_live(b) || !compl_v)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_OR_SAVEEXEC, &compl_v, 1, &i64_t, 1, NULL, NULL, 0, "exec_tmp", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+void rocke_b_exec_or(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return;
+    rocke_i_op(b, ROCKE_OP_TILE_EXEC_OR, &saved, 1, NULL, 0, NULL, NULL, 0, "v", NULL);
+}

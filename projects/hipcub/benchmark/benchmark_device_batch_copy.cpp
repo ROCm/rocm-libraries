@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark/benchmark.h"
-#include "cmdparser.hpp"
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>
@@ -41,8 +39,7 @@
 #include <utility>
 #include <vector>
 
-constexpr uint32_t warmup_size = 5;
-constexpr int32_t  max_size    = 1024 * 1024;
+constexpr int32_t max_size = 1024 * 1024;
 
 constexpr int32_t wlev_min_size = 128;
 constexpr int32_t blev_min_size = 1024;
@@ -90,12 +87,10 @@ std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenera
     return result;
 }
 
-using offset_type = size_t;
-
 template<typename ValueType, typename BufferSizeType>
 struct BatchCopyData
 {
-    size_t          total_num_elements = 0;
+    size_t          items              = 0;
     ValueType*      d_input            = nullptr;
     ValueType*      d_output           = nullptr;
     ValueType**     d_buffer_srcs      = nullptr;
@@ -106,7 +101,7 @@ struct BatchCopyData
     BatchCopyData(const BatchCopyData&) = delete;
 
     BatchCopyData(BatchCopyData&& other)
-        : total_num_elements{std::exchange(other.total_num_elements, 0)}
+        : items{std::exchange(other.items, 0)}
         , d_input{std::exchange(other.d_input, nullptr)}
         , d_output{std::exchange(other.d_output, nullptr)}
         , d_buffer_srcs{std::exchange(other.d_buffer_srcs, nullptr)}
@@ -116,7 +111,7 @@ struct BatchCopyData
 
     BatchCopyData& operator=(BatchCopyData&& other)
     {
-        total_num_elements = std::exchange(other.total_num_elements, 0);
+        items              = std::exchange(other.items, 0);
         d_input            = std::exchange(other.d_input, nullptr);
         d_output           = std::exchange(other.d_output, nullptr);
         d_buffer_srcs      = std::exchange(other.d_buffer_srcs, nullptr);
@@ -127,9 +122,9 @@ struct BatchCopyData
 
     BatchCopyData& operator=(const BatchCopyData&) = delete;
 
-    size_t total_num_bytes() const
+    size_t get_bytes() const
     {
-        return total_num_elements * sizeof(ValueType);
+        return items * sizeof(ValueType);
     }
 
     ~BatchCopyData()
@@ -185,26 +180,27 @@ BatchCopyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buf
     // Shuffle the sizes so that size classes aren't clustered
     std::shuffle(h_buffer_num_elements.begin(), h_buffer_num_elements.end(), rng);
 
-    result.total_num_elements
+    result.items
         = std::accumulate(h_buffer_num_elements.begin(), h_buffer_num_elements.end(), size_t{0});
 
     // Generate data.
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+    std::independent_bits_engine<std::mt19937_64, 64, unsigned long long> bits_engine{rng};
 
-    const size_t num_ints
-        = benchmark_utils::ceiling_div(result.total_num_bytes(), sizeof(uint64_t));
-    auto h_input = std::make_unique<unsigned char[]>(num_ints * sizeof(uint64_t));
+    const size_t num_ints = benchmark_utils::ceiling_div(result.get_bytes(), sizeof(unsigned long long));
+    auto h_input = std::make_unique<unsigned char[]>(num_ints * sizeof(unsigned long long));
 
-    std::for_each(reinterpret_cast<uint64_t*>(h_input.get()),
-                  reinterpret_cast<uint64_t*>(h_input.get() + num_ints * sizeof(uint64_t)),
-                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+    std::for_each(reinterpret_cast<unsigned long long*>(h_input.get()),
+                  reinterpret_cast<unsigned long long*>(h_input.get() + num_ints * sizeof(unsigned long long)),
+                  [&bits_engine](unsigned long long& elem) { ::new(&elem) unsigned long long{bits_engine()}; });
 
-    HIP_CHECK(hipMalloc(&result.d_input, result.total_num_bytes()));
-    HIP_CHECK(hipMalloc(&result.d_output, result.total_num_bytes()));
+    HIP_CHECK(hipMalloc(&result.d_input, result.get_bytes()));
+    HIP_CHECK(hipMalloc(&result.d_output, result.get_bytes()));
 
     HIP_CHECK(hipMalloc(&result.d_buffer_srcs, num_buffers * sizeof(ValueType*)));
     HIP_CHECK(hipMalloc(&result.d_buffer_dsts, num_buffers * sizeof(ValueType*)));
     HIP_CHECK(hipMalloc(&result.d_buffer_sizes, num_buffers * sizeof(BufferSizeType)));
+
+    using offset_type = size_t;
 
     // Generate the source and shuffled destination offsets.
     std::vector<offset_type> src_offsets;
@@ -214,7 +210,8 @@ BatchCopyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buf
     {
         src_offsets = shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
         dst_offsets = shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
-    } else
+    }
+    else
     {
         src_offsets = std::vector<offset_type>(num_buffers);
         dst_offsets = std::vector<offset_type>(num_buffers);
@@ -240,8 +237,7 @@ BatchCopyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buf
     }
 
     // Prepare the batch copy.
-    HIP_CHECK(
-        hipMemcpy(result.d_input, h_input.get(), result.total_num_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(result.d_input, h_input.get(), result.get_bytes(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(result.d_buffer_srcs,
                         h_buffer_srcs.data(),
                         h_buffer_srcs.size() * sizeof(ValueType*),
@@ -258,91 +254,69 @@ BatchCopyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buf
     return result;
 }
 
-template<class ValueType, class BufferSizeType>
-void run_benchmark(benchmark::State& state,
-                   hipStream_t       stream,
-                   const int32_t     num_tlev_buffers = 1024,
-                   const int32_t     num_wlev_buffers = 1024,
-                   const int32_t     num_blev_buffers = 1024)
+template<int32_t ItemSize,
+         int32_t ItemAlignment,
+         class BufferSizeType,
+         int32_t NumTlevBuffers = 1024,
+         int32_t NumWlevBuffers = 1024,
+         int32_t NumBlevBuffers = 1024>
+class batch_copy_benchmark : public primbench::benchmark_interface
 {
-    const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
+    using ValueType = benchmark_utils::custom_aligned_type<ItemSize, ItemAlignment>;
 
-    size_t                                   temp_storage_bytes = 0;
-    BatchCopyData<ValueType, BufferSizeType> data;
-    HIP_CHECK(hipcub::DeviceCopy::Batched(nullptr,
-                                          temp_storage_bytes,
-                                          data.d_buffer_srcs,
-                                          data.d_buffer_dsts,
-                                          data.d_buffer_sizes,
-                                          num_buffers));
-
-    void* d_temp_storage = nullptr;
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
-
-    data = prepare_data<ValueType, BufferSizeType>(num_tlev_buffers,
-                                                   num_wlev_buffers,
-                                                   num_blev_buffers);
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    primbench::json meta() const override
     {
-        HIP_CHECK(hipcub::DeviceCopy::Batched(d_temp_storage,
-                                              temp_storage_bytes,
-                                              data.d_buffer_srcs,
-                                              data.d_buffer_dsts,
-                                              data.d_buffer_sizes,
-                                              num_buffers,
-                                              stream));
+        return primbench::json{}
+            .add("algo", "device_batch_copy")
+            .add("lvl", "device")
+            .add("item_size", ItemSize)
+            .add("item_alignment", ItemAlignment)
+            .add("data_type", primbench::name<BufferSizeType>())
+            .add("number_of_tlev", NumTlevBuffers)
+            .add("number_of_wlev", NumWlevBuffers)
+            .add("number_of_blev", NumBlevBuffers);
     }
-    HIP_CHECK(hipDeviceSynchronize());
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for(auto _ : state)
+    void run(primbench::state& state) override
     {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
+        const auto& stream = state.stream;
 
-        HIP_CHECK(hipcub::DeviceCopy::Batched(d_temp_storage,
-                                              temp_storage_bytes,
-                                              data.d_buffer_srcs,
-                                              data.d_buffer_dsts,
-                                              data.d_buffer_sizes,
-                                              num_buffers,
-                                              stream));
+        BatchCopyData<ValueType, BufferSizeType> data
+            = prepare_data<ValueType, BufferSizeType>(NumTlevBuffers,
+                                                      NumWlevBuffers,
+                                                      NumBlevBuffers);
 
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
+        const size_t num_buffers = NumTlevBuffers + NumWlevBuffers + NumBlevBuffers;
 
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
+        void*  d_temp_storage = nullptr;
+        size_t temp_storage_bytes;
+
+        const auto launch = [&]
+        {
+            HIP_CHECK(hipcub::DeviceCopy::Batched(d_temp_storage,
+                                                  temp_storage_bytes,
+                                                  data.d_buffer_srcs,
+                                                  data.d_buffer_dsts,
+                                                  data.d_buffer_sizes,
+                                                  num_buffers,
+                                                  stream));
+        };
+
+        launch();
+
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+        state.set_items(data.items);
+        state.add_writes<ValueType>(data.items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_temp_storage));
     }
-    state.SetBytesProcessed(state.iterations() * data.total_num_bytes());
-    state.SetItemsProcessed(state.iterations() * data.total_num_elements);
+};
 
-    HIP_CHECK(hipFree(d_temp_storage));
-}
-
-#define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)                     \
-    benchmark::RegisterBenchmark(                                                     \
-        std::string("device_batch_copy"                                               \
-                    "<data_type:" #T ",item_size:" #IS ",item_alignment:" #IA         \
-                    ",number_of_tlev:" #num_tlev ",number_of_wlev:" #num_wlev         \
-                    ",number_of_blev:" #num_blev ">.")                                \
-            .c_str(),                                                                 \
-        [=](benchmark::State& state)                                                  \
-        {                                                                             \
-            run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>, T>(state,     \
-                                                                           stream,    \
-                                                                           num_tlev,  \
-                                                                           num_wlev,  \
-                                                                           num_blev); \
-        })
+#define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev) \
+    executor.queue<batch_copy_benchmark<IS, IA, T, num_tlev, num_wlev, num_blev>>()
 
 #define BENCHMARK_TYPE(item_size, item_alignment)                            \
     CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),     \
@@ -352,66 +326,21 @@ void run_benchmark(benchmark::State& state,
 
 int32_t main(int32_t argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", 1024, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
+    primbench::settings settings;
 
-    parser.run_and_exit_if_error();
+    // The size is set to 1, as prepare_data() calculates it later.
+    settings.size                 = 1;
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t  size   = parser.get<size_t>("size");
-    const int32_t trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    // HIP
-    hipStream_t stream = hipStreamDefault; // default
+    BENCHMARK_TYPE(1, 1);
+    BENCHMARK_TYPE(1, 2);
+    BENCHMARK_TYPE(1, 4);
+    BENCHMARK_TYPE(1, 8);
+    BENCHMARK_TYPE(2, 2);
+    BENCHMARK_TYPE(4, 4);
+    BENCHMARK_TYPE(8, 8);
 
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-
-    std::cout << "benchmark_device_batch_copy" << std::endl;
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Benchmark info
-    benchmark::AddCustomContext("size", std::to_string(size));
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-
-    benchmarks = {BENCHMARK_TYPE(1, 1),
-                  BENCHMARK_TYPE(1, 2),
-                  BENCHMARK_TYPE(1, 4),
-                  BENCHMARK_TYPE(1, 8),
-                  BENCHMARK_TYPE(2, 2),
-                  BENCHMARK_TYPE(4, 4),
-                  BENCHMARK_TYPE(8, 8)};
-
-            
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

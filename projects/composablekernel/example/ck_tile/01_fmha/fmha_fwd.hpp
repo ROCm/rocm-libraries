@@ -233,12 +233,19 @@ struct FmhaMasks
 // runtime args, some will passed to karg, some will used to compute grids/blocks
 struct fmha_fwd_args
 {
+    std::string* selected_kernel_name = nullptr;
+
     const void* q_ptr;
     const void* k_ptr;
     const void* v_ptr;
     const void* bias_ptr; // bias or alibi_slope pointer
     const void* q_descale_ptr;
     const void* k_descale_ptr;
+    // With BLOCKSCALE on gfx1250 the V descale rides an E8M0 scale operand, which keeps
+    // only the exponent: a value that is not a power of two is truncated toward zero
+    // (1.9 becomes 1.0), silently. Snap the scale to a power of two before quantizing and
+    // quantize with that same value. The caller must guarantee this; neither the kernel
+    // nor fmha_fwd() can validate it (the pointer is device memory).
     const void* v_descale_ptr;
     void* rand_val_ptr;
     void* lse_ptr;

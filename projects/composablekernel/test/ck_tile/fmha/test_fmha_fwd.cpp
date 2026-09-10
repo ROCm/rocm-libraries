@@ -104,8 +104,6 @@ struct Fp8FamilyTestConfigs
     }
 };
 
-// fp8 output leaves rtol=0, atol=16 (see get_elimit), so these cases are close to
-// unfalsifiable. They still catch dispatch and crash regressions.
 template <>
 struct TestConfigs<FmhaFwdFp8> : Fp8FamilyTestConfigs
 {
@@ -320,6 +318,100 @@ TEST_P(AllLong, DataTypeConfig)
                                                1,    // num_splits
                                                COMMON_ARGS);
     CHECK_RESULT(result);
+}
+
+TEST(TestCkTileFmhaFwd, QrTdmLdsArenaDecode)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm LDS arena is only supported on gfx1250";
+
+        std::string selected_kernel;
+        auto decode = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                                   1,
+                                                   4,
+                                                   2,
+                                                   {127},
+                                                   {509},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   0,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "0",
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(decode, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
+    }
+}
+
+TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm LDS arena is only supported on gfx1250";
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                                   1,
+                                                   4,
+                                                   2,
+                                                   {2049},
+                                                   {2177},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   false,
+                                                   "a:1",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "1",
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
+    }
 }
 
 class General

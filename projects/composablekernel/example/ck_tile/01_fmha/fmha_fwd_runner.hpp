@@ -17,7 +17,6 @@
 #include <functional>
 #include <cmath>
 #include <numeric>
-#include <stdexcept>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -69,12 +68,27 @@ auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 template <>
 auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 {
-    using TypeConfig  = FmhaFwdTypeConfig<FmhaFwdFp8>;
-    using ODataType   = typename TypeConfig::ODataType;
-    float o_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<ODataType>::max());
-    double rtol       = 0;
-    double atol       = 16 * (o_dtype_max > 240 ? 2 : 1);
-    return ck_tile::make_tuple(rtol, atol);
+    double max_rounding_point_distance = 3;
+    double atol                        = 0.125;
+    return ck_tile::make_tuple(max_rounding_point_distance, atol);
+}
+
+template <typename ODataType, typename RefTensor>
+double out_atol(double atol, const RefTensor& ref)
+{
+    if constexpr(!std::is_same_v<ODataType, ck_tile::fp8_t>)
+    {
+        return atol;
+    }
+    else
+    {
+        double scale = 0;
+        ref.ForEach([&](auto& self, auto idx) {
+            scale = std::max(
+                scale, std::abs(static_cast<double>(ck_tile::type_convert<float>(self(idx)))));
+        });
+        return atol * scale;
+    }
 }
 
 template <>
@@ -258,9 +272,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int init_sink_value,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
-                        std::optional<std::string> json = std::nullopt)
+                        std::optional<std::string> json   = std::nullopt,
+                        std::string* selected_kernel_name = nullptr)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
+
+    if(selected_kernel_name != nullptr)
+        selected_kernel_name->clear();
 
     constexpr bool is_mx = ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp4>::value;
 
@@ -1121,21 +1139,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
     bias_buf.ToDevice(bias_host.data());
     q_descale_buf.ToDevice(q_descale_host.data());
     k_descale_buf.ToDevice(k_descale_host.data());
-    if(qscale.type == quant_scale_enum::blockscale)
-    {
-        // v_descale rides an E8M0 operand, which truncates towards zero.
-        const bool v_descale_is_pow2 =
-            std::all_of(v_descale_host.begin(), v_descale_host.end(), [](auto v) {
-                const float f = ck_tile::type_convert<float>(v);
-                const float r =
-                    ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::e8m0_t>(f));
-                return ck_tile::bit_cast<uint32_t>(f) == ck_tile::bit_cast<uint32_t>(r);
-            });
-        if(!v_descale_is_pow2)
-        {
-            throw std::runtime_error("v_descale must be a power of two with -qscale=bs");
-        }
-    }
     v_descale_buf.ToDevice(v_descale_host.data());
     block_scale_seqstart_q_buf.ToDevice(block_scale_seqstart_q_host.data());
     block_scale_seqstart_k_buf.ToDevice(block_scale_seqstart_k_host.data());
@@ -1403,8 +1406,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
         args.nhead_k  = nhead_k;
         if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
         {
-            args.num_head_q_total = pack_gqa_nhead_;
-            args.head_start       = 0;
+            args.num_head_q_total     = pack_gqa_nhead_;
+            args.head_start           = 0;
+            args.selected_kernel_name = selected_kernel_name;
         }
 
         args.stride_q       = stride_q;
@@ -1964,8 +1968,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
         o_buf.FromDevice(o_host.data()); // TODO: ugly
 
         auto [rtol_, atol_] = get_elimit<DataTypeConfig>(init_method);
-        pass                = ck_tile::check_err(
-            o_host, o_naive_ref, std::string("OUT Error: Incorrect results!"), rtol_, atol_);
+        pass                = ck_tile::check_err(o_host,
+                                  o_naive_ref,
+                                  std::string("OUT Error: Incorrect results!"),
+                                  rtol_,
+                                  out_atol<ODataType>(atol_, o_naive_ref));
         std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
     }
     else
@@ -2767,18 +2774,14 @@ fwd_result fmha_fwd_run(mode_enum mode,
             else if(o_perm) o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[0], idx[1] + query_offset, idx[2]); });
             else       o_host_result.ForEach([&](auto& self, auto idx) { self(idx) = o_host(b_idx, idx[1] + query_offset, idx[0], idx[2]); });
             // clang-format on
-            // The shipped tolerance cannot fail when ODataType is fp8_t: check_err
-            // then takes its fp8 overload, whose criterion is |out - ref| <= atol or
-            // code_distance <= rtol, and get_elimit returns an atol of 16 or 32 while
-            // O, being a convex combination of V, stays within max|V|. For the
-            // quantized paths two derived checks replace it.
+            // For the quantized paths two derived checks replace this one.
             auto stock_check = [&] {
                 auto [rtol, atol] = get_elimit<DataTypeConfig>(init_method);
                 return ck_tile::check_err(o_host_result,
                                           o_host_ref,
                                           std::string("OUT Error: Incorrect results!"),
                                           rtol,
-                                          atol);
+                                          out_atol<ODataType>(atol, o_host_ref));
             };
             bool cur_pass = true;
             if constexpr(supports_qscale)
@@ -2828,16 +2831,23 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         if(!(std::abs(a) <= std::abs(worst_alpha)))
                             worst_alpha = a;
                     }
-                    // The largest per-head |alpha| a correct kernel produced over the
-                    // forward matrix, measured on this base, was 2.3e-3.
-                    constexpr double alpha_max = 1e-2;
-                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_max);
+                    // P's rounding spans a whole row, so alpha averages unmasked rows, not points.
+                    const double alpha_rows = static_cast<double>(
+                        mask.type == mask_enum::no_mask ? real_seqlen_q
+                                                        : std::min(real_seqlen_q, real_seqlen_k));
+                    // The one policy constant: the worst correct head measured needed 1.07.
+                    constexpr double alpha_k = 2;
+                    // 1/12 is the variance of a half-ULP round-to-nearest.
+                    const double alpha_tol =
+                        alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +
+                                            u_o * u_o / (12 * alpha_rows * hdim_v));
+                    cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_tol);
                     if(over != 0)
                         std::cerr << "OUT accuracy bound: " << over << " elements over, worst "
                                   << worst << "x" << std::endl;
-                    if(!(std::abs(worst_alpha) <= alpha_max))
+                    if(!(std::abs(worst_alpha) <= alpha_tol))
                         std::cerr << "OUT systematic gain: per-head alpha " << worst_alpha
-                                  << " exceeds " << alpha_max << std::endl;
+                                  << " exceeds " << alpha_tol << std::endl;
                 }
             }
             else

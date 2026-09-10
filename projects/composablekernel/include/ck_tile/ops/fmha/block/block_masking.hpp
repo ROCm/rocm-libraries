@@ -320,6 +320,9 @@ struct GenericAttentionMask
         }
     }
 
+    // the key sequence length, i.e. one past the last valid X index
+    CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
+
     private:
     index_t y, x, sink;
     index_t y_total, x_total;
@@ -563,6 +566,9 @@ struct SimplifiedGenericAttentionMask
             return top_right_edge || bottom_left_edge;
         }
     }
+
+    // the key sequence length, i.e. one past the last valid X index
+    CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
 
     private:
     index_t y, x, sink;

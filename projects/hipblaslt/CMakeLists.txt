@@ -32,7 +32,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
-set(HIPBLASLT_PROJECT_VERSION "1.4.1" CACHE STRING "Semantic version string.")
+set(HIPBLASLT_PROJECT_VERSION "1.5.0" CACHE STRING "Semantic version string.")
 
 set(PROJECT_VERSION "${HIPBLASLT_PROJECT_VERSION}")
 string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
@@ -521,6 +521,17 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT runtime
     )
+    # The gfx1250 v0 GEMM tree builds into its own directory (see
+    # device-library/CMakeLists.txt) but installs as one more subdir of the same
+    # library/ root. The property is only set when that tree is built.
+    get_property(_gfx1250v0_library_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
+    if(_gfx1250v0_library_dir)
+        rocm_install(
+            DIRECTORY "${_gfx1250v0_library_dir}"
+            DESTINATION "${HIPBLASLT_TENSILE_LIBRARY_DIR}/library"
+            COMPONENT runtime
+        )
+    endif()
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
