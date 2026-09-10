@@ -45,7 +45,9 @@ explored, not shipped.
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
+import inspect
 import itertools
 import json
 import math
@@ -56,6 +58,46 @@ from pathlib import Path
 
 class ParityError(RuntimeError):
     """The dispatcher could not be reached or asked. Never a shape-level decline."""
+
+
+def _predicate_result(predicate, *args, **kwargs) -> tuple[bool, str]:
+    """Invoke an eligibility API without converting operational errors to declines."""
+    if not callable(predicate):
+        raise ParityError("eligibility predicate is not callable")
+    try:
+        inspect.signature(predicate).bind(*args, **kwargs)
+        result = predicate(*args, **kwargs)
+    except Exception as exc:
+        raise ParityError(f"eligibility predicate failed: {exc}") from exc
+    if (
+        type(result) is not tuple
+        or len(result) != 2
+        or type(result[0]) is not bool
+        or type(result[1]) is not str
+        or (not result[0] and not result[1].strip())
+    ):
+        raise ParityError(
+            "eligibility predicate must return (bool, str), with a decline reason"
+        )
+    return result
+
+
+def _eligible(candidate, request) -> tuple[bool, str]:
+    """Ask one candidate the complete eligibility question.
+
+    `admits` is the only eligibility API. A candidate that does not expose it
+    cannot be asked the question at all, so the lookup failure is the answer:
+    reconciliation against a dispatcher whose capability gate was never
+    consulted is an unverified verdict, and an unverified verdict that looks
+    like a verified one is worse than none.
+    """
+    try:
+        # Static lookup distinguishes absence from a descriptor that raises on access.
+        inspect.getattr_static(candidate, "admits")
+        predicate = getattr(candidate, "admits")
+    except Exception as exc:
+        raise ParityError(f"cannot look up eligibility API 'admits': {exc}") from exc
+    return _predicate_result(predicate, request)
 
 
 def _load_profile(path: str) -> dict:
@@ -119,9 +161,8 @@ class Resolution:
     shape: dict
     spec: object | None = None
     reason: str | None = None
-    #: "constructed" (spec built and predicate accepted), "declined" (predicate said
-    #: no), or "rejected" (spec construction raised -- the answer the predicate alone
-    #: never sees).
+    #: "constructed" (spec built and predicate accepted) or "declined"
+    #: (the predicate returned a validated false result).
     kind: str = "constructed"
 
 
@@ -143,7 +184,7 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
 
 
 def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
-    """Ask the dispatcher for every shape, keeping both kinds of refusal apart."""
+    """Ask the dispatcher for every shape; API errors are operational failures."""
     dispatch = profile.get("dispatch") or {}
     request_decl = profile.get("request") or {}
     predicate_decl = profile.get("predicate") or {}
@@ -171,27 +212,16 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
-            # The constructor is INSIDE the try on purpose. Structural rejections --
-            # a decode Sq the block size cannot divide, an unsupported head_size --
-            # raise here, before any predicate runs. Calling only the predicate
-            # reports those shapes as supported and ships a wrong denominator.
             request = request_cls(**fields)
             spec = factory(request)
         except Exception as exc:
-            out.append(
-                Resolution(
-                    shape, reason=f"{type(exc).__name__}: {exc}", kind="rejected"
-                )
-            )
-            continue
+            raise ParityError(f"request/spec construction failed: {exc}") from exc
         if predicate is not None:
-            supported, why = predicate(spec, arch=arch) if arch else predicate(spec)
+            supported, why = _predicate_result(
+                predicate, spec, **({"arch": arch} if arch else {})
+            )
             if not supported:
-                out.append(
-                    Resolution(
-                        shape, reason=str(why) or "predicate declined", kind="declined"
-                    )
-                )
+                out.append(Resolution(shape, reason=why, kind="declined"))
                 continue
         out.append(Resolution(shape, spec=spec))
     return out
@@ -269,6 +299,51 @@ def _policy_resolvers(profile: dict) -> dict:
     return resolvers
 
 
+def _specialization(profile: dict) -> dict:
+    """The profile's `specialization` block, carried through to the emitted config.
+
+    The declaration is what lets a machine that never had rocKE installed say which
+    metadata fields the producing compiler specialized on and how each one is read
+    off the builder object. Dropping it here would ship descriptors whose
+    `provenance.specialization_contract` cannot be written at all, and the receiving
+    machine would have nothing to check the compiled bytes against.
+
+    EVERY field this profile hands to a standalone policy callback needs an explicit
+    binding. The callback is a formula that lives beside the kernel on THIS machine;
+    the descriptor has to name the builder-owned attribute or zero-argument accessor
+    that answers the same question ON THE OBJECT the compiler actually hands the
+    builder, spelled out as `{"method": "<accessor>"}` or `{"field": "<attr>"}`.
+    Guessing an accessor from the knob's name, or copying the formula into the
+    declaration, would both certify a compile against something other than what it
+    was built from. A knob with no authoritative readout is UNSUPPORTED and fails
+    here: relabelling it matcher-only would say the compiler does not specialize on
+    a field it demonstrably does, which is the one waiver that makes a full-mode
+    check pass while proving nothing.
+    """
+    declaration = profile.get("specialization")
+    if not isinstance(declaration, dict) or not declaration:
+        raise ParityError(
+            "the profile declares no 'specialization' block, so the emitted config "
+            "cannot state which metadata fields the producing compiler specializes "
+            "on. Declare 'metadata_fields' with a 'bindings' entry each, and "
+            "'matcher_only_fields' for the rest."
+        )
+    bindings = declaration.get("bindings") or {}
+    for knob in profile.get("policies") or {}:
+        binding = bindings.get(knob)
+        if not isinstance(binding, dict) or set(binding) not in ({"field"}, {"method"}):
+            raise ParityError(
+                f"'{knob}' is resolved here by a standalone policy callback but the "
+                f"specialization block binds no builder-owned readout for it. Add "
+                f"bindings.{knob} naming the attribute or zero-argument accessor on "
+                f"the builder's own spec object, as {{'method': '<accessor>'}} or "
+                f"{{'field': '<attr>'}}. There is no convention to infer one from, "
+                f"and moving it to matcher_only_fields would claim the compiler does "
+                f"not specialize on a field it does."
+            )
+    return copy.deepcopy(declaration)
+
+
 def build_config(
     resolutions: list[Resolution], profile: dict, knobs: dict | None = None
 ) -> dict:
@@ -293,6 +368,11 @@ def build_config(
     metadata_fields = list(profile.get("metadata_fields") or [])
     vocabulary = dict(profile.get("vocabulary") or {})
     resolvers = _policy_resolvers(profile)
+    # Resolved before a single kernel is built, so a knob the profile resolves by
+    # callback with no declared readout is refused while the message can still name
+    # it. Left until the return statement, the callback loop below reaches the knob
+    # first and fails on whatever the resolver does with it instead.
+    specialization = _specialization(profile)
     # Arch-PRIVATE fields are absent from the shared spec the dispatcher returns, but
     # the engine may still read them from the catalog: the gfx942 matcher checks
     # `seqlen_q % block_m == 0` and prepare() passes block_m to the grid helper, so a
@@ -434,6 +514,7 @@ def build_config(
         "authored_subpath": profile.get("authored_subpath", f"rocKE/{slug}"),
         "engine": profile["engine"],
         "kmd_fields": profile["kmd_fields"],
+        "specialization": specialization,
         "kernel_source_kind": profile.get("kernel_source_kind", "rocke"),
         "workspace_policy": profile.get("workspace_policy", "none"),
         "delegates_to_existing_plan": profile.get("delegates_to_existing_plan", False),

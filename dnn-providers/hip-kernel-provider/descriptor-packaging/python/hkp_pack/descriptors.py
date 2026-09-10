@@ -250,6 +250,32 @@ def _validate_ukd_fields(ukd, where, log=print):
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
     kind = ks["kind"]
+    provenance = ukd.get("provenance", {})
+    if not isinstance(provenance, dict):
+        raise HkpPackError(f"{where}: provenance must be an object")
+    # `effective_spec` is the producing compiler's own statement about what it
+    # observed while building the payload. An authored input claiming one would be
+    # asserting an observation nothing made, so it is refused at the door rather
+    # than overwritten later -- a shipped `kpack` descriptor is the one form that
+    # legitimately carries it, because packing is what wrote it.
+    if kind != "kpack" and "effective_spec" in provenance:
+        raise HkpPackError(
+            f"{where}: provenance.effective_spec is reserved for the producing "
+            "compiler and cannot be authored"
+        )
+    if "specialization_contract" in provenance:
+        contract = provenance["specialization_contract"]
+        if (
+            not isinstance(contract, dict)
+            or set(contract) != {"schema_version", "consumers"}
+            or contract["schema_version"] != 1
+            or not isinstance(contract["consumers"], list)
+            or not contract["consumers"]
+        ):
+            raise HkpPackError(
+                f"{where}: specialization_contract must be "
+                "{'schema_version': 1, 'consumers': [...]} with at least one consumer"
+            )
     if kind == "hip":
         _require(ks, ["source", "entry"], where)
         if "build" not in ks:

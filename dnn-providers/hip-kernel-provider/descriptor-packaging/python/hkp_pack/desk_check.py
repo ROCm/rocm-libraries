@@ -44,6 +44,10 @@ import collections
 import json
 from pathlib import Path
 
+from . import agreement
+from .errors import HkpPackError
+from .kpack_resolver import load_kpack
+
 # Two vocabularies describe one type: a rocKE spec spells the dtype the way
 # the builder's Python takes it ("bf16"), while the KMD metadata carries the
 # hipDNN DataType enum name the matcher compares against the graph
@@ -128,10 +132,187 @@ class DeskCheckNoSpecFound(RuntimeError):
     and "checked, found nothing wrong" rendered identically."""
 
 
+def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
+    """A KDP's kernel descriptors, with standalone-UKD id references resolved.
+
+    Post-pack a KDP keeps a referenced standalone UKD as a bare STRING and the UKD
+    ships as its own file in the same shard. A reader iterating the raw list
+    therefore meets a string where a descriptor should be -- and the standalone UKD
+    is the one case that carries a MULTI-consumer record, the strongest evidence in
+    the artifact, so leaving it unread would skip precisely what is hardest to
+    check. Resolved by id against the shard, which is the hop
+    `verify_variant_sets.resolve_bundles` already makes, so the two readers of one
+    artifact agree about what is in it.
+    """
+    kernels = []
+    for item in kdp_doc.get("kernelDescriptors") or []:
+        if isinstance(item, dict):
+            kernels.append(item)
+        elif isinstance(item, str):
+            target = tree.get(item)
+            if target is None:
+                raise HkpPackError(
+                    f"{where}: kernelDescriptors references id '{item}', which "
+                    "resolves to no descriptor in this shard"
+                )
+            kernels.append(target)
+        else:
+            raise HkpPackError(
+                f"{where}: a kernelDescriptors entry is neither an inline object "
+                f"nor an id reference (got {type(item).__name__})"
+            )
+    return kernels
+
+
 def load_kernels(kdp_path: Path) -> list[dict]:
-    """Load a `.kdp.json`'s ``kernelDescriptors`` list."""
-    doc = json.loads(Path(kdp_path).read_text(encoding="utf-8"))
-    return doc["kernelDescriptors"]
+    """A `.kdp.json`'s kernel descriptors, standalone-UKD references resolved."""
+    kdp_path = Path(kdp_path)
+    doc = json.loads(kdp_path.read_text(encoding="utf-8"))
+    return resolve_kernels(doc, load_tree(kdp_path), kdp_path.name)
+
+
+def load_tree(kdp_path: Path) -> dict:
+    """Every generic descriptor in the KDP's shard, indexed by its own ``id``.
+
+    The shard is the KDP's own directory and everything beneath it, which is how
+    the runtime loader reaches an engine's descriptors. Two documents claiming one
+    id is an error rather than a pick: which one won would depend on directory
+    order, and the losing engine would be checked against a schema it does not use.
+    """
+    root = Path(kdp_path).resolve().parent
+    by_id: dict[str, tuple[Path, dict]] = {}
+    for path in sorted(root.rglob("*.json")):
+        if path.name.endswith(".kdp.json"):
+            continue
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(doc, dict) or "id" not in doc:
+            continue
+        seen = by_id.get(doc["id"])
+        if seen is not None:
+            raise HkpPackError(
+                f"descriptor id '{doc['id']}' is claimed by both {seen[0]} and {path}"
+            )
+        by_id[doc["id"]] = (path, doc)
+    return {key: doc for key, (_path, doc) in by_id.items()}
+
+
+def resolve_schema(kdp_doc: dict, tree: dict) -> tuple[dict, dict]:
+    """``(engine, kmd)`` for a KDP, resolved by UUID at every hop.
+
+    ``KDP.engine`` names a UED and ``UED.metadata`` names a KMD, both by id. A
+    sibling file whose stem happens to match is not a reference and is never
+    substituted for one: a bundle can hold several engines, and binding by name
+    would check a variant set against another engine's schema and pass.
+    """
+    engine_id = kdp_doc.get("engine")
+    if engine_id not in tree:
+        raise HkpPackError(
+            f"KDP engine '{engine_id}' resolves to no descriptor in this shard"
+        )
+    engine = tree[engine_id]
+    kmd_id = engine.get("metadata")
+    if kmd_id not in tree:
+        raise HkpPackError(
+            f"engine '{engine_id}' metadata '{kmd_id}' resolves to no descriptor "
+            "in this shard"
+        )
+    return engine, tree[kmd_id]
+
+
+def _payload(kernel: dict, kdp_path: Path, arch: str, kpack_python_dir=None) -> bytes:
+    """The archive bytes this descriptor names, read from the archive itself.
+
+    A check that compares the descriptor's own ``sha256`` against a digest of that
+    same field establishes nothing. Reading the named blob is what makes the payload
+    binding real, and it needs the packaging archive reader only -- never the
+    producer that emitted the kernel.
+    """
+    source = kernel.get("kernel_source", {})
+    library = Path(kdp_path).resolve().parent / source.get("library", "")
+    if not library.is_file():
+        raise HkpPackError(
+            f"kernel '{kernel.get('name')}' names library '{source.get('library')}', "
+            f"which is not a file at {library}"
+        )
+    kpack, _compression = load_kpack(kpack_python_dir)
+    archive = kpack.PackedKernelArchive.read(str(library))
+    blob = archive.get_kernel(source.get("toc_key"), arch)
+    if blob is None:
+        raise HkpPackError(
+            f"kernel '{kernel.get('name')}': toc_key '{source.get('toc_key')}' is "
+            f"absent from {library} for {arch}"
+        )
+    return bytes(blob)
+
+
+def compiled_agreement(
+    kdp_path: Path, kpack_python_dir=None
+) -> tuple[list[str], list[str], int]:
+    """Compiled-specialization agreement over one shipped KDP.
+
+    The self-contained declaration and the producing-build record are checked
+    against the descriptors and archive bytes in hand. Nothing imports the producer,
+    so a valid artifact verifies on a machine that has never had rocKE installed --
+    and an artifact that cannot present a record is a failure, not an unchecked
+    property, because the absence is exactly the state a forged or stale tree is in.
+
+    Returns `(failures, unclaimed, verified)`. A declaration with no
+    `metadata_fields` states that the compiler specialized on nothing, which is the
+    legitimate and mandatory declaration for a non-compiled source -- there is no
+    producing-build record for it to bind, so it is reported as making NO COMPILED
+    CLAIM and counted separately. Folding it into the pass would put "declaration
+    and producing-build record bind the archive bytes" behind a kernel for which no
+    record was ever read, which is a claim this check did not make.
+    """
+    kdp_path = Path(kdp_path)
+    doc = json.loads(kdp_path.read_text(encoding="utf-8"))
+    tree = load_tree(kdp_path)
+    engine, kmd = resolve_schema(doc, tree)
+    header = {k: v for k, v in doc.items() if k != "kernelDescriptors"}
+    arches = doc.get("arch") or []
+    if len(arches) != 1:
+        return (
+            [
+                f"{kdp_path.name}: a shipped shard carries exactly one arch, not "
+                f"{arches!r}"
+            ],
+            [],
+            0,
+        )
+    arch = arches[0]
+    header["arch"] = [arch]
+    failures: list[str] = []
+    unclaimed: list[str] = []
+    verified = 0
+    for kernel in resolve_kernels(doc, tree, kdp_path.name):
+        name = kernel.get("name")
+        try:
+            declaration = agreement.select_declaration(
+                kernel, engine, kmd, {kmd["id"]: kmd}
+            )
+            records = agreement.canonical_records(
+                [
+                    agreement.consumer_record(
+                        kernel, engine, kmd, header, arch, declaration
+                    )
+                ]
+            )
+            if not declaration["metadata_fields"]:
+                unclaimed.append(
+                    f"{name}: declares no specialized metadata_fields, so there is "
+                    f"no producing-build record to bind and nothing here was "
+                    f"verified against a binary"
+                )
+                continue
+            payload = _payload(kernel, kdp_path, arch, kpack_python_dir)
+            agreement.verify(kernel, records, payload)
+            verified += 1
+        except HkpPackError as exc:
+            failures.append(f"{name}: {exc}")
+    return failures, unclaimed, verified
 
 
 def _authored_spec(kernel: dict) -> dict:
@@ -234,6 +415,15 @@ def _field_applicable(kernels: list[dict], field: str) -> bool:
     return any(field in k.get("kernel_source", {}) for k in kernels)
 
 
+#: The two things a desk check can be asked. `structural` reads the descriptors
+#: against themselves and against each other; `full` additionally binds each
+#: descriptor to the producing compiler's record and to the archive bytes it names.
+#: They are separate MODES rather than a strength dial because their conclusions are
+#: different in kind: a structural pass is a statement about the documents, and only
+#: a full pass is a statement about the binary.
+MODES = ("full", "structural")
+
+
 class DeskCheckReport:
     """All four invariants over one kernel list, plus a pass/fail verdict.
 
@@ -251,6 +441,18 @@ class DeskCheckReport:
     drift report used to delete the same field from the tuple identity and
     manufacture false collisions in the check whose entire job is catching
     unreachable variants. Narrow one, and the other is untouched.
+
+    `mode` decides what the verdict is allowed to MEAN. Under ``structural`` the
+    report names compiled agreement as not checked and can never read as though it
+    held; the drift line says it compared the AUTHORED spec, which is a claim about
+    what was asked for rather than about what was built. Under ``full``,
+    `agreement_failures` carries `compiled_agreement`'s failures and an empty list
+    is the only clean outcome -- a missing or stale record arrives here as a
+    failure message, never as an absent one. `agreement_unclaimed` carries the
+    kernels that declare no specialized metadata_fields: they are stated as making
+    NO COMPILED CLAIM rather than absorbed into the pass line, because no
+    producing-build record was read for them and a verdict that says otherwise is a
+    success this check never earned.
     """
 
     def __init__(
@@ -258,7 +460,23 @@ class DeskCheckReport:
         kernels: list[dict],
         fields=DEFAULT_MATCHER_FIELDS,
         drift_fields=None,
+        *,
+        mode: str,
+        agreement_failures=None,
+        agreement_unclaimed=None,
+        agreement_verified=0,
     ):
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+        if mode == "full" and agreement_failures is None:
+            raise ValueError(
+                "full mode requires the compiled-agreement result; None would make "
+                "an unrun check indistinguishable from a clean one"
+            )
+        self.mode = mode
+        self.agreement_failures = list(agreement_failures or [])
+        self.agreement_unclaimed = list(agreement_unclaimed or [])
+        self.agreement_verified = agreement_verified
         self.kernel_count = len(kernels)
         self.fields = tuple(fields)
         self.drift_fields = self.fields if drift_fields is None else tuple(drift_fields)
@@ -282,27 +500,65 @@ class DeskCheckReport:
     @property
     def ok(self) -> bool:
         """False on any invariant this check can actually enforce failing.
+
         A COULD-NOT-CHECK spec-drift result also fails the report -- it is
         not a clean bill of health, it is a check that could not run, and
         reporting it as green is the exact defect this module exists to
         remove. toc_key NOT-APPLICABLE (pre-pack tree) does NOT fail the
-        report -- that is an expected state, not an unchecked one."""
+        report -- that is an expected state, not an unchecked one.
+
+        In full mode any compiled-agreement failure fails the report, including the
+        failure that says a record is absent: an artifact that cannot say what it was
+        built from has not shown agreement with anything.
+        """
         toc_ok = (not self.toc_applicable) or (self.toc_distinct == self.toc_total)
         return (
             self.spec_drift_error is None
             and not self.drift
             and not self.duplicate_tuples
             and toc_ok
+            and not self.agreement_failures
         )
 
     def render(self) -> str:
-        lines = [f"kernels={self.kernel_count}"]
+        lines = [f"mode={self.mode}", f"kernels={self.kernel_count}"]
+        if self.mode == "full":
+            if self.agreement_failures:
+                body = "\n  ! ".join(["FAILED"] + self.agreement_failures)
+            elif self.agreement_verified:
+                body = (
+                    f"OK for {self.agreement_verified} kernel(s) -- declaration and "
+                    "producing-build record bind the current descriptors, schema, "
+                    "arch and archive bytes"
+                )
+            else:
+                body = (
+                    "NO COMPILED CLAIM -- no kernel in this KDP declares a "
+                    "specialized metadata field, so no producing-build record was "
+                    "read and nothing here was bound to a binary. This is not "
+                    "compiled agreement; a tree that should carry one is being read "
+                    "before it was packed, or its declarations are empty."
+                )
+            lines.append("compiled specialization agreement: " + body)
+            if self.agreement_unclaimed:
+                lines.append(
+                    "\n  ? ".join(
+                        ["compiled specialization NO COMPILED CLAIM:"]
+                        + self.agreement_unclaimed
+                    )
+                )
+        else:
+            lines.append(
+                "compiled specialization agreement: NOT CHECKED -- structural mode "
+                "reads the descriptors only; it establishes nothing about the "
+                "compiled binary. Re-run with --mode full to bind them."
+            )
         if self.spec_drift_error is not None:
             lines.append(
-                f"metadata/spec drift: COULD-NOT-CHECK -- {self.spec_drift_error}"
+                f"metadata/authored-spec drift: COULD-NOT-CHECK -- {self.spec_drift_error}"
             )
         else:
-            lines.append(f"metadata/spec drift: {self.drift or 'none'}")
+            lines.append(f"metadata/authored-spec drift: {self.drift or 'none'}")
         lines.append(
             "duplicate matcher tuples: " + str(self.duplicate_tuples or "none")
         )

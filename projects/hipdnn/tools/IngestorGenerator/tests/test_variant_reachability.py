@@ -48,6 +48,9 @@ _KMD_FIELDS = [
     {"name": "block_n", "type": "int", "default_value": 64},
 ]
 
+_KMD_ID = "88888888-8888-8888-8888-888888888888"
+_UED_ID = "99999999-9999-9999-9999-999999999999"
+
 
 def _variant(name: str, block_n: int, dtype: str = "bf16") -> dict:
     return {"name": name, "metadata": {"dtype": dtype, "block_n": block_n}}
@@ -55,13 +58,40 @@ def _variant(name: str, block_n: int, dtype: str = "bf16") -> dict:
 
 @pytest.fixture
 def env(tmp_path):
-    """Write a *.kdp.json/*.kmd.json bundle and a shape corpus; run the tool."""
+    """Write an id-wired descriptor bundle and a shape corpus; run the tool.
+
+    The bundle's schema is reached through `KDP.engine -> UED.metadata -> KMD`,
+    the same chain the loader and the variant-set gate walk, so the fixture has to
+    carry the UED that links them. A KDP and a KMD merely sharing a filename stem
+    are two unrelated documents here, which is the point: scoring a bundle against
+    whatever schema sits beside it decides every default and every applicability
+    verdict with a coincidence of naming.
+    """
 
     def write_bundle(variants: list[dict], fields=None) -> Path:
         kdp = tmp_path / "engine.kdp.json"
-        kdp.write_text(json.dumps({"kernelDescriptors": variants}))
+        kdp.write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "engine": _UED_ID,
+                    "kernelDescriptors": variants,
+                }
+            )
+        )
+        (tmp_path / "engine.ued.json").write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": _UED_ID,
+                    "name": "test:Engine",
+                    "metadata": _KMD_ID,
+                }
+            )
+        )
         kmd = tmp_path / "engine.kmd.json"
-        kmd.write_text(json.dumps({"fields": fields or _KMD_FIELDS}))
+        kmd.write_text(json.dumps({"id": _KMD_ID, "fields": fields or _KMD_FIELDS}))
         return kdp
 
     def write_shapes(shapes: list[dict]) -> Path:
@@ -237,14 +267,47 @@ class TestAllowUnreachableFlag:
         assert "narrow" in result.stdout
 
 
-class TestBundleDiscovery:
-    def test_missing_kmd_sibling_is_a_clean_failure(self, env, tmp_path):
-        kdp = tmp_path / "engine.kdp.json"
-        kdp.write_text(json.dumps({"kernelDescriptors": [_variant("only", 64)]}))
+class TestTheSchemaIsReachedByReference:
+    """The bundle's KMD is found by walking the ids the documents declare.
+
+    Everything below depends on the KMD: `default_value` decides what an absent
+    metadata key resolves to, and that resolution decides applicability. Reaching
+    the schema by swapping a filename suffix on the same stem picks whichever
+    document happens to sit beside the KDP, so a tree with two unrelated bundles
+    in one directory -- or one whose real schema lives above it -- is scored
+    against the wrong defaults and every verdict here is about a bundle nobody
+    ships.
+    """
+
+    def test_a_correctly_wired_bundle_resolves(self, env):
+        kdp = env.write_bundle([_variant("only", 64)])
+        shapes = env.write_shapes(_DIVISIBLE_SHAPES)
+        result = env.run(kdp, shapes, "--divides", "block_n=seqlen_kv")
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_a_dangling_engine_reference_is_a_clean_failure(self, env, tmp_path):
+        kdp = env.write_bundle([_variant("only", 64)])
+        doc = json.loads(kdp.read_text())
+        doc["engine"] = "no-such-ued"
+        kdp.write_text(json.dumps(doc))
         shapes = env.write_shapes(_DIVISIBLE_SHAPES)
         result = env.run(kdp, shapes)
         assert result.returncode == 2
-        assert "no sibling" in result.stdout + result.stderr
+        combined = result.stdout + result.stderr
+        assert "engine" in combined
+        assert "no-such-ued" in combined
+
+    def test_a_same_stem_kmd_that_nothing_references_is_not_accepted(
+        self, env, tmp_path
+    ):
+        """The defect this replaces: a KDP and a KMD sharing a stem, with nothing
+        in either document connecting them."""
+        kdp = env.write_bundle([_variant("only", 64)])
+        (tmp_path / "engine.ued.json").unlink()
+        shapes = env.write_shapes(_DIVISIBLE_SHAPES)
+        result = env.run(kdp, shapes)
+        assert result.returncode == 2
+        assert "engine" in result.stdout + result.stderr
 
 
 class TestGfx950RealBundle:

@@ -660,6 +660,14 @@ def _round_trip(original: dict, compact: dict) -> None:
     position, metadata key order reaches the emitted JSON, and the dedup pass keys
     on the resolved metadata -- so "the same kernels in a different order" is a
     different descriptor set, not a cosmetic difference.
+
+    The bundle-level `specialization` declaration is compared too. It is the only
+    thing a shipped descriptor carries that says which metadata fields the producing
+    compiler specialized on and how each is read off the builder, and it reaches
+    exactly one UKD field rather than one per kernel -- so the kernel-for-kernel
+    comparison below cannot see it go missing. A set that lost it converts to a
+    bundle nothing can check its compiled bytes against, which is the failure this
+    whole round trip exists to refuse.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from codegen.config_loader import load_config  # noqa: PLC0415
@@ -679,6 +687,14 @@ def _round_trip(original: dict, compact: dict) -> None:
         before.write_text(yaml.safe_dump(original, sort_keys=False))
         expected = load_config(before)
 
+    if reloaded.specialization != expected.specialization:
+        raise FactoriseError(
+            f"round trip lost or altered the bundle's 'specialization' declaration: "
+            f"{reloaded.specialization!r} != {expected.specialization!r}. Without it "
+            f"the emitted descriptors carry no specialization_contract, and a "
+            f"machine holding the archive has nothing to check the compiled bytes "
+            f"against."
+        )
     got = reloaded.packs[0].kernels
     want = expected.packs[0].kernels
     if len(got) != len(want):

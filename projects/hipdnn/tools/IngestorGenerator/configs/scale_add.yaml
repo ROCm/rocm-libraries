@@ -49,3 +49,18 @@ packs:
           block_size: 256
           dtype: FLOAT
         priority: 0
+
+# What the COMPILER specialized on. Rides on every emitted UKD as
+# provenance.specialization_contract, and is the only thing a machine checking a
+# shipped bundle has -- the producer is not installed where the archive lands.
+#
+# The direct-load dialect compiles from `source_file`/`entry_point` at plan-build
+# time and hydrates no builder object, so there is nothing for a binding to read
+# back: every field is matcher-only. That is stated rather than left blank,
+# because a bundle carrying no claim is indistinguishable from one whose author
+# never considered the question, and silence is not a waiver.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [block_size, dtype]
+  bindings: {}
+  vocabulary: {}

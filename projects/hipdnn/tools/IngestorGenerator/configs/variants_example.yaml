@@ -160,3 +160,26 @@ packs:
           # An arm-stated metadata value needs no `resolved`: the arm already says
           # what the matcher compares.
           - {dtype: fp16, seqlen_q: 4096, knobs: swept}
+
+# What the COMPILER specialized on, carried on every emitted UKD as
+# provenance.specialization_contract.
+#
+# All five fields reach `kernel_source.spec` in at least one arm, so all five are
+# checked rather than waived. `use_exp2_fast` is the interesting one: the arms that
+# leave it absent are telling the builder its own policy decides, so the SPEC
+# attribute would read as unset on exactly those kernels. A binding must name
+# something that answers for the value the binary was actually built with, which is
+# the builder object's own effective accessor -- not the raw field, and not a
+# `resolved_<name>` convention guessed from the field name, which is how a checker
+# ends up reading an attribute nobody implemented and reporting agreement anyway.
+specialization:
+  metadata_fields: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    seqlen_q: {field: seqlen_q}
+    block_m: {field: block_m}
+    waves_per_eu: {field: waves_per_eu}
+    use_exp2_fast: {method: effective_use_exp2_fast}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}

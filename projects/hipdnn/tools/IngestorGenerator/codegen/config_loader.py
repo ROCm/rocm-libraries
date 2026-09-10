@@ -140,7 +140,9 @@ def load_config(path: Path) -> IngestorConfig:
         # `variants` collapses the OTHER shape of repetition: a set where every
         # shape carries its own dispatcher-resolved spec, so there is no single
         # kernel_template for `axes` to cross. See `_expand_variant_kernels`.
-        variant_kernels_raw = _expand_variant_kernels(pack_raw, kmd_field_names)
+        variant_kernels_raw = _expand_variant_kernels(
+            pack_raw, {f.name: f.type for f in kmd_fields}
+        )
         kernels = []
         for kernel_raw in (
             list(pack_raw.get("kernels", [])) + axis_kernels_raw + variant_kernels_raw
@@ -231,6 +233,7 @@ def load_config(path: Path) -> IngestorConfig:
         workspace_policy=raw.get("workspace_policy", "none"),
         delegates_to_existing_plan=bool(raw.get("delegates_to_existing_plan", False)),
         authored_subpath=raw.get("authored_subpath", ""),
+        specialization=dict(raw.get("specialization") or {}),
     )
 
     _validate_config(config)
@@ -443,7 +446,7 @@ _ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata"})
 _SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
 
 
-def _expand_variant_kernels(pack_raw: dict, kmd_field_names: set) -> list:
+def _expand_variant_kernels(pack_raw: dict, kmd_field_names: dict) -> list:
     """Expand a pack's ``variants`` groups into ordinary kernel dicts, at load
     time, so ``generator.py``, the emitters and the dedup pass see exactly the
     shape a hand-authored kernel produces and need no changes.
@@ -485,13 +488,23 @@ def _expand_variant_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     expanded = []
     for position, group in enumerate(groups):
         expanded.extend(
-            _expand_one_variant_group(group, position, pack_name, kmd_field_names)
+            _expand_one_variant_group(
+                group,
+                position,
+                pack_name,
+                kmd_field_names,
+                (pack_raw.get("kernel_defaults") or {}).get("spec") or {},
+            )
         )
     return expanded
 
 
 def _expand_one_variant_group(
-    group: dict, position: int, pack_name: str, kmd_field_names: set
+    group: dict,
+    position: int,
+    pack_name: str,
+    kmd_field_names: dict,
+    pack_spec_defaults: dict | None = None,
 ) -> list:
     """One ``variants[]`` group -> the kernel dicts it stands for."""
     where = f"pack '{pack_name}' variants[{position}]"
@@ -539,11 +552,14 @@ def _expand_one_variant_group(
     # and order is part of the descriptor bytes.
     if group.get("spec_defaults") is not None:
         _require_mapping(group["spec_defaults"], f"{where} spec_defaults")
-    spec_defaults = dict(group.get("spec_defaults") or {})
+    spec_defaults = {
+        **(pack_spec_defaults or {}),
+        **dict(group.get("spec_defaults") or {}),
+    }
     for field_name, mapping in vocabulary.items():
         _require_mapping(mapping, f"{where} vocabulary['{field_name}']")
 
-    undeclared = sorted(set(metadata_fields) - kmd_field_names)
+    undeclared = sorted(set(metadata_fields) - set(kmd_field_names))
     if undeclared:
         raise ConfigError(
             f"{where} lists {undeclared} in 'metadata', which no kmd_fields entry "
@@ -619,6 +635,7 @@ def _expand_one_variant_group(
                     policy_knobs,
                     spec_order,
                     shape_where,
+                    kmd_field_names,
                 )
             )
     return expanded
@@ -635,6 +652,7 @@ def _expand_one_arm(
     policy_knobs: set,
     spec_order: list,
     shape_where: str,
+    kmd_types: dict,
 ) -> dict:
     """One (shape, arm) pair -> one kernel dict."""
     if not isinstance(arm, dict):
@@ -704,8 +722,10 @@ def _expand_one_arm(
                 f"{shape_where}: metadata field '{field_name}' is in neither the "
                 f"shape, the arm, nor 'resolved'. Nothing here decides its value."
             )
-        if isinstance(value, bool):
+        if isinstance(value, bool) and kmd_types[field_name] == "int":
             value = int(value)
+        elif kmd_types[field_name] == "float" and type(value) in (int, float):
+            value = float(value)
         if field_name in vocabulary and isinstance(value, str):
             # The matcher compares the hipDNN spelling; the spec carries the
             # builder's. Copying one over the other declines every graph while the
@@ -798,6 +818,7 @@ _KNOWN_TOP = frozenset(
         "graph_match",
         "descriptor_files_var",
         "pack_kernels_var",
+        "specialization",
     }
 )
 _KNOWN_ENGINE = frozenset(
@@ -837,6 +858,23 @@ _KNOWN_VARIANT_GROUP = frozenset(
     }
 )
 _KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
+#: The top-level ``specialization`` block's own keys.
+#:
+#: ``engine_id``/``kmd_id`` are deliberately NOT here: they are MINTED by
+#: ``generator.mint_ids`` and stamped onto the emitted contract, so an authored
+#: one would be a second source of truth pointing at whatever engine happened to
+#: share a name. A ``consumers`` list is not here either -- one config declares
+#: exactly one engine and one KMD, so it contributes exactly one consumer entry,
+#: and the (engine, kmd) duplicate the contract format forbids cannot be authored
+#: here at all.
+_KNOWN_SPECIALIZATION = frozenset(
+    {
+        "metadata_fields",
+        "matcher_only_fields",
+        "bindings",
+        "vocabulary",
+    }
+)
 
 
 def _reject_unknown_keys(raw: dict) -> None:
@@ -1235,6 +1273,178 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
 
 
+def _check_specialization_declaration(config: IngestorConfig) -> None:
+    """The ``specialization`` block says which metadata fields the COMPILER
+    specialized on, and how each one is read off the builder object.
+
+    It becomes ``provenance.specialization_contract`` on every emitted UKD, and it
+    is the ONLY thing a machine checking a shipped bundle has: the rocKE that
+    compiled the kernel is not installed on the machine that received the archive,
+    and importing a producer to answer "what did this descriptor's binary actually
+    specialize on" is precisely the check that cannot be run where it is needed.
+    So the declaration must be self-contained, and it must be exact -- every claim
+    below is one a downstream consumer will test rather than trust
+    (``hkp_pack.agreement.validate_consumer``).
+
+    THE PARTITION IS EXHAUSTIVE AND DISJOINT over ``kmd_fields``. Not a subset:
+    every field is either something the builder consumed (``metadata_fields``, and
+    then a binding says how to read it back) or something only the matcher reads
+    (``matcher_only_fields``). A field named in neither is the whole failure this
+    exists to prevent -- an unlisted field reads as "nobody's concern" and a full
+    check will pass over a value that decided the binary. A field in both is a
+    declaration that contradicts itself.
+
+    A COMPILED-SPECIALIZATION SOURCE MUST BIND WHAT ITS SPEC CARRIES. A ``rocke``
+    kernel is built by hydrating a spec dataclass and calling the builder, so a KMD
+    field that appears as a spec key demonstrably reached the compiler -- calling
+    it matcher-only would waive a real obligation to make the gate pass. Whether a
+    field the spec never mentions also reached the builder is not decidable from
+    the config, and is not guessed here.
+
+    A NON-COMPILED SOURCE MUST SAY SO EXPLICITLY. The direct-load and ``hip`` paths
+    have no builder object at all -- there is nothing to bind a metadata field to
+    and no accessor to read back -- so the declaration states ``metadata_fields:
+    []`` and lists every field as matcher-only. Writing it out is the point:
+    silence is not a waiver, and a bundle carrying no claim is indistinguishable
+    from one whose author never considered the question.
+
+    Presence is enforced at EMISSION (``generator.build_specialization_contract``),
+    where a descriptor is actually produced, rather than here: a config is also
+    loaded by tools that only inspect its expansion and never emit anything.
+    """
+    declaration = config.specialization
+    if not declaration:
+        return
+    if not isinstance(declaration, dict):
+        raise ConfigError(
+            f"'specialization' must be a mapping; got "
+            f"{type(declaration).__name__} ({declaration!r})."
+        )
+    unknown = sorted(set(declaration) - _KNOWN_SPECIALIZATION)
+    if unknown:
+        raise ConfigError(
+            f"'specialization' declares {unknown}, which this loader does not "
+            f"read. Known keys: {sorted(_KNOWN_SPECIALIZATION)}. 'engine_id' and "
+            f"'kmd_id' are minted at generation and stamped on automatically; a "
+            f"'consumers' list belongs to the emitted contract, not to a config, "
+            f"which declares exactly one engine and one KMD."
+        )
+
+    declared = [f.name for f in config.kmd_fields]
+    partition = {}
+    for key in ("metadata_fields", "matcher_only_fields"):
+        value = declaration.get(key) or []
+        if not isinstance(value, list) or any(not isinstance(n, str) for n in value):
+            raise ConfigError(
+                f"'specialization.{key}' must be a list of kmd_fields names; got "
+                f"{value!r}."
+            )
+        repeated = sorted({n for n in value if value.count(n) > 1})
+        if repeated:
+            raise ConfigError(
+                f"'specialization.{key}' names {repeated} more than once."
+            )
+        partition[key] = list(value)
+
+    checked = set(partition["metadata_fields"])
+    matcher_only = set(partition["matcher_only_fields"])
+    both = sorted(checked & matcher_only)
+    if both:
+        raise ConfigError(
+            f"'specialization' lists {both} in BOTH 'metadata_fields' and "
+            f"'matcher_only_fields'. A field is either one the compiler consumed "
+            f"or one only the matcher reads; a field claiming to be both makes "
+            f"the declaration self-contradictory, and a checker cannot decide "
+            f"whether to demand a binding for it."
+        )
+    unpartitioned = sorted(set(declared) - checked - matcher_only)
+    invented = sorted((checked | matcher_only) - set(declared))
+    if unpartitioned or invented:
+        raise ConfigError(
+            f"'specialization' must partition the declared kmd_fields "
+            f"{sorted(declared)} exhaustively: "
+            f"{unpartitioned} are in neither 'metadata_fields' nor "
+            f"'matcher_only_fields', and {invented} name no kmd_fields entry. An "
+            f"unlisted field reads to a checker as one nobody specialized on, so "
+            f"a value that decided the compiled binary would be passed over "
+            f"unchecked."
+        )
+
+    bindings = declaration.get("bindings") or {}
+    _require_mapping(bindings, "'specialization.bindings'")
+    if set(bindings) != checked:
+        raise ConfigError(
+            f"'specialization.bindings' keys {sorted(bindings)} must equal "
+            f"'metadata_fields' {sorted(checked)}. A checked field without a "
+            f"binding cannot be read back off the builder object, and a binding "
+            f"for an unchecked field describes a read nothing performs."
+        )
+    for name, binding in bindings.items():
+        _require_mapping(binding, f"'specialization.bindings[{name}]'")
+        if set(binding) not in ({"field"}, {"method"}):
+            raise ConfigError(
+                f"'specialization.bindings[{name}]' is {binding!r}; it must name "
+                f"exactly one of 'field' (a direct attribute of the hydrated spec "
+                f"or builder object) or 'method' (an existing zero-argument "
+                f"effective accessor on that same object). Naming both leaves the "
+                f"checker to choose which reading is authoritative, and naming "
+                f"neither leaves it nothing to read."
+            )
+        accessor = next(iter(binding.values()))
+        if not isinstance(accessor, str) or not accessor.isidentifier():
+            raise ConfigError(
+                f"'specialization.bindings[{name}]' must name one explicit "
+                f"attribute; {accessor!r} is not an identifier. A computed or "
+                f"guessed accessor name is how a checker ends up reading a "
+                f"convention nobody implemented and reporting agreement anyway."
+            )
+
+    vocabulary = declaration.get("vocabulary") or {}
+    _require_mapping(vocabulary, "'specialization.vocabulary'")
+    stray = sorted(set(vocabulary) - checked)
+    if stray:
+        raise ConfigError(
+            f"'specialization.vocabulary' translates {stray}, which "
+            f"'metadata_fields' does not carry, so the translation would have no "
+            f"effect -- and an untranslated builder spelling in metadata loads "
+            f"cleanly, reconciles on every count, and matches nothing."
+        )
+    for name, spellings in vocabulary.items():
+        _require_mapping(spellings, f"'specialization.vocabulary[{name}]'")
+
+    kinds = {
+        kernel.kernel_source.kind for pack in config.packs for kernel in pack.kernels
+    }
+    if KERNEL_SOURCE_KIND_ROCKE in kinds:
+        specialized = {
+            name
+            for pack in config.packs
+            for kernel in pack.kernels
+            for name in (kernel.kernel_source.spec or {})
+        } & set(declared)
+        waived = sorted(specialized & matcher_only)
+        if waived:
+            raise ConfigError(
+                f"'specialization' calls {waived} matcher-only, but a "
+                f"'{KERNEL_SOURCE_KIND_ROCKE}' kernel's kernel_source.spec carries "
+                f"those keys -- they are hydrated into the spec dataclass the "
+                f"builder is called with, so they demonstrably reached the "
+                f"compiler. Declaring a field the compiler consumed as matcher-only "
+                f"removes it from the agreement check while it keeps deciding the "
+                f"binary. List them in 'metadata_fields' with a binding each."
+            )
+    elif checked:
+        raise ConfigError(
+            f"'specialization.metadata_fields' names {sorted(checked)}, but no "
+            f"kernel in this config is built from a compiled specialization "
+            f"(kinds: {sorted(kinds)}). The direct-load and "
+            f"'{KERNEL_SOURCE_KIND_HIP}' paths hydrate no builder object, so there "
+            f"is nothing for a binding to read back and no agreement to check. "
+            f"Declare 'metadata_fields: []' and list every field under "
+            f"'matcher_only_fields'."
+        )
+
+
 def _check_workspace_policy(config: IngestorConfig) -> None:
     if config.workspace_policy not in WORKSPACE_POLICIES:
         raise ConfigError(
@@ -1311,6 +1521,10 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
+    # After the kind checks: the declaration's obligations depend on which kinds
+    # this config actually builds, so an unrecognized kind is named as a kind
+    # problem rather than as a specialization one.
+    _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
 

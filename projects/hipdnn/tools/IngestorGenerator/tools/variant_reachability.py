@@ -34,8 +34,9 @@ it must be honest about it:
      and picks a winner. That something is native C++ per engine -- this tool
      cannot call it and does not pretend to. The ranking is instead DECLARED
      (`--score-field block_n --score-prefer max`, or the same under `score:` in a
-     --profile), same spirit as `verify_variant_sets.py`'s policy resolvers: a
-     fact only the kernel knows, supplied rather than invented. WITHOUT a
+     --profile), same spirit as the specialization declaration a UKD carries for
+     `verify_variant_sets.py`: a fact only the kernel knows, supplied as data
+     rather than invented here. WITHOUT a
      declared ranking every applicable variant is reported reachable, and the
      output SAYS the ranking was not declared -- a gate that quietly stops
      checking a property is worse than one that admits it never checked it.
@@ -68,6 +69,14 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from verify_variant_sets import (  # noqa: E402
+    GateError,
+    Index,
+    resolve_bundles,
+)
+
 
 class ReachabilityError(RuntimeError):
     """A problem with the inputs (bundle, corpus, or ranking declaration) --
@@ -92,8 +101,17 @@ def _load_profile(path: str) -> dict:
     return loaded
 
 
-def load_bundle(kdp_path: str) -> tuple[dict, list[dict]]:
+def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict]]:
     """(name -> KMD default_value, kernelDescriptors) for one *.kdp.json.
+
+    The schema is reached BY REFERENCE, through the id chain the documents declare
+    -- `KDP.engine` names a UED, `UED.metadata` names a KMD -- resolved across every
+    descriptor under `tree` (the KDP's own directory unless one is given). Binding to
+    a same-stem sibling instead answers "which schema governs this bundle" with a
+    filename, so a bundle wired to one KMD is scored against another and every
+    reachability verdict below is about the wrong defaults. The resolution is shared
+    with `verify_variant_sets.py` rather than restated, so the two tools cannot
+    disagree about which schema a bundle has.
 
     The KMD is read for its defaults, not its schema in the abstract: the loader
     substitutes `default_value` for any field a descriptor's metadata omits, and
@@ -105,15 +123,21 @@ def load_bundle(kdp_path: str) -> tuple[dict, list[dict]]:
     kdp = Path(kdp_path)
     if not kdp.name.endswith(".kdp.json"):
         raise ReachabilityError(f"{kdp} does not look like a *.kdp.json")
-    kmd = kdp.with_name(kdp.name[: -len(".kdp.json")] + ".kmd.json")
-    if not kmd.exists():
+    root = Path(tree) if tree else kdp.parent
+    try:
+        bundles = resolve_bundles(Index(str(root)))
+    except GateError as exc:
+        raise ReachabilityError(str(exc))
+    matching = [b for b in bundles if Path(b.kdp_path).resolve() == kdp.resolve()]
+    if not matching:
         raise ReachabilityError(
-            f"{kdp} has no sibling {kmd.name}; cannot read the schema."
+            f"{kdp} is not among the KDPs under {root}. Pass --tree naming the root "
+            f"the bundle's generics live under, so its engine and schema references "
+            f"can be resolved."
         )
-    kmd_doc = json.loads(kmd.read_text())
-    defaults = {f["name"]: f.get("default_value") for f in kmd_doc["fields"]}
-    descriptors = json.loads(kdp.read_text())["kernelDescriptors"]
-    return defaults, descriptors
+    bundle = matching[0]
+    defaults = {f["name"]: f.get("default_value") for f in bundle.kmd["fields"]}
+    return defaults, [entry.ukd for entry in bundle.entries]
 
 
 def _resolved_metadata(descriptor: dict, defaults: dict) -> dict:
@@ -310,6 +334,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--kdp", required=True, help="Path to a *.kdp.json bundle.")
     parser.add_argument(
+        "--tree",
+        help="Descriptor root the bundle's engine and schema references resolve "
+        "across. Defaults to the --kdp file's own directory; name the root "
+        "explicitly when the generics live above it.",
+    )
+    parser.add_argument(
         "--shapes",
         required=True,
         help="JSON list of request-field mappings, the same corpus format "
@@ -361,7 +391,7 @@ def main(argv=None) -> int:
         if score is not None and ("field" not in score or "prefer" not in score):
             raise ReachabilityError("score needs both 'field' and 'prefer'")
 
-        defaults, descriptors = load_bundle(args.kdp)
+        defaults, descriptors = load_bundle(args.kdp, args.tree)
         shapes = json.loads(Path(args.shapes).read_text())
         if not isinstance(shapes, list):
             raise ReachabilityError("--shapes must be a JSON list of field mappings.")

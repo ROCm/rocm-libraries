@@ -100,3 +100,36 @@ packs:
           causal: 1
           block_n: 64
         priority: 0
+
+# What the COMPILER specialized on, carried on every emitted UKD as
+# provenance.specialization_contract.
+#
+# Every field below is a field of AttentionDenseSpec, hydrated by hkp_pack with
+# Spec(**fields) and handed to `build_attention_dense`, so each one demonstrably
+# reached the compiler and each is bound to the spec attribute it was read from.
+# Calling any of them matcher-only would remove it from the agreement check while
+# it kept deciding the binary.
+#
+# `dtype` needs a translation because the two layers spell it differently: the
+# matcher compares the hipDNN spelling, the spec carries the builder's. A checker
+# reading `bf16` off the spec and comparing it against `BF16` in metadata reports
+# a disagreement that is not one; without the translation, the only way to make it
+# pass would be to stop checking the field. The map covers both spellings the two
+# layers use, not only the one this pack happens to ship: the projection is a
+# property of the layers, and a vocabulary that stops at the shipped variants
+# turns the first fp16 kernel added here into a phantom disagreement.
+specialization:
+  metadata_fields:
+    [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, causal, block_n]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    head_size: {field: head_size}
+    num_query_heads: {field: num_query_heads}
+    num_kv_heads: {field: num_kv_heads}
+    seqlen_q: {field: seqlen_q}
+    seqlen_kv: {field: seqlen_kv}
+    causal: {field: causal}
+    block_n: {field: block_n}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}

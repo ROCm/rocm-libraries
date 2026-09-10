@@ -20,6 +20,8 @@ which it does own and can check without reading anyone else's source.
 import re
 from pathlib import Path
 
+import pytest
+
 from codegen.generator import PLACEHOLDER_MARKER, mint_ids
 
 
@@ -175,7 +177,7 @@ class TestPlaceholderScanSeesEveryEmittedFile:
         self, generator, scale_add_config, tmp_path
     ):
         written = generator.render(scale_add_config, tmp_path)
-        unfilled = generator.unfilled_placeholders(tmp_path, written)
+        unfilled = generator.unfilled_placeholders([tmp_path], written)
         assert unfilled, "a freshly generated engine must carry unfilled stubs"
         assert any(rel.startswith("packs/") for rel in unfilled), unfilled
         assert any(rel.startswith("tests/") for rel in unfilled), (
@@ -189,10 +191,10 @@ class TestPlaceholderScanSeesEveryEmittedFile:
         """The control: the scan must be able to reach zero, or the gate it
         backs is unsatisfiable and would be worked around."""
         written = generator.render(scale_add_config, tmp_path)
-        for rel in generator.unfilled_placeholders(tmp_path, written):
+        for rel in generator.unfilled_placeholders([tmp_path], written):
             path = tmp_path / rel
             path.write_text(path.read_text().replace(PLACEHOLDER_MARKER, "done"))
-        assert generator.unfilled_placeholders(tmp_path, written) == {}
+        assert generator.unfilled_placeholders([tmp_path], written) == {}
 
     def test_the_scan_finds_files_the_provider_splits_across_two_trees(
         self, generator, scale_add_config, tmp_path
@@ -222,13 +224,13 @@ class TestPlaceholderScanSeesEveryEmittedFile:
                 )
 
         root = tmp_path / "spliced"
-        located, missing, _amb = generator.locate_emitted(root, written)
+        located, missing, _amb = generator.locate_emitted([root], written)
         assert not [m for m in missing if m.startswith(("packs/", "tests/"))], missing
 
         # Fill only the pack, as a reader who trusted a packs/-only glob would.
         pack = engine / "ScaleAddNative.cpp"
         pack.write_text(pack.read_text().replace(PLACEHOLDER_MARKER, "done"))
-        unfilled = generator.unfilled_placeholders(root, written)
+        unfilled = generator.unfilled_placeholders([root], written)
         assert any(rel.startswith("tests/") for rel in unfilled), (
             "the matcher stub is still unfilled in the spliced tests tree but the "
             f"scan did not report it: {unfilled}"
@@ -243,22 +245,22 @@ class TestPlaceholderScanSeesEveryEmittedFile:
         written = generator.render(scale_add_config, tmp_path / "src")
         empty = tmp_path / "nothing"
         empty.mkdir()
-        located, missing, _amb = generator.locate_emitted(empty, written)
+        located, missing, _amb = generator.locate_emitted([empty], written)
         assert located == {}
         assert missing, "every shippable file is absent but none were reported"
         assert not any(m.startswith("fragments/") for m in missing), missing
 
-    def test_two_files_with_one_basename_are_ambiguous_not_a_coin_flip(
+    def test_two_files_at_one_spliced_path_are_ambiguous_not_a_coin_flip(
         self, generator, scale_add_config, tmp_path
     ):
         """A stale copy must not be able to answer for the real file.
 
-        The scan kept the first `rglob` hit, so the binding followed filesystem
-        order: a FILLED stale copy sorting first reported the gate green while
-        the real file still carried its markers. Basenames are not unique here
-        (1809 collide repo-wide; `build/` duplicates shipped descriptor names),
-        so this is luck, not a property. The decoy is named to sort BEFORE the
-        real directory, which is the case that used to pass.
+        The scan kept the first hit, so the binding followed filesystem order: a
+        FILLED stale copy sorting first reported the gate green while the real
+        file still carried its markers. Two trees can legitimately hold the same
+        spliced relative path -- a build tree, a stale checkout -- so uniqueness is
+        luck, not a property. The decoy is named to sort BEFORE the real directory,
+        which is the case that used to pass.
         """
         generator.render(scale_add_config, tmp_path / "gen")
         real = tmp_path / "root/real/packs"
@@ -271,14 +273,93 @@ class TestPlaceholderScanSeesEveryEmittedFile:
 
         written = generator.preview_files(scale_add_config)
         located, _missing, ambiguous = generator.locate_emitted(
-            tmp_path / "root", written
+            [tmp_path / "root"], written
         )
         assert "packs/ScaleAddNative.cpp" in ambiguous, (
-            "a basename matching in two places was silently bound to one of them "
-            f"-- located={located}"
+            "one spliced relative path matching in two places was silently bound "
+            f"to one of them -- located={located}"
         )
         assert len(ambiguous["packs/ScaleAddNative.cpp"]) == 2
         assert "packs/ScaleAddNative.cpp" not in located, (
             "an ambiguous file must not also be reported as located, or a caller "
             "that only checks `located` still gets the coin flip"
         )
+
+    def test_a_same_named_file_elsewhere_neither_satisfies_nor_confuses(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """A basename is not evidence.
+
+        Matching on the basename alone, any file anywhere under a root that
+        happened to share a name BOTH answered for a missing target -- reporting a
+        splice complete that was never made, and reading its placeholder count as
+        if it were this engine's -- and manufactured ambiguity against files
+        belonging to somebody else entirely. Repo-wide, 1809 basenames collide and
+        `build/` already duplicates shipped descriptor names.
+
+        The decoy here sits at a path the generator's own fragments never splice
+        to, so it is not this engine's file however it is named.
+        """
+        generator.render(scale_add_config, tmp_path / "gen")
+        decoy = tmp_path / "root/unrelated/subsystem"
+        decoy.mkdir(parents=True)
+        (decoy / "ScaleAddNative.cpp").write_text("// somebody else's file\n")
+
+        written = generator.preview_files(scale_add_config)
+        located, missing, ambiguous = generator.locate_emitted(
+            [tmp_path / "root"], written
+        )
+        assert (
+            "packs/ScaleAddNative.cpp" not in located
+        ), "a file at an unrelated path answered for this engine's pack source"
+        assert "packs/ScaleAddNative.cpp" not in ambiguous, (
+            "an unrelated file must not manufacture ambiguity either -- that turns "
+            "a correct tree red for a file that is not ours"
+        )
+        assert "packs/ScaleAddNative.cpp" in missing
+
+    def test_the_real_spliced_path_is_located_across_separate_roots(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The positive half, and why the roots are a LIST.
+
+        The engine tree and the provider's test tree may share no ancestor worth
+        scanning, and widening a single root until they do drags in build trees and
+        stale copies -- which the ambiguity rule then reports, correctly but
+        uselessly. Two roots, each searched at the relative paths this generator's
+        fragments splice to, is the shape that answers.
+        """
+        written = generator.render(scale_add_config, tmp_path / "gen")
+        engine = tmp_path / "provider/engines/kernel_ingestor_engine/packs"
+        tests = tmp_path / "elsewhere/tests/engines/kernel_ingestor_engine/packs"
+        engine.mkdir(parents=True)
+        tests.mkdir(parents=True)
+        for rel in written:
+            if rel.startswith("packs/"):
+                (engine / Path(rel).name).write_text(
+                    (tmp_path / "gen" / rel).read_text()
+                )
+            elif rel.startswith("tests/"):
+                (tests / Path(rel).name).write_text(
+                    (tmp_path / "gen" / rel).read_text()
+                )
+
+        located, missing, ambiguous = generator.locate_emitted(
+            [tmp_path / "provider", tmp_path / "elsewhere"], written
+        )
+        assert not ambiguous, ambiguous
+        assert "packs/ScaleAddNative.cpp" in located
+        assert "tests/TestScaleAddMatchers.cpp" in located, (
+            "the test stub is spliced under packs/ in the provider's test tree -- "
+            f"the cmake_test_sources fragment says so: {sorted(located)}"
+        )
+        assert all(m.startswith("descriptors/") for m in missing), missing
+
+    def test_a_root_that_does_not_exist_is_an_error_not_an_empty_search(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """An unreadable root contributes zero hits, and zero hits with no
+        complaint is a gate that passes because it looked nowhere."""
+        written = generator.render(scale_add_config, tmp_path / "gen")
+        with pytest.raises(ValueError, match="do not exist"):
+            generator.locate_emitted([tmp_path / "gen", tmp_path / "typo"], written)

@@ -913,3 +913,226 @@ class TestMappingShapedKeysAreGuarded:
 
     def test_a_well_formed_config_still_loads(self, tmp_path):
         assert self._load(tmp_path, lambda r: None) is not None
+
+
+class TestSpecializationDeclaration:
+    """The ``specialization`` block is what a later check has instead of the
+    compiler.
+
+    A shipped bundle is verified on a machine where the rocKE that built it is not
+    installed, so every claim about which metadata the compiler consumed has to
+    ride on the descriptor. A declaration that is merely plausible is worse than
+    none: the check runs, reports agreement, and has verified nothing.
+    """
+
+    @staticmethod
+    def _rocke_config(**declaration):
+        """A packaged rocKE config whose spec carries both KMD fields."""
+        kernel = make_kernel(
+            kernel_source=KernelSource(
+                kind="rocke",
+                source="kernels/gfx942/example.py",
+                builder="build_example",
+                spec={"block_size": 64, "dtype": "bf16"},
+            ),
+        )
+        return make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="rocke",
+            packs=[make_pack(kernels=[kernel], arch=["gfx942"])],
+            specialization=declaration,
+        )
+
+    @staticmethod
+    def _complete_rocke_declaration(**overrides):
+        declaration = {
+            "metadata_fields": ["block_size", "dtype"],
+            "matcher_only_fields": [],
+            "bindings": {
+                "block_size": {"field": "block_size"},
+                "dtype": {"field": "dtype"},
+            },
+            "vocabulary": {"dtype": {"bf16": "BF16"}},
+        }
+        declaration.update(overrides)
+        return declaration
+
+    def test_a_complete_declaration_is_accepted(self):
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(**self._complete_rocke_declaration())
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_a_partition_that_misses_a_field_is_rejected(self):
+        """An unlisted field reads to a checker as one nobody specialized on, so a
+        value that decided the binary is passed over unchecked."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                metadata_fields=["block_size"],
+                bindings={"block_size": {"field": "block_size"}},
+                vocabulary={},
+            )
+        )
+        with pytest.raises(ConfigError, match="partition"):
+            _check_specialization_declaration(config)
+
+    def test_a_partition_that_overlaps_is_rejected(self):
+        """A field claiming to be both checked and matcher-only makes the
+        declaration self-contradictory: a checker cannot decide whether to demand
+        a binding for it."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(matcher_only_fields=["dtype"])
+        )
+        with pytest.raises(ConfigError, match="BOTH"):
+            _check_specialization_declaration(config)
+
+    def test_binding_keys_must_equal_metadata_fields(self):
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={"block_size": {"field": "block_size"}}
+            )
+        )
+        with pytest.raises(ConfigError, match="bindings"):
+            _check_specialization_declaration(config)
+
+    def test_a_binding_naming_both_a_field_and_a_method_is_rejected(self):
+        """Two readings, no rule for which is authoritative."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={
+                    "block_size": {"field": "block_size", "method": "effective_block"},
+                    "dtype": {"field": "dtype"},
+                }
+            )
+        )
+        with pytest.raises(ConfigError, match="exactly one"):
+            _check_specialization_declaration(config)
+
+    def test_a_method_binding_is_accepted(self):
+        """The converse: an effective accessor is a legitimate reading, and the
+        only truthful one for a knob the kernel's own policy resolves."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={
+                    "block_size": {"method": "effective_block_size"},
+                    "dtype": {"field": "dtype"},
+                }
+            )
+        )
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_a_spec_carried_field_may_not_be_called_matcher_only(self):
+        """The waiver this gate exists to refuse.
+
+        A key in ``kernel_source.spec`` is hydrated into the dataclass the builder
+        is called with, so it demonstrably reached the compiler. Relabelling it
+        matcher-only removes it from the agreement check while it keeps deciding
+        the binary -- which is how a gate goes green without checking anything.
+        """
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            metadata_fields=["dtype"],
+            matcher_only_fields=["block_size"],
+            bindings={"dtype": {"field": "dtype"}},
+            vocabulary={},
+        )
+        with pytest.raises(ConfigError, match="matcher-only"):
+            _check_specialization_declaration(config)
+
+    def test_a_direct_load_config_may_not_claim_metadata_fields(self):
+        """There is no builder object on that path, so a binding names a read
+        nothing performs."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": ["block_size"],
+                "matcher_only_fields": ["dtype"],
+                "bindings": {"block_size": {"field": "block_size"}},
+                "vocabulary": {},
+            }
+        )
+        with pytest.raises(ConfigError, match="compiled specialization"):
+            _check_specialization_declaration(config)
+
+    def test_a_direct_load_matcher_only_declaration_is_accepted(self):
+        """The shape every non-compiled bundle must state explicitly."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size", "dtype"],
+                "bindings": {},
+                "vocabulary": {},
+            }
+        )
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_an_authored_consumer_identity_is_rejected(self):
+        """Ids are minted, never authored.
+
+        One config declares exactly one engine and one KMD, so it contributes
+        exactly one consumer entry -- the duplicate (engine, kmd) pair the contract
+        format forbids cannot be authored here at all. An authored id would be a
+        second source of truth pointing at whatever engine shared a name.
+        """
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size", "dtype"],
+                "bindings": {},
+                "vocabulary": {},
+                "engine_id": "00000000-0000-0000-0000-000000000000",
+            }
+        )
+        with pytest.raises(ConfigError, match="minted"):
+            _check_specialization_declaration(config)
+
+    def test_a_vocabulary_entry_for_an_unchecked_field_is_rejected(self):
+        """A translation with no effect leaves the builder's spelling in metadata,
+        which loads cleanly, reconciles on every count, and matches nothing."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                vocabulary={"nonexistent": {"a": "B"}},
+            )
+        )
+        with pytest.raises(ConfigError, match="vocabulary"):
+            _check_specialization_declaration(config)
+
+    def test_every_shipped_example_config_carries_a_valid_declaration(
+        self, load_test_config
+    ):
+        """The examples are what an author copies, so a bundle they produce must
+        be checkable rather than merely loadable."""
+        for name in (
+            "scale_add.yaml",
+            "binary_ops.yaml",
+            "axes_example.yaml",
+            "variants_example.yaml",
+            "gfx950_attention_dense.yaml",
+        ):
+            config = load_test_config(name)
+            declared = {f.name for f in config.kmd_fields}
+            declaration = config.specialization
+            assert declaration, f"{name} declares no specialization"
+            assert (
+                set(declaration["metadata_fields"])
+                | set(declaration["matcher_only_fields"])
+                == declared
+            ), name

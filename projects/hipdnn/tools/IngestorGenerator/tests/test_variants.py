@@ -552,3 +552,138 @@ class TestRejections:
                     }
                 ],
             )
+
+
+#: Every KMD field the defaults probe below declares, and the value its pack-level
+#: `kernel_defaults.spec` supplies when that row is the one under test.
+_PROBE_FIELDS = [
+    {"name": "dtype", "type": "string"},
+    {"name": "seqlen_q", "type": "int", "default_value": 256},
+    {"name": "block_m", "type": "int", "default_value": 256},
+    {"name": "waves_per_eu", "type": "int", "default_value": 2},
+    EXP2_FIELD,
+]
+
+
+def _probe_config(pack_default_spec: dict, arm: dict, resolved: dict) -> dict:
+    """A one-shape, one-arm variant set whose ONLY source for some spec keys is
+    the pack-level ``kernel_defaults.spec``."""
+    return {
+        "dialect": "packaged",
+        "kernel_source_kind": "rocke",
+        "engine": {"name": "hipkernel:Probe", "knobs": ["block_m"]},
+        "kmd_fields": _PROBE_FIELDS,
+        "specialization": {
+            "metadata_fields": [f["name"] for f in _PROBE_FIELDS],
+            "matcher_only_fields": [],
+            "bindings": {
+                "dtype": {"field": "dtype"},
+                "seqlen_q": {"field": "seqlen_q"},
+                "block_m": {"field": "block_m"},
+                "waves_per_eu": {"field": "waves_per_eu"},
+                "use_exp2_fast": {"method": "effective_use_exp2_fast"},
+            },
+            "vocabulary": {"dtype": {"bf16": "BF16"}},
+        },
+        "packs": [
+            {
+                "name": "probe",
+                "arch": ["gfx942"],
+                "kernel_defaults": {
+                    "kind": "rocke",
+                    "source": "kernels/gfx942/probe.py",
+                    "builder": "build_probe",
+                    "spec": pack_default_spec,
+                },
+                "variants": [
+                    {
+                        "name": "probe.{ordinal}",
+                        "metadata": [f["name"] for f in _PROBE_FIELDS],
+                        "vocabulary": {"dtype": {"bf16": "BF16"}},
+                        "policy_knobs": ["use_exp2_fast"],
+                        "knob_sets": {"one": [dict(arm)]},
+                        "shapes": [{"knobs": "one", "resolved": dict(resolved)}],
+                    }
+                ],
+            }
+        ],
+    }
+
+
+class TestPackDefaultsComposeBeforeMetadataProjection:
+    """A pack-level ``kernel_defaults.spec`` decides the binary, so it must reach
+    the metadata projection -- and an OMITTED key must stay omitted.
+
+    The spec is what the kernel is compiled from; metadata is what the matcher
+    compares. If the pack default composes only into the emitted ``kernel_source``
+    and not into the projection, the descriptor advertises the KMD default while
+    the binary carries the pack's -- two independent defaults that are not required
+    to agree, and whose disagreement is silent. And an omitted key is a THIRD
+    state: it tells the builder its own policy decides, which is not the same as
+    pinning the knob to ``false``/``0``, and both would otherwise reach metadata
+    as the same value.
+    """
+
+    @staticmethod
+    def _emitted(tmp_path, config_raw):
+        from codegen.generator import build_kdp, mint_ids
+
+        config = _load(tmp_path, config_raw)
+        kdp = build_kdp(config, config.packs[0], mint_ids(config))
+        assert len(kdp["kernelDescriptors"]) == 1
+        return kdp["kernelDescriptors"][0]
+
+    #: (field supplied ONLY by the pack default, spec value, emitted metadata).
+    #: `dtype` also crosses the vocabulary; `use_exp2_fast` also crosses the
+    #: bool-to-int projection its declared type requires.
+    @pytest.mark.parametrize(
+        "field,spec_value,expected",
+        [
+            ("dtype", "bf16", "BF16"),
+            ("seqlen_q", 1024, 1024),
+            ("block_m", 128, 128),
+            ("waves_per_eu", 4, 4),
+            ("use_exp2_fast", True, 1),
+        ],
+    )
+    def test_a_key_only_the_pack_default_supplies_reaches_the_metadata(
+        self, tmp_path, field, spec_value, expected
+    ):
+        pack_default = {
+            "dtype": "bf16",
+            "seqlen_q": 256,
+            "block_m": 256,
+            "waves_per_eu": 2,
+        }
+        pack_default[field] = spec_value
+        # The arm and the shape state NOTHING: the pack default is the only source.
+        emitted = self._emitted(
+            tmp_path,
+            _probe_config(pack_default, {}, {"use_exp2_fast": 1}),
+        )
+        assert emitted["metadata"][field] == expected
+        assert emitted["kernel_source"]["spec"][field] == spec_value
+
+    def test_a_key_omitted_at_both_levels_stays_absent_from_the_spec(self, tmp_path):
+        """Omission is the third state, not a synonym for false.
+
+        ``use_exp2_fast`` is absent from the pack default and from the arm, which
+        is what tells the builder its own policy decides it at build time. Writing
+        ``false`` there instead would compile a different binary -- and the two
+        reach metadata as the same 0, so nothing downstream could tell them apart.
+        The shape's ``resolved`` block is what states the answer the policy gave,
+        so the matcher still compares something true of the binary.
+        """
+        emitted = self._emitted(
+            tmp_path,
+            _probe_config(
+                {"dtype": "bf16", "seqlen_q": 256, "block_m": 256, "waves_per_eu": 2},
+                {},
+                {"use_exp2_fast": 1},
+            ),
+        )
+        assert "use_exp2_fast" not in emitted["kernel_source"]["spec"], (
+            "an omitted policy knob was materialized into the spec; that pins a "
+            "value the author left to the kernel and changes the compiled binary"
+        )
+        assert emitted["metadata"]["use_exp2_fast"] == 1

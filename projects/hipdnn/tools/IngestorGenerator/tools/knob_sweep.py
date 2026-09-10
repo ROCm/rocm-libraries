@@ -55,9 +55,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dispatch_parity import (  # noqa: E402
     ParityError,
-    _import,
     _bind_provider,
+    _import,
     _load_profile,
+    _predicate_result,
+    _required,
     build_config,
     knob_partition,
     resolve_shapes,
@@ -108,6 +110,19 @@ def _promote(spec, arch_spec_cls, overrides: dict):
     return arch_spec_cls(**{**shared, **overrides})
 
 
+def _support_predicate(profile: dict):
+    """The engine's own eligibility predicate, or None when the profile declares none.
+
+    Bound once per arm rather than per shape: a predicate that will not import is an
+    operational failure of the whole run, and discovering it at shape 900 would leave
+    the earlier 899 reported as checked when they were not.
+    """
+    declaration = profile.get("predicate") or {}
+    if not declaration:
+        return None
+    return _import(*_required(declaration, "predicate", "module", "function"))
+
+
 def _arm(
     resolutions, profile: dict, overrides: dict, arch_spec_cls=None
 ) -> tuple[dict, list[tuple[int, str]]]:
@@ -133,9 +148,20 @@ def _arm(
     that count: an arm covering a subset of the corpus is measurable, but a bare
     ratio against parity over a different shape population is not a comparison.
 
+    TWO WAYS TO REFUSE, and only one of them raises. A spec constructor rejects an
+    illegal combination outright. The other kind constructs perfectly and is simply
+    NOT SUPPORTED -- an unsupported `head_size`, a `use_cfvst` combination the
+    kernel declines -- and the only thing that knows is the engine's own
+    eligibility predicate. So the predicate is asked about the FINAL spec: after
+    promotion to the builder's class and after this arm's overrides, which is the
+    spec the descriptor would actually be built from. Asking before the overrides
+    answers a question about a different kernel, and the arm ships a variant nothing
+    can serve while the run reads as a clean comparison against parity.
     """
     mutated = []
     unbuildable: list[tuple[int, str]] = []
+    predicate = _support_predicate(profile)
+    arch = profile.get("arch")
     for index, resolution in enumerate(resolutions):
         if resolution.spec is None:
             mutated.append(resolution)
@@ -175,6 +201,19 @@ def _arm(
         except Exception as exc:
             unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
             continue
+        if predicate is not None:
+            # THE FINAL SPEC, not the one the dispatcher returned. Composition is
+            # complete here: promoted to the builder's class and carrying this arm's
+            # overrides. A perturbation that constructs and is still declined --
+            # an unsupported head_size, a use_cfvst combination the kernel refuses --
+            # is invisible to the constructor above and to any check run earlier, and
+            # shipping it puts a variant in the catalog that nothing will ever serve.
+            supported, why = _predicate_result(
+                predicate, clone.spec, **({"arch": arch} if arch else {})
+            )
+            if not supported:
+                unbuildable.append((index, f"unsupported: {why}"))
+                continue
         mutated.append(clone)
     return build_config(mutated, profile), unbuildable
 
