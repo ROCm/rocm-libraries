@@ -250,7 +250,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
     {
 
         std::vector<std::string> unsupportedRaggedTensorStrings;
-        for(auto id : listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid}))
+        for(auto id : listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid}))
         {
             const std::string unsupportedString
                 = std::to_string(id) + " (" + tensorMap.at(id)->name()->str() + ")";
@@ -268,6 +268,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
               + static_cast<int>(kTensor->ragged_offset_tensor_uid().has_value())
               + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
               + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
+
+        HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
+                                       || attrs.seq_len_q_tensor_uid().has_value(),
+                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+
+        // TODO: Add support and checks for CU_SEQ_LENS_Q and CU_SEQ_LENS_KV
 
         HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
                                    "Either all or none of Q, K, V or O must be ragged");
@@ -505,10 +511,10 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.archString = deviceString;
     params.maskType = plan_utils::getMaskType(sdpaAttrs);
 
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
     auto batchMode
         = (qTensor->ragged_offset_tensor_uid().has_value()) ? BatchMode::GROUP : BatchMode::BATCH;
 
-    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
     if(batchMode == BatchMode::GROUP)
     {
         params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),

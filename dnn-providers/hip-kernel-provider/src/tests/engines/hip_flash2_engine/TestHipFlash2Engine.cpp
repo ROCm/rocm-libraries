@@ -4,17 +4,21 @@
 // Unit tests for HipFlash2Engine following the asm_sdpa_engine pattern.
 // Run with: ninja unit-check
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
+#include "mocks/MockPlanBuilder.hpp"
+#include "mocks/RaggedTensorMapFixture.hpp"
 
 namespace hip_flash2_engine
 {
@@ -124,6 +128,40 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_engine->isApplicable(_handle, graph));
+}
+
+// Device-independent guard tests: a mocked plan builder that would accept the
+// graph proves the ragged guard short-circuits before any plan builder runs.
+
+TEST_F(TestHipFlash2Engine, IsApplicableTrueWhenPlanBuilderApplicableAndNoRagged)
+{
+    auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+
+    HipFlash2Engine engine;
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
+
+    EXPECT_TRUE(engine.isApplicable(_handle, mockGraph));
+}
+
+TEST_F(TestHipFlash2Engine, IsApplicableFalseForRaggedGraph)
+{
+    auto mockPlanBuilder = std::make_unique<hip_kernel_provider::MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+    HipFlash2Engine engine;
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    const hip_kernel_provider::RaggedTensorMapFixture raggedTensors;
+    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap())
+        .WillRepeatedly(::testing::ReturnRef(raggedTensors.tensorMap()));
+
+    EXPECT_FALSE(engine.isApplicable(_handle, mockGraph));
 }
 
 // -- ID and name tests ---------------------------------------------------------

@@ -12,6 +12,7 @@
 
 #include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "mocks/RaggedTensorMapFixture.hpp"
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
@@ -125,6 +126,24 @@ TEST(TestHipMlopsEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     EXPECT_CALL(mockGraph, getTensorMap()).Times(::testing::AnyNumber());
     Handle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
+}
+
+TEST(TestHipMlopsEngine, IsApplicableReturnsFalseForRaggedGraph)
+{
+    // An otherwise-applicable plan builder must be short-circuited by the ragged
+    // guard, so its isApplicable is never consulted.
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+    EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_)).Times(0);
+
+    HipMlopsEngine engine(0);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    const RaggedTensorMapFixture raggedTensors;
+    const MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, getTensorMap())
+        .WillRepeatedly(::testing::ReturnRef(raggedTensors.tensorMap()));
+    Handle dummyHandle;
+    EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
 TEST(TestHipMlopsEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
