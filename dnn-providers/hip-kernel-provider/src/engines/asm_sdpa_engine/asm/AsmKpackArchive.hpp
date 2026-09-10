@@ -64,7 +64,7 @@ public:
         KernelData& operator=(KernelData&& o) noexcept
         {
             std::swap(data, o.data);
-            size = o.size;
+            std::swap(size, o.size);
             return *this;
         }
 

@@ -23,7 +23,10 @@ target_include_directories(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/../../../engines/asm_sdpa_engine/generated
 )
 
-# Path to the build-tree kpack archives for real loading tests
+# Path to the build-tree kpack archives for real loading tests.
+# These are unit tests (registered via add_unit_test_target) that run only in the
+# build tree. Installed-layout / TheRock coverage is provided by the integration
+# test suite, which resolves paths relative to the installed plugin.
 target_compile_definitions(hip_kernel_provider_tests PRIVATE
     ASM_KPACK_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa"
 )
