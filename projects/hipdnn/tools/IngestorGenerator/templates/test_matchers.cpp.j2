@@ -22,9 +22,13 @@
 namespace
 {
 
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
+// `BoundTokens` and `MatchContext` are deliberately NOT `using`-imported here. The
+// provider builds its tests under clang-tidy with misc-unused-using-decls as an ERROR,
+// and the cases below are `GTEST_SKIP` stubs that name no type, so a freshly generated
+// file carrying those two declarations fails the build before its author has written a
+// line -- the same trap the pack template's `[[maybe_unused]]` field constants avoid.
+// Add them back beside this one when the fixture you write below actually names them.
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
 
 /// A fixed device, constructed BY VALUE rather than queried from the host. An
 /// arch-gated matcher test that instead calls hipGetDeviceProperties() is vacuous
