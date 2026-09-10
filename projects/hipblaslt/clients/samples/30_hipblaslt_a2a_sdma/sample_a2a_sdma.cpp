@@ -23,6 +23,11 @@
 // own ranks against the closed form every worker generates from; no D crosses
 // the socket.
 //
+// Once checked, every rank re-fills A and B from the alphabet the tensilelite
+// client draws from and repeats the launch, reporting latency as the max across
+// ranks over kTimingIterations. Successive launches alternate the communicator's
+// kChannels flag regions.
+//
 // Needs a device library holding a FusedGemmA2A solution --
 // tensilelite/Tensile/Tests/common/comm/gfx950/fused_a2a.yaml builds one. Run
 // with:
@@ -68,7 +73,6 @@ namespace
     constexpr uint32_t kRanksPerProcess = 2;
     constexpr uint32_t kWorld           = kProcesses * kRanksPerProcess;
     constexpr uint32_t kChannels        = 2;
-    constexpr uint32_t kChannel         = 1;
 
     constexpr int64_t kShard = kExtent / kWorld;
 
@@ -77,6 +81,9 @@ namespace
 
     constexpr size_t kWorkspaceSize   = 32ull * 1024 * 1024;
     constexpr int    kSocketTimeoutSec = 30;
+
+    constexpr int kTimingIterations = 50;
+    constexpr int kTimingWarmup     = 10;
 
     // Ordered worst-last: combining two verdicts is a max.
     constexpr char kGo   = 0;
@@ -105,6 +112,13 @@ namespace
     float expectedD(uint32_t rank, int64_t feature, int64_t token)
     {
         return float((rank + 1) * ((feature % 7) + 1) * ((token % 5) + 1));
+    }
+
+    // Matches the (x%7)-3 alphabet the tensilelite client draws from.
+    float nextSample(uint32_t& state, float scale)
+    {
+        state = state * 1664525u + 1013904223u;
+        return float(int((state >> 16) % 7) - 3) * scale;
     }
 
     bool writeAll(int fd, const void* data, size_t bytes)
@@ -198,6 +212,22 @@ namespace
 
         std::vector<uint16_t> hD;
         std::vector<uint16_t> hRecv;
+
+        std::vector<double> latencies;
+    };
+
+    struct Events
+    {
+        hipEvent_t start = nullptr;
+        hipEvent_t stop  = nullptr;
+
+        ~Events()
+        {
+            if(start != nullptr)
+                static_cast<void>(hipEventDestroy(start));
+            if(stop != nullptr)
+                static_cast<void>(hipEventDestroy(stop));
+        }
     };
 
     // Releases the descriptors a rank builds, on every path out of runRank.
@@ -326,6 +356,28 @@ namespace
 
 namespace
 {
+    char fillDense(ProcessContext& ctx, uint32_t rank)
+    {
+        Rank& self = ctx.ranks[rank - ctx.rankBase];
+
+        const size_t elemsA = size_t(kK) * kFeatures;
+        const size_t elemsB = size_t(kK) * kTokens;
+
+        std::vector<uint16_t> host(elemsA);
+        uint32_t              state = rank + 1;
+        for(auto& v : host)
+            v = toBf16(nextSample(state, 0.5f));
+        CHECK_HIP(
+            hipMemcpy(self.dA, host.data(), elemsA * sizeof(uint16_t), hipMemcpyHostToDevice));
+
+        host.resize(elemsB);
+        for(auto& v : host)
+            v = toBf16(nextSample(state, 0.25f));
+        CHECK_HIP(
+            hipMemcpy(self.dB, host.data(), elemsB * sizeof(uint16_t), hipMemcpyHostToDevice));
+        return kGo;
+    }
+
     char runRank(ProcessContext& ctx, uint32_t rank, AllgatherSlot& slot)
     {
         Rank&         self = ctx.ranks[rank - ctx.rankBase];
@@ -365,9 +417,6 @@ namespace
         const hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         CHECK_LT(hipblasLtFusedEpilogueSetAttribute(
             fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE, &mode, sizeof(mode)));
-        const uint32_t channel = kChannel;
-        CHECK_LT(hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)));
 
         auto &layA = handles.lay[0], &layB = handles.lay[1];
         auto &layC = handles.lay[2], &layD = handles.lay[3];
@@ -405,28 +454,84 @@ namespace
             return verdict;
 
         const float alpha = 1.0f, beta = 0.0f;
-        CHECK_LT(hipblasLtMatmul(self.handle,
-                                 mm,
-                                 &alpha,
-                                 self.dA,
-                                 layA,
-                                 self.dB,
-                                 layB,
-                                 &beta,
-                                 self.dC,
-                                 layC,
-                                 self.dD,
-                                 layD,
-                                 &heur[0].algo,
-                                 self.dWorkspace,
-                                 kWorkspaceSize,
-                                 nullptr));
+        uint32_t    launchCount = 0;
+
+        // Successive launches alternate the communicator's flag regions.
+        auto launch = [&] {
+            const uint32_t        channel = launchCount++ % kChannels;
+            const hipblasStatus_t channelStatus
+                = hipblasLtFusedEpilogueSetAttribute(fused,
+                                                     HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL,
+                                                     &channel,
+                                                     sizeof(channel));
+            if(channelStatus != HIPBLAS_STATUS_SUCCESS)
+                return channelStatus;
+
+            return hipblasLtMatmul(self.handle,
+                                   mm,
+                                   &alpha,
+                                   self.dA,
+                                   layA,
+                                   self.dB,
+                                   layB,
+                                   &beta,
+                                   self.dC,
+                                   layC,
+                                   self.dD,
+                                   layD,
+                                   &heur[0].algo,
+                                   self.dWorkspace,
+                                   kWorkspaceSize,
+                                   nullptr);
+        };
+        CHECK_LT(launch());
         CHECK_HIP(hipDeviceSynchronize());
 
         const size_t bytesCD   = size_t(kFeatures) * kTokens * sizeof(uint16_t);
         const size_t bytesRecv = size_t(kWorld) * kTokens * kShard * sizeof(uint16_t);
         self.hD.resize(size_t(kFeatures) * kTokens);
         self.hRecv.resize(size_t(kWorld) * kTokens * kShard);
+        CHECK_HIP(hipMemcpy(self.hD.data(), self.dD, bytesCD, hipMemcpyDeviceToHost));
+        CHECK_HIP(hipMemcpy(self.hRecv.data(), self.dRecv, bytesRecv, hipMemcpyDeviceToHost));
+
+        if(fillDense(ctx, rank) != kGo)
+            return kFail;
+
+        Events events;
+        CHECK_HIP(hipEventCreate(&events.start));
+        CHECK_HIP(hipEventCreate(&events.stop));
+        self.latencies.reserve(kTimingIterations);
+
+        for(int it = 0; it < kTimingWarmup + kTimingIterations; ++it)
+        {
+            CHECK_HIP(hipEventRecord(events.start, nullptr));
+            CHECK_LT(launch());
+            CHECK_HIP(hipEventRecord(events.stop, nullptr));
+            CHECK_HIP(hipDeviceSynchronize());
+
+            if(it >= kTimingWarmup)
+            {
+                float ms = 0.0f;
+                CHECK_HIP(hipEventElapsedTime(&ms, events.start, events.stop));
+                self.latencies.push_back(double(ms) * 1000.0);
+            }
+        }
+
+        // Refill the verifiable operands and land one more launch into hD/hRecv,
+        // which checkRank reads.
+        std::vector<uint16_t> hA(size_t(kK) * kFeatures, toBf16(0.0f));
+        std::vector<uint16_t> hB(size_t(kK) * kTokens, toBf16(0.0f));
+        for(int64_t f = 0; f < kFeatures; ++f)
+            hA[size_t(f) * kK] = toBf16(float((rank + 1) * ((f % 7) + 1)));
+        for(int64_t t = 0; t < kTokens; ++t)
+            hB[size_t(t) * kK] = toBf16(float((t % 5) + 1));
+        CHECK_HIP(hipMemcpy(
+            self.dA, hA.data(), size_t(kK) * kFeatures * sizeof(uint16_t), hipMemcpyHostToDevice));
+        CHECK_HIP(hipMemcpy(
+            self.dB, hB.data(), size_t(kK) * kTokens * sizeof(uint16_t), hipMemcpyHostToDevice));
+
+        CHECK_LT(launch());
+        CHECK_HIP(hipDeviceSynchronize());
         CHECK_HIP(hipMemcpy(self.hD.data(), self.dD, bytesCD, hipMemcpyDeviceToHost));
         CHECK_HIP(hipMemcpy(self.hRecv.data(), self.dRecv, bytesRecv, hipMemcpyDeviceToHost));
         return kGo;
@@ -648,6 +753,27 @@ namespace
         return true;
     }
 
+    void reportPerf(std::vector<double> us)
+    {
+        std::sort(us.begin(), us.end());
+        const double lo     = us.front();
+        const double median = us[us.size() / 2];
+        const double p99    = us[(us.size() * 99) / 100];
+
+        const double gflop  = 2.0 * double(kFeatures) * kTokens * kK / 1e9;
+        const double egress = double(kExtent) * kTokens * sizeof(uint16_t) * double(kWorld - 1)
+                              / double(kWorld) / 1e6;
+
+        std::printf("perf (whole call, max across ranks, %d iterations after %d warmup; rates at "
+                    "min latency):\n",
+                    kTimingIterations,
+                    kTimingWarmup);
+        std::printf(
+            "  latency      min %.1f us    median %.1f us    p99 %.1f us\n", lo, median, p99);
+        std::printf("  GEMM         %.0f TFLOP/s per rank (%.1f GFLOP)\n", gflop / lo * 1e3, gflop);
+        std::printf("  A2A egress   %.1f GB/s per rank (%.1f MB)\n", egress / lo * 1e3, egress);
+    }
+
     int runProcess(ProcessContext& ctx)
     {
         const bool report = ctx.rankBase == 0;
@@ -703,6 +829,19 @@ namespace
                 if(!checkRank(ctx, ctx.rankBase + slot))
                     status = kStatusFailed;
 
+        std::vector<double> mine(size_t(kTimingIterations) * kRanksPerProcess, 0.0);
+        if(status == kStatusOk)
+            for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
+                std::copy(ctx.ranks[slot].latencies.begin(),
+                          ctx.ranks[slot].latencies.end(),
+                          mine.begin() + size_t(slot) * kTimingIterations);
+
+        if(!sendChunks(ctx.sock, mine.data(), kTimingIterations * sizeof(double)))
+        {
+            std::printf("failed: latency exchange\n");
+            status = kStatusFailed;
+        }
+
         for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
         {
             Rank& rank = ctx.ranks[slot];
@@ -727,9 +866,9 @@ namespace
         return status;
     }
 
-    // Three collectives in a fixed order: recv IPC handles, the registration
-    // allgather, then the verdict.
-    bool coordinate(const std::vector<int>& socks)
+    // Four collectives in a fixed order: recv IPC handles, the registration
+    // allgather, the verdict, then per-rank latency, which stops here.
+    bool coordinate(const std::vector<int>& socks, std::vector<double>& perfUs)
     {
         std::vector<char> all;
         size_t            bytesPerRank = 0;
@@ -737,6 +876,17 @@ namespace
         for(int step = 0; step < 3; ++step)
             if(!gather(socks, all, bytesPerRank) || !broadcast(socks, all))
                 return false;
+
+        if(!gather(socks, all, bytesPerRank)
+           || bytesPerRank != size_t(kTimingIterations) * sizeof(double))
+            return false;
+
+        std::vector<double> flat(size_t(kTimingIterations) * kWorld, 0.0);
+        std::memcpy(flat.data(), all.data(), all.size());
+        perfUs.assign(kTimingIterations, 0.0);
+        for(uint32_t r = 0; r < kWorld; ++r)
+            for(int i = 0; i < kTimingIterations; ++i)
+                perfUs[i] = std::max(perfUs[i], flat[size_t(r) * kTimingIterations + i]);
         return true;
     }
 }
@@ -792,7 +942,8 @@ int main()
         children[p] = child;
     }
 
-    const bool coordinated = coordinate(socks);
+    std::vector<double> perfUs;
+    const bool          coordinated = coordinate(socks, perfUs);
     for(int sock : socks)
         ::close(sock);
 
@@ -826,5 +977,6 @@ int main()
                 (long long)kTokens,
                 (long long)kExtent,
                 (long long)kShard);
+    reportPerf(perfUs);
     return kStatusOk;
 }
