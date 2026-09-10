@@ -197,6 +197,7 @@ public:
                 // than an empty cache.
                 for(size_t rank = 0; rank < ranked->size(); ++rank)
                 {
+                    std::string failure;
                     try
                     {
                         auto plan = std::make_unique<GenericPlan<THandle>>(
@@ -214,14 +215,27 @@ public:
                         executionContext.setPlan(std::move(plan));
                         return;
                     }
+                    catch(const HipdnnPluginException& error)
+                    {
+                        // A malformed descriptor is the author's mistake, not a kernel that
+                        // happens not to fit this graph: falling past it would hide the fault
+                        // and silently serve a different kernel than the one authored.
+                        if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                        {
+                            throw;
+                        }
+                        failure = error.what();
+                    }
                     catch(const std::exception& error)
                     {
-                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                               << _engine.name << "' could not build a plan for "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << ": " << error.what()
-                                               << "; trying the next ranked entry");
+                        failure = error.what();
                     }
+
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                           << _engine.name << "' could not build a plan for "
+                                           << toString((*ranked)[rank].kernelId) << " at rank "
+                                           << rank << ": " << failure
+                                           << "; trying the next ranked entry");
                 }
 
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
@@ -294,9 +308,9 @@ public:
                                                     << " before knob filtering), ranked front "
                                                     << toString(filtered.front().kernelId));
 
-        // One policy for both paths: an unbuildable candidate is a reason to carry, a
-        // malformed descriptor stops the build. Absorbing here what the ranked walk rethrows
-        // would make the diagnosis a consequence of a tuning setting.
+        // Every candidate walk applies the same policy: an unbuildable candidate is a reason
+        // to carry, a malformed descriptor stops the build. Absorbing here what the others
+        // rethrow would make the diagnosis a consequence of a tuning setting.
         std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());

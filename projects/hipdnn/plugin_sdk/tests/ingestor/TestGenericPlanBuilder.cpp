@@ -1713,6 +1713,67 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
            "of throwing";
 }
 
+/// The other half of the walk above: carrying past a kernel that cannot be prepared is
+/// what the ranked walk is for, but a malformed descriptor is the author's mistake and
+/// stops the build. The same descriptor reaching the empty-cache walk already throws, so
+/// absorbing it here would make the diagnosis depend on whether a record happened to
+/// exist.
+TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelIsMalformedRethrows)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const MalformedAtBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xDD));
+    const auto properties = testDeviceProperties();
+
+    // Fully covering, so the ranked walk runs at all, and ranking kernel_64 -- the
+    // malformed one -- first. kernel_128 and kernel_256 both prepare, so a walk that
+    // absorbed the throw would serve kernel_128 and report nothing.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
+    WinnerRecord record;
+    for(const auto& kernel : catalog)
+    {
+        record.push_back(
+            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+    }
+    std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.timeMs < rhs.timeMs;
+    });
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected a malformed descriptor at rank 0 to be reported, not skipped "
+                  "in favour of rank 1";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The author's own status and wording, as on the cache-free walks.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("outside the descriptor's directory"),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
 /// A record keyed on a different device must never be served here. This is why the key
 /// folds the whole DeviceProperties struct rather than the arch string alone.
 TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
