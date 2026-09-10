@@ -1208,13 +1208,23 @@ validParameters = { # we need to make sure this matches develop
     #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {MXSA,A} + {MXSB,B}, crossed parity. NumWaves>1.
-    #   2  {A,MXSA,MXSB} + {B}, 1/1/2 wave split. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3. NumWaves==4.
     #
     # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
     "TDMFuse": [0, 1, 2],
     # TDMCross -- which wave issues which member of a TDM descriptor group.
     # Orthogonal to TDMFuse: that picks the grouping, this rearranges the waves
-    # over it. Components/TDMFuse.py:tdmWaveAssignment is the only consumer.
+    # over it. Components/TDMFuse.py:tdmWaveAssignment is the only consumer that
+    # decides codegen; tdmCrossRejectReason also reads the parameter, to name the
+    # value it refuses.
+    #
+    # A boolean in effect, not an int enum. tdmCross() is
+    # `ks.get("TDMCross", 0) or 0` and every caller compares against the default
+    # rather than dispatching on the value, so any nonzero selects the one
+    # crossed arrangement: TDMCross=2 is TDMCross=1, not a third shape. Growing a
+    # third arrangement means teaching _arrangedGroups to dispatch on the value,
+    # so this list is not "room to grow" on its own.
     #
     #   0  Default. The shipped arrangement, member order as the grouping table
     #      writes it. Hidden from the kernel name, like TDMFuse=0.

@@ -11,11 +11,13 @@ Two separate questions live here and must not be confused:
 
 TDMFuse=0  {A,B} + {MXSA,MXSB}   default two-way parity
 TDMFuse=1  {A,MXSA} + {MXSB,B}   crossed parity (tdmFusePaired)
-TDMFuse=2  {A,MXSA,MXSB} + {B}   1/1/2 remainder split, NumWaves==4 (tdmFuseAMx)
+TDMFuse=2  {A,MXSA,MXSB} + {B}   2/1/1 remainder split, NumWaves==4 (tdmFuseAMx)
 
 The groupings are rows of TDM_GROUPS below, keyed on name.  The TDMFuse integer
-is a stable-but-arbitrary index into that table: our shipped values are baked
-into solution names and cannot move, so a name is the only stable key.
+is not an index into that table.  It is a key into TDM_FUSE_GROUPING, which maps
+it to a row name; a row's own `.index` is a third, unrelated numbering (4, 5, 2,
+3, 1, 0) carried for history, while the integers we ship are 0, 1, 2.  Our values
+are baked into solution names and cannot move, so a name is the only stable key.
 """
 
 import os
@@ -35,6 +37,15 @@ TDM_CROSS_DEFAULT = 0
 TDM_CROSS_CROSSED = 1
 
 
+class TdmArrangementNotEmittable(ValueError):
+    """A grouping row's wave partition has no spelling in the writer.
+
+    Raised rather than answered approximately. A mis-derived wave rule does not
+    fault: it points two waves at one LDS block, or advances a descriptor by
+    another tensor's increment, and the assembly looks well formed either way.
+    """
+
+
 class TdmGrouping:
     """One row of the grouping table.
 
@@ -44,8 +55,9 @@ class TdmGrouping:
     layout     "parity" splits a k-member group by wave index modulo k, so a
                two-member group lands member 0 on the even waves and member 1
                on the odd. "block" splits the waves into k contiguous shares,
-               remainder to the leading members, which is the 1/1/2 policy
-               TDMFuse=2 names.
+               remainder to the leading members, which is the 2/1/1 policy
+               TDMFuse=2 names: at NumWaves=4 its three-member group puts A on
+               waves 0-1, MXSA on wave 2 and MXSB on wave 3.
     index      the historical integer. Arbitrary and non-contiguous with
                anybody else's numbering; never key on it.
     """
@@ -61,8 +73,17 @@ class TdmGrouping:
 
 # Declarative grouping table, keyed on name.  Nothing below branches on a
 # specific name or index, so adding a grouping is adding a row plus one entry in
-# TDM_FUSE_GROUPING pointing an integer at it -- no new rejection, no new wave
-# rule, no new naming case.
+# TDM_FUSE_GROUPING pointing an integer at it -- no new rejection and no new
+# naming case.
+#
+# It is not true that a row needs no new wave rule.  Two rules are only as
+# general as the wave shapes they can spell: `tdmWaveComponents` can express a
+# one-wave share, a contiguous share starting at wave 0, and a stride-two share,
+# and refuses anything else; and the TDMFuse=2 shared-set increment in
+# `KernelWriterAssembly.tdmSetupIncrementWaveSeparated` is one compare per
+# single-wave scale member.  A row whose partition falls outside those shapes
+# now fails the build loudly instead of miscompiling, but it does need work
+# there before an integer may point at it.
 #
 #   name     groups (each = one fused tensor_load_to_lds)
 #   None     none -- every part loads on its own instruction
@@ -145,8 +166,35 @@ def tdmGrouping(ks):
     return TDM_GROUPS[TDM_FUSE_GROUPING[0]]
 
 
+def tdmWaveSeparated(ks):
+    """True when the TDM moves both tensors and there is more than one wave.
+
+    The writer's precondition for every wave-separated arrangement: with a
+    single wave, or with the TDM moving only one of A and B, there is no wave
+    partition to lay a grouping onto and the default shared descriptor set is
+    programmed whatever TDMFuse asked for.
+
+    `KernelWriterAssembly.isTdmWaveSeparated` delegates here rather than
+    restating it, so the writer and the thick gate cannot drift apart on the
+    precondition the way they could on the grouping question below.
+    """
+    return bool(ks.get("enableTDMA") and ks.get("enableTDMB")
+                and ks.get("NumWaves", 1) > 1)
+
+
+def tdmGroupingSeparatesAB(ks):
+    """True when the resolved grouping row puts A and B in different sets.
+
+    The table question alone, without the wave-separation precondition. Exposed
+    because the thick gate needs to tell "the grouping would have separated them
+    but the writer is not wave separated", which earns no relaxation at all,
+    from "the grouping shares them", which earns the text mechanism.
+    """
+    return not any({"A", "B"} <= set(group) for group in tdmGrouping(ks).groups)
+
+
 def tdmSeparateABDescriptors(ks):
-    """True when the grouping puts A and B in different descriptor sets.
+    """True when A's and B's TDM descriptors are distinct register sets.
 
     Two tensors sharing one set ride one fused `tensor_load_to_lds` and so share
     one TDM tensor token: nothing can drain one without draining the other. Two
@@ -158,8 +206,16 @@ def tdmSeparateABDescriptors(ks):
     answers with the fallback the writer actually gets. Adding a row therefore
     needs no branch here: `A_MX` and `B_MX` separate A from B, `MX_AB` and `AB`
     do not, and `None` fuses nothing so every tensor is its own set.
+
+    Single owner. `KernelWriterAssembly.tdmSeparateABDescriptors` used to spell
+    this `tdmFuseAMx or tdmFusePaired`, naming the two wired TDMFuse values
+    instead of asking the table. The two agreed on every shipped kernel, so
+    nothing miscompiled, but they are not the same question: `B_MX` separates A
+    from B and neither predicate names it, so the writer answered False where
+    this answers True. That method now delegates here, leaving one definition
+    rather than two that happen to match.
     """
-    return not any({"A", "B"} <= set(group) for group in tdmGrouping(ks).groups)
+    return tdmWaveSeparated(ks) and tdmGroupingSeparatesAB(ks)
 
 
 def tdmMemberIsLive(ks, tc):
@@ -299,7 +355,14 @@ def _crossGroups(groups):
 
 
 def tdmCross(ks):
-    """The requested wave arrangement. Missing key means default."""
+    """The requested wave arrangement. Missing key means default.
+
+    Boolean in effect, not an enum. Every caller compares against
+    TDM_CROSS_DEFAULT rather than dispatching on the value, so any nonzero
+    selects the one crossed arrangement and TDMCross=2 is TDMCross=1, not a
+    third shape. A third arrangement means teaching `_arrangedGroups` to
+    dispatch on the value, not just widening ValidParameters.
+    """
     return ks.get("TDMCross", TDM_CROSS_DEFAULT) or TDM_CROSS_DEFAULT
 
 
@@ -319,9 +382,15 @@ def _arrangedGroups(ks):
 def tdmWaveAssignment(ks):
     """Which tensors each wave issues, as {wave: (tc, ...)}.
 
-    LAYER 1. The only consumer of TDMCross in the whole codebase; every
-    other site reads the assignment (or tdmWavePartition, its per-tensor view)
-    rather than the parameter, so a new arrangement cannot half-apply.
+    LAYER 1. The only consumer of TDMCross that decides codegen, which it
+    reaches through `_arrangedGroups`; `tdmCrossRejectReason` also reads the
+    parameter, to name the value it refuses. Every other site reads the
+    assignment, or tdmWavePartition, its per-tensor view.
+
+    That routing is necessary for an arrangement to apply whole, not sufficient.
+    A consumer that reads the partition can still be unable to spell it, so an
+    arrangement can half-apply by being refused downstream instead of being
+    applied inconsistently -- `tdmWaveComponents` is the live example.
 
     Pure: depends on the grouping row, TDMCross, NumWaves and member
     liveness, and on nothing the writer mutates. The decoupled PGR pair reaches
@@ -364,6 +433,37 @@ def tdmWavePartition(ks, tc):
     return numComp, tuple(w for w in range(numWaves) if (w % 2 == 0) == isAArm)
 
 
+def tdmSoleWave(ks, tc):
+    """The one wave that carries `tc`, read off the partition.
+
+    A chained s_cselect dispatch can only test WaveIdx against a single value per
+    member, so a row that gives `tc` more than one wave needs a different
+    spelling in the writer. Refuse rather than compare against the first and
+    leave the rest of the share advancing by another tensor's increment.
+    """
+    _, waves = tdmWavePartition(ks, tc)
+    if len(waves) != 1:
+        raise TdmArrangementNotEmittable(
+            "the shared-set increment selects one wave per member, but the "
+            "grouping puts %s on waves %s; extend that dispatch to a wave range "
+            "before wiring a row with that partition" % (tc, waves))
+    return waves[0]
+
+
+def tdmWaveRangeText(ks, tc):
+    """`tc`'s wave share as comment text: "wave 2", or "waves 0-1".
+
+    A plain function rather than a writer method on purpose: it needs nothing but
+    the solution, and several tests drive the writer through hand-rolled stubs
+    that carry only the methods they expect. New instance methods break those
+    stubs; module functions do not.
+    """
+    _, waves = tdmWavePartition(ks, tc)
+    if len(waves) == 1:
+        return "wave %d" % waves[0]
+    return "waves %d-%d" % (waves[0], waves[-1])
+
+
 def tdmGroupPartner(ks, tc, fallback):
     """The other member of `tc`'s descriptor set, or `fallback`.
 
@@ -388,13 +488,39 @@ def tdmWaveComponents(ks, tc):
 
     None is the sentinel because 0 already means "shift by zero". TensorDataMover
     and KernelWriterAssembly both branch on these three values.
+
+    Those three are the whole vocabulary, so a share outside them raises
+    TdmArrangementNotEmittable rather than being rounded to the nearest one. A
+    two-wave share of (2, 3) is the case that used to fall through to a shift of
+    one and land both waves on component 1, pointing two waves at a single LDS
+    block -- a data race with no trace in the assembly.
+
+    A share of zero components is not such a case and is not refused: at
+    NumWaves=1 a multi-member group leaves its later members on no wave, which
+    _waveShares reports as zero components, and no wave reads the id.
     """
     numComp, waves = tdmWavePartition(ks, tc)
     if numComp == 1:
         return numComp, None
     if waves == tuple(range(numComp)):
         return numComp, 0
-    return numComp, 1
+    if numComp < 2:
+        # numComp == 0: a multi-member group on a single wave leaves this member
+        # on no wave at all, and _waveShares reports zero components for it by
+        # design. There is no wave rule here to be unable to spell -- no wave
+        # carries the member, so the id is never read -- so keep the shipped
+        # answer instead of refusing.
+        return numComp, 1
+    if tuple(w >> 1 for w in waves) == tuple(range(numComp)):
+        return numComp, 1
+    raise TdmArrangementNotEmittable(
+        "tensor %s rides waves %s over %d components, and no right-shift of "
+        "WaveIdx maps that onto components 0..%d: shifting by one gives %s. A "
+        "component id is emittable as a constant zero (one wave), WaveIdx "
+        "itself (a contiguous share from wave 0) or WaveIdx >> 1 (a stride-two "
+        "share). Teach this function the shape before pointing a TDMFuse "
+        "integer at a row that produces it."
+        % (tc, waves, numComp, numComp - 1, tuple(w >> 1 for w in waves)))
 
 
 def tdmDataTensorsShareAWave(ks):
@@ -536,14 +662,17 @@ def decoupledThickGateRelaxation(ks):
     or a path resolution, decoupled from the thing it governs, so that when the
     two disagree the guard permits instead of refusing. The fix is placement,
     not another check -- `tdmSeparateABDescriptors` routes the question through
-    `tdmGrouping`, the same function the writer's own grouping comes from, so
-    the two cannot diverge by construction.
+    `tdmGrouping`, the same function the writer's own grouping comes from.
+
+    "By construction" only became true once the writer asked the same function.
+    It kept a second definition, `tdmFuseAMx or tdmFusePaired`, which agreed on
+    every wired row and would have disagreed on `B_MX`; it now delegates.
     """
     decoupled, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
     if not (decoupled and numLdsBlkA != numLdsBlkB):
         return None
-    if tdmSeparateABDescriptors(ks):
-        if not (ks.get("enableTDMA") and ks.get("enableTDMB")):
+    if tdmGroupingSeparatesAB(ks):
+        if not tdmSeparateABDescriptors(ks):
             return None
         if min(numLdsBlkA, numLdsBlkB) != 1:
             return None

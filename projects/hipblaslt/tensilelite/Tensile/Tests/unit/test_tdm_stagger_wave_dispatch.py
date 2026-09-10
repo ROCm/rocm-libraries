@@ -3,7 +3,7 @@
 """TDMFuse=2's stagger gates must dispatch per wave, not by two-way parity.
 
 ``TDMFuse=2`` (``tdmFuseAMx``) aliases ``{A,MXSA,MXSB}`` onto one descriptor set
-and splits them 1/1/2 over four waves: waves 0-1 carry A, wave 2 carries MXSA,
+and splits them 2/1/1 over four waves: waves 0-1 carry A, wave 2 carries MXSA,
 wave 3 carries MXSB. ``B`` owns its own set and every wave carries a component
 of it.
 
