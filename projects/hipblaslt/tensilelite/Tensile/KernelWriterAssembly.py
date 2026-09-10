@@ -11440,7 +11440,17 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
-      imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+      if self.isTdmWaveSeparated(kernel):
+        skipMetadataLabel = Label(self.labels.getNameInc("TdmMetadataSkipOddWave"), "")
+        guardedLoad = Module("tdmMetadataWSGuardedLoad")
+        self._emitTdmWaveParitySCCAuto(guardedLoad, kernel, comment="metadata WaveSeparated: check wave parity (odd -> skip load)",
+                                      tmpTag="tdmMetadataIssueParity")
+        guardedLoad.add(SCBranchSCC1(labelName=skipMetadataLabel.getLabelName(), comment="odd wave: skip metadata load"))
+        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+        guardedLoad.add(skipMetadataLabel)
+        imod.add(guardedLoad)
+      else:
+        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -19532,6 +19542,8 @@ class KernelWriterAssembly(KernelWriter):
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
     isMetadataML1: bool = isMetadata and kernel["ProblemType"]["Sparse"] and kernel["ProblemType"]["MetadataLayout"]
+    waveSepMetadata: bool = isMetadata and self.isTdmWaveSeparated(kernel)
+    numComp: int = numWaves // 2 if waveSepMetadata else numWaves
 
     isTdmIter = (not isMetadata
                  and kernel.get("_TDMIterateMode%s" % tc, False))
@@ -19549,8 +19561,12 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
-      dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
+      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      if waveSepMetadata:
+        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wCompId = WaveIdx // 2"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wCompId * (mt // numComp * du * bpe // dim1Divisor)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
                 f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
@@ -19576,7 +19592,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
       mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
-      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
+      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp, self))
     else:
       # isSparseTrack/isMetadata apply to the K dimension (index 3).
       # For unrolledMajor (TN): K is dim0. For tlu (NN): K is dim1.
@@ -19611,7 +19627,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1),
                                     self._tdmIterTileDim1(kernel, tc, du, dtype), self))
       else:
-        mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
+        mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
 
     # --- Tensor stride ---
     if isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
