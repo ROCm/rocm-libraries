@@ -81,6 +81,10 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForMultiNodeGraph)
 {
     const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+    // The node-count guard must reject the graph before anything else is inspected: if it were
+    // deleted or weakened, hasOnlySupportedAttributes() would be reached next, and this
+    // expectation would fail the test instead of silently passing via gmock's default action.
+    EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_)).Times(0);
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(mockGraph));
 }
