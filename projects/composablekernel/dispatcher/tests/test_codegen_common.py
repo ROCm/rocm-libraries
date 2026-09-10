@@ -42,6 +42,8 @@ from codegen_common import (  # noqa: E402
     rowcol_tensor_quant_default_tile,
     ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
     ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250,
+    ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES,
+    validate_rowcol_tensor_quant_gfx_arch,
     make_aquant_kernel_name,
     # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
     fp8_warp_tile_k_for_arch,
@@ -739,6 +741,72 @@ class TestRowColTensorQuantDefaultTile(unittest.TestCase):
         t = rowcol_tensor_quant_default_tile("gfx1250")
         t["tile_m"] = -1
         self.assertNotEqual(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250["tile_m"], -1)
+
+
+class TestValidateRowColTensorQuantGfxArch(unittest.TestCase):
+    """--gfx-arch has to be checked, because nothing downstream checks it.
+
+    The flag only selects a default tile; it never reaches --offload-arch, so an
+    unrecognized value is not rejected by hipcc the way a bad compile target is. It
+    just falls through to the gfx9 MFMA tile -- which on gfx1250 compiles and returns
+    garbage. That is the failure this operator's gfx1250 work exists to prevent,
+    reachable by a single typo on the command line.
+    """
+
+    def test_supported_arches_pass_through_bare(self):
+        for arch in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+            with self.subTest(arch=arch):
+                self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(arch), arch)
+
+    def test_feature_suffixes_are_accepted_and_stripped(self):
+        # A real device reports the suffixed form; refusing it would make the flag
+        # unusable with the name the hardware gives.
+        for given, expected in [
+            ("gfx1250:xnack-", "gfx1250"),
+            ("gfx950:sramecc+:xnack-", "gfx950"),
+            ("gfx942:xnack+", "gfx942"),
+        ]:
+            with self.subTest(arch=given):
+                self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(given), expected)
+
+    def test_empty_means_unspecified(self):
+        self.assertEqual(validate_rowcol_tensor_quant_gfx_arch(""), "")
+
+    def test_a_typo_is_rejected_rather_than_silently_gfx9(self):
+        for arch in ("gfx1205", "gfx12500", "gfx942x", "gfx", "1250", "GFX1250"):
+            with self.subTest(arch=arch):
+                with self.assertRaises(ValueError):
+                    validate_rowcol_tensor_quant_gfx_arch(arch)
+
+    def test_architectures_without_a_defensible_tile_are_rejected(self):
+        # These are real targets and some are listed in arch_specs.json, but neither
+        # default tile is correct for them: gfx1200/gfx1201 are WMMA parts with a
+        # 16x16x16 8-bit fragment, and gfx908 has no fp8 MFMA at all. Accepting them
+        # would hand back a tile this operator has never validated.
+        for arch in ("gfx908", "gfx1100", "gfx1200", "gfx1201", "gfx1201:xnack-"):
+            with self.subTest(arch=arch):
+                with self.assertRaises(ValueError):
+                    validate_rowcol_tensor_quant_gfx_arch(arch)
+
+    def test_the_error_names_the_value_and_the_alternatives(self):
+        with self.assertRaises(ValueError) as ctx:
+            validate_rowcol_tensor_quant_gfx_arch("gfx1205")
+        message = str(ctx.exception)
+        self.assertIn("gfx1205", message)
+        for arch in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+            self.assertIn(arch, message)
+
+    def test_the_set_matches_the_bridge_runtime(self):
+        # One advertised support set per bridge. gemm_utils is the runtime entry
+        # point; if the two drift, --gfx-arch accepts a target the runner refuses,
+        # or refuses one it accepts.
+        sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+        import gemm_utils
+
+        self.assertEqual(
+            sorted(ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES),
+            sorted(gemm_utils._SUPPORTED_ARCHES),
+        )
 
 
 if __name__ == "__main__":

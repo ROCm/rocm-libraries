@@ -1040,6 +1040,44 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
     return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
 
 
+# Architectures the RowColQuant/TensorQuant codegen will accept on its command line.
+# Deliberately the same four as dispatcher/python/gemm_utils.py::_SUPPORTED_ARCHES,
+# so the bridge does not advertise one supported set on one entry point and a
+# different one on another.
+#
+# Not taken from codegen/arch_specs.json: that file does not list gfx1250 at all, and
+# it does list gfx908/gfx1100/gfx1200/gfx1201, none of which these two operators have
+# a defensible default tile for -- gfx1200/gfx1201 in particular are WMMA parts whose
+# 8-bit fragment is 16x16x16, so both tiles above are wrong for them.
+ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
+
+
+def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str) -> str:
+    """Normalize and check a caller-supplied gfx target; return the bare target.
+
+    Raises ``ValueError`` for anything outside
+    ``ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES``. Empty is allowed and means "not
+    specified", which selects the gfx9 MFMA tile -- the behaviour every invocation
+    without the flag had before the flag existed.
+
+    This exists because ``--gfx-arch`` on the two codegen scripts is the one place a
+    typo is completely silent. Everywhere else a bad target eventually reaches
+    ``--offload-arch`` and hipcc rejects it; here the value only picks a tile, so
+    ``--gfx-arch gfx1205`` quietly generates the gfx9 MFMA tile and the result is a
+    kernel that compiles for gfx1250 and returns garbage -- which is the failure mode
+    this whole branch exists to close, arriving through the front door.
+    """
+    if not gfx_arch:
+        return ""
+    base = normalize_gfx_arch(gfx_arch)
+    if base not in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {gfx_arch!r} (normalized to {base!r}); "
+            f"supported: {', '.join(ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES)}."
+        )
+    return base
+
+
 # Default traits, shared for the same reason as the tile above. pad_m is enabled
 # because these kernels are used with M values that are not tile-aligned.
 ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS = {
