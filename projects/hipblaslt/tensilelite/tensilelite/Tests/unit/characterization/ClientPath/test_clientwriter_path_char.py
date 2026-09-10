@@ -46,6 +46,7 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 import tensilelite.ClientWriter as CW
+from tensilelite import _runtime
 from tensilelite.Common.GlobalParameters import globalParameters
 
 pytestmark = pytest.mark.unit
@@ -620,30 +621,20 @@ class TestRunNewClient:
 
 class TestGetClientExecutablePath:
     def test_raises_when_file_not_found(self, monkeypatch):
-        """Lines 807-813: raises FileNotFoundError when PrebuiltClient doesn't exist."""
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", "/nonexistent/fake_client")
+        """Runtime lookup failures remain visible to the caller."""
         def client_not_found():
             raise _runtime.TensileLiteRuntimeError("tensilelite-client was not found")
 
         monkeypatch.setattr(_runtime, "client_executable", client_not_found)
 
-        with pytest.raises(FileNotFoundError, match="TensileLite client executable not found"):
+        with pytest.raises(_runtime.TensileLiteRuntimeError, match="tensilelite-client was not found"):
             CW.getClientExecutablePath()
 
     def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
-        """Lines 805-806: returns PrebuiltClient path when it exists."""
+        """The client path is supplied by the initialized runtime binding."""
         fake_exe = tmp_path / "tensile_client"
         fake_exe.write_text("#!/bin/bash\necho fake")
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", str(fake_exe))
-
-        result = CW.getClientExecutablePath()
-        assert result == str(fake_exe)
-||||||| base
-    def test_returns_path_when_file_exists(self, tmp_path, monkeypatch):
-        """Lines 805-806: returns PrebuiltClient path when it exists."""
-        fake_exe = tmp_path / "tensile_client"
-        fake_exe.write_text("#!/bin/bash\necho fake")
-        monkeypatch.setitem(globalParameters, "PrebuiltClient", str(fake_exe))
+        monkeypatch.setattr(_runtime, "client_executable", lambda: fake_exe)
 
         result = CW.getClientExecutablePath()
         assert result == str(fake_exe)
