@@ -64,8 +64,13 @@ TEST(alignStridesToModesTest, UtilTest)
     EXPECT_EQ(hiptensor::alignStridesToModes({'c', 'a', 'b'}, {'a', 'b', 'c'}, strides),
               (std::vector<std::size_t>{12, 1, 3}));
 
-    // A reference mode the tensor doesn't carry cannot be aligned.
-    EXPECT_TRUE(hiptensor::alignStridesToModes({'a', 'b', 'd'}, {'a', 'b', 'c'}, strides).empty());
+    // A reference mode the tensor doesn't carry gets stride 0, broadcasting it along that mode.
+    EXPECT_EQ(hiptensor::alignStridesToModes({'a', 'b', 'd'}, {'a', 'b', 'c'}, strides),
+              (std::vector<std::size_t>{1, 3, 0}));
+
+    // A tensor of lower rank than the reference is broadcast along every mode it lacks.
+    EXPECT_EQ(hiptensor::alignStridesToModes<std::size_t>({'a', 'b', 'c'}, {'c'}, {1}),
+              (std::vector<std::size_t>{0, 0, 1}));
 
     // Mode and stride counts must agree.
     EXPECT_TRUE(hiptensor::alignStridesToModes({'a', 'b'}, {'a', 'b'}, strides).empty());
