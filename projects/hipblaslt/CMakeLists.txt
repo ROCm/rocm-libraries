@@ -435,7 +435,15 @@ elseif(WIN32)
         "llvm/bin directory) to embed version info.")
 endif()
 
-add_subdirectory(tensilelite)
+# hipBLASLt and TensileLite expose independent shared-library options. Keep
+# their target creation insulated from an enclosing superproject's
+# BUILD_SHARED_LIBS value; static exports have additional package dependencies.
+block(SCOPE_FOR VARIABLES)
+    set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+    add_subdirectory(tensilelite)
+endblock()
+
+set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
     add_library(hipblaslt)
