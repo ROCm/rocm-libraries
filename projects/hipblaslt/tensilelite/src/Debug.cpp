@@ -120,6 +120,11 @@ namespace TensileLite
         return m_value & 0x200000;
     }
 
+    bool Debug::printNoSolutionUniformSummationOrder() const
+    {
+        return m_value & 0x400000;
+    }
+
     bool Debug::naivePropertySearch() const
     {
         return m_naivePropertySearch;
