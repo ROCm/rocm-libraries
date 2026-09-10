@@ -415,8 +415,11 @@ inline constexpr BinaryFloatFormat binaryFloatFormatKnown() {
         return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
     else if constexpr (Type == ScalarType::E5M3)
         return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
-    else
+    else if constexpr (Type == ScalarType::E4M3)
         return {4, 3, 7, 7, false, false, false, 0x7e, 0, 0x7f};
+    else
+        static_assert(AlwaysFalseV<std::integral_constant<ScalarType, Type>>,
+                      "Unhandled binary floating-point ScalarType.");
 }
 
 inline BinaryFloatFormat binaryFloatFormat(ScalarType type) {
@@ -440,8 +443,12 @@ inline constexpr bool isBinaryFloatNaNKnown(uint32_t raw) {
         return raw == 0x80U;
     else if constexpr (Type == ScalarType::E5M3)
         return raw == 0xffU;
-    else
+    else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+                       Type == ScalarType::Float6E3M2)
         return false;
+    else
+        static_assert(AlwaysFalseV<std::integral_constant<ScalarType, Type>>,
+                      "Unhandled binary floating-point ScalarType.");
 }
 
 inline bool isBinaryFloatNaN(ScalarType type, uint32_t raw) {
@@ -641,47 +648,22 @@ inline int64_t signExtend(uint32_t value, uint32_t bits) {
     return static_cast<int32_t>((value ^ sign) - sign);
 }
 
-template <ScalarType Type, typename Target>
+template <typename Tag, typename Target>
 Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset,
                          const ScalarConversionOptions& options) {
+    constexpr ScalarType Type = Tag::type;
     static_assert(isConcreteScalarType(Type));
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
     if constexpr (Type == ScalarType::Boolean)
         return convertScalarValue<Target>(readNative<uint8_t>(storage, offsetBytes) != 0, options);
-    else if constexpr (Type == ScalarType::UInt8)
-        return convertScalarValue<Target>(readNative<uint8_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::Int8)
-        return convertScalarValue<Target>(readNative<int8_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::UInt16)
-        return convertScalarValue<Target>(readNative<uint16_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::Int16)
-        return convertScalarValue<Target>(readNative<int16_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::UInt32)
-        return convertScalarValue<Target>(readNative<uint32_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::Int32)
-        return convertScalarValue<Target>(readNative<int32_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::UInt64)
-        return convertScalarValue<Target>(readNative<uint64_t>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::Int64)
-        return convertScalarValue<Target>(readNative<int64_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Float16)
         return convertScalarValue<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)),
                                           options);
     else if constexpr (Type == ScalarType::BFloat16)
         return convertScalarValue<Target>(
             decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)), options);
-    else if constexpr (Type == ScalarType::Float32)
-        return convertScalarValue<Target>(readNative<float>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::Float64)
-        return convertScalarValue<Target>(readNative<double>(storage, offsetBytes), options);
-    else if constexpr (Type == ScalarType::ComplexFloat32)
-        return convertScalarValue<Target>(readNative<std::complex<float>>(storage, offsetBytes),
-                                          options);
-    else if constexpr (Type == ScalarType::ComplexFloat64)
-        return convertScalarValue<Target>(readNative<std::complex<double>>(storage, offsetBytes),
-                                          options);
     else if constexpr (Type == ScalarType::Int4)
         return convertScalarValue<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4),
                                           options);
@@ -700,19 +682,24 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
     else if constexpr (Type == ScalarType::E8M0Zero)
         return convertScalarValue<Target>(decodeE8M0Zero(readNative<uint8_t>(storage, offsetBytes)),
                                           options);
+    else if constexpr (!std::is_void_v<typename Tag::Storage>)
+        return convertScalarValue<Target>(readNative<typename Tag::Storage>(storage, offsetBytes),
+                                          options);
+    else
+        static_assert(AlwaysFalseV<Tag>, "Unhandled ScalarType decoding.");
 }
 
-template <ScalarType Type, typename Target>
+template <typename Tag, typename Target>
 Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return decodeScalarKnown<Type, Target>(storage, logicalOffset,
-                                           implicitNativeConversionOptions());
+    return decodeScalarKnown<Tag, Target>(storage, logicalOffset,
+                                          implicitNativeConversionOptions());
 }
 
 template <typename Target>
 Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset,
                     const ScalarConversionOptions& options) {
     return visitScalarType(type, [&]<typename Tag>() {
-        return decodeScalarKnown<Tag::type, Target>(storage, logicalOffset, options);
+        return decodeScalarKnown<Tag, Target>(storage, logicalOffset, options);
     });
 }
 
@@ -721,9 +708,10 @@ Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff
     return decodeScalar<Target>(type, storage, logicalOffset, implicitNativeConversionOptions());
 }
 
-template <ScalarType Type, typename Source>
+template <typename Tag, typename Source>
 void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source,
                        const ScalarConversionOptions& options) {
+    constexpr ScalarType Type = Tag::type;
     static_assert(isConcreteScalarType(Type));
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
@@ -731,22 +719,6 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
     if constexpr (Type == ScalarType::Boolean)
         writeNative<uint8_t>(storage, offsetBytes,
                              convertScalarValue<bool>(source, options) ? uint8_t{1} : uint8_t{0});
-    else if constexpr (Type == ScalarType::UInt8)
-        writeNative<uint8_t>(storage, offsetBytes, convertScalarValue<uint8_t>(source, options));
-    else if constexpr (Type == ScalarType::Int8)
-        writeNative<int8_t>(storage, offsetBytes, convertScalarValue<int8_t>(source, options));
-    else if constexpr (Type == ScalarType::UInt16)
-        writeNative<uint16_t>(storage, offsetBytes, convertScalarValue<uint16_t>(source, options));
-    else if constexpr (Type == ScalarType::Int16)
-        writeNative<int16_t>(storage, offsetBytes, convertScalarValue<int16_t>(source, options));
-    else if constexpr (Type == ScalarType::UInt32)
-        writeNative<uint32_t>(storage, offsetBytes, convertScalarValue<uint32_t>(source, options));
-    else if constexpr (Type == ScalarType::Int32)
-        writeNative<int32_t>(storage, offsetBytes, convertScalarValue<int32_t>(source, options));
-    else if constexpr (Type == ScalarType::UInt64)
-        writeNative<uint64_t>(storage, offsetBytes, convertScalarValue<uint64_t>(source, options));
-    else if constexpr (Type == ScalarType::Int64)
-        writeNative<int64_t>(storage, offsetBytes, convertScalarValue<int64_t>(source, options));
     else if constexpr (Type == ScalarType::Float16)
         writeNative<uint16_t>(storage, offsetBytes,
                               encodeFloat16(convertScalarValue<float>(source, options)));
@@ -756,16 +728,6 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
             options.bfloat16Rounding == BFloat16Rounding::Truncate
                 ? encodeBFloat16Truncated(convertScalarValue<float>(source, options))
                 : encodeBFloat16(convertScalarValue<float>(source, options)));
-    else if constexpr (Type == ScalarType::Float32)
-        writeNative<float>(storage, offsetBytes, convertScalarValue<float>(source, options));
-    else if constexpr (Type == ScalarType::Float64)
-        writeNative<double>(storage, offsetBytes, convertScalarValue<double>(source, options));
-    else if constexpr (Type == ScalarType::ComplexFloat32)
-        writeNative<std::complex<float>>(storage, offsetBytes,
-                                         convertScalarValue<std::complex<float>>(source, options));
-    else if constexpr (Type == ScalarType::ComplexFloat64)
-        writeNative<std::complex<double>>(
-            storage, offsetBytes, convertScalarValue<std::complex<double>>(source, options));
     else if constexpr (Type == ScalarType::Int4)
         writePackedBits(storage, offsetBits, 4,
                         static_cast<uint32_t>(convertToIntegerBits(source, 4, true, options)));
@@ -782,19 +744,24 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
     else if constexpr (Type == ScalarType::E8M0Zero)
         writeNative<uint8_t>(storage, offsetBytes,
                              encodeE8M0Zero(convertScalarValue<float>(source, options)));
+    else if constexpr (!std::is_void_v<typename Tag::Storage>)
+        writeNative<typename Tag::Storage>(
+            storage, offsetBytes, convertScalarValue<typename Tag::Storage>(source, options));
+    else
+        static_assert(AlwaysFalseV<Tag>, "Unhandled ScalarType encoding.");
 }
 
-template <ScalarType Type, typename Source>
+template <typename Tag, typename Source>
 void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source) {
-    encodeScalarKnown<Type>(storage, logicalOffset, std::move(source),
-                            implicitStorageConversionOptions(Type));
+    encodeScalarKnown<Tag>(storage, logicalOffset, std::move(source),
+                           implicitStorageConversionOptions(Tag::type));
 }
 
 template <typename Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
                   Source source, const ScalarConversionOptions& options) {
     visitScalarType(type, [&]<typename Tag>() {
-        encodeScalarKnown<Tag::type>(storage, logicalOffset, std::move(source), options);
+        encodeScalarKnown<Tag>(storage, logicalOffset, std::move(source), options);
     });
 }
 
