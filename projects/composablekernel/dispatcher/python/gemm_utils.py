@@ -131,13 +131,33 @@ def _get_arch() -> str:
 def _validate_arch(arch: str) -> str:
     """Normalize a gfx target, then check it against ``_SUPPORTED_ARCHES``.
 
-    Normalization comes FIRST, and that ordering is the whole point. Both sources
-    that feed this -- amd-smi and rocminfo -- report the target with its feature
-    flags on a real device ("gfx950:sramecc+:xnack-", "gfx1250:xnack-"), and
-    validating that string raw rejected the only name such a device ever gives:
+    Normalization comes FIRST, and that ordering is the whole point -- but not
+    because autodetection produces suffixes. It does not. On a real device all
+    three autodetect sources report the BARE target: ``amd-smi``'s
+    ``TARGET_GRAPHICS_VERSION``, ``rocm_agent_enumerator``, and the agent
+    ``Name:`` line that ``_get_arch`` above parses all print ``gfx90a``
+    (measured on a gfx90a device). ``_get_arch`` could not return a suffixed
+    name even if rocminfo offered one: the only suffixed string in that output
+    is the ISA line, ``amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-``, which fails
+    the ``startswith("gfx")`` check after the split.
 
-        gfx1250                 -> ValueError
+    Suffixed names get here from CALLERS, not from detection, and they are real:
+
+      * this repository's own CMakeLists.txt sets, on the ASAN branch,
+        ``CK_GPU_TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"``;
+      * ``hipDeviceProp_t::gcnArchName`` returns ``gfx90a:sramecc+:xnack-``
+        (measured on the same device).
+
+    Either is a plausible thing to copy into ``--gfx-arch`` or an explicit
+    ``arch=``, and that value reaches this function unmodified. Validating it raw
+    rejected it:
+
         gfx950:sramecc+:xnack-  -> ValueError
+
+    Bare targets were never the problem; they passed before this change and pass
+    now (tests/test_gemm_utils.py::test_bare_supported_arches_are_unchanged).
+    Normalizing first costs a supported bare name nothing and makes the suffixed
+    spellings above usable.
 
     Every caller wants the bare target regardless. It is stamped onto
     ``GemmKernelConfig.gfx_arch``, handed to ``--offload-arch``, and used as the key

@@ -373,10 +373,12 @@ class TestGroupedGfx1250(unittest.TestCase):
 # _resolve_arch() validated its input against _SUPPORTED_ARCHES *before*
 # normalizing it, so a target carrying feature flags was rejected outright:
 #
-#     gfx1250                 -> ValueError
 #     gfx950:sramecc+:xnack-  -> ValueError
 #
-# That is the form hipDeviceProp_t::gcnArchName reports, the form rocminfo prints
+# Bare targets were unaffected -- gfx1250 is in _SUPPORTED_ARCHES and passed both
+# before and after (test_bare_supported_arches_are_unchanged below).
+#
+# The suffixed form is what hipDeviceProp_t::gcnArchName reports, the form rocminfo prints
 # for the ISA line, and the form this repository's own CMakeLists.txt uses for
 # GPU_TARGETS ("gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"), so a
 # caller copying a target from any of those could not drive the bridge with it.
