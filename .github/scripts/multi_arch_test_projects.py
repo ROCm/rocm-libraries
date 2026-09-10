@@ -16,6 +16,14 @@ SHARED_ADJACENT_TEST_PROJECTS = {
     "shared/mxdatagenerator": ["rocroller"],
 }
 
+# These shared components still require their mapped build configuration, but
+# TheRock determines that they have no applicable multi-arch runtime tests.
+# Forward their subtree names instead of expanding their build umbrellas into
+# unrelated test projects.
+BUILD_ONLY_SHARED_PROJECTS = {
+    "shared/stinkytofu",
+}
+
 
 def select_test_projects(changed_projects: str) -> str:
     """Return the projects TheRock should test for changed monorepo subtrees."""
@@ -27,6 +35,10 @@ def select_test_projects(changed_projects: str) -> str:
     for changed_project in changed_projects.split(","):
         changed_project = changed_project.strip()
         if not changed_project:
+            continue
+
+        if changed_project in BUILD_ONLY_SHARED_PROJECTS:
+            selected.append(changed_project)
             continue
 
         if not changed_project.startswith("shared/"):
