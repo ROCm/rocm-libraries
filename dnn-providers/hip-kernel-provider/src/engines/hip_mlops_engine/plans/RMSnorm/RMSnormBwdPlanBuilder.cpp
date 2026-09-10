@@ -18,6 +18,8 @@
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
 
+using namespace hip_kernel_provider::core::utils;
+
 namespace hip_kernel_provider::rmsnorm
 {
 

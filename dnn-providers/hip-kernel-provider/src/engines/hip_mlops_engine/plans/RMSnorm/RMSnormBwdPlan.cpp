@@ -136,18 +136,13 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
                                                            + std::to_string(outerSize * stride));
     }
 
-    // Get activation parameters
-    if(_params.optActivation().has_value())
-    {
-        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
-        _activationBeta = static_cast<float>(_params.optActivation()->beta);
-    }
-
-    // Get activation mode
+    // Get activation parameters and activation mode
     auto activationMode = ActivationMode::PASTHRU;
-    if(_params.optActivation().has_value())
+    if(const auto& activation = _params.optActivation(); activation.has_value())
     {
-        activationMode = (*_params.optActivation()).mode;
+        _activationAlpha = static_cast<float>(activation->alpha);
+        _activationBeta = static_cast<float>(activation->beta);
+        activationMode = activation->mode;
     }
 
     // Determine input/output data type configuration
