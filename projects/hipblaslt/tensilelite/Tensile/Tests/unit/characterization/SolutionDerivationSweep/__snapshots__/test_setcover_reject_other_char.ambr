@@ -1,0 +1,166 @@
+# serializer version: 1
+# name: test_setcover_reject_other[activationalt]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[af0em_nohpa]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[convertafterds]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[interleave_alpha]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[mbsk_maxviol]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBufferSingleKernel',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_dtva]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': True,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_dtvb]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': True,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_gg]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_pgr2]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_sparse]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_subdword]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[nobuf_usebias]
+  dict({
+    'BufferLoad': False,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 1,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[srmap_sourceswap]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 4,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[ucms_tailloop]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
+# name: test_setcover_reject_other[wf32_source]
+  dict({
+    'BufferLoad': True,
+    'DirectToVgprA': False,
+    'DirectToVgprB': False,
+    'PrefetchGlobalRead': 2,
+    'StoreRemapVectorWidth': 0,
+    'Valid': False,
+    '_GlobalAccumulation': 'MultipleBuffer',
+  })
+# ---
