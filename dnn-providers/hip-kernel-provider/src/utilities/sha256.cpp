@@ -1,47 +1,25 @@
-/*
-    MIT License
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+//
+// Derived from LekKit's SHA-256 (https://github.com/LekKit/sha256); see sha256.hpp for
+// the provenance note and upstream's licence. Algorithm details:
+// https://en.wikipedia.org/wiki/SHA-2
 
-    Copyright (c) 2020 LekKit https://github.com/LekKit
+#include "utilities/sha256.hpp"
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
+#include <cstring>
 
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-*/
-
-/* Details of the implementation, etc can be found here: https://en.wikipedia.org/wiki/SHA-2
-   See sha256.h for short documentation on library usage */
-
-#include "sha256.h"
-
-void sha256_init(struct sha256_buff* buff)
+namespace hip_kernel_provider::utilities
 {
-    buff->h[0]       = 0x6a09e667;
-    buff->h[1]       = 0xbb67ae85;
-    buff->h[2]       = 0x3c6ef372;
-    buff->h[3]       = 0xa54ff53a;
-    buff->h[4]       = 0x510e527f;
-    buff->h[5]       = 0x9b05688c;
-    buff->h[6]       = 0x1f83d9ab;
-    buff->h[7]       = 0x5be0cd19;
-    buff->data_size  = 0;
-    buff->chunk_size = 0;
-}
 
-static const uint32_t k[64] = {
+namespace
+{
+
+constexpr std::size_t CHUNK_BYTES = 64;
+constexpr std::size_t DIGEST_BYTES = 32;
+
+/// The first 32 bits of the fractional parts of the cube roots of the first 64 primes.
+constexpr std::array<std::uint32_t, 64> ROUND_CONSTANTS = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
     0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -51,39 +29,49 @@ static const uint32_t k[64] = {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-#define rotate_r(val, bits) (val >> bits | val << (32 - bits))
-
-static void sha256_calc_chunk(struct sha256_buff* buff, const uint8_t* chunk)
+/// std::rotr would say this directly, but this provider builds as C++17 and that is C++20.
+constexpr std::uint32_t rotateRight(std::uint32_t value, std::uint32_t bits)
 {
-    uint32_t w[64];
-    uint32_t tv[8];
-    uint32_t i;
+    return (value >> bits) | (value << (32U - bits));
+}
 
-    for(i = 0; i < 16; ++i)
+void sha256CalcChunk(Sha256Buff& buff, const std::uint8_t* chunk)
+{
+    std::array<std::uint32_t, 64> w{};
+    std::array<std::uint32_t, 8> tv{};
+
+    for(std::size_t i = 0; i < 16; ++i)
     {
-        w[i] = (uint32_t)chunk[0] << 24 | (uint32_t)chunk[1] << 16 | (uint32_t)chunk[2] << 8
-               | (uint32_t)chunk[3];
+        w[i] = static_cast<std::uint32_t>(chunk[0]) << 24
+               | static_cast<std::uint32_t>(chunk[1]) << 16
+               | static_cast<std::uint32_t>(chunk[2]) << 8 | static_cast<std::uint32_t>(chunk[3]);
         chunk += 4;
     }
 
-    for(i = 16; i < 64; ++i)
+    for(std::size_t i = 16; i < 64; ++i)
     {
-        uint32_t s0 = rotate_r(w[i - 15], 7) ^ rotate_r(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        uint32_t s1 = rotate_r(w[i - 2], 17) ^ rotate_r(w[i - 2], 19) ^ (w[i - 2] >> 10);
-        w[i]        = w[i - 16] + s0 + w[i - 7] + s1;
+        const std::uint32_t sigma0
+            = rotateRight(w[i - 15], 7) ^ rotateRight(w[i - 15], 18) ^ (w[i - 15] >> 3U);
+        const std::uint32_t sigma1
+            = rotateRight(w[i - 2], 17) ^ rotateRight(w[i - 2], 19) ^ (w[i - 2] >> 10U);
+        w[i] = w[i - 16] + sigma0 + w[i - 7] + sigma1;
     }
 
-    for(i = 0; i < 8; ++i)
-        tv[i] = buff->h[i];
-
-    for(i = 0; i < 64; ++i)
+    for(std::size_t i = 0; i < 8; ++i)
     {
-        uint32_t S1    = rotate_r(tv[4], 6) ^ rotate_r(tv[4], 11) ^ rotate_r(tv[4], 25);
-        uint32_t ch    = (tv[4] & tv[5]) ^ (~tv[4] & tv[6]);
-        uint32_t temp1 = tv[7] + S1 + ch + k[i] + w[i];
-        uint32_t S0    = rotate_r(tv[0], 2) ^ rotate_r(tv[0], 13) ^ rotate_r(tv[0], 22);
-        uint32_t maj   = (tv[0] & tv[1]) ^ (tv[0] & tv[2]) ^ (tv[1] & tv[2]);
-        uint32_t temp2 = S0 + maj;
+        tv[i] = buff.h[i];
+    }
+
+    for(std::size_t i = 0; i < 64; ++i)
+    {
+        const std::uint32_t sum1
+            = rotateRight(tv[4], 6) ^ rotateRight(tv[4], 11) ^ rotateRight(tv[4], 25);
+        const std::uint32_t ch = (tv[4] & tv[5]) ^ (~tv[4] & tv[6]);
+        const std::uint32_t temp1 = tv[7] + sum1 + ch + ROUND_CONSTANTS[i] + w[i];
+        const std::uint32_t sum0
+            = rotateRight(tv[0], 2) ^ rotateRight(tv[0], 13) ^ rotateRight(tv[0], 22);
+        const std::uint32_t maj = (tv[0] & tv[1]) ^ (tv[0] & tv[2]) ^ (tv[1] & tv[2]);
+        const std::uint32_t temp2 = sum0 + maj;
 
         tv[7] = tv[6];
         tv[6] = tv[5];
@@ -95,106 +83,130 @@ static void sha256_calc_chunk(struct sha256_buff* buff, const uint8_t* chunk)
         tv[0] = temp1 + temp2;
     }
 
-    for(i = 0; i < 8; ++i)
-        buff->h[i] += tv[i];
-}
-
-void sha256_update(struct sha256_buff* buff, const void* data, size_t size)
-{
-    const uint8_t* ptr = (const uint8_t*)data;
-    buff->data_size += size;
-    /* If there is data left in buff, concatenate it to process as new chunk */
-    if(size + buff->chunk_size >= 64)
+    for(std::size_t i = 0; i < 8; ++i)
     {
-        uint8_t tmp_chunk[64];
-        memcpy(tmp_chunk, buff->last_chunk, buff->chunk_size);
-        memcpy(tmp_chunk + buff->chunk_size, ptr, 64 - buff->chunk_size);
-        ptr += (64 - buff->chunk_size);
-        size -= (64 - buff->chunk_size);
-        buff->chunk_size = 0;
-        sha256_calc_chunk(buff, tmp_chunk);
-    }
-    /* Run over data chunks */
-    while(size >= 64)
-    {
-        sha256_calc_chunk(buff, ptr);
-        ptr += 64;
-        size -= 64;
-    }
-
-    /* Save remaining data in buff, will be reused on next call or finalize */
-    memcpy(buff->last_chunk + buff->chunk_size, ptr, size);
-    buff->chunk_size += size;
-}
-
-void sha256_finalize(struct sha256_buff* buff)
-{
-    buff->last_chunk[buff->chunk_size] = 0x80;
-    buff->chunk_size++;
-    memset(buff->last_chunk + buff->chunk_size, 0, 64 - buff->chunk_size);
-
-    /* If there isn't enough space to fit int64, pad chunk with zeroes and prepare next chunk */
-    if(buff->chunk_size > 56)
-    {
-        sha256_calc_chunk(buff, buff->last_chunk);
-        memset(buff->last_chunk, 0, 64);
-    }
-
-    /* Add total size as big-endian int64 x8 */
-    uint64_t size = buff->data_size * 8;
-    int      i;
-    for(i = 8; i > 0; --i)
-    {
-        buff->last_chunk[55 + i] = size & 255;
-        size >>= 8;
-    }
-
-    sha256_calc_chunk(buff, buff->last_chunk);
-}
-
-void sha256_read(const struct sha256_buff* buff, uint8_t* hash)
-{
-    uint32_t i;
-    for(i = 0; i < 8; i++)
-    {
-        hash[i * 4]     = (buff->h[i] >> 24) & 255;
-        hash[i * 4 + 1] = (buff->h[i] >> 16) & 255;
-        hash[i * 4 + 2] = (buff->h[i] >> 8) & 255;
-        hash[i * 4 + 3] = buff->h[i] & 255;
+        buff.h[i] += tv[i];
     }
 }
 
-static void bin_to_hex(const void* data, uint32_t len, char* out)
+void binToHex(const void* data, std::size_t len, char* out)
 {
-    static const char* const lut = "0123456789abcdef";
-    uint32_t                 i;
-    for(i = 0; i < len; ++i)
+    constexpr std::array<char, 16> HEX_DIGITS
+        = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
+    for(std::size_t i = 0; i < len; ++i)
     {
-        uint8_t c      = ((const uint8_t*)data)[i];
-        out[i * 2]     = lut[c >> 4];
-        out[i * 2 + 1] = lut[c & 15];
+        const std::uint8_t c = bytes[i];
+        out[i * 2] = HEX_DIGITS[c >> 4U];
+        out[(i * 2) + 1] = HEX_DIGITS[c & 15U];
     }
 }
 
-void sha256_read_hex(const struct sha256_buff* buff, char* hex)
+} // namespace
+
+void sha256Init(Sha256Buff& buff)
 {
-    uint8_t hash[32];
-    sha256_read(buff, hash);
-    bin_to_hex(hash, 32, hex);
+    buff.h[0] = 0x6a09e667;
+    buff.h[1] = 0xbb67ae85;
+    buff.h[2] = 0x3c6ef372;
+    buff.h[3] = 0xa54ff53a;
+    buff.h[4] = 0x510e527f;
+    buff.h[5] = 0x9b05688c;
+    buff.h[6] = 0x1f83d9ab;
+    buff.h[7] = 0x5be0cd19;
+    buff.dataSize = 0;
+    buff.chunkSize = 0;
 }
 
-void sha256_easy_hash(const void* data, size_t size, uint8_t* hash)
+void sha256Update(Sha256Buff& buff, const void* data, std::size_t size)
 {
-    struct sha256_buff buff;
-    sha256_init(&buff);
-    sha256_update(&buff, data, size);
-    sha256_finalize(&buff);
-    sha256_read(&buff, hash);
+    const auto* ptr = static_cast<const std::uint8_t*>(data);
+    buff.dataSize += size;
+
+    // Whatever is held over from the previous call is concatenated with the front of this
+    // one so it can be processed as a whole chunk.
+    if(size + buff.chunkSize >= CHUNK_BYTES)
+    {
+        const std::size_t held = buff.chunkSize;
+        std::array<std::uint8_t, CHUNK_BYTES> tmpChunk{};
+        std::memcpy(tmpChunk.data(), buff.lastChunk.data(), held);
+        std::memcpy(tmpChunk.data() + held, ptr, CHUNK_BYTES - held);
+        ptr += CHUNK_BYTES - held;
+        size -= CHUNK_BYTES - held;
+        buff.chunkSize = 0;
+        sha256CalcChunk(buff, tmpChunk.data());
+    }
+
+    while(size >= CHUNK_BYTES)
+    {
+        sha256CalcChunk(buff, ptr);
+        ptr += CHUNK_BYTES;
+        size -= CHUNK_BYTES;
+    }
+
+    // The remainder stays in the buffer for the next call, or for finalize.
+    std::memcpy(buff.lastChunk.data() + buff.chunkSize, ptr, size);
+    buff.chunkSize = static_cast<std::uint8_t>(buff.chunkSize + size);
 }
 
-void sha256_easy_hash_hex(const void* data, size_t size, char* hex)
+void sha256Finalize(Sha256Buff& buff)
 {
-    uint8_t hash[32];
-    sha256_easy_hash(data, size, hash);
-    bin_to_hex(hash, 32, hex);
+    buff.lastChunk[buff.chunkSize] = 0x80;
+    buff.chunkSize++;
+    std::memset(buff.lastChunk.data() + buff.chunkSize, 0, CHUNK_BYTES - buff.chunkSize);
+
+    // Without room left for the 64-bit length, this chunk is padded out and flushed so the
+    // length lands in the next one.
+    if(buff.chunkSize > 56)
+    {
+        sha256CalcChunk(buff, buff.lastChunk.data());
+        buff.lastChunk.fill(0);
+    }
+
+    // Total size in bits, as a big-endian 64-bit value in the last eight bytes.
+    std::uint64_t size = buff.dataSize * 8;
+    for(std::size_t i = 8; i > 0; --i)
+    {
+        buff.lastChunk[55 + i] = static_cast<std::uint8_t>(size & 255U);
+        size >>= 8U;
+    }
+
+    sha256CalcChunk(buff, buff.lastChunk.data());
 }
+
+void sha256Read(const Sha256Buff& buff, std::uint8_t* hash)
+{
+    for(std::size_t i = 0; i < 8; ++i)
+    {
+        hash[i * 4] = static_cast<std::uint8_t>((buff.h[i] >> 24U) & 255U);
+        hash[(i * 4) + 1] = static_cast<std::uint8_t>((buff.h[i] >> 16U) & 255U);
+        hash[(i * 4) + 2] = static_cast<std::uint8_t>((buff.h[i] >> 8U) & 255U);
+        hash[(i * 4) + 3] = static_cast<std::uint8_t>(buff.h[i] & 255U);
+    }
+}
+
+void sha256ReadHex(const Sha256Buff& buff, char* hex)
+{
+    std::array<std::uint8_t, DIGEST_BYTES> hash{};
+    sha256Read(buff, hash.data());
+    binToHex(hash.data(), DIGEST_BYTES, hex);
+}
+
+void sha256EasyHash(const void* data, std::size_t size, std::uint8_t* hash)
+{
+    Sha256Buff buff{};
+    sha256Init(buff);
+    sha256Update(buff, data, size);
+    sha256Finalize(buff);
+    sha256Read(buff, hash);
+}
+
+void sha256EasyHashHex(const void* data, std::size_t size, char* hex)
+{
+    std::array<std::uint8_t, DIGEST_BYTES> hash{};
+    sha256EasyHash(data, size, hash.data());
+    binToHex(hash.data(), DIGEST_BYTES, hex);
+}
+
+} // namespace hip_kernel_provider::utilities
