@@ -918,6 +918,8 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+// TODO(#11940): Move communicator and peer-transport setup to RCCL or a shared
+// transport layer; keep the fused GEMM handoff in hipBLASLt.
 hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
                                        uint32_t                       rank,
                                        uint32_t                       world,
