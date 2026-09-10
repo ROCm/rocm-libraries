@@ -1,6 +1,6 @@
 ---
 name: hipdnn-superbuild-test
-description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically.
+description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically. This skill executes targets; for what the cross-provider suite actually runs and how to read its result, defer to the hipdnn-integration-testing skill.
 argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|external-integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -49,7 +49,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
    ```
-   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
+   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it emits **one `<component>:<target>` line and one `<component>:command:<cmdline>` line per registered external suite** — a provider may register several (hip-kernel-provider registers one per engine: `hip-kernel-provider-external-integration-check` for `HIP_MLOPS_ENGINE` and `hip-kernel-provider-asm-sdpa-external-integration-check` for `ASM_SDPA_ENGINE`), so do not assume a single line. Each command is the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own; the `--test-engine` value tells you which suite a line belongs to.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
@@ -73,8 +73,15 @@ Infer options from the user request:
      ```bash
      python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
+   - **Before reporting the result, read the `hipdnn-integration-testing`
+     skill.** This suite is the one place where exit code 0 is routinely
+     meaningless: a run that skips every test still exits 0, and `ctest -L`
+     with a label that matches nothing prints `No tests were found!!!` and
+     also exits 0. That skill documents which of those outcomes are expected
+     (a tracked provider limitation) and which are a real regression, plus
+     the tier/TOML/`exclude_gpu` layers that decide what ran at all.
 
-9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
+9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY" — never the exit code alone; a 100%-skipped run is green and is not evidence the engine still works.
 
 ## Direct Binary Mapping
 
@@ -108,3 +115,15 @@ If a requested component has no matching target, say that it was not present in 
 - Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
 - Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.
+
+## See also
+
+- `hipdnn-integration-testing` skill — the domain reference behind the
+  `external-integration` scope: what the cross-provider
+  `hipdnn_integration_tests` binary actually runs (bundles/sweeps vs C++
+  tests), how YAML tiers, `exclude_gpu`, `ctest -L`, `--gtest_filter` and the
+  per-engine TOML compose into what executes, and the failure modes that make
+  a run report green with no coverage — "zero tests ran", an all-skip run, a
+  `ctest -L <typo>` that exits 0. **Read it before interpreting any result
+  from step 8, and before concluding an engine did or did not regress.** This
+  skill executes; that one explains.
