@@ -1,0 +1,60 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S01 openLoop PGR>=3 early-exit NoGlobalLoadLoop cluster (gfx950).
+#
+# Target: Tensile/KernelWriterAssembly.py openLoop() PGR>=3 arm.
+#   7835 endCounter = PGR-1        (early exit 1, inside `if PGR>=3:`)
+#   7846 SCmpLeU32 second early-exit (loopCounter<=PGR)
+#   7809 beginLabelOnly return-only path (module.add(loopLabelBegin); return)
+#   7892/7899 multi-summation LRO reset (loopIdx != unrollIdx) - needs >1
+#            summation loop; single-summation GEMM cannot reach it, reported
+#            honestly by the probe.
+#
+# No existing _designed config sets PrefetchGlobalRead >= 3 (all are 0/1/2),
+# so the whole PGR>=3 openLoop arm is unexecuted.  Solution.py:5579 gates
+# PGR>=3 behind DirectToLds{A,B}, PrefetchLocalRead>=1, ScheduleIterAlg==3.
+# This copies the working gfx950 F8 TN DirectToLds=1 shape and sets
+# PrefetchGlobalRead:[3] + PrefetchLocalRead:[1].  StreamK/UseSubtileImpl are
+# dropped so PrefetchAcrossPersistent (which forbids PGR>2) stays off.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+        - DepthU: [256]
+        - PrefetchGlobalRead: [3]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
