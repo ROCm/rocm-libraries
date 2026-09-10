@@ -42,7 +42,12 @@ DeviceProperties fixedDeviceProperties()
 // TODO - FILL THIS OUT: build a MatchContext from a real graph fixture for this
 // engine, mirroring PointwiseTestGraphs.hpp / ConvNative.cpp's own test graph
 // builders, then exercise {{ config.graph_match_symbol }} /
+{% if config.engine.has_heuristic %}
 // {{ config.kernel_match_symbol }} / {{ config.score_symbol }} against it.
+{% else %}
+// {{ config.kernel_match_symbol }} against it. This engine declares heuristic: none,
+// so it has no score symbol to exercise -- selection ranks on priority then id.
+{% endif %}
 
 // Two directions, deliberately pre-wired and deliberately skipping until you fill them
 // in. A matcher has a DIRECTION, and nothing before stage 8 tests which way it answers:
@@ -67,6 +72,7 @@ TEST({{ config.engine.pascal_name }}Matchers, DeclinesAGraphOutsideItsApplicabil
                     "Over-acceptance corrupts results rather than reporting them.";
 }
 
+{% if config.engine.has_heuristic %}
 TEST({{ config.engine.pascal_name }}Matchers, ScoreReadsAtLeastOneDescriptorField)
 {
     GTEST_SKIP() << "TODO - FILL THIS OUT: {{ config.score_symbol }} must vary with "
@@ -75,6 +81,7 @@ TEST({{ config.engine.pascal_name }}Matchers, ScoreReadsAtLeastOneDescriptorFiel
                     "makes selection order arbitrary, and nothing else catches it "
                     "until the 8e.3 performance pass on real hardware.";
 }
+{% endif %}
 
 TEST({{ config.engine.pascal_name }}MatchersPlaceholder, FixtureConstructsADeviceByValue)
 {

@@ -6,3 +6,14 @@
 ## TestConvFwdPack.cpp/TestPointwisePacks.cpp) -- move both files there when splicing.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Packs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp
+
+## Splice point 5b: .../descriptor-packaging/cmake/HkpPackaging.cmake, the
+## HKP_CENSUS_TEST_SUITES list in hkp_register_tests(). Append this suite name:
+##
+##     Test{{ config.engine.pascal_name }}Packs
+##
+## That is what registers one census run per configured packaging architecture,
+## each against that architecture's own descriptor shard and each carrying an
+## explicit HIPDNN_TEST_EXPECTED_ARCH. Compiling the file above without this row
+## builds the census into the binary and never runs it: nothing else selects it,
+## and a gtest filter that selects nothing exits 0.

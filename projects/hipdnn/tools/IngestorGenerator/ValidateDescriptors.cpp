@@ -7,15 +7,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,15 +28,23 @@
 
 /**
  * @file ValidateDescriptors.cpp
- * @brief Standalone validator for generic-kernel-ingestor descriptor bundles.
+ * @brief Standalone STRUCTURAL validator for generic-kernel-ingestor descriptor bundles.
  *
  * Wraps `loadValidatedDescriptorSets`, the loader's own provider-facing entry point and
  * "the only place validation happens" (`DescriptorLoader.hpp`). This tool exists because
  * that entry point requires two things a standalone binary does not have for free: a
  * registered log sink (the loader never throws -- every rejection is
  * `HIPDNN_PLUGIN_LOG_ERROR(...); continue`, and the default log level is off), and
- * real native symbols registered by a linked provider. Neither gap can be closed by
- * calling the loader differently; both are worked around below.
+ * native symbols registered by a linked provider. Neither gap can be closed by calling
+ * the loader differently; both are worked around below.
+ *
+ * The symbols registered here are STUBS, harvested from the descriptors themselves. That
+ * makes this a check of descriptor structure, cross-references and completeness. It says
+ * nothing about whether any provider implements those symbols: that question is answered
+ * only by the provider host checks, which run the real typed registration
+ * (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
+ * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle. A clean run here
+ * is not native-implementation proof.
  */
 
 namespace
@@ -214,18 +218,6 @@ struct HarvestedSymbols
     std::set<std::string> kernelMatcher;
     std::set<std::string> dispatch;
     std::set<std::string> score;
-
-    /// The union across every registry kind -- what `--native-source` diffs against.
-    std::set<std::string> all() const
-    {
-        std::set<std::string> combined;
-        combined.insert(graphMatch.begin(), graphMatch.end());
-        combined.insert(graphCriterion.begin(), graphCriterion.end());
-        combined.insert(kernelMatcher.begin(), kernelMatcher.end());
-        combined.insert(dispatch.begin(), dispatch.end());
-        combined.insert(score.begin(), score.end());
-        return combined;
-    }
 };
 
 HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
@@ -293,216 +285,9 @@ void registerStubs(const HarvestedSymbols& harvested)
     }
 }
 
-/// One `--native-source` cross-check result.
-///
-/// The two diff directions are deliberately asymmetric, because one native `.cpp`
-/// declares one engine's symbols while the descriptor roots hold every engine's:
-/// - `inSourceNotInDescriptors` is **per file**: a symbol this source registers that no
-///   descriptor names is a defect in this source no matter what else was passed.
-/// - the reverse direction is **aggregated across every `--native-source`** and lives on
-///   the run, not here. Diffing one file against the union of all engines' symbols would
-///   report every *other* engine's symbols as missing -- pointing `--native-source` at
-///   `ConvNative.cpp` over the shipped tree would flag all seven pointwise symbols and
-///   exit non-zero on a healthy tree.
-struct NativeSourceCheck
-{
-    std::string sourceFile;
-    std::set<std::string> resolvedSymbols;
-    std::set<std::string> inSourceNotInDescriptors;
-    bool parseError = false;
-    std::string parseErrorMessage;
-
-    bool clean() const
-    {
-        return !parseError && inSourceNotInDescriptors.empty();
-    }
-};
-
-/// Extracts every `constexpr std::string_view NAME = "value";` declaration in @p text,
-/// mapping declared name to its literal value. Text-based, not a clang-tooling parse:
-/// the whole file's constants are collected once, then only the ones actually
-/// referenced from `register<Name>Symbols` are kept.
-std::map<std::string, std::string> extractStringViewConstants(const std::string& text)
-{
-    static const std::regex s_constantPattern(
-        R"RE(constexpr\s+std::string_view\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"\s*;)RE");
-    std::map<std::string, std::string> constants;
-    for(auto it = std::sregex_iterator(text.begin(), text.end(), s_constantPattern);
-        it != std::sregex_iterator();
-        ++it)
-    {
-        constants.emplace((*it)[1].str(), (*it)[2].str());
-    }
-    return constants;
-}
-
-/// Extracts the body of `register<Name>Symbols(...)` -- the single function every
-/// pack's native `.cpp` defines to bind its symbols into a `SymbolScope`. Text-based:
-/// finds the matching closing brace by depth-counting from the opening one, so a
-/// nested block inside the function does not truncate the match.
-std::optional<std::string> extractRegisterSymbolsBody(const std::string& text)
-{
-    static const std::regex s_signaturePattern(R"(void\s+register\w*Symbols\s*\([^)]*\)\s*\{)");
-    std::smatch match;
-    if(!std::regex_search(text, match, s_signaturePattern))
-    {
-        return std::nullopt;
-    }
-    const size_t bodyStart = static_cast<size_t>(match.position(0)) + match.length(0);
-    int depth = 1;
-    size_t index = bodyStart;
-    for(; index < text.size() && depth > 0; ++index)
-    {
-        if(text[index] == '{')
-        {
-            ++depth;
-        }
-        else if(text[index] == '}')
-        {
-            --depth;
-        }
-    }
-    if(depth != 0)
-    {
-        return std::nullopt;
-    }
-    return text.substr(bodyStart, index - 1 - bodyStart);
-}
-
-/// Every identifier passed as `scope.add(...)`'s first argument within
-/// `registerBody`, resolving both `scope.add(std::string(NAME), ...)` and the bare
-/// `scope.add(NAME, ...)` spelling. There are zero inline `scope.add("literal", ...)`
-/// calls anywhere in the tree -- all 11 real registrations pass a named constant -- so
-/// only the identifier forms are matched; a literal-string scan would find nothing and
-/// silently diff empty-vs-empty.
-std::vector<std::string> extractScopeAddArgumentNames(const std::string& registerBody)
-{
-    static const std::regex s_scopeAddPattern(
-        R"(scope\s*\.\s*add\s*\(\s*(?:std::string\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)|([A-Za-z_][A-Za-z0-9_]*))\s*,)");
-    std::vector<std::string> names;
-    for(auto it = std::sregex_iterator(registerBody.begin(), registerBody.end(), s_scopeAddPattern);
-        it != std::sregex_iterator();
-        ++it)
-    {
-        const std::string viaStdString = (*it)[1].str();
-        names.push_back(viaStdString.empty() ? (*it)[2].str() : viaStdString);
-    }
-    return names;
-}
-
-/// Resolves `--native-source <file.cpp>` against the harvested descriptor symbol set.
-/// Finds `register<Name>Symbols`, collects the identifiers passed to `scope.add(...)`,
-/// resolves each back to its `constexpr std::string_view NAME = "value";` declaration
-/// in the same file, and diffs the resolved values against @p descriptorSymbols.
-///
-/// A file that yields zero resolved symbols is reported as a parse error, not a clean
-/// pass: an empty-vs-empty diff is exactly the false-green this check exists to catch
-/// (a regex that finds nothing looks identical to a file that legitimately declares
-/// nothing).
-NativeSourceCheck checkNativeSource(const std::string& path,
-                                    const std::set<std::string>& descriptorSymbols)
-{
-    NativeSourceCheck check;
-    check.sourceFile = path;
-
-    std::ifstream file(path, std::ios::binary);
-    if(!file.is_open())
-    {
-        check.parseError = true;
-        check.parseErrorMessage = "failed to open '" + path + "'";
-        return check;
-    }
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    const std::string text = buffer.str();
-
-    const auto registerBody = extractRegisterSymbolsBody(text);
-    if(!registerBody.has_value())
-    {
-        check.parseError = true;
-        check.parseErrorMessage
-            = "no 'register<Name>Symbols(...)' function found in '" + path + "'";
-        return check;
-    }
-
-    const auto constants = extractStringViewConstants(text);
-    const auto argumentNames = extractScopeAddArgumentNames(*registerBody);
-
-    for(const auto& name : argumentNames)
-    {
-        const auto it = constants.find(name);
-        if(it == constants.end())
-        {
-            check.parseError = true;
-            if(!check.parseErrorMessage.empty())
-            {
-                check.parseErrorMessage.append("; ");
-            }
-            check.parseErrorMessage.append("'scope.add' in ")
-                .append(path)
-                .append(" references '")
-                .append(name)
-                .append("', which has no 'constexpr std::string_view ")
-                .append(name)
-                .append(" = \"...\";' declaration in the same file");
-            continue;
-        }
-        check.resolvedSymbols.insert(it->second);
-    }
-
-    if(check.resolvedSymbols.empty())
-    {
-        check.parseError = true;
-        if(check.parseErrorMessage.empty())
-        {
-            check.parseErrorMessage
-                = "'" + path
-                  + "' resolved zero native symbols from register<Name>Symbols -- treating "
-                    "this as an error rather than an empty-vs-empty pass";
-        }
-        return check;
-    }
-
-    for(const auto& symbol : check.resolvedSymbols)
-    {
-        if(descriptorSymbols.count(symbol) == 0)
-        {
-            check.inSourceNotInDescriptors.insert(symbol);
-        }
-    }
-    return check;
-}
-
-/// The descriptor-named symbols no supplied `--native-source` file declares, across all
-/// of them. Only meaningful once every native source backing the descriptor roots has
-/// been passed, so it is reported as a run-level violation rather than pinned on any one
-/// file. With no `--native-source` at all this is not computed: absence of the flag means
-/// the cross-check was not requested, not that every symbol is unaccounted for.
-std::set<std::string>
-    descriptorSymbolsNoSourceDeclares(const std::vector<NativeSourceCheck>& checks,
-                                      const std::set<std::string>& descriptorSymbols)
-{
-    std::set<std::string> declared;
-    for(const auto& check : checks)
-    {
-        declared.insert(check.resolvedSymbols.begin(), check.resolvedSymbols.end());
-    }
-
-    std::set<std::string> undeclared;
-    for(const auto& symbol : descriptorSymbols)
-    {
-        if(declared.count(symbol) == 0)
-        {
-            undeclared.insert(symbol);
-        }
-    }
-    return undeclared;
-}
-
 struct Options
 {
     std::vector<std::string> roots;
-    std::vector<std::string> nativeSources;
     std::vector<std::string> expectEngines;
     bool json = false;
     bool showHelp = false;
@@ -510,16 +295,15 @@ struct Options
 
 void printHelp(const char* programName)
 {
-    std::cout << "Usage: " << programName
-              << " <root>... [--native-source <cpp>]... [--expect-engine <name>]... [--json]\n"
-              << "Loads and validates generic-kernel-ingestor descriptor bundles under one or\n"
-              << "more root directories, the same way a real provider would at plugin load\n"
-              << "time -- without a GPU and without linking a real provider.\n"
+    std::cout << "Usage: " << programName << " <root>... [--expect-engine <name>]... [--json]\n"
+              << "Loads and structurally validates generic-kernel-ingestor descriptor\n"
+              << "bundles under one or more root directories: cross-references, metadata\n"
+              << "completion and catalog identity, with a no-op stub standing in for every\n"
+              << "native symbol the descriptors name. It does NOT check that a provider\n"
+              << "implements those symbols -- the provider host checks do that, by running\n"
+              << "the real typed registration and censusing what loads.\n"
               << "Options:\n"
               << "  <root>                    Descriptor root directory (repeatable)\n"
-              << "  --native-source <cpp>     Cross-check a pack's register<Name>Symbols\n"
-              << "                            against the descriptors' named symbols "
-                 "(repeatable)\n"
               << "  --expect-engine <name>    Require this engine name in the validated set "
                  "(repeatable)\n"
               << "  --json                    Emit machine-readable JSON instead of text\n"
@@ -537,16 +321,7 @@ std::optional<Options> parseArgs(int argc, const char* const* argv)
             options.showHelp = true;
             return options;
         }
-        if(arg == "--native-source")
-        {
-            if(i + 1 >= argc)
-            {
-                std::cerr << "Error: --native-source requires a file argument\n";
-                return std::nullopt;
-            }
-            options.nativeSources.emplace_back(argv[++i]);
-        }
-        else if(arg == "--expect-engine")
+        if(arg == "--expect-engine")
         {
             if(i + 1 >= argc)
             {
@@ -643,27 +418,7 @@ try
         }
     }
 
-    const auto descriptorSymbols = harvested.all();
-    std::vector<NativeSourceCheck> nativeSourceChecks;
-    nativeSourceChecks.reserve(options->nativeSources.size());
-    for(const auto& sourcePath : options->nativeSources)
-    {
-        nativeSourceChecks.push_back(checkNativeSource(sourcePath, descriptorSymbols));
-    }
-
-    // Aggregated across every supplied source, not per file: see NativeSourceCheck.
-    const auto undeclaredSymbols
-        = nativeSourceChecks.empty()
-              ? std::set<std::string>{}
-              : descriptorSymbolsNoSourceDeclares(nativeSourceChecks, descriptorSymbols);
-
-    const bool nativeSourceClean
-        = std::all_of(nativeSourceChecks.begin(),
-                      nativeSourceChecks.end(),
-                      [](const NativeSourceCheck& check) { return check.clean(); })
-          && undeclaredSymbols.empty();
-
-    const bool success = errorMessages.empty() && missingEngines.empty() && nativeSourceClean;
+    const bool success = errorMessages.empty() && missingEngines.empty();
 
     if(options->json)
     {
@@ -680,24 +435,6 @@ try
             diagnosticsJson.push_back(
                 {{"severity", severityName(diagnostic.severity)}, {"message", diagnostic.message}});
         }
-
-        auto& checksJson = report["native_source_checks"];
-        checksJson = nlohmann::json::array();
-        for(const auto& check : nativeSourceChecks)
-        {
-            checksJson.push_back({
-                {"source_file", check.sourceFile},
-                {"clean", check.clean()},
-                {"parse_error", check.parseError},
-                {"parse_error_message", check.parseErrorMessage},
-                {"resolved_symbols", check.resolvedSymbols},
-                {"in_source_not_in_descriptors", check.inSourceNotInDescriptors},
-            });
-        }
-
-        // Run-level, not per file: the descriptor-named symbols that no supplied
-        // --native-source declares. Empty (and meaningless) when the flag was not used.
-        report["descriptor_symbols_no_source_declares"] = undeclaredSymbols;
 
         std::cout << report.dump(2) << "\n";
     }
@@ -729,27 +466,6 @@ try
             std::cerr << "VIOLATION: expected engine not found: '" << missing << "'\n";
         }
 
-        for(const auto& check : nativeSourceChecks)
-        {
-            if(check.parseError)
-            {
-                std::cerr << "VIOLATION: native-source parse error in '" << check.sourceFile
-                          << "': " << check.parseErrorMessage << "\n";
-                continue;
-            }
-            for(const auto& symbol : check.inSourceNotInDescriptors)
-            {
-                std::cerr << "VIOLATION: native-source '" << check.sourceFile
-                          << "' declares symbol '" << symbol << "' that no descriptor names\n";
-            }
-        }
-
-        for(const auto& symbol : undeclaredSymbols)
-        {
-            std::cerr << "VIOLATION: descriptor names symbol '" << symbol
-                      << "', which none of the supplied --native-source files declares\n";
-        }
-
         for(const auto& message : errorMessages)
         {
             std::cerr << "VIOLATION: " << message << "\n";
@@ -760,9 +476,9 @@ try
 }
 catch(const std::exception& error)
 {
-    // The tool walks the filesystem, runs regexes and parses JSON, all of which throw.
-    // Letting one escape `main` gives the caller a terminate() and no diagnostic, which
-    // in a validator is indistinguishable from a crash in the thing being validated.
+    // The tool walks the filesystem and parses JSON, both of which throw. Letting one
+    // escape `main` gives the caller a terminate() and no diagnostic, which in a
+    // validator is indistinguishable from a crash in the thing being validated.
     std::cerr << "FATAL: " << error.what() << "\n";
     return 2;
 }

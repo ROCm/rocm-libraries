@@ -863,11 +863,12 @@ assertion: an unloadable path silently falls through to the next candidate.")
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}"
                        "${HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP}"
-                       "${_rocke_comgr_lib}")
+                       "${_rocke_comgr_lib}" "${_arches}")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>)
+# hkp_register_tests(<rocm_kpack_dir> <hipcc> <hip_enabled> <rocke_comgr_lib>
+#                    <arches>)
 #   Register the pytest suite as two build-tree ctest entries running disjoint
 #   sets: a quick entry (`-m quick`, the no-compile subset) and a standard entry
 #   (`-m "not quick"`, the rest). Tier labels come from HKP_PACK_test_categories,
@@ -879,8 +880,12 @@ endfunction()
 #   enabled (a tests-only ingestor build configures clean on a bare box; the
 #   compile-dependent tests self-skip via the hipcc/rocke fixtures, and CI
 #   hard-gates them via the REQUIRE_* env vars forwarded below).
+#
+#   `arches` is the configured packaging architecture list, forwarded so the
+#   per-arch census entries below register against the shards this build packed
+#   rather than against whatever device the test machine happens to hold.
 # ---------------------------------------------------------------------------
-function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib)
+function(hkp_register_tests rocm_kpack_dir hipcc hip_enabled rocke_comgr_lib arches)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
@@ -961,56 +966,7 @@ silently stop running.")
         ENVIRONMENT "${_pyenv}"
         ${_disabled})
 
-    # S4: hipdnn_validate_descriptors --native-source cross-checks a pack's descriptor
-    # JSON against the C++ source it dispatches into (dispatch/graph_match/kernel_match/
-    # score symbol names). This is a pure filesystem/JSON/regex check -- no HIP call, no
-    # device -- but the flag was previously exercised only against generator-emitted
-    # synthetic fixtures, never against a real shipped pack, so a typo in any of the four
-    # symbol strings in a real descriptor was invisible to every test that ran.
-    #
-    # One entry per attention_dense pack this repo ships. The list is EMPTY on this
-    # branch: it ships the mechanism, not a pack. Each integration adds its own row,
-    # so the table never names a Native.cpp the branch does not carry. Each row targets
-    # the descriptor tree staged under HIPDNN_DESCRIPTOR_BUILD_DIR for its arch; that
-    # arch's kind: rocke sources are lowered to a loadable kind: kpack tree only when the
-    # arch is in GPU_TARGETS, so a build that did not target the arch never stages one.
-    # The driver script skips (ctest's SKIP_RETURN_CODE, 77) rather than fails in that
-    # case: absence reflects which arches this build configured, not a descriptor defect.
-    #
-    # Gated on the validator target existing (HIPDNN_ENABLE_KERNEL_INGESTOR) and nothing
-    # else -- the per-arch skip is the driver script's job, not configure-time's, since
-    # which arches got packed is a build-time fact HIPDNN_DESCRIPTOR_BUILD_DIR only
-    # resolves once hkp_stage_all()'s custom command has actually run.
-    # Rows are `<arch>;<pack-dir>;<engine-name>;<Native.cpp>`, one per attention_dense
-    # pack the branch actually ships. Empty here by design -- this branch carries the
-    # cross-check mechanism, not a pack -- and each integration branch sets its own
-    # rows, so the table can never name a Native.cpp absent from the checkout. Rows
-    # escape their separators (`\;`) so each stays ONE list element.
-    set(HKP_NATIVE_SOURCE_PACKS)
-
-    if(TARGET hipdnn_validate_descriptors AND HKP_NATIVE_SOURCE_PACKS)
-        set(_ns_native_source_root "${HKP_PKG_DIR}/../src/engines/kernel_ingestor_engine/packs")
-        foreach(_ns_spec IN LISTS HKP_NATIVE_SOURCE_PACKS)
-            list(GET _ns_spec 0 _ns_arch)
-            list(GET _ns_spec 1 _ns_pack)
-            list(GET _ns_spec 2 _ns_engine)
-            list(GET _ns_spec 3 _ns_native_file)
-            set(_ns_test_name "hip-kernel-provider-hkp-native-source-${_ns_arch}")
-            add_test(
-                NAME ${_ns_test_name}
-                COMMAND "${Python3_EXECUTABLE}"
-                        "${HKP_PKG_DIR}/tools/hkp_native_source_check.py"
-                        --arch "${_ns_arch}"
-                        --root "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_ns_arch}/rocKE/${_ns_pack}"
-                        --validator "$<TARGET_FILE:hipdnn_validate_descriptors>"
-                        --expect-engine "${_ns_engine}"
-                        --native-source "${_ns_native_source_root}/${_ns_native_file}"
-            )
-            set_tests_properties(${_ns_test_name} PROPERTIES
-                SKIP_RETURN_CODE 77
-                LABELS "unit_test;hip-kernel-provider;host")
-        endforeach()
-    endif()
+    hkp_register_census_tests("${arches}")
 
     # Both entries are add_test()'d in this scope just above, so the YAML's
     # test_patterns match them via the directory-property loop. EXPLICIT_TESTS is
@@ -1021,4 +977,58 @@ silently stop running.")
        AND COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
     endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# The emitted-bundle census. Each generated engine ships a GTest suite that
+# reads what actually loaded through discoverDescriptorSets() -- the provider's
+# real typed registration followed by loadValidatedDescriptorSets<Handle>() --
+# and compares the loaded pack/kernel identities, the runtime source kind and the
+# SDK version against the inventory its generation actually emitted. That is the
+# native-implementation check: a pack whose symbols do not register drops its
+# descriptors at load and the census sees them missing.
+#
+# The architecture is supplied EXPLICITLY. `arches` is the configured packaging
+# list (GPU_TARGETS/AMDGPU_TARGETS, normalized by hkp_selected_arches) -- the same
+# list the pack step lowered for -- so one entry is registered per selected arch
+# against that arch's own shard under HIPDNN_DESCRIPTOR_BUILD_DIR. Nothing here
+# probes a device and nothing reads the descriptors to decide what to expect: a
+# bundle cannot be its own expectation, and a host census must not depend on which
+# card is in the machine.
+#
+# Rows are GTest suite names, one per generated engine census spliced into the
+# test binary; the driver requires the filter to select at least one case, because
+# a filter matching nothing is a gtest PASS. EMPTY here by design -- this branch
+# carries the mechanism, not a generated engine -- and each integration appends
+# its own suite name (the generator's cmake_test_sources fragment says so).
+# ---------------------------------------------------------------------------
+function(hkp_register_census_tests arches)
+    set(HKP_CENSUS_TEST_SUITES)
+
+    if(NOT TARGET hip_kernel_provider_tests OR NOT HKP_CENSUS_TEST_SUITES OR NOT arches)
+        return()
+    endif()
+
+    set(_census_filter "")
+    foreach(_suite IN LISTS HKP_CENSUS_TEST_SUITES)
+        if(_census_filter)
+            string(APPEND _census_filter ":")
+        endif()
+        string(APPEND _census_filter "${_suite}.*")
+    endforeach()
+
+    foreach(_census_arch IN LISTS arches)
+        add_test(
+            NAME "hip-kernel-provider-hkp-census-${_census_arch}"
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${HKP_PKG_DIR}/tools/hkp_census_check.py"
+                    --arch "${_census_arch}"
+                    --descriptor-root
+                    "${HIPDNN_DESCRIPTOR_BUILD_DIR}/${_census_arch}"
+                    --test-binary "$<TARGET_FILE:hip_kernel_provider_tests>"
+                    --gtest-filter "${_census_filter}")
+        set_tests_properties("hip-kernel-provider-hkp-census-${_census_arch}" PROPERTIES
+            LABELS "unit_test;hip-kernel-provider;host")
+    endforeach()
 endfunction()

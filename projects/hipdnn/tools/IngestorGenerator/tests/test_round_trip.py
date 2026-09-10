@@ -51,8 +51,7 @@ def validator():
 def test_scale_add_round_trip_validates_clean(
     validator, generator, scale_add_config, tmp_path
 ):
-    written = generator.render(scale_add_config, tmp_path)
-    native_rel = next(f for f in written if f.endswith("Native.cpp"))
+    generator.render(scale_add_config, tmp_path)
 
     result = subprocess.run(
         [
@@ -60,8 +59,6 @@ def test_scale_add_round_trip_validates_clean(
             str(tmp_path / "descriptors"),
             "--expect-engine",
             scale_add_config.engine.name,
-            "--native-source",
-            str(tmp_path / native_rel),
             "--json",
         ],
         capture_output=True,
@@ -72,17 +69,12 @@ def test_scale_add_round_trip_validates_clean(
     assert payload["success"] is True
     assert scale_add_config.engine.name in payload["engines"]
     assert payload["expected_engines_missing"] == []
-    native_checks = payload["native_source_checks"]
-    assert len(native_checks) == 1
-    assert native_checks[0]["clean"] is True
-    assert native_checks[0]["in_source_not_in_descriptors"] == []
 
 
 def test_binary_ops_round_trip_validates_clean(
     validator, generator, binary_ops_config, tmp_path
 ):
-    written = generator.render(binary_ops_config, tmp_path)
-    native_rel = next(f for f in written if f.endswith("Native.cpp"))
+    generator.render(binary_ops_config, tmp_path)
 
     result = subprocess.run(
         [
@@ -90,8 +82,6 @@ def test_binary_ops_round_trip_validates_clean(
             str(tmp_path / "descriptors"),
             "--expect-engine",
             binary_ops_config.engine.name,
-            "--native-source",
-            str(tmp_path / native_rel),
             "--json",
         ],
         capture_output=True,
