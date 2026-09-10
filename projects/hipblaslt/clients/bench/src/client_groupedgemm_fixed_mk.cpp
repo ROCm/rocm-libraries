@@ -659,27 +659,30 @@ int test_hipblaslt(hipDataType                 in_datatype,
         generate(h_bias.back(),
                  recipe(h_bias.back().type(), initialization::OperandSequence::Bias));
 
-        CHECK_HIP_ERROR(hipMalloc(&da[i], size_a[i] * sizeof(Tin)));
-        CHECK_HIP_ERROR(hipMalloc(&db[i], size_b[i] * sizeof(Tin)));
-        CHECK_HIP_ERROR(hipMalloc(&dc[i], size_c[i] * sizeof(Tout)));
-        CHECK_HIP_ERROR(hipMalloc(&dd[i], size_d[i] * sizeof(Tout)));
+        CHECK_HIP_ERROR(hipMalloc(&da[i], std::max<size_t>(1, size_a[i] * sizeof(Tin))));
+        CHECK_HIP_ERROR(hipMalloc(&db[i], std::max<size_t>(1, size_b[i] * sizeof(Tin))));
+        CHECK_HIP_ERROR(hipMalloc(&dc[i], std::max<size_t>(1, size_c[i] * sizeof(Tout))));
+        CHECK_HIP_ERROR(hipMalloc(&dd[i], std::max<size_t>(1, size_d[i] * sizeof(Tout))));
         if(enable_bias[i])
-            CHECK_HIP_ERROR(hipMalloc(&d_bias[i], size_bias[i] * sizeof(float)));
+            CHECK_HIP_ERROR(hipMalloc(&d_bias[i], std::max<size_t>(1, size_bias[i] * sizeof(float))));
 
         // copy matrices from host to device
-        CHECK_HIP_ERROR(hipMemcpy(da[i],
-                                  ha[i].rawEncodedBackingStorage().data(),
-                                  ha[i].rawEncodedBackingStorage().size(),
-                                  hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(hipMemcpy(db[i],
-                                  hb[i].rawEncodedBackingStorage().data(),
-                                  hb[i].rawEncodedBackingStorage().size(),
-                                  hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(hipMemcpy(dc[i],
-                                  hc[i].rawEncodedBackingStorage().data(),
-                                  hc[i].rawEncodedBackingStorage().size(),
-                                  hipMemcpyHostToDevice));
-        if(enable_bias[i])
+        if(!ha[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(da[i],
+                                      ha[i].rawEncodedBackingStorage().data(),
+                                      ha[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(!hb[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(db[i],
+                                      hb[i].rawEncodedBackingStorage().data(),
+                                      hb[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(!hc[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(dc[i],
+                                      hc[i].rawEncodedBackingStorage().data(),
+                                      hc[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(enable_bias[i] && !h_bias[i].rawEncodedBackingStorage().empty())
             CHECK_HIP_ERROR(hipMemcpy(d_bias[i],
                                       h_bias[i].rawEncodedBackingStorage().data(),
                                       h_bias[i].rawEncodedBackingStorage().size(),
@@ -908,9 +911,10 @@ int test_hipblaslt(hipDataType                 in_datatype,
             {
                 std::cout << "GEMM " << i;
                 // copy output from device to CPU
-                CHECK_HIP_ERROR(hipMemcpy(
-                    hd[i].data(), dd[i], sizeof(Tout) * size_c[i], hipMemcpyDeviceToHost));
-                auto* d_ptr = &hd_gold[i][0];
+                if(size_d[i] != 0)
+                    CHECK_HIP_ERROR(hipMemcpy(
+                        hd[i].data(), dd[i], sizeof(Tout) * size_d[i], hipMemcpyDeviceToHost));
+                auto* d_ptr = hd_gold[i].data();
 
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
