@@ -1,0 +1,70 @@
+name: "Component CI: TensileLite unit"
+
+# Why this lane exists
+#
+# A pre-submit GATE for the TensileLite host-only unit suite (Tensile/Tests/unit),
+# built from source and run CPU-only on the lightweight AWS scale pool. It moves
+# these tests off the TheRock multi-arch GPU runner (where the host-only `quick`
+# tier ran on a real gfx942 GPU it never used), freeing GPU capacity.
+#
+# Distinct from the `TensileLite coverage` lane, which only MEASURES coverage;
+# this lane answers "do the unit tests pass" and fails the PR when they don't.
+# GPU-bound unit cases (skipif on gfx1250/gfx950) skip here and stay covered by
+# the GPU tiers on TheRock CI — this lane is host-only by design.
+#
+# rocisa's own suite is covered by component-ci-rocisa.yml; this lane runs only
+# Tensile/Tests/unit to avoid duplicating it.
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install tox
+        shell: bash
+        run: pip install tox
+
+      # `tox -e unit` installs rocisa from source (compiler env below) and runs
+      # `pytest {posargs}`; scope it to Tensile/Tests/unit and exclude the `gpu`
+      # marker so only host-only unit tests run (matches the quick/standard tier).
+      #
+      # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
+      # but not PATH, and some tests resolve the assembler via
+      # shutil.which("amdclang++"). Without it the process-wide rocisa singleton
+      # initializes with a bogus compiler and cascades into ~200 codegen failures
+      # across xdist workers (AIHPBLAS-3877).
+      - name: Run TensileLite unit tests
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        env:
+          CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+          CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+          CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+          CMAKE_GENERATOR: Ninja
+          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        run: |
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+          tox -e unit -- Tensile/Tests/unit -m "not gpu"
