@@ -27,6 +27,7 @@ import os
 import tempfile
 import yaml
 from Tensile.BenchmarkSplitter import BenchmarkSplitter
+import copy
 
 
 @pytest.fixture
@@ -575,3 +576,252 @@ class TestBenchmarkSplitterEdgeCases:
         # Should have all 2 sizes in one file
         sizes = result[0]["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"][0]["ProblemSizes"]
         assert len(sizes) == 2
+
+
+
+# ==== mutation-kill tests (slice 8 campaign) ====
+# --- survivors of BenchmarkSplitter.__splitByBenchmarkGroup ---
+class TestSplitByBenchmarkGroupKills:
+    """Kill survivors of BenchmarkSplitter.__splitByBenchmarkGroup."""
+
+    _split = staticmethod(BenchmarkSplitter._BenchmarkSplitter__splitByBenchmarkGroup)
+
+    @staticmethod
+    def _splitByBenchmarkGroup_cfg():
+        return {
+            "GlobalParameters": {"nested": {"x": 1}},
+            "BenchmarkProblems": [[
+                {"OperationType": "GEMM", "nested": {"a": 1}},
+                {"BenchmarkFinalParameters": [{"ProblemSizes": [[64, 64, 64]]}],
+                 "nested": {"b": 2}},
+            ]],
+        }
+
+    def test_splitByBenchmarkGroup_exact_multiple_problems_message(self):
+        data = {"BenchmarkProblems": [[{"OperationType": "GEMM"}], [{"x": 1}]]}
+        with pytest.raises(AssertionError) as ei:
+            self._split(data)
+        assert str(ei.value) == "Config file must have one BenchmarkProblems group"
+
+    def test_splitByBenchmarkGroup_exact_no_problem_type_message(self):
+        data = {"BenchmarkProblems": [[{"NoOp": 1}, {"BenchmarkFinalParameters": []}]]}
+        with pytest.raises(AssertionError) as ei:
+            self._split(data)
+        assert str(ei.value) == "Could not find problem type group"
+
+    def test_splitByBenchmarkGroup_problem_group_deepcopied(self):
+        data = self._splitByBenchmarkGroup_cfg()
+        r = self._split(data)[0]
+        r["BenchmarkProblems"][0][0]["nested"]["a"] = 999
+        assert data["BenchmarkProblems"][0][0]["nested"]["a"] == 1
+
+    def test_splitByBenchmarkGroup_benchmark_group_deepcopied(self):
+        data = self._splitByBenchmarkGroup_cfg()
+        r = self._split(data)[0]
+        r["BenchmarkProblems"][0][1]["nested"]["b"] = 999
+        assert data["BenchmarkProblems"][0][1]["nested"]["b"] == 2
+
+    def test_splitByBenchmarkGroup_other_section_deepcopied(self):
+        data = self._splitByBenchmarkGroup_cfg()
+        r = self._split(data)[0]
+        r["GlobalParameters"]["nested"]["x"] = 999
+        assert data["GlobalParameters"]["nested"]["x"] == 1
+
+    def test_splitByBenchmarkGroup_other_section_value_preserved(self):
+        data = self._splitByBenchmarkGroup_cfg()
+        r = self._split(data)[0]
+        assert r["GlobalParameters"] == {"nested": {"x": 1}}
+
+
+# --- survivors of BenchmarkSplitter.__splitByBenchmarkSizes ---
+_SBS = BenchmarkSplitter._BenchmarkSplitter__splitByBenchmarkSizes
+
+
+def _sbs_cfg(sizes, extra_group_key=None, problem_nested=None):
+    problemGroup = {"OperationType": "GEMM", "DataType": "f32"}
+    if problem_nested is not None:
+        problemGroup["Nested"] = problem_nested
+    benchGroup = {"BenchmarkFinalParameters": [{"ProblemSizes": copy.deepcopy(sizes)}]}
+    if extra_group_key is not None:
+        benchGroup[extra_group_key[0]] = extra_group_key[1]
+    return {"GlobalParameters": {"V": "1"},
+            "BenchmarkProblems": [[problemGroup, benchGroup]]}
+
+
+class TestSplitByBenchmarkSizesPin:
+    def test_sbs_default_numsizes_is_one(self):
+        # numSizes defaults to 1: 3 sizes -> 3 files (mutant numSizes=2 -> 2 files)
+        cfg = _sbs_cfg([[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+        rv = _SBS(cfg)
+        assert len(rv) == 3
+        for r in rv:
+            sizes = r["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"][0]["ProblemSizes"]
+            assert len(sizes) == 1
+
+    def test_sbs_msg_multiple_problems_exact(self):
+        cfg = _sbs_cfg([[1, 1, 1]])
+        cfg["BenchmarkProblems"].append([{"OperationType": "GEMM"}])
+        with pytest.raises(AssertionError) as ei:
+            _SBS(cfg)
+        assert str(ei.value) == "Config file must have one BenchmarkProblems group"
+
+    def test_sbs_missing_problem_group_raises_exact(self):
+        # group0 is the benchmark group, group1 is neither -> problemIdx stays -1
+        cfg = {"BenchmarkProblems": [[
+            {"BenchmarkFinalParameters": [{"ProblemSizes": [[1, 1, 1]]}]},
+            {"SomethingElse": "x"},
+        ]]}
+        with pytest.raises(AssertionError) as ei:
+            _SBS(cfg)
+        assert str(ei.value) == "Config file must have one ProblemType group and one Benchmark group"
+
+    def test_sbs_missing_benchmark_group_raises_exact(self):
+        # group0 is the problem group, group1 is neither -> benchmarkIdx stays -1
+        cfg = {"BenchmarkProblems": [[
+            {"OperationType": "GEMM"},
+            {"SomethingElse": "x"},
+        ]]}
+        with pytest.raises(AssertionError) as ei:
+            _SBS(cfg)
+        assert str(ei.value) == "Config file must have one ProblemType group and one Benchmark group"
+
+    def test_sbs_three_groups_len_not_two_raises(self):
+        # both indices found but len(benchmarkProblems)==3 -> first 'and' must hold
+        cfg = {"BenchmarkProblems": [[
+            {"OperationType": "GEMM"},
+            {"BenchmarkFinalParameters": [{"ProblemSizes": [[1, 1, 1]]}]},
+            {"Extra": "x"},
+        ]]}
+        with pytest.raises(AssertionError) as ei:
+            _SBS(cfg)
+        assert str(ei.value) == "Config file must have one ProblemType group and one Benchmark group"
+
+    def test_sbs_problem_group_at_index_one(self):
+        # problem group legitimately at index 1 -> problemIdx == 1
+        cfg = {"GlobalParameters": {"V": "1"}, "BenchmarkProblems": [[
+            {"BenchmarkFinalParameters": [{"ProblemSizes": [[1, 1, 1], [2, 2, 2]]}]},
+            {"OperationType": "GEMM"},
+        ]]}
+        rv = _SBS(cfg, numSizes=1)
+        assert len(rv) == 2
+        assert "OperationType" in rv[0]["BenchmarkProblems"][0][0]
+        assert "BenchmarkFinalParameters" in rv[0]["BenchmarkProblems"][0][1]
+
+    def test_sbs_msg_empty_problem_sizes_exact(self):
+        cfg = _sbs_cfg([])
+        with pytest.raises(AssertionError) as ei:
+            _SBS(cfg)
+        assert str(ei.value) == "Benchmark group must have non-empty ProblemSizes"
+
+    def test_sbs_preserves_other_benchmark_group_keys(self):
+        cfg = _sbs_cfg([[1, 1, 1]], extra_group_key=("GroupName", "myGroup"))
+        rv = _SBS(cfg, numSizes=1)
+        benchOut = rv[0]["BenchmarkProblems"][0][1]
+        assert benchOut["GroupName"] == "myGroup"
+
+    def test_sbs_problem_group_deep_copied(self):
+        # the problem type group is stored via copy.deepcopy (not shallow): mutating
+        # the input nested object after the call must not affect the returned copy
+        cfg = _sbs_cfg([[1, 1, 1], [2, 2, 2]], problem_nested={"vals": [1, 2]})
+        rv = _SBS(cfg, numSizes=10)
+        assert len(rv) == 1
+        pgOut = rv[0]["BenchmarkProblems"][0][0]
+        cfg["BenchmarkProblems"][0][0]["Nested"]["vals"].append(99)
+        assert pgOut["Nested"]["vals"] == [1, 2]
+
+    def test_sbs_other_keys_preserved_and_deep_copied(self):
+        # else branch: result[k] = copy.deepcopy(data[k]) for non-BenchmarkProblems
+        # keys. Kills mutmut_109 (result[k]=None), mutmut_110 (deepcopy(None)=None),
+        # and mutmut_111 (shallow copy.copy, which shares the nested object).
+        cfg = _sbs_cfg([[1, 1, 1], [2, 2, 2]])
+        cfg["GlobalParameters"] = {"Nested": {"vals": [1, 2, 3]}}
+        rv = _SBS(cfg, numSizes=1)
+        assert len(rv) == 2
+        for r in rv:
+            assert r["GlobalParameters"] == {"Nested": {"vals": [1, 2, 3]}}
+        assert rv[0]["GlobalParameters"]["Nested"] is not cfg["GlobalParameters"]["Nested"]
+        rv[0]["GlobalParameters"]["Nested"]["vals"].append(99)
+        assert cfg["GlobalParameters"]["Nested"]["vals"] == [1, 2, 3]
+
+
+# --- survivors of BenchmarkSplitter.__splitByProblem ---
+class TestSplitByProblemDeepCopy:
+    def _make_data(self):
+        return {
+            "GlobalParameters": {"nested": [1, 2, 3]},
+            "BenchmarkProblems": [
+                [{"OperationType": "GEMM"}],
+                [{"OperationType": "X"}],
+            ],
+        }
+
+    def test_splitByProblem_problemKey_is_deep_copied(self):
+        # Kills mutmut_11: result[problemKey] = [copy.deepcopy(data[k][i])]
+        # A shallow copy.copy of the problem list would share the inner dict.
+        data = self._make_data()
+        result = BenchmarkSplitter._BenchmarkSplitter__splitByProblem(data)
+        assert len(result) == 2
+        # deepcopy => distinct inner-dict objects
+        assert result[0]["BenchmarkProblems"][0][0] is not data["BenchmarkProblems"][0][0]
+        assert result[1]["BenchmarkProblems"][0][0] is not data["BenchmarkProblems"][1][0]
+        # mutate the split output's inner dict; original must be untouched under deepcopy
+        result[0]["BenchmarkProblems"][0][0]["OperationType"] = "MUTATED"
+        assert data["BenchmarkProblems"][0][0]["OperationType"] == "GEMM"
+
+    def test_splitByProblem_otherKeys_are_deep_copied(self):
+        # Kills mutmut_14: result[k] = copy.deepcopy(data[k]) for non-problem keys.
+        # A shallow copy.copy of the dict would share the nested list.
+        data = self._make_data()
+        result = BenchmarkSplitter._BenchmarkSplitter__splitByProblem(data)
+        assert len(result) == 2
+        # deepcopy => the nested list object is a distinct object per split file
+        assert result[0]["GlobalParameters"]["nested"] is not data["GlobalParameters"]["nested"]
+        assert result[1]["GlobalParameters"]["nested"] is not data["GlobalParameters"]["nested"]
+        # mutating the nested list in a split output must not touch the original
+        result[0]["GlobalParameters"]["nested"].append(99)
+        assert data["GlobalParameters"]["nested"] == [1, 2, 3]
+
+
+# --- survivors of BenchmarkSplitter.splitBenchmarkBySizes ---
+class TestBenchmarkSplitterSurvivorKills:
+    """Kill splitBenchmarkBySizes default-arg and accumulation-operator survivors."""
+
+    def test_splitBenchmarkBySizes_default_numSizes_yields_seven_files(self, temp_config_file, temp_output_dir):
+        # numSizes omitted -> default must be 1. sample config produces 3 benchmark
+        # groups (3+2 sizes in problem1, 2 sizes in problem2); with 1 size/file that
+        # is 3+2+2 = 7 files. Kills mut1 (default 1->2 gives 4), mut15 (+=/= gives 2),
+        # mut18 (+=/= gives 2).
+        BenchmarkSplitter.splitBenchmarkBySizes(temp_config_file, temp_output_dir)
+        assert len(os.listdir(temp_output_dir)) == 7
+
+    def test_splitBenchmarkBySizes_numSizes_two_yields_four_files(self, temp_config_file, temp_output_dir):
+        # numSizes=2 explicitly. ceil(3/2)+ceil(2/2)+ceil(2/2) = 2+1+1 = 4 files.
+        # Kills mut23: dropping numSizes from the inner __splitByBenchmarkSizes call
+        # makes it default to 1 -> 7 files.
+        BenchmarkSplitter.splitBenchmarkBySizes(temp_config_file, temp_output_dir, numSizes=2)
+        assert len(os.listdir(temp_output_dir)) == 4
+
+    def test_splitBenchmarkBySizes_default_baseFileName_uses_config_basename(self, temp_config_file, temp_output_dir):
+        # baseFileName omitted -> empty-string default triggers the basename fallback,
+        # so every output file starts with the config file's own base name. Kills mut2:
+        # default ""->"XXXX" skips the fallback and names files "XXXX_..".
+        BenchmarkSplitter.splitBenchmarkBySizes(temp_config_file, temp_output_dir)
+        base = os.path.splitext(os.path.basename(temp_config_file))[0]
+        files = os.listdir(temp_output_dir)
+        assert files
+        for fn in files:
+            assert fn.startswith(base)
+            assert not fn.startswith("XXXX")
+
+    def test_splitBenchmarkBySizes_default_suffixFormat_two_digit_index(self, temp_config_file, temp_output_dir):
+        # suffixFormat omitted -> default "{:02}" so index 0 renders as "_00".
+        # numSizes=100 collapses each of the 3 groups to a single file -> 3 files
+        # named base_00/_01/_02. Kills mut4: default "{:02}"->"XX{:02}XX" would
+        # render "_XX00XX".
+        BenchmarkSplitter.splitBenchmarkBySizes(temp_config_file, temp_output_dir, numSizes=100)
+        base = os.path.splitext(os.path.basename(temp_config_file))[0]
+        files = sorted(os.listdir(temp_output_dir))
+        assert len(files) == 3
+        assert (base + "_00.yaml") in files
+        for fn in files:
+            assert "XX" not in fn
