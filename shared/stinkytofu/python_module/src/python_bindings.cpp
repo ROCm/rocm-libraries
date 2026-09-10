@@ -157,6 +157,9 @@ NB_MODULE(_stinkytofu, m) {
 #define SET_MODULE_OPTION_LLM(name, type) \
     if (options.contains(#name)) nb::try_cast<type>(options[#name], moduleOptions.name);
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION_LLM)
+#define SET_MODULE_OPTION_WITH_DEFAULT_LLM(name, type, value) SET_MODULE_OPTION_LLM(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT_LLM)
+#undef SET_MODULE_OPTION_WITH_DEFAULT_LLM
 #undef SET_MODULE_OPTION_LLM
             }
             return lowerLogicalModuleToAsm(module, arch, moduleOptions);
