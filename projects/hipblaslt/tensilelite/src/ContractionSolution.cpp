@@ -4611,6 +4611,16 @@ namespace TensileLite
         if(!streamKDynamicQueueUnsupported(hardware))
             return true;
 
+        // streamK5EffectiveDynamic() needs analytical hardware for AUTO mode.
+        // Unknown hardware is already classified as unsupported, so return the
+        // policy result instead of letting mode resolution throw.
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+        {
+            warnStreamKDynamicQueueUnsupportedOnce(hardware);
+            return false;
+        }
+
         // Runtime XCD count is not a power of two or does not equal the baked
         // per-XCD queue count. Only the dynamic-queue sub-path is affected: an
         // SK5 solution that resolves to the static (SK3) sub-path for this

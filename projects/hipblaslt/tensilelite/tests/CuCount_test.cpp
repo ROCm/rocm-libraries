@@ -5,7 +5,9 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -932,6 +934,26 @@ namespace
             return nullptr;
         }
     };
+
+    class RecordingReporter : public Client::ResultReporter
+    {
+    public:
+        std::vector<std::pair<std::string, std::string>> reportedStrings;
+
+        void reportValue_string(std::string const& key, std::string const& value) override
+        {
+            reportedStrings.emplace_back(key, value);
+        }
+        void reportValue_uint(std::string const&, uint64_t) override {}
+        void reportValue_int(std::string const&, int64_t) override {}
+        void reportValue_double(std::string const&, double) override {}
+        void reportValue_sizes(std::string const&, std::vector<size_t> const&) override {}
+        void reportValue_vecOfSizes(std::string const&,
+                                    std::vector<std::vector<size_t>> const&) override
+        {
+        }
+        void finalizeReport() override {}
+    };
 } // namespace
 
 TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
@@ -996,6 +1018,25 @@ TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
         << "SK3-static solution must remain selectable when NUM_XCD is unknown";
 }
 
+TEST(StreamKDynamicQueueXcdGateTest, Sk5AutoUnknownHardwareIsRejectedWithoutThrowing)
+{
+    hip::HipAMDGPU noAnalytical;
+    noAnalytical.processor        = AMDGPU::Processor::gfx942;
+    noAnalytical.computeUnitCount = 304;
+    noAnalytical.deviceName       = "test-gfx942-no-analytical";
+
+    ContractionSolution hybridSolution;
+    initEquality512Solution(hybridSolution, 5);
+    auto problem = makeGemmProblem(512, 512, 512);
+    problem.setParams().setStreamKTileSchedulingMode(2); // AUTO requires analytical hardware.
+
+    bool supported = true;
+    EXPECT_NO_THROW(
+        supported = hybridSolution.streamKDynamicQueueSupported(problem, noAnalytical));
+    EXPECT_FALSE(supported)
+        << "Unknown hardware must be rejected without entering the SK5 AUTO heuristic";
+}
+
 // Selection-predicate contract: on MI300A (6 XCD) the dynamic-queue solution is
 // EXCLUDED from selection (supported == false) so a different solution serves
 // the GEMM, while on MI300X (8 XCD) the identical solution stays selectable.
@@ -1037,13 +1078,7 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
     auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
     TestSolutionIterator iterator(mi300a);
     auto                 problem = makeGemmProblem(512, 512, 512);
-    std::ostringstream   reportOutput;
-    auto reporter = std::make_shared<Client::LogReporter>(
-        Client::LogLevel::Terse,
-        std::initializer_list<std::string>{Client::ResultKey::Validation},
-        reportOutput,
-        false,
-        false);
+    auto reporter = std::make_shared<RecordingReporter>();
     iterator.setReporter(reporter);
 
     ContractionSolution dynamicSolution;
@@ -1051,13 +1086,62 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
     EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true))
         << "The explicit all-solutions client path must not launch an eight-queue "
            "dynamic kernel on a six-XCD MI300A";
+    ASSERT_EQ(reporter->reportedStrings.size(), 1u);
+    EXPECT_EQ(reporter->reportedStrings[0].first, Client::ResultKey::Validation);
+    EXPECT_EQ(reporter->reportedStrings[0].second, "UNSUPPORTED_XCD_TOPOLOGY");
+
+    reporter->reportedStrings.clear();
     EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, false))
         << "Topology filtering must also apply during non-reporting prediction checks";
+    EXPECT_TRUE(reporter->reportedStrings.empty());
 
     ContractionSolution staticSolution;
     initEquality512Solution(staticSolution, 3);
     EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
         << "The topology guard must retain static StreamK coverage on MI300A";
+    EXPECT_TRUE(reporter->reportedStrings.empty());
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorReportsAssertsBeforeTopology)
+{
+    auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
+    TestSolutionIterator iterator(mi300a);
+    auto                 problem  = makeGemmProblem(512, 512, 512);
+    auto                 reporter = std::make_shared<RecordingReporter>();
+    iterator.setReporter(reporter);
+
+    ContractionSolution dynamicSolution;
+    initEquality512Solution(dynamicSolution, 4);
+    dynamicSolution.problemPredicate
+        = std::make_shared<Predicates::False<ContractionProblemGemm>>();
+
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true));
+    ASSERT_EQ(reporter->reportedStrings.size(), 1u);
+    EXPECT_EQ(reporter->reportedStrings[0].first, Client::ResultKey::Validation);
+    EXPECT_EQ(reporter->reportedStrings[0].second, "DID_NOT_SATISFY_ASSERTS");
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, LogReporterTreatsUnsupportedTopologyAsTerse)
+{
+    std::ostringstream reportOutput;
+    Client::LogReporter reporter(
+        Client::LogLevel::Terse,
+        std::initializer_list<std::string>{Client::ResultKey::Validation,
+                                           Client::ResultKey::TimeUS,
+                                           Client::ResultKey::SpeedGFlops},
+        reportOutput,
+        false,
+        false);
+
+    reporter.preProblem(nullptr);
+    reporter.preSolution(nullptr);
+    reporter.report(Client::ResultKey::TimeUS, 1.0);
+    reporter.report(Client::ResultKey::SpeedGFlops, 0.0);
+    reporter.report(Client::ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
+    reporter.postSolution();
+    reporter.postProblem();
+
+    EXPECT_NE(reportOutput.str().find("UNSUPPORTED_XCD_TOPOLOGY"), std::string::npos);
 }
 
 // ===========================================================================
