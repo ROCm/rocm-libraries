@@ -26,19 +26,6 @@ class CleanBuildPy(build_py):
         super().run()
 
 
-setup(
-    version=_metadata["distribution_version"](_build_rocm_version()),
-    install_requires=[
-        "packaging",
-        "pyyaml",
-        "msgpack",
-        "joblib>=1.4.0",
-        "filelock",
-        "numpy",
-    ],
-    cmdclass={"build_py": CleanBuildPy},
-)
-
 def _build_rocm_version() -> str:
     """
     Return the ROCm identity encoded in the TensileLite wheel.
@@ -57,3 +44,17 @@ def _build_rocm_version() -> str:
             "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
         )
     return explicit_rocm_version
+
+
+setup(
+    version=_metadata["distribution_version"](_build_rocm_version()),
+    install_requires=[
+        "packaging",
+        "pyyaml",
+        "msgpack",
+        "joblib>=1.4.0",
+        "filelock",
+        "numpy",
+    ],
+    cmdclass={"build_py": CleanBuildPy},
+)
