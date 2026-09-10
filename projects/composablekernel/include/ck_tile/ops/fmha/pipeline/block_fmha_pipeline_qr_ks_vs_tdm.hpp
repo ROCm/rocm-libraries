@@ -1097,12 +1097,15 @@ struct BlockFmhaPipelineQRKSVSTdm
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
         move_tile_window(k_dram_window, {kN0, 0});
-        // K's prefetch is 2 loop-iterations ahead of consumption (ptrk0/ptrk1
-        // ping-pong, see mainloop() below), so when the sink region is exactly
-        // one tile (num_sink_loop == 1) this second prefetch already targets
-        // what mainloop() consumes at i_total_loops == 0 -- the sink->normal
-        // jump must apply here. For num_sink_loop >= 2 the jump instead applies
-        // in the main loop two iterations before consumption (see the
+        // The prologue issues two K prefetches: the first into ptrk0, which
+        // k_lds_read_window is bound to and which mainloop() therefore consumes at
+        // i_total_loops == 0, and the second into ptrk1, consumed at
+        // i_total_loops == 1. When the sink region is exactly one tile
+        // (num_sink_loop == 1), iteration 0 is that sink tile and iteration 1 is
+        // the first normal tile, so the sink->normal jump has to land between the
+        // two prefetches -- here. For num_sink_loop >= 2 the first normal tile is
+        // consumed at i_total_loops == num_sink_loop, and K runs 2 iterations
+        // ahead, so the jump applies in the main loop instead (see the
         // i_total_loops == num_sink_loop - 2 check below).
         if constexpr(kHasSink)
         {
