@@ -269,20 +269,25 @@ public:
         }
         else if(!pathsToProcess.empty())
         {
-            std::string configuredPaths;
-            for(const auto& configuredPath : pathsToProcess)
-            {
-                if(!configuredPaths.empty())
+            // Invoked from inside the logging macro, which expands to a level check around its
+            // message argument, so the join runs only when WARN is enabled.
+            const auto joinConfiguredPaths = [&pathsToProcess] {
+                std::string joined;
+                for(const auto& configuredPath : pathsToProcess)
                 {
-                    configuredPaths += "; ";
+                    if(!joined.empty())
+                    {
+                        joined += "; ";
+                    }
+                    joined += configuredPath.string();
                 }
-                configuredPaths += configuredPath.string();
-            }
+                return joined;
+            };
 
             HIPDNN_BACKEND_LOG_WARN("Plugin loading found no plugin libraries in any of the {} "
                                     "configured plugin path(s): {}",
                                     pathsToProcess.size(),
-                                    configuredPaths);
+                                    joinConfiguredPaths());
         }
     }
 
