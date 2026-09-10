@@ -85,8 +85,11 @@ namespace hipblaslt::client
             return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
         case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
-        default:
+        case hipblaslt_scaling_format::none:
+        case hipblaslt_scaling_format::Scalar:
             return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+        default:
+            throw std::invalid_argument("Invalid hipBLASLt matrix scaling format.");
         }
     }
 
@@ -111,10 +114,15 @@ namespace hipblaslt::client
             epilogue = arguments.bias_vector ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT
                                              : HIPBLASLT_EPILOGUE_CLAMP_EXT;
             break;
-        default:
+        case hipblaslt_activation_type::none:
+        case hipblaslt_activation_type::sigmoid:
+            // hipBLASLt has no sigmoid epilogue. Preserve the existing client
+            // behavior: sigmoid selects no activation but may still select bias.
             if(arguments.bias_vector)
                 epilogue = HIPBLASLT_EPILOGUE_BIAS;
             break;
+        default:
+            throw std::invalid_argument("Invalid hipBLASLt activation type.");
         }
 
         if(arguments.gradient)

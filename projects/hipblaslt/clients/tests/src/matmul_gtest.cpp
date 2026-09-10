@@ -86,6 +86,9 @@ TEST(MatmulOrchestration, MapsScaleModes)
 
     for(const auto& [format, expected] : mappings)
         EXPECT_EQ(hipblaslt::client::matmulScaleMode(format), expected);
+    EXPECT_THROW(
+        hipblaslt::client::matmulScaleMode(static_cast<hipblaslt_scaling_format>(-1)),
+        std::invalid_argument);
 }
 
 TEST(MatmulOrchestration, MapsSwizzledMatrixLayouts)
@@ -135,6 +138,10 @@ TEST(MatmulOrchestration, MapsEpiloguePolicy)
     arguments.bias_vector      = false;
     arguments.use_e            = true;
     arguments.gradient         = false;
+    EXPECT_THROW(hipblaslt::client::matmulEpilogue(arguments), std::invalid_argument);
+
+    arguments.use_e           = false;
+    arguments.activation_type = static_cast<hipblaslt_activation_type>(-1);
     EXPECT_THROW(hipblaslt::client::matmulEpilogue(arguments), std::invalid_argument);
 }
 
