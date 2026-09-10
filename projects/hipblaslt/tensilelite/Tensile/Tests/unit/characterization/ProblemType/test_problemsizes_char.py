@@ -94,10 +94,14 @@ def test_problem_size_range_descriptor_lengths(snapshot):
     assert _range_summary(psr) == snapshot
 
 
-def test_problem_size_range_too_many_descriptors_exits():
+def test_problem_size_range_too_many_descriptors_exits(capsys):
     # A descriptor with >4 entries -> printExit.
     with pytest.raises(SystemExit):
         ProblemSizeRange(_PT, [[1, 2, 3, 4, 5], [64], [32]])
+    assert capsys.readouterr().out.strip() == (
+        "Tensile::FATAL: dimension[0] config ([1, 2, 3, 4, 5]) "
+        "has 5 descriptors rather than 1-4."
+    )
 
 
 def test_problem_size_range_short_config_padded(snapshot):
@@ -254,3 +258,45 @@ def test_problem_sizes_minstride_wrong_length_exits():
 def test_problem_sizes_duplicate_minstride_exits():
     with pytest.raises(SystemExit):
         ProblemSizes(_PT, [{"MinStride": [0, 0, 0]}, {"MinStride": [0, 0, 0]}])
+
+
+def test_problem_size_range_distinguishes_step_increments():
+    problem_range = ProblemSizeRange(
+        _PT,
+        [[64, 128, 16, 512], [32, 96, 8, 256], [16, 48, 80]],
+    )
+
+    assert problem_range.indicesSized[:3] == [
+        [64, 128, 16, 512],
+        [32, 96, 8, 256],
+        [16, 48, 0, 80],
+    ]
+    assert problem_range.numProblemSizes[:3] == [4, 3, 2]
+    assert problem_range.totalProblemSizes == 24
+    assert tuple(problem_range.problemSizes[0]) == (64, 32, 16, 0, 0, 0, 0)
+    assert tuple(problem_range.problemSizes[-1]) == (496, 232, 64, 0, 0, 0, 0)
+
+
+def test_problem_size_range_maps_distinct_indices():
+    problem_range = ProblemSizeRange(
+        _PT,
+        [[256, 300, 256], [64, 80, 96], [16, 40, 24], 0, 1, 2],
+    )
+
+    assert problem_range.indicesMapped == [0, 1, 2]
+    assert problem_range.indexMax[:6] == [256, 96, 24, 256, 96, 24]
+    assert [tuple(size) for size in problem_range.problemSizes] == [
+        (256, 64, 16, 256, 64, 16, 0)
+    ]
+
+
+@pytest.mark.parametrize(
+    "sizes,expected",
+    [
+        ([0, 0, 0], [0, 0, 0, 0, 0, 0, 0]),
+        ([-5, -5, 0], [-5, -5, 0, -1, -1, -1, -1]),
+    ],
+    ids=["zero", "negative-sentinel"],
+)
+def test_exact_dict_leading_dimension_placeholders(sizes, expected):
+    assert list(ExactDict({"sizes": sizes}, _PT).sizes) == expected
