@@ -311,24 +311,46 @@ class TestCodegenHeaderGeneration:
 class TestDefaultConfigAlignment:
     """Ensure default_fp8_config/default_bf8_config stay in sync with _default_config()."""
 
-    def _codegen_default_names(self):
+    # Both defaults are arch-dependent, so comparing them at a single architecture
+    # cannot see a drift that only exists on another one -- which is exactly the
+    # drift gfx1250 enablement introduces. Every arch the bridge supports is
+    # checked, plus a suffixed spelling on each side.
+    _ARCHES = ["gfx942", "gfx950", "gfx1250", "gfx1250:xnack-", "gfx942:sramecc+:xnack-"]
+
+    def _codegen_default_names(self, gfx_arch=""):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
         from unified_grouped_gemm_tensorquant_codegen import _default_config, _build_specs
-        specs = _build_specs(_default_config())
+        specs = _build_specs(_default_config(gfx_arch))
         return {s.name for s in specs}
 
-    def test_default_fp8_config_name_in_codegen_defaults(self):
-        cfg = default_fp8_config()
-        assert cfg.name in self._codegen_default_names(), (
-            f"default_fp8_config().name '{cfg.name}' is not produced by _default_config() "
-            f"in the codegen. The two defaults have drifted — update one to match the other."
+    @pytest.mark.parametrize("gfx_arch", _ARCHES)
+    def test_default_fp8_config_name_in_codegen_defaults(self, gfx_arch):
+        cfg = default_fp8_config(gfx_arch)
+        assert cfg.name in self._codegen_default_names(gfx_arch), (
+            f"default_fp8_config('{gfx_arch}').name '{cfg.name}' is not produced by "
+            f"_default_config('{gfx_arch}') in the codegen. The two defaults have "
+            f"drifted — update one to match the other."
         )
 
-    def test_default_bf8_config_name_in_codegen_defaults(self):
-        cfg = default_bf8_config()
-        assert cfg.name in self._codegen_default_names(), (
-            f"default_bf8_config().name '{cfg.name}' is not produced by _default_config() "
-            f"in the codegen. The two defaults have drifted — update one to match the other."
+    @pytest.mark.parametrize("gfx_arch", _ARCHES)
+    def test_default_bf8_config_name_in_codegen_defaults(self, gfx_arch):
+        cfg = default_bf8_config(gfx_arch)
+        assert cfg.name in self._codegen_default_names(gfx_arch), (
+            f"default_bf8_config('{gfx_arch}').name '{cfg.name}' is not produced by "
+            f"_default_config('{gfx_arch}') in the codegen. The two defaults have "
+            f"drifted — update one to match the other."
+        )
+
+    def test_gfx1250_default_actually_differs_from_the_gfx9_default(self):
+        """Guard against the parametrization passing for the wrong reason.
+
+        If _default_config() ever stops honouring gfx_arch, every case above
+        still passes -- both sides would just fall back to the gfx9 tile
+        together. Assert the two architectures really do produce different
+        kernels, so that regression is visible.
+        """
+        assert self._codegen_default_names("gfx1250").isdisjoint(
+            self._codegen_default_names("gfx942")
         )
 
 
