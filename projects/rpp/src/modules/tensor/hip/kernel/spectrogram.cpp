@@ -413,7 +413,14 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                            handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
                            make_uint2(dstDescPtr->strides.nStride, dstHStride), numWindowsTensor,
                            make_int2(numBins, power), vertical);
-        HIP_CHECK_LAUNCH_RETURN();
+        hipError_t launchStatus = hipGetLastError();
+        if (launchStatus != hipSuccess) {
+            fprintf(stderr, "HIP kernel launch error: returned %d at %s:%d", launchStatus, __FILE__,
+                    __LINE__);
+            if (workBuffer) (void)hipFree(workBuffer);
+            if (execInfo) rocfft_execution_info_destroy(execInfo);
+            return RPP_ERROR_HIP_LAUNCH;
+        }
 
         // Clean up temporary rocFFT resources (plan is cached and reused)
         if (workBuffer) (void)hipFree(workBuffer);
