@@ -267,52 +267,46 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16, miopenTensorNCHW))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvFwdNhwc_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNHWC, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvFwdNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNHWC, true))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvBwdNhwc_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNHWC, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvBwdNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNHWC, true))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvWrwNhwc_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNHWC, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvWrwNhwc_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNHWC, true))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvFwdNchw_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNCHW, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvFwdNchw_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNCHW, true))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvBwdNchw_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNCHW, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvBwdNchw_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNCHW, true))));
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_UnitTestConvSolverConvHipConvWrwNchw_TF32,
-    testing::Combine(
-        testing::Values(GetTestParamsTF32()),
-        testing::Values(miopenConvolutionAlgoDirect),
-        testing::ValuesIn(GetConvSmokeTestCases(miopenFloat, miopenTensorNCHW, true))));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverConvHipConvWrwNchw_TF32,
+                         testing::Combine(testing::Values(GetTestParamsTF32()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvSmokeTestCases(
+                                              miopenFloat, miopenTensorNCHW, true))));
 
 #endif // MIOPEN_USE_HIPCONV
