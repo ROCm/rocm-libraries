@@ -4,6 +4,103 @@ Build-time UKD/KMD/KDP -> kpack packaging. Provider-internal (`tools/hkp_pack.py
 see `python/hkp_pack/` for the pipeline itself and `examples/descriptors/` for a
 real, minimal authored source root.
 
+## Compiler-bound specialization agreement
+
+Generic descriptor generation is toolchain-free and supplies declarations, not
+compiler evidence. Packaging consumes UKD `provenance.specialization_contract` as
+data; it does not bind an authoring profile, redirect compiler import roots or
+import a second policy implementation. There is no packaging `--profile` option,
+CMake `PROFILES` cache input or external root manifest. Profiles remain
+authoring/mining inputs whose relevant declarations travel with generated UKDs.
+
+The declaration has `schema_version: 1` and `consumers`, each containing `engine_id`,
+`kmd_id`, `metadata_fields`, `matcher_only_fields`, `bindings` and `vocabulary`.
+The two field lists exhaustively and disjointly partition the referenced KMD's
+fields. Binding keys are exactly `metadata_fields`; each value is exactly
+`{field: "<attr>"}` or `{method: "<accessor>"}`. IDs reference existing descriptors,
+without copying KMD type/default definitions. Shared standalone UKDs carry all
+consumers; duplicate/conflicting declarations fail. See the
+[generator agreement reference](../../../projects/hipdnn/tools/IngestorGenerator/README.md#specialization-agreement)
+for authoring and projection semantics.
+
+### Actual compiler observations
+
+Use the selected compiler interpreter and the actual imported builder/spec objects.
+`build_spec` hydrates ordinary defaults and default factories on the object passed
+to `builder_fn`. Observe declared direct fields only when the builder uses them
+without further resolution; otherwise observe the zero-argument bound effective
+accessor the builder actually consumes. Read it even when the raw field is non-null:
+coupling may override an explicit value, such as swizzle true with conflict-free V
+disabled. Never guess accessor conventions, copy policy formulas or reconstruct a
+different spec object for comparison.
+
+`None` remains authored intent, not a wildcard or an instruction to substitute
+false. Missing/noncallable accessors, unresolved `None`, unsupported return types,
+exceptions or non-repeatable observations block full agreement. Matcher-only
+classification needs a source-use-site audit and independent review; a consumed
+specialization field cannot be exempted merely to make a check pass.
+
+Complete and type metadata through the actual referenced KMD. BOOL remains boolean;
+a boolean may intentionally project to 0/1 for INT; FLOAT normalizes numerically.
+Descriptor-side type errors are not silently coerced. Compare observed effective
+values against each consumer's completed metadata before publication.
+
+### Shared compilation and reserved evidence
+
+Collect every consumer's observation requests before compiling a shared variant.
+Serial and prewarm/worker results carry the code object, captured symbol,
+architecture and serializable observations keyed by canonical declaration digest.
+Every consumer is compared independently, including on result reuse; one successful
+consumer cannot certify a contradictory second consumer. Reuse is within the
+existing packaging invocation/producer context, not a new persistent observation
+cache.
+
+Preserve authored `provenance.spec` separately and untouched. Only the producing
+compiler writes the reserved `provenance.effective_spec` record. Authored rocKE
+inputs supplying a purported record are rejected. Extra/provenance passthrough
+must not overwrite fresh observations during UKD rewriting or final publication.
+Packed-input validation reads the actual packed record; it does not pretend to
+recompile authored input.
+
+The schema-versioned producing-build record binds effective values and observation
+requests, canonical authored-input digest, observed builder/spec/accessor identities
+and origins, consumer UKD/engine/KMD IDs, KMD content, completed metadata, KDP/effective
+architecture and actual library/toc-key/symbol/payload SHA256. Its binding digest
+excludes the evidence itself. The declaration remains alongside the record so a
+checker needs no external profile.
+
+Producer identities are qualified names and defining-file paths/content hashes
+observed from actual imported objects. Required unresolvable origins fail evidence
+production; producer files must remain stable during the invocation. Wheel stamps
+are separately labeled build provenance, not proof of imported origins or the
+entire transitive toolchain. Existing hermetic wheel selection and wheel-content
+build dependencies remain responsible for rebuilds after producer changes.
+
+### Full versus structural checking
+
+A full check validates the self-contained declaration and producing-build record
+against current descriptors, schema, metadata, architecture and named payload
+bytes. Missing, unsupported, stale or mismatched required records fail. A valid
+packed artifact can be fully checked **without rocKE installed on the verifying
+machine**: the checker neither imports today's producer nor claims an older
+artifact came from it.
+
+An explicit structural-only check may pass the properties it actually checks, but
+does not satisfy compiled-specialization agreement. Optional mining/analysis
+profiles cannot supply or override compiler evidence. Observations establish
+agreement with actual builder decisions and artifact integrity, not formal
+equivalence of arbitrary machine code or correctness of native dispatch.
+
+The runtime consumes packed per-architecture descriptors with source kind KPACK,
+not unlowered rocKE/HIP authoring descriptors. Native proof separately executes
+actual typed provider registration/loading and a finalized emitted-bundle census;
+source-text symbol matching is not certification. Host checks use explicit
+`HIPDNN_TEST_EXPECTED_ARCH` from configured packaging arches with the corresponding
+shard and nonempty exact test selection. Neither structural nor host loading
+proves numerical device behavior. The
+[ingestor RUNBOOK](../../../projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/RUNBOOK.md)
+owns the complete create/extend sequence and post-regeneration gates.
+
 ## Build speed: put the comgr cache on local storage
 
 Packing a rocKE descriptor set is dominated by lowering each kernel through
@@ -51,67 +148,49 @@ in CI where a missing dependency must not go silent.
 
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
-```bash
-python3 descriptor-packaging/tools/hkp_desk_check.py <path/to/some.kdp.json>
-```
+The desk check resolves KDP engine → UED metadata → KMD UUID within the selected
+descriptor tree/shards. It completes defaults and canonicalizes metadata through
+that schema. Tuple identity is engine-wide, including cross-pack overlap in
+effective architectures: equal metadata on disjoint architectures is legal,
+conflicting overlapping candidates are not. A KDP filename is not a KMD reference.
 
-RUNBOOK.md step 5d's four invariants over a shipped variant set used to live only as a
-shell-embedded Python snippet inside markdown -- untestable prose, and wrong on the
-exact data it told an agent to point it at. Invariant 1 (metadata/spec drift) read
-`kernel_source.spec`, which packing rewrites away (the authored spec moves to
-`provenance.spec`; `kernel_source` becomes `{kind: kpack, library, toc_key, symbol,
-sha256}`), so on a real packed tree the check silently printed "none" regardless of
-real drift. Nothing ever ran the snippet, so nothing ever noticed.
+Full checking uses the embedded declarations and producer-owned effective
+observations described above, not merely matching explicitly authored spec keys.
+Constructor defaults, omitted policy and coupled effective accessors remain
+obligations. An authored tree without compiler evidence can receive only an
+explicit structural result; it cannot be labeled compiler-clean.
 
-`python/hkp_pack/desk_check.py` is the fix, shipped as real, importable, testable code
-instead: it checks `kernel_source.spec` then falls back to `provenance.spec`, and
-reports COULD-NOT-CHECK (a FAILING result, not a silent pass) when a kernel has neither.
-It also handles pre-pack authored trees, where `toc_key`/`symbol` do not exist yet --
-those invariants report NOT-APPLICABLE rather than a false "None == None" collision.
-`tools/hkp_desk_check.py` is the thin CLI: exit 0 means every invariant this check can
-enforce is clean (including "found nothing to check" counting as a failure, never a
-pass); exit 1 means a real violation or a spec that could not be found anywhere.
-Invariant 4 (symbol non-uniqueness) is informational only and never affects the exit
-code on its own.
+`tools/hkp_desk_check.py --mode {full,structural} [--kpack-python-dir D]
+[--field F] [--drift-field F] <path/to/*.kdp.json>` selects the intended proof
+strength explicitly. `--mode` is required and has no default, because a default
+would let a structural run read as a full one; every run prints a leading
+`mode=<full|structural>` line and a `compiled specialization agreement:` line.
+`--mode structural` accepts an authored (pre-pack) or a shipped file and reports
+that agreement as NOT CHECKED; `--mode full` is for a shipped shard, and binds each
+kernel whose declaration names specialized metadata fields to the producing build's
+record and the archive bytes the descriptor names, reporting `OK for N kernel(s)`.
+A missing, unsupported or mismatched record for such a kernel is a failure, never a
+successful COULD-NOT-CHECK result. A kernel declaring no specialized metadata field
+has no record to bind and is listed by name under `compiled specialization NO
+COMPILED CLAIM:` — never absorbed into the pass line. That list is printed
+alongside `OK for N kernel(s)` in a mixed KDP; only when NO kernel makes a claim
+does the agreement line itself read `NO COMPILED CLAIM`. Archive-key/symbol
+properties that do not apply to authored input do not establish publication
+correctness. Symbol reuse by itself is not evidence that two metadata tuples are
+identical.
 
-Two field lists, deliberately independent: `--field` is the MATCHER-TUPLE identity
-(invariant 2), `--drift-field` is what invariant 1 compares against the authored spec,
-defaulting to `--field`. They were one list at first, and that was a trap: a spec and a
-KMD legitimately spell the same value differently (`spec "bf16"` against `metadata
-"BFLOAT16"`), so silencing the resulting false drift with `--field` also removed the
-field from what makes a variant distinct, and invariant 2 then reported 16 false
-collisions on the real 32-kernel gfx950 bundle. dtype specifically no longer needs
-silencing at all -- spellings are normalised through `_DTYPE_ALIASES`, so
-`bf16`/`BFLOAT16` agrees while `bf16`/`HALF` still fails.
-
-```bash
-PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
-    python3 -m pytest descriptor-packaging/tests/test_desk_check_invariants.py -q
-```
-
-Exercises the SHIPPED module directly (not a private copy of its logic -- a private
-copy is exactly how invariant 1 went dead the first time) over
-`tests/fixtures/desk_check/` (a small real rocKE `attention_dense` bundle: two
-genuinely distinct variants, head_size 64 and 128). Each invariant carries both a
-positive case (a clean real pack) and a negative case (a fixture engineered to violate
-it, packed for real, proving the check catches the defect it exists for), plus a
-`TestCliEndToEnd` class that runs the actual `tools/hkp_desk_check.py` subprocess
-end-to-end -- against a clean real pack (exit 0), a real pack with an injected genuine
-drift (exit 1), and the pre-pack authored tree (exit 0, NOT-APPLICABLE for
-toc_key/symbol) -- so the CLI's argument parsing and exit-code mapping are covered, not
-just the library functions underneath it.
+`tests/test_desk_check_invariants.py` exercises the shipped module. Keep structural
+identity, real packed observations and tampered-evidence checks distinct from
+native registration and numerical tests; a synthetic predicate or controlled
+payload establishes only its specific boundary.
 
 ### Real-corpus builder-signature guards (`tests/test_hkp_pack_rocke.py`)
 
-`test_real_gfx942_attention_dense_is_accepted` and `test_real_gfx942_tiled_2d_is_accepted`
-assert the real gfx942 `build_*` functions in `rocke/library/kernels/gfx942/` satisfy
-`_require_spec_arch_signature`'s `(spec, *, arch)` contract. gfx942's
-`build_attention_dense` used to be the corpus's one real REFUSAL case (a keyword-only
-`tuning` parameter no descriptor could supply); PR #11237 folded that parameter into the
-spec dataclass, so the corpus no longer contains a real unsuppliable-parameter builder.
-The guard itself remains covered by a SYNTHETIC one in
-`tests/test_hkp_pack_producer_guards.py::test_rejects_keyword_only_parameter` -- run
-both files together to see full coverage of this guard:
+The real gfx942 `build_*` functions in `rocke/library/kernels/gfx942/` must satisfy
+`_require_spec_arch_signature`'s `(spec, *, arch)` contract. The real-builder cases
+in `tests/test_hkp_pack_rocke.py` and rejection cases in
+`tests/test_hkp_pack_producer_guards.py` cover complementary paths. Signature
+acceptance alone is not effective-specialization or numerical proof.
 
 ```bash
 PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
