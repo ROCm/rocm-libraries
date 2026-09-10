@@ -34,6 +34,7 @@
 #include "random.hpp"
 
 #include <algorithm>
+#include <thread>
 #include <vector>
 
 #if MIOPEN_ENABLE_SQLITE
@@ -133,6 +134,60 @@ TEST(CPU_Cache_NONE, check_kern_db)
         EXPECT_TRUE(err_db.FindRecordUnsafe(cfg0));
         EXPECT_TRUE(err_db.RemoveRecordUnsafe(cfg0));
     }
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_reuse)
+{
+    miopen::TempFile temp_file("tmp-kerndb-cached");
+    auto& db1 =
+        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    auto& db2 =
+        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+    EXPECT_EQ(&db1, &db2);
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
+{
+    miopen::TempFile temp_file_a("tmp-kerndb-cached-a");
+    miopen::TempFile temp_file_b("tmp-kerndb-cached-b");
+    auto& db_a =
+        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_a, false);
+    auto& db_b =
+        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file_b, false);
+    EXPECT_NE(&db_a, &db_b);
+}
+
+TEST(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
+{
+    miopen::TempFile temp_file("tmp-kerndb-cached-mt");
+    auto& db =
+        miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
+
+    miopen::KernelConfig cfg;
+    cfg.kernel_name = "kernel_mt";
+    cfg.kernel_args = {random_bytes(512).data(), 512};
+    cfg.kernel_blob = random_bytes(8192);
+
+    ASSERT_TRUE(db.StoreRecord(cfg));
+
+    constexpr int kNumThreads = 8;
+    std::vector<std::thread> threads;
+    std::vector<bool> results(kNumThreads, false);
+
+    for(int i = 0; i < kNumThreads; ++i)
+    {
+        threads.emplace_back([&db, &cfg, &results, i]() {
+            auto rec = db.FindRecord(cfg);
+            if(rec && rec.value() == cfg.kernel_blob)
+                results[i] = true;
+        });
+    }
+
+    for(auto& t : threads)
+        t.join();
+
+    for(int i = 0; i < kNumThreads; ++i)
+        EXPECT_TRUE(results[i]) << "Thread " << i << " failed to find the correct record";
 }
 #endif
 
