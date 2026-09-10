@@ -88,11 +88,6 @@ static bool is_supported_arch(const std::string& arch)
     return false;
 }
 
-// True if this .so was compiled for a gfx12-class target (WMMA, wave32).
-// Used to scope the M%4 rejection below to the architecture where the defect is
-// actually observed, so gfx942/gfx950 callers are not restricted by it.
-static bool is_gfx12_arch(const std::string& arch) { return arch.rfind("gfx12", 0) == 0; }
-
 // ---------------------------------------------------------------------------
 // Compile-time gfx1250 tile guard.
 //
@@ -116,6 +111,12 @@ static constexpr bool ct_starts_with(const char* s, const char* prefix)
 }
 
 static constexpr bool kCompiledForGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
+
+// Family-wide companion for the M%4 guard below. That defect is an unpadded AQ view in
+// the shared quant kernel header rather than a gfx1250-specific silicon property, so
+// every gfx12xx part is subject to it. Compile-time, so on gfx9 the guard folds away
+// instead of constructing a std::string per call to test a constant.
+static constexpr bool kCompiledForGfx12 = ct_starts_with(GFX_ARCH, "gfx12");
 
 static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileM == 16,
               "gfx1250 has no 32x32 WMMA fragment: warp_tile_m must be 16. This kernel "
@@ -334,7 +335,7 @@ int dispatcher_run_gemm(const void* A,
     // converts a silent wrong answer into a clean refusal without touching code paths
     // that other architectures depend on. Remove this guard once the AQ tail is
     // padded upstream.
-    if(is_gfx12_arch(std::string(GFX_ARCH)) && (M % 4) != 0)
+    if(kCompiledForGfx12 && (M % 4) != 0)
     {
         std::cerr << "dispatcher_run_gemm: M must be a multiple of 4 on " << GFX_ARCH
                   << " for RowColQuant; got M=" << M << ". The per-row A-scale (AQ) tile "

@@ -1474,8 +1474,11 @@ def validate_gemm_rowcol_tensor_quant(
     #
     # These two grouped quant bridges are different: their codegen does not emit a
     # loadable entry for >4-warp blocks on gfx1250, so those kernels abort at launch
-    # with "cannot find symbol" (3,220 rows in a GPU sweep). That is a property of
-    # this bridge's code generation, not of the hardware, so the rule belongs here.
+    # with "cannot find symbol" -- 3,352 of the 4,320 8-warp rows in a 14,208-row
+    # sweep, and 2,168 of those even when paired with an otherwise legal tile. That
+    # is a property of this bridge's code generation, not of the hardware, so the
+    # rule belongs here. (Both figures come from the same archive; an earlier draft
+    # of this comment quoted 3,220, which is from a different, smaller sweep.)
     if (gpu_target.split(":")[0] if gpu_target else gpu_target) == "gfx1250":
         if warp_m * warp_n * warp_k > 4:
             return False, (
