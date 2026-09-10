@@ -4,7 +4,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
-#include <limits>
 
 #include <gtest/gtest.h>
 
@@ -54,8 +53,10 @@ TEST(TestKpackArchive, StandsTheRatioDownWhenTheArchiveSizeIsUnknown)
 
 TEST(TestKpackArchive, DoesNotOverflowOnAHugeArchive)
 {
-    // The multiplication form of the ratio check wraps here and would admit every entry.
-    constexpr std::uintmax_t ARCHIVE = std::numeric_limits<std::uintmax_t>::max();
+    // 2^52 is where the multiplication form of the ratio check wraps to exactly zero, so it
+    // rejects every non-empty entry while the division form admits this one. Sizes nearer the
+    // type's maximum wrap to a still-enormous product and leave the two forms indistinguishable.
+    constexpr std::uintmax_t ARCHIVE = 1ULL << 52;
     EXPECT_TRUE(isCredibleCodeObjectSize(ONE_MIB, ARCHIVE));
     EXPECT_FALSE(isCredibleCodeObjectSize(TWO_GIB + 1, ARCHIVE));
 }
