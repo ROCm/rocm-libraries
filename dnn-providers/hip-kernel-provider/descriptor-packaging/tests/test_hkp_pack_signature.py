@@ -11,22 +11,33 @@ the object rather than from anything an author wrote.
 
 import pytest
 
-from conftest import _arg, _bundle, _elf, _kernel, _note, _object
+from conftest import (
+    _arg,
+    _bundle,
+    _elf,
+    _kernel,
+    _note,
+    _object,
+    requires_msgpack,
+)
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import compile_hip_variant
 from hkp_pack.kernel_signature import amdgcn_object, kernel_signature
 
-try:
-    import msgpack
-except ImportError:
-    msgpack = None
-
 ARCH = "gfx942"
 WHERE = "test object"
 
-pytestmark = pytest.mark.skipif(
-    msgpack is None, reason="msgpack is not importable in this environment"
-)
+
+@pytest.fixture(autouse=True)
+def _msgpack_is_available():
+    """Every test here reads a signature, and both object levels need msgpack:
+    the synthesised ones are packed here, the compiled ones carry a packed note.
+
+    Autouse rather than a call in each test because the synthesising helpers
+    reach msgpack through conftest, where a missing one surfaces as an
+    AttributeError on None instead of naming the dependency.
+    """
+    requires_msgpack()
 
 
 THREE_BUFFERS = [
