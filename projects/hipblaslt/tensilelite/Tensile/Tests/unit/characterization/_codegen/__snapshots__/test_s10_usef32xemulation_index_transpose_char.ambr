@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_s10_usef32xemulation_index_transpose_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_BH_UserArgs_MT64x64x64_MI16xerkiVK2yZgsOZbYOXrSPLzH-fZLFsSFNPFCRemMCniw=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT64x64x64_MI16x1nPpUBWheRQJYdp4HLZ55RUAh6ua50a7e5AAXDNYJd4U=',
+      'err': 0,
+    }),
+  ])
+# ---
