@@ -9,7 +9,6 @@
 
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -368,8 +367,13 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     cpuY.markHostModified();
 
     // Compare
-    const CpuFpReferenceValidation<IOType> validator(tolerance, tolerance);
-    EXPECT_TRUE(validator.allClose(cpuY, gpuY));
+    const auto* cpuYData = static_cast<const IOType*>(cpuY.rawHostData());
+    const auto* gpuYData = static_cast<const IOType*>(gpuY.rawHostData());
+    for(size_t i = 0; i < cpuY.elementCount(); ++i)
+    {
+        EXPECT_NEAR(static_cast<float>(gpuYData[i]), static_cast<float>(cpuYData[i]), tolerance)
+            << "Mismatch in dx at index " << i;
+    }
 }
 
 } // anonymous namespace
@@ -386,7 +390,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNchw)
         {2, 3, 4, 4}, TensorLayout::NCHW, batchnorm::getToleranceInferenceWithVariance<float>());
 }
 
-TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNchwc)
+TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNhwc)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -438,7 +442,7 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBfp16, ExecutePlanNhwc)
 // Rejection test — unregistered signature
 // ============================================================================
 
-TEST(TestGpuBatchnormFwdInfVariancedPlanBuilder, UnregisteredSignatureThrows)
+TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, UnregisteredSignatureThrows)
 {
     GpuPlanBuilderRegistry registry;
 
