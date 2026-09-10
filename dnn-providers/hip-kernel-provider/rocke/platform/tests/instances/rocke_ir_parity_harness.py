@@ -573,6 +573,243 @@ def build_deep(kind, arch, **kw):
     return _build
 
 
+# ---------------------------------------------------------------------------
+# Direct conv builder helpers
+# ---------------------------------------------------------------------------
+# Each helper returns a zero-argument closure (_build) that constructs the
+# spec and calls the appropriate build_direct_conv_* function.  The Python
+# lowerer is used exclusively (lower_case pins _lower_kernel_to_llvm_python).
+#
+# C++ engine parity: the direct grouped conv kernels are Python-lowerer-only.
+# There is no C++ implementation in platform/cpp/; byte-identity with the C++
+# engine is therefore not tracked here.  When a C++ port is added, wire it
+# into check_byte_identity.py under the "conv_direct" family.
+# ---------------------------------------------------------------------------
+
+
+def build_direct_16c(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    *,
+    block_q=16,
+    block_groups=8,
+    fold_k32=True,
+    double_buffer=True,
+):
+    def _build():
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectConv16cSpec,
+            DirectConvProblem,
+            build_direct_conv_16c,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=16,
+            kpg=16,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+        )
+        spec = DirectConv16cSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+            fold_k32=fold_k32,
+            double_buffer=double_buffer,
+        )
+        return build_direct_conv_16c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_4c(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    *,
+    block_q=4,
+    block_groups=16,
+):
+    def _build():
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectConv4cSpec,
+            DirectConvProblem,
+            build_direct_conv_4c,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=4,
+            kpg=4,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+        )
+        spec = DirectConv4cSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+        )
+        return build_direct_conv_4c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_8c(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    *,
+    block_q=16,
+    block_groups=8,
+    double_buffer=True,
+):
+    def _build():
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectConv8cSpec,
+            DirectConvProblem,
+            build_direct_conv_8c,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=8,
+            kpg=8,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+        )
+        spec = DirectConv8cSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+            double_buffer=double_buffer,
+        )
+        return build_direct_conv_8c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_32c(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    *,
+    block_q=32,
+    block_groups=4,
+    double_buffer=True,
+):
+    def _build():
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectConv32cSpec,
+            DirectConvProblem,
+            build_direct_conv_32c,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=32,
+            kpg=32,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+        )
+        spec = DirectConv32cSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+            double_buffer=double_buffer,
+        )
+        return build_direct_conv_32c(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    *,
+    block_w=16,
+    block_waves=2,
+):
+    def _build():
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseSpec,
+            build_direct_depthwise as _build_dw,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+        )
+        spec = DirectDepthwiseSpec(
+            problem=p,
+            name=name,
+            block_w=block_w,
+            block_waves=block_waves,
+        )
+        return _build_dw(spec, arch=arch)
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1807,6 +2044,227 @@ def cases():
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
     )
+
+    # conv_direct: parametric direct grouped convolution.
+    # Covers all cpg variants (4c, 8c, 16c, 32c, depthwise) on gfx942 and gfx950.
+    # The cases mirror the six configs in parity/conv_direct_grouped_emit.py and
+    # extend them with 8c, 32c, and depthwise.
+    #
+    # Problem sizes are kept small (H=W=8 or 32) to compile fast on CI.
+    # The gfx950 16c cases exercise fold_k32=True (uses mfma_f32_16x16x32_f16).
+    # The gfx942 16c case uses fold_k32=False (mfma_f32_16x16x16_f16 only).
+    #
+    # C++ engine parity: not tracked — no C++ implementation exists yet.
+
+    # --- 16c, gfx950, fold_k32=True (matches parity emit idx=0 and idx=1) ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/16c_n32h8_bg4_fold",
+        "gfx950",
+        build_direct_16c(
+            "irhash_direct16c_950_bg4",
+            "gfx950",
+            N=32,
+            H=8,
+            W=8,
+            groups=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_groups=4,
+            fold_k32=True,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/16c_n32h8_bg8_fold",
+        "gfx950",
+        build_direct_16c(
+            "irhash_direct16c_950_bg8",
+            "gfx950",
+            N=32,
+            H=8,
+            W=8,
+            groups=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_groups=8,
+            fold_k32=True,
+        ),
+    )
+    # --- 16c, gfx942, fold_k32=False (matches parity emit idx=4) ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/16c_n1h8_fold_false",
+        "gfx942",
+        build_direct_16c(
+            "irhash_direct16c_942_a",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=8,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_groups=4,
+            fold_k32=False,
+        ),
+    )
+    # --- 4c, gfx950 (matches parity emit idx=2 and idx=3) ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_n32h8_bq4",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_bq4",
+            "gfx950",
+            N=32,
+            H=8,
+            W=8,
+            groups=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=4,
+            block_groups=16,
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/4c_n1h8_small",
+        "gfx950",
+        build_direct_4c(
+            "irhash_direct4c_950_small",
+            "gfx950",
+            N=1,
+            H=8,
+            W=8,
+            groups=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=4,
+            block_groups=16,
+        ),
+    )
+    # --- 8c, gfx950 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/8c_n4h16",
+        "gfx950",
+        build_direct_8c(
+            "irhash_direct8c_950_a",
+            "gfx950",
+            N=4,
+            H=16,
+            W=16,
+            groups=8,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    # --- 8c, gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/8c_n4h16",
+        "gfx942",
+        build_direct_8c(
+            "irhash_direct8c_942_a",
+            "gfx942",
+            N=4,
+            H=16,
+            W=16,
+            groups=8,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    # --- 32c, gfx950 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/32c_n2h8",
+        "gfx950",
+        build_direct_32c(
+            "irhash_direct32c_950_a",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=4,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=32,
+            block_groups=4,
+        ),
+    )
+    # --- 32c, gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/32c_n2h8",
+        "gfx942",
+        build_direct_32c(
+            "irhash_direct32c_942_a",
+            "gfx942",
+            N=2,
+            H=8,
+            W=8,
+            groups=4,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_q=32,
+            block_groups=4,
+        ),
+    )
+    # --- depthwise, gfx950 ---
+    # groups=64, block_waves=1 → block_ch=64; 64%64=0.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_n4h16",
+        "gfx950",
+        build_direct_depthwise(
+            "irhash_directdw_950_a",
+            "gfx950",
+            N=4,
+            H=16,
+            W=16,
+            groups=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_w=16,
+            block_waves=1,
+        ),
+    )
+    # --- depthwise, gfx942 ---
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/dw_n4h16",
+        "gfx942",
+        build_direct_depthwise(
+            "irhash_directdw_942_a",
+            "gfx942",
+            N=4,
+            H=16,
+            W=16,
+            groups=64,
+            KH=3,
+            KW=3,
+            PAD=1,
+            block_w=16,
+            block_waves=1,
+        ),
+    )
+
     return out
 
 

@@ -72,6 +72,138 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# MIOpen driver command parser
+# ---------------------------------------------------------------------------
+
+_MIOPEN_DTYPE_MAP = {
+    "conv": "fp32",
+    "convfp16": "fp16",
+    "convbfp16": "bf16",
+    "convint8": "fp16",  # int8 not supported; fall back to fp16 and warn
+}
+
+
+def parse_miopen_cmd_direct(cmd: str):
+    """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
+
+    Only 2-D NHWC forward convolutions are supported (no 3-D, no dgrad/wgrad).
+    Raises ``ValueError`` for unsupported cases.
+    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
+    ``"fp32"``.
+
+    Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
+    1 (depthwise) or a positive multiple of 4 (grouped).
+    """
+    import shlex
+
+    tokens = shlex.split(cmd)
+
+    driver_kw = None
+    driver_idx = None
+    for i, t in enumerate(tokens):
+        key = t.split("/")[-1].lower()
+        if key in _MIOPEN_DTYPE_MAP:
+            driver_kw = key
+            driver_idx = i
+            break
+    if driver_kw is None:
+        raise ValueError(
+            f"No MIOpenDriver keyword found in command "
+            f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
+        )
+    dtype = _MIOPEN_DTYPE_MAP[driver_kw]
+    if driver_kw == "convint8":
+        print(
+            "[warn] convint8 is not supported by this benchmark; treating as fp16",
+            file=sys.stderr,
+        )
+
+    sub = argparse.ArgumentParser(add_help=False)
+    sub.add_argument("-n", "--n", dest="N", type=int, default=1)
+    sub.add_argument("-c", "--c", dest="C", type=int, default=1)
+    sub.add_argument("-H", "--H", dest="Hi", type=int, default=1)
+    sub.add_argument("-W", "--W", dest="Wi", type=int, default=1)
+    sub.add_argument("-k", "--k", dest="K", type=int, default=1)
+    sub.add_argument("-y", "--y", dest="Y", type=int, default=1)
+    sub.add_argument("-x", "--x", dest="X", type=int, default=1)
+    sub.add_argument("-p", "--p", dest="pH", type=int, default=0)
+    sub.add_argument("-q", "--q", dest="pW", type=int, default=0)
+    sub.add_argument("-u", "--u", dest="sH", type=int, default=1)
+    sub.add_argument("-v", "--v", dest="sW", type=int, default=1)
+    sub.add_argument("-l", "--l", dest="dH", type=int, default=1)
+    sub.add_argument("-j", "--j", dest="dW", type=int, default=1)
+    sub.add_argument("-g", "--g", dest="groups", type=int, default=1)
+    sub.add_argument("-F", "--F", dest="forw", type=int, default=1)
+    sub.add_argument(
+        "-in_layout", "--in_layout", dest="in_layout", type=str, default="NHWC"
+    )
+    sub.add_argument("-m", "--m", dest="_mode", type=str, default="conv")
+    sub.add_argument("-t", "--t", dest="_time", type=int, default=0)
+    sub.add_argument("-V", "--V", dest="_verify", type=int, default=1)
+    sub.add_argument("-_", "--_", dest="_spatial_dim", type=int, default=2)
+
+    miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
+
+    layout = miopen_args.in_layout.upper()
+    if layout not in ("NHWC", "NWC"):
+        raise ValueError(
+            f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
+        )
+
+    N = miopen_args.N
+    C = miopen_args.C
+    K = miopen_args.K
+    groups = miopen_args.groups
+
+    if C % groups != 0:
+        raise ValueError(f"C={C} is not divisible by groups={groups}")
+    if K % groups != 0:
+        raise ValueError(f"K={K} is not divisible by groups={groups}")
+
+    cpg = C // groups
+    kpg = K // groups
+    if cpg != kpg:
+        raise ValueError(
+            f"cpg={cpg} != kpg={kpg}; DirectConvProblem requires C/groups == K/groups"
+        )
+    if cpg != 1 and (cpg % 4 != 0 or cpg < 4):
+        raise ValueError(
+            f"cpg={cpg} must be 1 (depthwise) or a positive multiple of 4 (grouped)"
+        )
+
+    sH = miopen_args.sH
+    if cpg == 1 and sH != 1:
+        raise ValueError(f"depthwise kernel requires stride=1 (got sH={sH})")
+
+    if miopen_args.sH != miopen_args.sW:
+        print(
+            f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
+            file=sys.stderr,
+        )
+    if miopen_args.pH != miopen_args.pW:
+        print(
+            f"[warn] pH={miopen_args.pH} != pW={miopen_args.pW}; using pH={miopen_args.pH}",
+            file=sys.stderr,
+        )
+
+    from rocke.instances.common.conv_direct_grouped import DirectConvProblem
+
+    problem = DirectConvProblem(
+        N=N,
+        H=miopen_args.Hi,
+        W=miopen_args.Wi,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=miopen_args.Y,
+        KW=miopen_args.X,
+        PAD=miopen_args.pH,
+        stride=sH,
+    )
+    return problem, dtype
+
+
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
     import random
 
@@ -731,6 +863,29 @@ def main() -> int:
         help="on the first verify FAIL, dump tensors to PATH/ and stop the sweep.",
     )
 
+    miopen_grp = parser.add_argument_group(
+        "MIOpen input",
+        "Load the conv problem from a MIOpenDriver command instead of explicit shape flags. "
+        "When set, DirectConvProblem is derived from the command; --dtype / shape flags are ignored. "
+        "Only forward (fwd) 2-D NHWC convolutions are supported. "
+        "cpg must equal kpg and be 1 (depthwise) or a positive multiple of 4 (grouped).",
+    )
+    miopen_grp.add_argument(
+        "--miopen-cmd",
+        default=None,
+        metavar="CMD",
+        help="MIOpenDriver command string, e.g. "
+        '"./MIOpenDriver convfp16 -n 8 -c 64 -H 56 -W 56 -k 64 -y 3 -x 3 '
+        '-p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 64 -F 1 -in_layout=NHWC"',
+    )
+    miopen_grp.add_argument(
+        "--miopen-file",
+        default=None,
+        metavar="FILE",
+        help="Path to a file containing one MIOpenDriver command per line; "
+        "the benchmark is run once per line (blank lines and # comments ignored).",
+    )
+
     conv = parser.add_argument_group(
         "DirectConvProblem", "convolution shape parameters"
     )
@@ -770,55 +925,94 @@ def main() -> int:
 
     arch = args.arch
 
-    if args.C % args.groups != 0:
-        print(
-            f"error: C={args.C} is not divisible by groups={args.groups}",
-            file=sys.stderr,
-        )
-        return 2
-    if args.K % args.groups != 0:
-        print(
-            f"error: K={args.K} is not divisible by groups={args.groups}",
-            file=sys.stderr,
-        )
-        return 2
+    # Build list of (problem, dtype) cases.
+    cases: list  # List[Tuple[DirectConvProblem, str]]
+    if args.miopen_file is not None:
+        path = args.miopen_file
+        lines = open(path).readlines()
+        cases = []
+        for lineno, line in enumerate(lines, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                prob, dt = parse_miopen_cmd_direct(line)
+                cases.append((prob, dt))
+            except ValueError as e:
+                print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
+        if not cases:
+            print(f"error: {path}: no valid cases found", file=sys.stderr)
+            return 2
+    elif args.miopen_cmd is not None:
+        try:
+            prob, dt = parse_miopen_cmd_direct(args.miopen_cmd)
+        except ValueError as e:
+            print(f"error: --miopen-cmd: {e}", file=sys.stderr)
+            return 2
+        cases = [(prob, dt)]
+    else:
+        if args.C % args.groups != 0:
+            print(
+                f"error: C={args.C} is not divisible by groups={args.groups}",
+                file=sys.stderr,
+            )
+            return 2
+        if args.K % args.groups != 0:
+            print(
+                f"error: K={args.K} is not divisible by groups={args.groups}",
+                file=sys.stderr,
+            )
+            return 2
 
-    cpg = args.C // args.groups
-    kpg = args.K // args.groups
+        cpg = args.C // args.groups
+        kpg = args.K // args.groups
 
-    if cpg != kpg:
-        print(
-            f"error: cpg={cpg} != kpg={kpg}; direct grouped conv requires C/groups == K/groups",
-            file=sys.stderr,
-        )
-        return 2
+        if cpg != kpg:
+            print(
+                f"error: cpg={cpg} != kpg={kpg}; direct grouped conv requires C/groups == K/groups",
+                file=sys.stderr,
+            )
+            return 2
 
-    # cpg == 1: depthwise.  cpg >= 4 and multiple of 4: grouped.
-    if cpg != 1 and (cpg % 4 != 0 or cpg < 4):
-        print(
-            f"error: cpg={cpg} (C/groups={args.C}/{args.groups}) must be 1 (depthwise) "
-            f"or a positive multiple of 4 (grouped)",
-            file=sys.stderr,
-        )
-        return 2
+        if cpg != 1 and (cpg % 4 != 0 or cpg < 4):
+            print(
+                f"error: cpg={cpg} (C/groups={args.C}/{args.groups}) must be 1 (depthwise) "
+                f"or a positive multiple of 4 (grouped)",
+                file=sys.stderr,
+            )
+            return 2
 
-    if cpg == 1 and args.sH != 1:
-        print(
-            f"error: depthwise kernel requires stride=1 (got sH={args.sH})",
-            file=sys.stderr,
-        )
-        return 2
+        if cpg == 1 and args.sH != 1:
+            print(
+                f"error: depthwise kernel requires stride=1 (got sH={args.sH})",
+                file=sys.stderr,
+            )
+            return 2
 
-    if args.sH != args.sW:
-        print(
-            f"warning: sH={args.sH} != sW={args.sW}; using sH={args.sH}",
-            file=sys.stderr,
+        if args.sH != args.sW:
+            print(
+                f"warning: sH={args.sH} != sW={args.sW}; using sH={args.sH}",
+                file=sys.stderr,
+            )
+        if args.pH != args.pW:
+            print(
+                f"warning: pH={args.pH} != pW={args.pW}; using pH={args.pH}",
+                file=sys.stderr,
+            )
+
+        problem = DirectConvProblem(
+            N=args.N,
+            H=args.Hi,
+            W=args.Wi,
+            groups=args.groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=args.Y,
+            KW=args.X,
+            PAD=args.pH,
+            stride=args.sH,
         )
-    if args.pH != args.pW:
-        print(
-            f"warning: pH={args.pH} != pW={args.pW}; using pH={args.pH}",
-            file=sys.stderr,
-        )
+        cases = [(problem, "fp16")]
 
     _common = dict(
         args=args,
@@ -833,24 +1027,24 @@ def main() -> int:
         u8=_u8,
     )
 
-    problem = DirectConvProblem(
-        N=args.N,
-        H=args.Hi,
-        W=args.Wi,
-        groups=args.groups,
-        cpg=cpg,
-        kpg=kpg,
-        KH=args.Y,
-        KW=args.X,
-        PAD=args.pH,
-        stride=args.sH,
-    )
+    all_rc = 0
+    for case_idx, (problem, dtype) in enumerate(cases):
+        if len(cases) > 1:
+            print(f"\n{'#'*72}", flush=True)
+            print(
+                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} dtype={dtype}",
+                flush=True,
+            )
+            print(f"{'#'*72}", flush=True)
 
-    if cpg == 1:
-        rc, _ = _run_depthwise_sweep(problem=problem, **_common)
-    else:
-        rc, _ = _run_sweep(problem=problem, **_common)
-    return rc
+        cpg = problem.cpg
+        if cpg == 1:
+            rc, _ = _run_depthwise_sweep(problem=problem, **_common)
+        else:
+            rc, _ = _run_sweep(problem=problem, **_common)
+        all_rc = all_rc or rc
+
+    return all_rc
 
 
 if __name__ == "__main__":

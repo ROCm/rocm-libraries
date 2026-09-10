@@ -63,6 +63,8 @@ def _run_benchmark(*extra_args, timeout=600):
         "1",
         "--iters",
         "1",
+        "--jobs",
+        "0",
         *extra_args,
     ]
     # Stream output to the terminal in real time and also collect it for
