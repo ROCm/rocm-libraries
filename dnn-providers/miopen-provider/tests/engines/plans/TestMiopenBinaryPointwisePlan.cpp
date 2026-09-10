@@ -40,7 +40,7 @@ protected:
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, GetWorkspaceSizeReturnsZero)
 {
-    auto fbb = createPointwiseGraph(validBinarySpec());
+    auto fbb = validBinaryGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);
@@ -53,7 +53,7 @@ TEST_F(TestGpuMiopenBinaryPointwisePlan, GetWorkspaceSizeReturnsZero)
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorDoesNotThrowForValidGraph)
 {
-    auto fbb = createPointwiseGraph(validBinarySpec());
+    auto fbb = validBinaryGraph();
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);
@@ -65,13 +65,11 @@ TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorDoesNotThrowForValidGraph)
 
 TEST_F(TestGpuMiopenBinaryPointwisePlan, ConstructorThrowsInternalErrorWhenIn1TensorUidMissing)
 {
-    // A default-constructed PointwiseGraphSpec produces a unary-shaped node (no
+    // A default createValidPointwiseGraph() call produces a unary-shaped node (no
     // in_1_tensor_uid) -- isApplicable would reject this graph, but here the plan
     // constructor is invoked directly to exercise its own defense against isApplicable and
     // buildPlan drifting apart.
-    PointwiseGraphSpec spec;
-    spec.mode = PointwiseMode::ADD;
-    auto fbb = createPointwiseGraph(spec);
+    auto fbb = createValidPointwiseGraph(PointwiseMode::ADD);
     const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
 
     const auto& nodeWrapper = graph.getNodeWrapper(0);

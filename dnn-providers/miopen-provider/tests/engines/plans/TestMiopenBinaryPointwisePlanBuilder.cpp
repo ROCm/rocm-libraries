@@ -20,6 +20,7 @@ using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace pointwise_common;
 
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 namespace
@@ -47,17 +48,15 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    static PointwiseGraphSpec validSpec()
+    static flatbuffers::FlatBufferBuilder validGraph()
     {
-        auto spec = validBinarySpec();
-        spec.mode = GetParam().mode;
-        return spec;
+        return validBinaryGraph(GetParam().mode);
     }
 };
 
 TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, IsApplicableReturnsTrueForValidGraph)
 {
-    auto builder = createPointwiseGraph(validSpec());
+    auto builder = validGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -66,9 +65,24 @@ TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, IsApplicableReturnsTrueForV
 TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes,
        IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto spec = validSpec();
-    spec.overrideShapeEnabled = true;
-    auto builder = createPointwiseGraph(spec);
+    auto builder = createValidPointwiseGraph(GetParam().mode,
+                                             {1, 3, 4, 4},
+                                             {1, 3, 4, 4},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{1, 3, 1, 1},
+                                             std::vector<int64_t>{3, 1, 1, 1},
+                                             DataType::FLOAT,
+                                             DataType::FLOAT,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             false,
+                                             false,
+                                             false,
+                                             false,
+                                             true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -76,7 +90,7 @@ TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes,
 
 TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, GetMaxWorkspaceSizeReturnsZero)
 {
-    auto builder = createPointwiseGraph(validSpec());
+    auto builder = validGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     const HipdnnMiopenSettings settings;
@@ -85,7 +99,7 @@ TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, GetMaxWorkspaceSizeReturnsZ
 
 TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, GetCustomKnobsReturnsEmpty)
 {
-    auto builder = createPointwiseGraph(validSpec());
+    auto builder = validGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     auto knobs = _planBuilder.getCustomKnobs(*_dummyHandle, graph);
@@ -126,9 +140,7 @@ TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForMulti
 
 TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForMissingSecondInput)
 {
-    PointwiseGraphSpec spec;
-    spec.mode = PointwiseMode::ADD;
-    auto builder = createPointwiseGraph(spec);
+    auto builder = createValidPointwiseGraph(PointwiseMode::ADD);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -136,9 +148,23 @@ TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForMissi
 
 TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForThirdInputPresent)
 {
-    auto spec = validBinarySpec();
-    spec.addThirdInput = true;
-    auto builder = createPointwiseGraph(spec);
+    auto builder = createValidPointwiseGraph(PointwiseMode::ADD,
+                                             {1, 3, 4, 4},
+                                             {1, 3, 4, 4},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{1, 3, 1, 1},
+                                             std::vector<int64_t>{3, 1, 1, 1},
+                                             DataType::FLOAT,
+                                             DataType::FLOAT,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             std::nullopt,
+                                             false,
+                                             false,
+                                             false,
+                                             /*addThirdInput=*/true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -146,9 +172,7 @@ TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForThird
 
 TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForUnsupportedMode)
 {
-    auto spec = validBinarySpec();
-    spec.mode = PointwiseMode::DIV;
-    auto builder = createPointwiseGraph(spec);
+    auto builder = validBinaryGraph(PointwiseMode::DIV);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -156,10 +180,13 @@ TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForUnsup
 
 TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForFirstInputBroadcasting)
 {
-    auto spec = validBinarySpec();
-    spec.inputDims = {1, 1, 4, 4};
-    spec.inputStrides = {16, 16, 4, 1};
-    auto builder = createPointwiseGraph(spec);
+    auto builder = createValidPointwiseGraph(PointwiseMode::ADD,
+                                             {1, 1, 4, 4},
+                                             {1, 3, 4, 4},
+                                             std::vector<int64_t>{16, 16, 4, 1},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{1, 3, 1, 1},
+                                             std::vector<int64_t>{3, 1, 1, 1});
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -168,10 +195,13 @@ TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder, IsApplicableReturnsFalseForFirst
 TEST_F(TestGpuMiopenBinaryPointwisePlanBuilder,
        IsApplicableReturnsFalseForSecondInputNotBroadcastable)
 {
-    auto spec = validBinarySpec();
-    spec.secondInputDims = {1, 2, 1, 1};
-    spec.secondInputStrides = {2, 1, 1, 1};
-    auto builder = createPointwiseGraph(spec);
+    auto builder = createValidPointwiseGraph(PointwiseMode::ADD,
+                                             {1, 3, 4, 4},
+                                             {1, 3, 4, 4},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{48, 16, 4, 1},
+                                             std::vector<int64_t>{1, 2, 1, 1},
+                                             std::vector<int64_t>{2, 1, 1, 1});
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
