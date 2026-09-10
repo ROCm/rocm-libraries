@@ -1,0 +1,1045 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_load.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_output.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_schedule_executor.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_d192_v128_softmax.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_dtype_traits.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_tdm_v128_config.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_v128_schedule.hpp"
+
+namespace ck_tile {
+
+template <typename Geometry_, typename Tuning_, typename Schedule_>
+struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultPolicy
+{
+    using BasePolicy       = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
+    using Geometry         = Geometry_;
+    using Tuning           = Tuning_;
+    using Schedule         = Schedule_;
+    using Layout           = FmhaTdmV128Layout<Geometry>;
+    using ScheduleExecutor = FmhaTdmV128ScheduleExecutor<Schedule>;
+    using KLoad            = FmhaTdmV128Load<Geometry::kKSuLoadCount>;
+    using VLoad            = FmhaTdmV128TransposeLoad<Geometry::kVStageLoadCount>;
+    static_assert(Schedule::kNumQkStages == Geometry::kQkStages &&
+                  Schedule::kNumPvStages == Geometry::kPvStages &&
+                  Schedule::kQkWmmasPerStage == Geometry::kQkWmmasPerStage &&
+                  Schedule::kPvWmmasPerStage == Geometry::kPvWmmasPerStage);
+    static constexpr index_t kBlockPerCu = Tuning::kBlockPerCu;
+
+    static constexpr index_t kLdsRows            = Geometry::kN;
+    static constexpr index_t kKValidWidth        = Geometry::kHeadDimQK;
+    static constexpr index_t kKPhysicalStride    = Layout::kKPhysicalStride;
+    static constexpr index_t kVLogicalWidth      = Geometry::kDv;
+    static constexpr index_t kVPhysicalStride    = Layout::kVPhysicalStride;
+    static constexpr index_t kVPadAmount         = Layout::kVPadAmount;
+    static constexpr index_t kVPadInterval       = Layout::kVPadInterval;
+    static constexpr index_t kKFootprintElements = kLdsRows * kKPhysicalStride;
+    static constexpr index_t kVFootprintElements = kLdsRows * kVPhysicalStride;
+    static constexpr index_t kKFootprintBytes =
+        kKFootprintElements * sizeof(typename Geometry::KDataType);
+    static constexpr index_t kVFootprintBytes =
+        kVFootprintElements * sizeof(typename Geometry::VDataType);
+    static constexpr bool kUseFullHeadKSuQk           = true;
+    static constexpr bool kUseSplitSoftmax            = true;
+    static constexpr bool kSkipExactFullTilePredicate = true;
+    static constexpr bool kUseCustomQkStageSchedule   = true;
+    static constexpr bool kUseCustomPvStageSchedule   = true;
+    static constexpr bool kUseOutputFragments         = true;
+    static constexpr auto kORescaleToken              = FmhaD192ScheduleToken::ORescale;
+    static constexpr index_t kKPrefetchTensorCount    = Tuning::kKWait;
+    static constexpr index_t kVPrefetchTensorCount    = Tuning::kVWait;
+    static constexpr bool kPrefetchTailDrain          = Tuning::kTailDrain;
+    static constexpr index_t kQkStage0TailDsCount     = Tuning::kQkStage0TailDsCount;
+    static constexpr index_t kQkStage1TailDsCount     = Tuning::kQkStage1TailDsCount;
+    static constexpr index_t kQkStage2TailDsCount     = Tuning::kQkStage2TailDsCount;
+    static constexpr index_t kQkStage3TailDsCount     = Tuning::kQkStage3TailDsCount;
+    static constexpr index_t kPvStage0TailDsCount     = Tuning::kPvStage0TailDsCount;
+    static constexpr index_t kPvStage1TailDsCount     = Tuning::kPvStage1TailDsCount;
+    static constexpr index_t kPvStage2TailDsCount     = Tuning::kPvStage2TailDsCount;
+    static constexpr index_t kPvStage3TailDsCount     = Tuning::kPvStage3TailDsCount;
+    static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
+    static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
+    static_assert(kQkStage0TailDsCount == 0 || kQkStage0TailDsCount == Geometry::kKSuLoadCount);
+    static_assert(kQkStage1TailDsCount == 0 || kQkStage1TailDsCount == Geometry::kKSuLoadCount);
+    static_assert(kQkStage2TailDsCount == 0 || kQkStage2TailDsCount == Geometry::kKSuLoadCount);
+    static_assert(kQkStage3TailDsCount == 0 || kQkStage3TailDsCount == Geometry::kVStageLoadCount);
+    static_assert(kPvStage0TailDsCount == 0 || kPvStage0TailDsCount == Geometry::kVStageLoadCount);
+    static_assert(kPvStage1TailDsCount == 0 || kPvStage1TailDsCount == Geometry::kVStageLoadCount);
+    static_assert(kPvStage2TailDsCount == 0 || kPvStage2TailDsCount == Geometry::kVStageLoadCount);
+    static_assert(kPvStage3TailDsCount == 0 || kPvStage3TailDsCount == Geometry::kKSuLoadCount);
+
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitQkStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < 4);
+        if constexpr(Stage == 0)
+        {
+            s_wait_dscnt<kQkStage0TailDsCount>();
+        }
+        else if constexpr(Stage == 1)
+        {
+            s_wait_dscnt<kQkStage1TailDsCount>();
+        }
+        else if constexpr(Stage == 2)
+        {
+            s_wait_dscnt<kQkStage2TailDsCount>();
+        }
+        else
+        {
+            s_wait_dscnt<kQkStage3TailDsCount>();
+        }
+    }
+
+    template <index_t Stage>
+    CK_TILE_DEVICE static void WaitPvStageTail()
+    {
+        static_assert(Stage >= 0 && Stage < 4);
+        if constexpr(Stage == 0)
+        {
+            s_wait_dscnt<kPvStage0TailDsCount>();
+        }
+        else if constexpr(Stage == 1)
+        {
+            s_wait_dscnt<kPvStage1TailDsCount>();
+        }
+        else if constexpr(Stage == 2)
+        {
+            s_wait_dscnt<kPvStage2TailDsCount>();
+        }
+        else
+        {
+            s_wait_dscnt<kPvStage3TailDsCount>();
+        }
+    }
+
+    // Optionally pack the four buffers back to back instead of aligning each one to 64 KiB.
+    static constexpr bool kPackLds = Tuning::kPackLds;
+
+    static constexpr index_t kLdsOffsetK0  = 0;
+    static constexpr index_t kLdsOffsetK1  = kPackLds ? kKFootprintBytes : 0x10000;
+    static constexpr index_t kLdsOffsetV0  = kPackLds ? 2 * kKFootprintBytes : 0x20000;
+    static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + (kPackLds ? kVFootprintBytes : 0x10000);
+    static constexpr index_t kLdsArenaSize = kLdsOffsetV1 + kVFootprintBytes;
+
+    using OutputFragments = FmhaTdmV128OutputFragments;
+
+    static_assert(kKFootprintBytes <= 0x10000);
+    static_assert(Geometry::kM * Geometry::kHeadDimQK * sizeof(typename Geometry::QDataType) <=
+                  kKFootprintBytes);
+    static_assert(kVFootprintBytes == 0x9000);
+    static_assert(Geometry::kHeadDimQK != 192 || kLdsArenaSize == (kPackLds ? 0x2b000 : 0x39000));
+    static_assert(kLdsOffsetK0 + kKFootprintBytes <= kLdsOffsetK1);
+    static_assert(kLdsOffsetK1 + kKFootprintBytes <= kLdsOffsetV0);
+    static_assert(kLdsOffsetV0 + kVFootprintBytes <= kLdsOffsetV1);
+    static_assert(kLdsOffsetV1 + kVFootprintBytes == kLdsArenaSize);
+    static_assert(kLdsOffsetK0 % 16 == 0 && kLdsOffsetK1 % 16 == 0 && kLdsOffsetV0 % 16 == 0 &&
+                  kLdsOffsetV1 % 16 == 0);
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemmSu()
+    {
+        using GemmProblem =
+            BlockGemmProblem<typename Problem::QDataType,
+                             typename Problem::KDataType,
+                             typename Problem::SaccDataType,
+                             Problem::kBlockSize,
+                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
+                                                    Geometry::kQkSuColumns,
+                                                    Problem::BlockFmhaShape::kQKHeaddim>,
+                                           typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                                           typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
+
+        using WarpGemm = WarpGemmDispatcher<typename Problem::QDataType,
+                                            typename Problem::KDataType,
+                                            typename Problem::SaccDataType,
+                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                                            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
+                                            true>;
+
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,
+                                                typename Problem::KDataType,
+                                                typename Problem::SaccDataType,
+                                                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                                                WarpGemm,
+                                                GemmLoopOrder::MNK>;
+
+        return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeKSuRegTileDistribution()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemmSu<Problem>())>;
+        static_assert(BlockGemm::NIterPerWarp == 2 &&
+                      BlockGemm::KIterPerWarp == Geometry::kHeadDimQK / Geometry::kQkWmmaK);
+        return make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
+    }
+
+    template <index_t WmmaOrdinal,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor>
+    CK_TILE_DEVICE static void RunQkSuWmma(CBlockTensor& c_block_tensor,
+                                           const ABlockTensor& a_block_tensor,
+                                           const BBlockTensor& b_block_tensor)
+    {
+        using WarpGemm    = typename BlockGemm::WarpGemm;
+        using AWarpDstr   = typename WarpGemm::AWarpDstr;
+        using BWarpDstr   = typename WarpGemm::BWarpDstr;
+        using CWarpDstr   = typename WarpGemm::CWarpDstr;
+        using AWarpTensor = typename WarpGemm::AWarpTensor;
+        using BWarpTensor = typename WarpGemm::BWarpTensor;
+        using CWarpTensor = typename WarpGemm::CWarpTensor;
+
+        constexpr auto a_warp_y_lengths =
+            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_warp_y_lengths =
+            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
+                                                            BlockGemm::KIterPerWarp *
+                                                            BlockGemm::MIterPerWarp);
+        constexpr index_t n_iter =
+            WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
+        constexpr index_t k_iter =
+            (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+        constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
+
+        AWarpTensor a_warp_tensor;
+        a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, k_iter>{}, a_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+
+        BWarpTensor b_warp_tensor;
+        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+
+        CWarpTensor c_warp_tensor;
+        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+
+        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+        c_block_tensor.set_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+            c_warp_tensor.get_thread_buffer());
+    }
+
+    template <typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor>
+    CK_TILE_DEVICE static void RunQkSu(const BlockGemm&,
+                                       CBlockTensor& c_block_tensor,
+                                       const ABlockTensor& a_block_tensor,
+                                       const BBlockTensor& b_block_tensor)
+    {
+        static_assert(BlockGemm::KIterPerWarp == Geometry::kHeadDimQK / Geometry::kQkWmmaK);
+        static_assert(BlockGemm::MIterPerWarp == 2);
+        static_assert(BlockGemm::NIterPerWarp == 2);
+
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeABlockDistributionEncode())>,
+                           remove_cvref_t<decltype(ABlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 SU Q distribution is incompatible with the QK BlockGemm");
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeBBlockDistributionEncode())>,
+                           remove_cvref_t<decltype(BBlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 SU K distribution is incompatible with the QK BlockGemm");
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeCBlockDistributionEncode())>,
+                           remove_cvref_t<decltype(CBlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 SU accumulator distribution is incompatible with the QK BlockGemm");
+
+        static_for<0, BlockGemm::NIterPerWarp, 1>{}([&](auto n_iter) {
+            static_for<0, BlockGemm::KIterPerWarp, 1>{}([&](auto k_iter) {
+                static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto m_iter) {
+                    constexpr index_t ordinal =
+                        n_iter * BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp +
+                        k_iter * BlockGemm::MIterPerWarp + m_iter;
+                    RunQkSuWmma<ordinal, BlockGemm>(c_block_tensor, a_block_tensor, b_block_tensor);
+                });
+            });
+        });
+    }
+
+    template <index_t Stage,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor,
+              typename BTileWindow,
+              typename SoftmaxTokenEmitter>
+    CK_TILE_DEVICE static void
+    RunQkScheduledStageWithSoftmax(const BlockGemm&,
+                                   CBlockTensor& c_block_tensor,
+                                   const ABlockTensor& a_block_tensor,
+                                   const BBlockTensor& b_block_tensor,
+                                   NextBBlockTensor& next_b_block_tensor,
+                                   const BTileWindow& b_lds_window,
+                                   SoftmaxTokenEmitter& emit_softmax_token)
+    {
+        using Executor = ScheduleExecutor;
+        using Kind     = FmhaTdmV128LoadKind;
+        static_assert(Stage >= 0 && Stage < Executor::Schedule::kNumQkStages);
+        static_assert((Stage < Executor::Schedule::kNumQkStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount) ||
+                      (Stage == Executor::Schedule::kNumQkStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount));
+
+        auto emit_wmma = [&](auto, auto wmma) {
+            RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
+                c_block_tensor, a_block_tensor, b_block_tensor);
+        };
+        auto emit_token = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value == Kind::KRead)
+            {
+                KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
+                                                                         b_lds_window);
+            }
+            else if constexpr(decltype(kind)::value == Kind::VRead)
+            {
+                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                    b_lds_window);
+            }
+            else
+            {
+                decltype(kind)::EmitSoftmax(emit_softmax_token);
+            }
+        };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaTdmV128SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
+
+        Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
+        WaitQkStageTail<Stage>();
+    }
+
+    template <index_t Stage,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor,
+              typename BTileWindow>
+    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm& block_gemm,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor& next_b_block_tensor,
+                                                   const BTileWindow& b_lds_window)
+    {
+        auto emit_no_softmax = [](auto, auto) {};
+        RunQkScheduledStageWithSoftmax<Stage>(block_gemm,
+                                              c_block_tensor,
+                                              a_block_tensor,
+                                              b_block_tensor,
+                                              next_b_block_tensor,
+                                              b_lds_window,
+                                              emit_no_softmax);
+    }
+
+    template <index_t WmmaOrdinal,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor>
+    CK_TILE_DEVICE static void RunPvSuWmma(CBlockTensor& c_block_tensor,
+                                           const ABlockTensor& a_block_tensor,
+                                           const BBlockTensor& b_block_tensor)
+    {
+        using WarpGemm    = typename BlockGemm::WarpGemm;
+        using AWarpDstr   = typename WarpGemm::AWarpDstr;
+        using BWarpDstr   = typename WarpGemm::BWarpDstr;
+        using CWarpDstr   = typename WarpGemm::CWarpDstr;
+        using AWarpTensor = typename WarpGemm::AWarpTensor;
+        using BWarpTensor = typename WarpGemm::BWarpTensor;
+        using CWarpTensor = typename WarpGemm::CWarpTensor;
+
+        static_assert(BlockGemm::KIterPerWarp == 1);
+        static_assert(BlockGemm::MIterPerWarp == 2);
+        static_assert(BlockGemm::NIterPerWarp == 8);
+        static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < 16);
+
+        constexpr index_t d_msb       = WmmaOrdinal / 4;
+        constexpr index_t n           = WmmaOrdinal % 4;
+        constexpr index_t m_iter      = d_msb / 2;
+        constexpr index_t v_msb       = d_msb % 2;
+        constexpr index_t full_n_iter = n * 2 + v_msb;
+
+        constexpr auto a_warp_y_lengths =
+            to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_warp_y_lengths =
+            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        AWarpTensor a_warp_tensor;
+        a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<0, m_iter>{}, a_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+
+        BWarpTensor b_warp_tensor;
+        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<0, full_n_iter>{}, b_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+
+        CWarpTensor c_warp_tensor;
+        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, full_n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+
+        WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
+        c_block_tensor.set_y_sliced_thread_data(
+            merge_sequences(sequence<m_iter, full_n_iter>{}, c_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+            c_warp_tensor.get_thread_buffer());
+    }
+
+    template <index_t Stage,
+              typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor,
+              typename NextBBlockTensor,
+              typename BTileWindow>
+    CK_TILE_DEVICE static void RunPvScheduledStage(const BlockGemm&,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor& next_b_block_tensor,
+                                                   const BTileWindow& b_lds_window)
+    {
+        using Executor = ScheduleExecutor;
+        using Kind     = FmhaTdmV128LoadKind;
+        static_assert(Stage >= 0 && Stage < Executor::Schedule::kNumPvStages);
+        static_assert(Executor::Schedule::kPvWmmasPerStage == OutputFragments::kNumFragments);
+        static_assert((Stage < Executor::Schedule::kNumPvStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount) ||
+                      (Stage == Executor::Schedule::kNumPvStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount));
+
+        auto emit_wmma = [&](auto, auto wmma) {
+            RunPvSuWmma<decltype(wmma)::value, BlockGemm>(
+                c_block_tensor, a_block_tensor, b_block_tensor);
+        };
+        auto emit_token = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value == Kind::KRead)
+            {
+                KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
+                                                                         b_lds_window);
+            }
+            else if constexpr(decltype(kind)::value == Kind::VRead)
+            {
+                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                    b_lds_window);
+            }
+        };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaTdmV128SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
+
+        Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
+        WaitPvStageTail<Stage>();
+    }
+
+    template <index_t Stage, typename NextBBlockTensor, typename BTileWindow, typename WmmaEmitter>
+    CK_TILE_DEVICE static void RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
+                                                           const BTileWindow& b_lds_window,
+                                                           WmmaEmitter& emit_wmma)
+    {
+        using Executor = ScheduleExecutor;
+        using Kind     = FmhaTdmV128LoadKind;
+        static_assert(Stage >= 0 && Stage < Executor::Schedule::kNumPvStages);
+        static_assert((Stage < Executor::Schedule::kNumPvStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount) ||
+                      (Stage == Executor::Schedule::kNumPvStages - 1 &&
+                       BTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount));
+
+        auto emit_token = [&](auto kind, auto access) {
+            if constexpr(decltype(kind)::value == Kind::KRead)
+            {
+                KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
+                                                                         b_lds_window);
+            }
+            else if constexpr(decltype(kind)::value == Kind::VRead)
+            {
+                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                    b_lds_window);
+            }
+        };
+        auto emit_point = [](auto, auto, auto point) {
+            if constexpr(decltype(point)::value == FmhaTdmV128SchedulePoint::AfterTokens)
+                __builtin_amdgcn_sched_barrier(0);
+            else
+                __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
+        };
+
+        Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
+        WaitPvStageTail<Stage>();
+    }
+
+    template <typename BlockGemm,
+              typename CBlockTensor,
+              typename ABlockTensor,
+              typename BBlockTensor>
+    CK_TILE_DEVICE static void RunPvSu(const BlockGemm&,
+                                       CBlockTensor& c_block_tensor,
+                                       const ABlockTensor& a_block_tensor,
+                                       const BBlockTensor& b_block_tensor)
+    {
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeABlockDistributionEncode())>,
+                           remove_cvref_t<decltype(ABlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 SU P distribution is incompatible with the PV BlockGemm");
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeBBlockDistributionEncode())>,
+                           remove_cvref_t<decltype(BBlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 SU V distribution is incompatible with the PV BlockGemm");
+        static_assert(
+            std::is_same_v<remove_cvref_t<decltype(BlockGemm::MakeCBlockDistributionEncode())>,
+                           remove_cvref_t<decltype(CBlockTensor::get_tile_distribution()
+                                                       .get_static_tile_distribution_encoding())>>,
+            "D192 output accumulator distribution is incompatible with the PV BlockGemm");
+
+        static_for<0, 16, 1>{}([&](auto ordinal) {
+            RunPvSuWmma<ordinal, BlockGemm>(c_block_tensor, a_block_tensor, b_block_tensor);
+        });
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseCompilerMax()
+    {
+        // Let the allocator place score tuples above the inline-asm low-VGPR range.
+        return (Geometry::kHeadDimQK == 128 && Problem::FmhaMask::IsMasking) ||
+               (Geometry::kHeadDimQK == 192 && !Problem::kIsGroupMode &&
+                !Problem::FmhaMask::IsMasking &&
+                std::is_same_v<remove_cvref_t<typename Problem::QDataType>, bf16_t> &&
+                std::is_same_v<remove_cvref_t<typename Problem::KDataType>, bf16_t> &&
+                std::is_same_v<remove_cvref_t<typename Problem::VDataType>, bf16_t>);
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
+        ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
+    {
+        using Softmax = FmhaTdmV128SplitSoftmax;
+        using Mapping = typename Softmax::Mapping;
+
+        static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
+        static_assert(!Problem::kHasLogitsSoftCap);
+        static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+        static_assert(RowTensor::get_thread_buffer_size() == 2);
+
+        const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+        const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+
+        constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
+        const auto p0_m0 =
+            Softmax::RunPart0<0, ScoreTensor, kUseCompilerMax>(score, old_max_m0, log2e_scale);
+        const auto p0_m1 =
+            Softmax::RunPart0<1, ScoreTensor, kUseCompilerMax>(score, old_max_m0, log2e_scale);
+        const auto p0_m2 =
+            Softmax::RunPart0<2, ScoreTensor, kUseCompilerMax>(score, old_max_m1, log2e_scale);
+        const auto p0_m3 =
+            Softmax::RunPart0<3, ScoreTensor, kUseCompilerMax>(score, old_max_m1, log2e_scale);
+
+        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+        const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
+            p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
+        const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
+            p0_m2.local_max, p0_m3.local_max, p0_m2.old_max_log2e, log2e_scale);
+
+        row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+        row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+        delta_m0                                 = p1_m0.delta;
+        delta_m1                                 = p1_m1.delta;
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart2AndGetScale(ScoreTensor& score,
+                                                               const RowTensor& row_max,
+                                                               RowTensor& row_sum,
+                                                               float log2e_scale,
+                                                               float delta_m0,
+                                                               float delta_m1,
+                                                               float& output_scale_m0,
+                                                               float& output_scale_m1)
+    {
+        using Softmax = FmhaTdmV128SplitSoftmax;
+        using Mapping = typename Softmax::Mapping;
+
+        static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
+        static_assert(!Problem::kHasLogitsSoftCap);
+        static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+        static_assert(RowTensor::get_thread_buffer_size() == 2);
+
+        constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+
+        const auto validated_max = [](float value) {
+            if constexpr(kValidateMax)
+            {
+                return value == -numeric<float>::infinity() ? 0.0f : value;
+            }
+            else
+            {
+                return value;
+            }
+        };
+
+        const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+        const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+        const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+        const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
+
+        const float sum_m0 =
+            Softmax::RunPart2LocalSum<0>(score, validated_max(row_max_m0), log2e_scale);
+        const float sum_m1 =
+            Softmax::RunPart2LocalSum<1>(score, validated_max(row_max_m0), log2e_scale);
+        const float sum_m2 =
+            Softmax::RunPart2LocalSum<2>(score, validated_max(row_max_m1), log2e_scale);
+        const float sum_m3 =
+            Softmax::RunPart2LocalSum<3>(score, validated_max(row_max_m1), log2e_scale);
+
+        row_sum.get_thread_buffer()[number<0>{}] =
+            Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
+        row_sum.get_thread_buffer()[number<1>{}] =
+            Softmax::UpdateRowSum(old_sum_m1, Softmax::MergeRowSum(sum_m2, sum_m3), delta_m1);
+
+        output_scale_m0 = Softmax::Exp2(delta_m0);
+        output_scale_m1 = Softmax::Exp2(delta_m1);
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor, typename OutputTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart2(ScoreTensor& score,
+                                                    const RowTensor& row_max,
+                                                    RowTensor& row_sum,
+                                                    OutputTensor& output,
+                                                    float log2e_scale,
+                                                    float delta_m0,
+                                                    float delta_m1)
+    {
+        using Mapping = typename FmhaD192SplitSoftmax::Mapping;
+        static_assert(OutputTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+        static_assert(std::is_same_v<typename ScoreTensor::StaticTileDistribution,
+                                     typename OutputTensor::StaticTileDistribution>,
+                      "D192 score and output accumulators must have identical lane ownership");
+
+        float output_scale_m0;
+        float output_scale_m1;
+        RunSplitSoftmaxPart2AndGetScale<Problem>(score,
+                                                 row_max,
+                                                 row_sum,
+                                                 log2e_scale,
+                                                 delta_m0,
+                                                 delta_m1,
+                                                 output_scale_m0,
+                                                 output_scale_m1);
+        using Softmax = FmhaTdmV128SplitSoftmax;
+        Softmax::RescaleOutput<0>(output, output_scale_m0);
+        Softmax::RescaleOutput<1>(output, output_scale_m0);
+        Softmax::RescaleOutput<2>(output, output_scale_m1);
+        Softmax::RescaleOutput<3>(output, output_scale_m1);
+    }
+
+    template <index_t Ordinal, typename OutputTensor>
+    CK_TILE_DEVICE static void
+    RunOutputRescaleToken(OutputTensor& output, float output_scale_m0, float output_scale_m1)
+    {
+        using Softmax = FmhaTdmV128SplitSoftmax;
+        static_assert(Ordinal >= 0 && Ordinal < 16);
+        constexpr index_t output_tile = Ordinal / 4;
+        constexpr index_t msb         = Ordinal % 4;
+        const float output_scale      = msb < 2 ? output_scale_m0 : output_scale_m1;
+        Softmax::template RescaleOutputTile<msb, output_tile>(output, output_scale);
+    }
+
+    template <typename TokenConstant, typename Ordinal, typename OutputTensor>
+    CK_TILE_DEVICE static void RunPreviousTileSoftmaxToken(
+        TokenConstant, Ordinal, OutputTensor& output, float output_scale_m0, float output_scale_m1)
+    {
+        if constexpr(TokenConstant::value == FmhaD192ScheduleToken::ORescale)
+        {
+            RunOutputRescaleToken<Ordinal::value>(output, output_scale_m0, output_scale_m1);
+        }
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor, typename OutputTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmax(ScoreTensor& score,
+                                               RowTensor& row_max,
+                                               RowTensor& row_sum,
+                                               OutputTensor& output,
+                                               float log2e_scale)
+    {
+        float delta_m0;
+        float delta_m1;
+        RunSplitSoftmaxPart01<Problem>(score, row_max, log2e_scale, delta_m0, delta_m1);
+        RunSplitSoftmaxPart2<Problem>(
+            score, row_max, row_sum, output, log2e_scale, delta_m0, delta_m1);
+    }
+
+    template <typename Problem, typename ScoreTensor, typename RowTensor, typename Fragments>
+    CK_TILE_DEVICE static void RunSplitSoftmaxFragments(ScoreTensor& score,
+                                                        RowTensor& row_max,
+                                                        RowTensor& row_sum,
+                                                        Fragments& output,
+                                                        float log2e_scale)
+    {
+        float delta_m0;
+        float delta_m1;
+        RunSplitSoftmaxPart01<Problem>(score, row_max, log2e_scale, delta_m0, delta_m1);
+
+        float output_scale_m0;
+        float output_scale_m1;
+        RunSplitSoftmaxPart2AndGetScale<Problem>(score,
+                                                 row_max,
+                                                 row_sum,
+                                                 log2e_scale,
+                                                 delta_m0,
+                                                 delta_m1,
+                                                 output_scale_m0,
+                                                 output_scale_m1);
+
+        static_for<0, OutputFragments::kNumFragments, 1>{}([&](auto ordinal) {
+            constexpr index_t d_msb = decltype(ordinal)::value / OutputFragments::kNumN;
+            const float scale       = d_msb < 2 ? output_scale_m0 : output_scale_m1;
+            auto& fragment          = output.at(ordinal);
+            static_for<0, OutputFragments::kElementsPerFragment, 1>{}(
+                [&](auto element) { fragment[decltype(element)::value] *= scale; });
+        });
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsSupportedProblem()
+    {
+        using Shape = remove_cvref_t<typename Problem::BlockFmhaShape>;
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+        constexpr bool is_wave32 = get_warp_size() == 32;
+#else
+        constexpr bool is_wave32 = true;
+#endif
+        return std::is_same_v<remove_cvref_t<typename Problem::QDataType>,
+                              typename Geometry::QDataType> &&
+               std::is_same_v<remove_cvref_t<typename Problem::KDataType>,
+                              typename Geometry::KDataType> &&
+               std::is_same_v<remove_cvref_t<typename Problem::VDataType>,
+                              typename Geometry::VDataType> &&
+               std::is_same_v<remove_cvref_t<typename Problem::PDataType>,
+                              typename Geometry::PDataType> &&
+               Shape::kM0 == 128 && Shape::kN0 == 128 && Shape::kK0 == 32 && Shape::kN1 == 128 &&
+               Shape::kK1 == 32 && Shape::kQKHeaddim == Geometry::kHeadDimQK &&
+               Shape::kSubQKHeaddim == Geometry::kHeadDimQK &&
+               Shape::Gemm0BlockWarps::at(number<0>{}) == 4 &&
+               Shape::Gemm0BlockWarps::at(number<1>{}) == 1 &&
+               Shape::Gemm0BlockWarps::at(number<2>{}) == 1 &&
+               Shape::Gemm0WarpTile::at(number<0>{}) == 16 &&
+               Shape::Gemm0WarpTile::at(number<1>{}) == 16 &&
+               Shape::Gemm0WarpTile::at(number<2>{}) == 32 &&
+               Shape::Gemm1BlockWarps::at(number<0>{}) == 4 &&
+               Shape::Gemm1BlockWarps::at(number<1>{}) == 1 &&
+               Shape::Gemm1BlockWarps::at(number<2>{}) == 1 &&
+               Shape::Gemm1WarpTile::at(number<0>{}) == 16 &&
+               Shape::Gemm1WarpTile::at(number<1>{}) == 16 &&
+               Shape::Gemm1WarpTile::at(number<2>{}) == 32 && Shape::IsVLayoutRowMajor &&
+               Shape::NumWarps == 4 && is_wave32;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQKReductionSteps()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        return Problem::BlockFmhaShape::kQKHeaddim / Problem::BlockFmhaShape::kK0;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetK0() { return kLdsOffsetK0; }
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetK1() { return kLdsOffsetK1; }
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetV0() { return kLdsOffsetV0; }
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsOffsetV1() { return kLdsOffsetV1; }
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsArenaSize() { return kLdsArenaSize; }
+
+    template <typename Problem, bool LoadOnce = true>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        static_assert(LoadOnce, "D192/V128 policy requires a full-head K TDM load");
+        constexpr index_t warp_num = Problem::kBlockSize / get_warp_size();
+        static_assert(kLdsRows % warp_num == 0);
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<warp_num, kLdsRows / warp_num>, sequence<kKPhysicalStride>>,
+                tuple<sequence<1>>,
+                tuple<sequence<0>>,
+                sequence<1, 2>,
+                sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKDramSuTileDistribution()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        constexpr index_t warp_num = Problem::kBlockSize / get_warp_size();
+        static_assert(32 % warp_num == 0);
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<warp_num, 32 / warp_num>, sequence<kKPhysicalStride>>,
+                tuple<sequence<1>>,
+                tuple<sequence<0>>,
+                sequence<1, 2>,
+                sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVDramSuTileDistribution()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        constexpr index_t warp_num = Problem::kBlockSize / get_warp_size();
+        static_assert(32 % warp_num == 0);
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<warp_num, 32 / warp_num>, sequence<kVLogicalWidth>>,
+                tuple<sequence<1>>,
+                tuple<sequence<0>>,
+                sequence<1, 2>,
+                sequence<1, 0>>{},
+            bool_constant<true>{});
+    }
+
+    template <index_t Su,
+              typename Problem,
+              typename TdmConfig,
+              typename LdsTileWindow,
+              typename DramTileWindow>
+    CK_TILE_DEVICE static void LoadKSuTdm(const TdmConfig& config,
+                                          const LdsTileWindow& lds_tile_window,
+                                          const DramTileWindow& dram_tile_window)
+    {
+        static_assert(Su >= 0 && Su < 4);
+        const auto dram_origin = dram_tile_window.get_window_origin();
+        auto dram_su_window    = make_tile_window(
+            dram_tile_window.get_bottom_tensor_view(),
+            make_tuple(number<32>{}, number<kKPhysicalStride>{}),
+            make_multi_index(dram_origin.at(number<0>{}) + Su * 32, dram_origin.at(number<1>{})),
+            MakeKDramSuTileDistribution<Problem>());
+
+        const auto lds_origin = lds_tile_window.get_window_origin();
+        auto lds_su_window    = make_tile_window(
+            lds_tile_window.get_bottom_tensor_view(),
+            make_tuple(number<32>{}, number<kKPhysicalStride>{}),
+            make_multi_index(lds_origin.at(number<0>{}) + Su * 32, lds_origin.at(number<1>{})));
+        load_tile_tdm(config, lds_su_window, dram_su_window);
+    }
+
+    template <index_t Su,
+              typename Problem,
+              typename TdmConfig,
+              typename LdsTileWindow,
+              typename DramTileWindow>
+    CK_TILE_DEVICE static void LoadVSuTdm(const TdmConfig& config,
+                                          const LdsTileWindow& lds_tile_window,
+                                          const DramTileWindow& dram_tile_window)
+    {
+        static_assert(Su >= 0 && Su < 4);
+        const auto dram_origin = dram_tile_window.get_window_origin();
+        auto dram_su_window    = make_tile_window(
+            dram_tile_window.get_bottom_tensor_view(),
+            make_tuple(number<32>{}, number<kVLogicalWidth>{}),
+            make_multi_index(dram_origin.at(number<0>{}) + Su * 32, dram_origin.at(number<1>{})),
+            MakeVDramSuTileDistribution<Problem>());
+
+        const auto lds_origin = lds_tile_window.get_window_origin();
+        auto lds_su_window    = make_tile_window(
+            lds_tile_window.get_bottom_tensor_view(),
+            make_tuple(number<32>{}, number<kVLogicalWidth>{}),
+            make_multi_index(lds_origin.at(number<0>{}) + Su * 32, lds_origin.at(number<1>{})));
+        load_tile_tdm(config, lds_su_window, dram_su_window);
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        constexpr index_t kKPack = BasePolicy::template GetSmemKPackK<Problem>();
+        return make_naive_tensor_descriptor(
+            make_tuple(number<kLdsRows>{}, number<kKPhysicalStride>{}),
+            make_tuple(number<kKPhysicalStride>{}, number<1>{}),
+            number<kKPack>{},
+            number<1>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsReadBlockDescriptor()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        constexpr index_t kKPack = BasePolicy::template GetSmemKPackK<Problem>();
+        return make_naive_tensor_descriptor(make_tuple(number<kLdsRows>{}, number<kKValidWidth>{}),
+                                            make_tuple(number<kKPhysicalStride>{}, number<1>{}),
+                                            number<kKPack>{},
+                                            number<1>{});
+    }
+
+    template <typename Problem, bool LoadOnce = true>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
+    {
+        static_assert(LoadOnce, "D192/V128 policy requires a full-head K LDS descriptor");
+        return MakeKLdsWriteBlockDescriptor<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        constexpr index_t kKPack = BasePolicy::template GetSmemKPackV<Problem>();
+        return make_naive_tensor_descriptor(
+            make_tuple(number<kLdsRows>{}, number<kVLogicalWidth>{}),
+            make_tuple(number<kVPhysicalStride>{}, number<1>{}),
+            number<kKPack>{},
+            number<1>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadBlockDescriptor()
+    {
+        return MakeVLdsWriteBlockDescriptor<Problem>();
+    }
+
+    template <typename Problem, bool Xor = false>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsBlockDescriptor()
+    {
+        static_assert(!Xor, "D192/V128 TDM writer requires an affine V LDS descriptor");
+        return MakeVLdsWriteBlockDescriptor<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        using BlockGemm = remove_cvref_t<decltype(BasePolicy::template GetPVBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+
+        constexpr index_t kMWarp        = 4;
+        constexpr index_t kNWarp        = 1;
+        constexpr index_t kNIterPerWarp = kVLogicalWidth / (kNWarp * WarpGemm::kN);
+        constexpr index_t kKIterPerWarp = 32 / WarpGemm::kK;
+        static_assert(kNIterPerWarp == 8 && kKIterPerWarp == 1);
+
+        constexpr auto outer_encoding = tile_distribution_encoding<
+            sequence<kMWarp>,
+            tuple<sequence<kNIterPerWarp, kNWarp>, sequence<kKIterPerWarp>>,
+            tuple<sequence<0, 1>>,
+            tuple<sequence<0, 1>>,
+            sequence<2, 1>,
+            sequence<0, 0>>{};
+        constexpr auto block_encoding = detail::make_embed_tile_distribution_encoding(
+            outer_encoding, typename WarpGemm::BWarpDstrEncoding{});
+        using ReadEncoding =
+            typename InputTileDistributionTraits<decltype(block_encoding),
+                                                 typename Problem::VDataType>::TransposedDstrEncode;
+
+        return make_static_tile_distribution(ReadEncoding{});
+    }
+
+    template <typename Problem, bool LoadOnce = true>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeK()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        static_assert(LoadOnce, "D192/V128 policy requires a full-head K LDS allocation");
+        using Traits = fmha::FmhaProblemTraitsT<Problem>;
+        return kKFootprintElements * Traits::kKElementBytes;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeV()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        using Traits = fmha::FmhaProblemTraitsT<Problem>;
+        return kVFootprintElements * Traits::kVElementBytes;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        return GetLdsArenaSize();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
+    {
+        static_assert(IsSupportedProblem<Problem>(),
+                      "D192/V128 policy received an invalid problem");
+        return make_tuple(number<true>{}, number<kVPadAmount>{}, number<kVPadInterval>{});
+    }
+};
+
+template <typename Geometry>
+using FmhaTdmV128DefaultTuning = std::conditional_t<
+    std::is_same_v<Geometry, LegacyD192Geometry>,
+    LegacyD192Tuning,
+    FmhaTdmV128Tuning<0, 0, sequence<0, 0, 0, 0>, sequence<0, 0, 0, 0>, true, false, 1, Geometry>>;
+
+template <typename Problem>
+using FmhaTdmV128PolicyFor =
+    BlockFmhaPipelineQRKSVSTdmV128Policy<FmhaTdmV128GeometryFor<Problem>,
+                                         FmhaTdmV128DefaultTuning<FmhaTdmV128GeometryFor<Problem>>,
+                                         FmhaTdmV128ScheduleFor<FmhaTdmV128GeometryFor<Problem>>>;
+
+} // namespace ck_tile

@@ -158,4 +158,6 @@ static_assert(FmhaD192OutputFragments::kNumFragments *
 static_assert(FmhaD192OutputFragments::ValidateMapping());
 static_assert(FmhaD192OutputFragments::ValidateScheduleRescaleMapping());
 
+using FmhaTdmV128OutputFragments = FmhaD192OutputFragments;
+
 } // namespace ck_tile

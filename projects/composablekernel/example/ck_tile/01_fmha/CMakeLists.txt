@@ -49,8 +49,19 @@ set(FMHA_FWD_CODEGEN_FILTER "" CACHE STRING
   "optional --filter argument forwarded to generate.py for the fwd API")
 option(FMHA_FWD_GFX1250_D192_TDM_ESM2
   "Enable ESM2 for gfx1250 D192 BF16 QR/TDM generated instances" ON)
+# Explicit family option takes precedence for both shapes. The old option supplies
+# only the initial cache default; changing it does not overwrite an existing value.
+option(FMHA_FWD_GFX1250_TDM_V128_ESM2
+  "Enable ESM2 for gfx1250 scheduled V128 generated instances"
+  ${FMHA_FWD_GFX1250_D192_TDM_ESM2})
 option(FMHA_FWD_GFX1250_D192_BATCH_NMASK_WWM_FAST
-  "Use the fast WWM register allocator for gfx1250 D192 BF16 batch no-mask instances" ON)
+  "Deprecated and ignored; D192 BF16 batch no-mask requires the default WWM allocator" OFF)
+if(FMHA_FWD_GFX1250_D192_BATCH_NMASK_WWM_FAST)
+  message(WARNING
+    "FMHA_FWD_GFX1250_D192_BATCH_NMASK_WWM_FAST is ignored: the fast allocator can "
+    "miscompile accumulator initialization. D192 BF16 batch no-mask uses the "
+    "default allocator and compiler-visible Max3 instead.")
+endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
@@ -287,6 +298,14 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_fmha_fwd_d192_codegen.py
   )
   set_tests_properties(test_ck_tile_fmha_fwd_d192_codegen PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    LABELS "CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+  )
+  add_test(
+    NAME test_ck_tile_fmha_fwd_v128_codegen
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/test_fmha_fwd_v128_codegen.py
+  )
+  set_tests_properties(test_ck_tile_fmha_fwd_v128_codegen PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
     LABELS "CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
   )

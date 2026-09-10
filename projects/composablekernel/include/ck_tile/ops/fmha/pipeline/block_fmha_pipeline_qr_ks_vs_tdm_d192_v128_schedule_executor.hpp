@@ -7,17 +7,20 @@
 
 namespace ck_tile {
 
-enum class FmhaD192SchedulePoint : index_t
+enum class FmhaTdmV128SchedulePoint : index_t
 {
     AfterWmma,
     BetweenTokenHalves,
     AfterTokens,
 };
 
-struct BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor
+using FmhaD192SchedulePoint = FmhaTdmV128SchedulePoint;
+
+template <typename Schedule_>
+struct FmhaTdmV128ScheduleExecutor
 {
-    using Schedule = BlockFmhaPipelineQRKSVSTdmD192V128Schedule;
-    using Point    = FmhaD192SchedulePoint;
+    using Schedule = Schedule_;
+    using Point    = FmhaTdmV128SchedulePoint;
 
     template <index_t Stage,
               index_t Wmma,
@@ -27,14 +30,16 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor
     CK_TILE_HOST_DEVICE static constexpr void
     ExecuteQkRow(WmmaEmitter& emit_wmma, TokenEmitter& emit_token, PointEmitter& emit_point)
     {
+        static_assert(Stage >= 0 && Stage < Schedule::kNumQkStages);
+        static_assert(Wmma >= 0 && Wmma < Schedule::kQkWmmasPerStage);
         emit_wmma(number<Stage>{}, number<Wmma>{});
         emit_point(
             number<Stage>{}, number<Wmma>{}, std::integral_constant<Point, Point::AfterWmma>{});
-        Schedule::VisitQkRowHalf<Stage, Wmma, false>(emit_token);
+        Schedule::template VisitQkRowHalf<Stage, Wmma, false>(emit_token);
         emit_point(number<Stage>{},
                    number<Wmma>{},
                    std::integral_constant<Point, Point::BetweenTokenHalves>{});
-        Schedule::VisitQkRowHalf<Stage, Wmma, true>(emit_token);
+        Schedule::template VisitQkRowHalf<Stage, Wmma, true>(emit_token);
         emit_point(
             number<Stage>{}, number<Wmma>{}, std::integral_constant<Point, Point::AfterTokens>{});
     }
@@ -47,14 +52,16 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor
     CK_TILE_HOST_DEVICE static constexpr void
     ExecutePvRow(WmmaEmitter& emit_wmma, TokenEmitter& emit_token, PointEmitter& emit_point)
     {
+        static_assert(Stage >= 0 && Stage < Schedule::kNumPvStages);
+        static_assert(Wmma >= 0 && Wmma < Schedule::kPvWmmasPerStage);
         emit_wmma(number<Stage>{}, number<Wmma>{});
         emit_point(
             number<Stage>{}, number<Wmma>{}, std::integral_constant<Point, Point::AfterWmma>{});
-        Schedule::VisitPvRowHalf<Stage, Wmma, false>(emit_token);
+        Schedule::template VisitPvRowHalf<Stage, Wmma, false>(emit_token);
         emit_point(number<Stage>{},
                    number<Wmma>{},
                    std::integral_constant<Point, Point::BetweenTokenHalves>{});
-        Schedule::VisitPvRowHalf<Stage, Wmma, true>(emit_token);
+        Schedule::template VisitPvRowHalf<Stage, Wmma, true>(emit_token);
         emit_point(
             number<Stage>{}, number<Wmma>{}, std::integral_constant<Point, Point::AfterTokens>{});
     }
@@ -75,5 +82,8 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor
             [&](auto wmma) { ExecutePvRow<Stage, wmma>(emit_wmma, emit_token, emit_point); });
     }
 };
+
+using BlockFmhaPipelineQRKSVSTdmD192V128ScheduleExecutor =
+    FmhaTdmV128ScheduleExecutor<BlockFmhaPipelineQRKSVSTdmD192V128Schedule>;
 
 } // namespace ck_tile

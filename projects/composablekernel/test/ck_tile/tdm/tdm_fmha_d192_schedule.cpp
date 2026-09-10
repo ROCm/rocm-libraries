@@ -25,6 +25,7 @@ using D192BlockShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 32, 12
 
 struct D192MappingProblem
 {
+    static constexpr bool kIsGroupMode = false;
     struct FmhaMask
     {
         static constexpr bool IsMasking = false;

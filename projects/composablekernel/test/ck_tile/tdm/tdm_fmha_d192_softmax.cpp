@@ -32,6 +32,7 @@ using D192BlockShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 32, 12
 template <bool Masking>
 struct D192SoftmaxProblem
 {
+    static constexpr bool kIsGroupMode = false;
     struct FmhaMask
     {
         static constexpr bool IsMasking = Masking;

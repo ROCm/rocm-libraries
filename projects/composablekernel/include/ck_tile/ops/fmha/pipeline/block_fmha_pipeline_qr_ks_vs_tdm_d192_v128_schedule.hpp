@@ -53,6 +53,8 @@ struct BlockFmhaPipelineQRKSVSTdmD192V128Schedule
     using Row   = FmhaD192ScheduleRow;
 
     static constexpr index_t kNumStages       = 4;
+    static constexpr index_t kNumQkStages     = kNumStages;
+    static constexpr index_t kNumPvStages     = kNumStages;
     static constexpr index_t kQkWmmasPerStage = 24;
     static constexpr index_t kPvWmmasPerStage = 16;
     static constexpr index_t kNumQkRows       = kNumStages * kQkWmmasPerStage;

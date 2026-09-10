@@ -169,15 +169,23 @@ struct FmhaD192SplitSoftmax
         float delta;
     };
 
+    template <bool UseCompilerMax = false>
     CK_TILE_DEVICE static float Max3(float x, float y, float z)
     {
+        if constexpr(UseCompilerMax)
+        {
+            return max(max(x, y), z);
+        }
+        else
+        {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-        float result;
-        asm volatile("v_max3_num_f32 %0, %1, %2, %3" : "=v"(result) : "v"(x), "v"(y), "v"(z));
-        return result;
+            float result;
+            asm volatile("v_max3_num_f32 %0, %1, %2, %3" : "=v"(result) : "v"(x), "v"(y), "v"(z));
+            return result;
 #else
-        return max(max(x, y), z);
+            return max(max(x, y), z);
 #endif
+        }
     }
 
     CK_TILE_DEVICE static float PermuteLaneX16(float value)
@@ -191,7 +199,7 @@ struct FmhaD192SplitSoftmax
 #endif
     }
 
-    template <index_t Msb, typename ScoreTensor>
+    template <index_t Msb, typename ScoreTensor, bool UseCompilerMax = false>
     CK_TILE_DEVICE static Part0State
     RunPart0(const ScoreTensor& score, float old_max, float log2e_scale)
     {
@@ -204,16 +212,16 @@ struct FmhaD192SplitSoftmax
             const auto pair2            = Mapping::LoadPair<Msb, pair_base + 2>(score);
             const auto pair3            = Mapping::LoadPair<Msb, pair_base + 3>(score);
 
-            float value   = Max3(pair0[0], pair0[1], pair1[0]);
-            value         = Max3(pair1[1], pair2[0], value);
-            value         = Max3(pair2[1], pair3[0], value);
-            group_max(su) = Max3(pair3[1], value, pair0[0]);
+            float value   = Max3<UseCompilerMax>(pair0[0], pair0[1], pair1[0]);
+            value         = Max3<UseCompilerMax>(pair1[1], pair2[0], value);
+            value         = Max3<UseCompilerMax>(pair2[1], pair3[0], value);
+            group_max(su) = Max3<UseCompilerMax>(pair3[1], value, pair0[0]);
         });
 
-        float lane_max =
-            Max3(group_max[number<0>{}], group_max[number<1>{}], group_max[number<2>{}]);
-        lane_max = Max3(lane_max, group_max[number<3>{}], group_max[number<1>{}]);
-        lane_max = Max3(lane_max, PermuteLaneX16(lane_max), old_max);
+        float lane_max = Max3<UseCompilerMax>(
+            group_max[number<0>{}], group_max[number<1>{}], group_max[number<2>{}]);
+        lane_max = Max3<UseCompilerMax>(lane_max, group_max[number<3>{}], group_max[number<1>{}]);
+        lane_max = Max3<UseCompilerMax>(lane_max, PermuteLaneX16(lane_max), old_max);
 
         return Part0State{lane_max, old_max * log2e_scale};
     }
@@ -320,5 +328,8 @@ struct FmhaD192SplitSoftmax
         return cvt_pk_bf16_f32(value[0], value[1]);
     }
 };
+
+using FmhaTdmV128ScoreFragmentMapping = FmhaD192ScoreFragmentMapping;
+using FmhaTdmV128SplitSoftmax         = FmhaD192SplitSoftmax;
 
 } // namespace ck_tile

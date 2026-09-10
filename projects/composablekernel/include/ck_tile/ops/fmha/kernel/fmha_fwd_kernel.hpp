@@ -2987,13 +2987,9 @@ struct FmhaFwdKernel
                     make_tuple(number<FmhaPipeline::kK1>{}, number<FmhaPipeline::kN1>{}),
                     sequence<kPadSeqLenK, false>{});
 
-                // Same rationale as the affine-TDM dispatch in make_q_dram and
-                // make_k_dram above: TDM box-major DMA can't honor software
-                // XOR'd dram views, the unmerge/xor/merge_v3 chain below is
-                // dead code for TDM, and calculate_offset(unit_vec) would
-                // otherwise produce an XOR-polluted stride. Return the naive
-                // view: a pad transform reports the pad rows as real and the
-                // DMA reads past the end of V.
+                // TDM needs affine DRAM strides and the logical sequence bounds;
+                // software padding would make invalid V rows readable by DMA.
+                // LDS padding is configured separately by the pipeline policy.
                 if constexpr(kUsesTdmAffineDramPath)
                 {
                     return v_dram_naive;
@@ -3092,7 +3088,7 @@ struct FmhaFwdKernel
                             make_tuple(sequence<0>{}, sequence<1, 2>{}),
                             make_tuple(sequence<0>{}, sequence<1>{}));
                     }
-                } // end else (qr_tdm dispatch above returns v_dram_naive early)
+                } // end else (affine-TDM dispatch above returns v_dram_naive early)
             };
 
             const auto v_dram = [&]() {

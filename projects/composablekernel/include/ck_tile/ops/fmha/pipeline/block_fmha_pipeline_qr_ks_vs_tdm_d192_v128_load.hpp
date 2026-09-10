@@ -7,7 +7,8 @@
 
 namespace ck_tile {
 
-struct FmhaD192TransposeLoad
+template <index_t ExpectedAccesses = -1>
+struct FmhaTdmV128TransposeLoad
 {
     template <index_t IAccess, typename DistributedTensor, typename TileWindow_>
     CK_TILE_DEVICE static void LoadAccess(DistributedTensor& dst_tensor,
@@ -21,6 +22,7 @@ struct FmhaD192TransposeLoad
         using TransposePolicy = DefaultTranspose<DataType>;
         using VectorType      = typename Traits::vector_t;
 
+        static_assert(ExpectedAccesses == -1 || TileWindow::NumAccessPerCoord == ExpectedAccesses);
         static_assert(IAccess >= 0 && IAccess < TileWindow::NumAccessPerCoord);
         static_assert(
             std::is_same_v<remove_cvref_t<typename DistributedTensor::DataType>, DataType>);
@@ -69,7 +71,8 @@ struct FmhaD192TransposeLoad
     }
 };
 
-struct FmhaD192Load
+template <index_t ExpectedAccesses>
+struct FmhaTdmV128Load
 {
     template <index_t IInstruction, typename DistributedTensor, typename TileWindow_>
     CK_TILE_DEVICE static void LoadInstruction(DistributedTensor& dst_tensor,
@@ -83,7 +86,8 @@ struct FmhaD192Load
         using DataType   = typename Base::DataType;
         using VectorType = typename Traits::vector_t;
 
-        static_assert(TileWindow::NumAccessPerCoord == 24);
+        static_assert(TileWindow::NumAccessPerCoord == ExpectedAccesses);
+        static_assert(sizeof(VectorType) == 16, "Each scheduled K event must issue one b128 load");
         static_assert(IInstruction >= 0 && IInstruction < TileWindow::NumAccessPerCoord);
         static_assert(
             std::is_same_v<remove_cvref_t<typename DistributedTensor::DataType>, DataType>);
@@ -127,5 +131,8 @@ struct FmhaD192Load
 #endif
     }
 };
+
+using FmhaD192Load          = FmhaTdmV128Load<24>;
+using FmhaD192TransposeLoad = FmhaTdmV128TransposeLoad<>;
 
 } // namespace ck_tile

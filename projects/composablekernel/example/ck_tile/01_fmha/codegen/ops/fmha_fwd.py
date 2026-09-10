@@ -219,6 +219,15 @@ unsigned get_num_thread_blocks(unsigned batch, unsigned nheads, unsigned max_seq
 
 [[maybe_unused]] bool is_gfx125_d192_tdm_enabled() {
     static const bool enabled = [] {
+        const char* force = std::getenv("CK_TILE_FMHA_GFX125_TDM_V128_FORCE_FALLBACK");
+        if(force != nullptr && force[0] == '1' && force[1] == '\\0') {
+            return false;
+        }
+        // Promote only after the complete family validation gate.
+        constexpr bool kTdmV128DefaultEnabled = false;
+        if constexpr(kTdmV128DefaultEnabled) {
+            return true;
+        }
         const char* value = std::getenv("CK_TILE_FMHA_GFX125_D192_TDM");
         return value != nullptr && value[0] == '1' && value[1] == '\\0';
     }();
@@ -352,14 +361,62 @@ class FmhaFwdApiTrait:
     # occupancy variants for the same tile can coexist in one shared object.
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
-    dispatch_hdim: Optional[str] = None
-    dispatch_hdim_v: Optional[int] = None
 
     @property
     def dispatch_bucket(self) -> Tuple[str, int]:
+        return (self.hdim, self.bn1)
+
+    @property
+    def is_tdm_v128_family(self) -> bool:
+        return self.pipeline_tag in ("qr_tdm_d192_v128", "qr_tdm_v128")
+
+    @property
+    def is_gfx125_tdm_v128_candidate(self) -> bool:
         return (
-            self.hdim if self.dispatch_hdim is None else self.dispatch_hdim,
-            self.bn1 if self.dispatch_hdim_v is None else self.dispatch_hdim_v,
+            self.is_tdm_v128_family
+            and self.arch.name == "gfx125"
+            and self.dtype == "bf16"
+            and (self.hdim, self.pipeline_tag)
+            in (("128", "qr_tdm_v128"), ("192", "qr_tdm_d192_v128"))
+            and self.bn1 == 128
+            and self.vlayout == "row"
+            and self.logits == "f"
+            and self.bias == "no"
+            and self.dropout == "f"
+            and self.qscale == "no"
+            and self.skip == "f"
+            and self.sink == "f"
+            and self.tr_load == "f"
+        )
+
+    @property
+    def tdm_v128_key(self) -> tuple:
+        return (
+            self.arch.name,
+            self.dtype,
+            self.mode,
+            self.hdim,
+            self.bn1,
+            self.vlayout,
+            self.logits,
+            self.bias,
+            self.mask,
+            self.lse,
+            self.dropout,
+            self.qscale,
+            self.skip,
+            self.sink,
+            self.tr_load,
+            self.spad,
+            self.skpad,
+            self.dpad,
+            self.dvpad,
+            self.pipeline_tag,
+            self.bm0,
+            self.bn0,
+            self.bk0,
+            self.bk1,
+            self.bk0max,
         )
 
     @property
@@ -411,22 +468,16 @@ class FmhaFwdApiTrait:
             self.sink,
         )
 
-    def dispatch_constraint(self, available_candidate_keys: set) -> CppConstraint:
+    def dispatch_constraint(self) -> CppConstraint:
         selector = CppConstraint(
-            "is_gfx125_d192_tdm_enabled() && a.hdim_q == 192 && "
-            "a.hdim_v == 128 && a.max_seqlen_q >= 128"
+            f"is_gfx125_d192_tdm_enabled() && a.hdim_q == {self.hdim} && "
+            "a.hdim_v == 128 && a.max_seqlen_q >= 128 && "
+            f"t.hdim_q == {self.hdim} && t.hdim_v == 128"
         )
-        if (
-            self.is_gfx125_d192_candidate_feature
-            and self.pipeline_tag == "qr_tdm_d192_v128"
-        ):
+        if self.is_gfx125_tdm_v128_candidate:
             return self.constraint & selector
-        if (
-            self.is_gfx125_d192_fallback_feature
-            and self.pipeline_tag == "qr"
-            and self.gfx125_d192_feature_key in available_candidate_keys
-        ):
-            return self.constraint & CppConstraint(f"!({selector})")
+        if self.is_tdm_v128_family:
+            return self.constraint & CppConstraint("false")
         return self.constraint
 
     @property
@@ -446,6 +497,7 @@ class FmhaFwdApiTrait:
             "qr_async_trload_v3",
             "qr_tdm",
             "qr_tdm_d192_v128",
+            "qr_tdm_v128",
         ]:
             if self.spad == "t":
                 return "true"  # always support
@@ -486,7 +538,7 @@ class FmhaFwdApiTrait:
                 return "true"
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
-        elif self.pipeline_tag in ["qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128"]:
+        elif self.pipeline_tag in ["qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
             if self.skpad == "t":
                 return "true"
             else:
@@ -505,7 +557,7 @@ class FmhaFwdApiTrait:
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128"]:
+        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -525,7 +577,7 @@ class FmhaFwdApiTrait:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128"]:
+        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -728,6 +780,21 @@ class FmhaFwdApiPool:
                 return any(has_traits(val) for val in node.values())
             return False
 
+        def render_traits(traits, arch, dtype, family=False):
+            max_bm0 = max((trait.bm0 for trait in traits), default=0)
+            inners = str()
+            for i_trait, trait in enumerate(traits):
+                fmt = api_trait_fmt_args(arch, dtype, trait.hdim, trait, max_bm0)
+                fmt["F_constraint"] = trait.dispatch_constraint()
+                if family:
+                    fmt["F_seqtune"] = "true"
+                inners += FMHA_FWD_API_INNER_DISPATCH.format(
+                    F_if="if" if family else if_(i_trait),
+                    F_trait_type=FMHA_FWD_TRAIT_TYPE.format(**fmt),
+                    **fmt,
+                )
+            return inners
+
         per_arch = str()
         for i_arch, (arch, pool_by_arch) in enumerate(
             item for item in self.pool.items() if has_traits(item[1])
@@ -736,31 +803,22 @@ class FmhaFwdApiPool:
             for i_dtype, (dtype, pool_by_dtype) in enumerate(
                 item for item in pool_by_arch.items() if has_traits(item[1])
             ):
-                per_hdim_case = str()
-                for i_hdim, ((hdim, hdim_v), pool_by_hdim) in enumerate(
-                    item for item in pool_by_dtype.items() if has_traits(item[1])
+                family_traits = []
+                legacy_buckets = OrderedDict()
+                for bucket, traits in pool_by_dtype.items():
+                    for trait in traits:
+                        if not filter_fn(trait):
+                            continue
+                        if trait.is_tdm_v128_family:
+                            family_traits.append(trait)
+                        else:
+                            legacy_buckets.setdefault(bucket, []).append(trait)
+                # Exact candidates return before the independent legacy range chain.
+                per_hdim_case = render_traits(family_traits, arch, dtype, family=True)
+                for i_hdim, ((hdim, hdim_v), traits) in enumerate(
+                    legacy_buckets.items()
                 ):
-                    max_bm0 = max(
-                        (t.bm0 for t in pool_by_hdim if filter_fn(t)), default=0
-                    )
-                    filtered_traits = [
-                        trait for trait in pool_by_hdim if filter_fn(trait)
-                    ]
-                    available_candidate_keys = {
-                        trait.gfx125_d192_feature_key
-                        for trait in filtered_traits
-                        if trait.is_gfx125_d192_candidate_feature
-                        and trait.pipeline_tag == "qr_tdm_d192_v128"
-                    }
-                    inners = str()
-                    for i_trait, trait in enumerate(filtered_traits):
-                        fmt = api_trait_fmt_args(arch, dtype, trait.hdim, trait, max_bm0)
-                        fmt["F_constraint"] = trait.dispatch_constraint(available_candidate_keys)
-                        inners += FMHA_FWD_API_INNER_DISPATCH.format(
-                            F_if=if_(i_trait),
-                            F_trait_type=FMHA_FWD_TRAIT_TYPE.format(**fmt),
-                            **fmt,
-                        )
+                    inners = render_traits(traits, arch, dtype)
                     per_hdim_case += FMHA_FWD_API_PER_HDIM_CASE.format(
                         F_if=if_(i_hdim),
                         F_hdim=hdim,
@@ -947,13 +1005,6 @@ class FmhaFwdKernel:
         return f"{self.name}{self.F_arch.filename_suffix}.cpp"
 
     def api_trait(self) -> FmhaFwdApiTrait:
-        is_gfx125_d192_candidate = (
-            self.F_arch.name == "gfx125"
-            and self.F_dtype == "bf16"
-            and self.F_hdim == 192
-            and self.F_tile.F_bn1 == 128
-            and self.F_pipeline.tag == "qr_tdm_d192_v128"
-        )
         return FmhaFwdApiTrait(
             arch=self.F_arch,
             pipeline_tag=self.F_pipeline.tag,
@@ -982,8 +1033,6 @@ class FmhaFwdKernel:
             sink=self.F_pipeline.F_sink,
             occupancy=int(self.F_tile.F_occupancy),
             constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
-            dispatch_hdim="256" if is_gfx125_d192_candidate else None,
-            dispatch_hdim_v=256 if is_gfx125_d192_candidate else None,
         )
 
 
@@ -1564,14 +1613,15 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32
 
     @staticmethod
-    def is_d192_tdm_tile(tile: FmhaFwdTileSize) -> bool:
+    def is_tdm_v128_tile(tile: FmhaFwdTileSize, hdim: int) -> bool:
         return (
-            tile.F_bm0 == 128
+            hdim in (128, 192)
+            and tile.F_bm0 == 128
             and tile.F_bn0 == 128
             and tile.F_bk0 == 32
             and tile.F_bn1 == 128
             and tile.F_bk1 == 32
-            and tile.F_bk0max == 192
+            and tile.F_bk0max == hdim
             and (tile.F_rm0, tile.F_rn0, tile.F_rk0) == (4, 1, 1)
             and (tile.F_rm1, tile.F_rn1, tile.F_rk1) == (4, 1, 1)
             and (tile.F_wm0, tile.F_wn0, tile.F_wk0) == (16, 16, 32)
@@ -1583,32 +1633,41 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = super().get_rules()
 
-        def check_d192_tdm_tile_pipeline(
+        def check_tdm_v128_tile_pipeline(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            if problem_ctx.dtype != "bf16" or (
-                problem_ctx.hdim,
-                problem_ctx.hdim_v,
-            ) != (192, 128):
-                return True
+            is_tdm = kernel_ctx.pipeline.tag in ("qr_tdm_d192_v128", "qr_tdm_v128")
+            if (
+                problem_ctx.dtype != "bf16"
+                or problem_ctx.hdim_v != 128
+                or (problem_ctx.hdim not in (128, 192))
+            ):
+                return not is_tdm
 
-            is_tdm = kernel_ctx.pipeline.tag == "qr_tdm_d192_v128"
-            is_tdm_tile = cls.is_d192_tdm_tile(kernel_ctx.tile)
+            expected_tag = (
+                "qr_tdm_d192_v128" if problem_ctx.hdim == 192 else "qr_tdm_v128"
+            )
+            is_tdm_tile = cls.is_tdm_v128_tile(kernel_ctx.tile, problem_ctx.hdim)
             if is_tdm != is_tdm_tile:
                 return False
             if not is_tdm:
-                return False
+                return problem_ctx.hdim != 192
 
-            expected_seq_pad = "t" if problem_ctx.mode == "group" else "f"
+            # D128 retains the validated direct kernel's padded specialization;
+            # the unpadded batch/no-mask specialization incurs VGPR spills.
+            expected_seq_pad = (
+                "t" if problem_ctx.hdim == 128 or problem_ctx.mode == "group" else "f"
+            )
             return (
-                kernel_ctx.pipeline.F_vlayout == "row"
+                kernel_ctx.pipeline.tag == expected_tag
+                and kernel_ctx.pipeline.F_vlayout == "row"
                 and kernel_ctx.pipeline.F_spad == expected_seq_pad
                 and kernel_ctx.pipeline.F_skpad == expected_seq_pad
                 and kernel_ctx.pipeline.F_dpad == "t"
                 and kernel_ctx.pipeline.F_dvpad == "t"
             )
 
-        rules.append(check_d192_tdm_tile_pipeline)
+        rules.append(check_tdm_v128_tile_pipeline)
         return rules
 
     @classmethod
@@ -1624,6 +1683,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             }  # fmt: skip
             if dtype == "bf16":
+                result[(128, 128)].append(FmhaFwdTileSize(128, 128,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   1))  # fmt: skip
                 result[(192, 128)].append(FmhaFwdTileSize(128, 128,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,   1))  # fmt: skip
             return result
         elif dtype in cls._DT_FP8_FP8BF16:
@@ -1685,12 +1745,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
 
-            if dtype == "bf16" and hdim == 192 and hdim_v == 128:
+            if dtype == "bf16" and hdim in (128, 192) and hdim_v == 128:
+                family_tag = "qr_tdm_d192_v128" if hdim == 192 else "qr_tdm_v128"
                 for mask, lse in itertools.product(
                     get_mask_map(mask_impl).keys(), ["t", "f"]
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_d192_v128", "row", "f", "f", "t", "t", "f", "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_d192_v128", "row", "t", "t", "t", "t", "f", "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline(family_tag, "row", "f", "f", "t", "t", "f", "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline(family_tag, "row", "t", "t", "t", "t", "f", "no", lse, "f", qscale, mask, "f", "f", "f"))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).
@@ -2114,6 +2175,14 @@ def get_product(receipt: int) -> Product:
         return Product(name="Default", rule=fit)
 
 
+def family_hdim_requested(hdim: int, optdim_list: List[int]) -> bool:
+    if optdim_list == [-1]:
+        return hdim in (128, 192)
+    return (hdim == 128 and 128 in optdim_list) or (
+        hdim == 192 and (192 in optdim_list or 256 in optdim_list)
+    )
+
+
 def get_fwd_blobs(
     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
@@ -2127,7 +2196,7 @@ def get_fwd_blobs(
         # CustomTuneFactory might return None
         if not d:
             continue
-        include_gfx125_d192 = (
+        include_legacy_bf16_d192_fallback = (
             factory.arch.name == "gfx125"
             and dtype == "bf16"
             and (optdim_list == [-1] or 192 in optdim_list or 256 in optdim_list)
@@ -2136,11 +2205,19 @@ def get_fwd_blobs(
         for ((hdim, hdim_v), tiles), mode in itertools.product(
             d.items(), MODE_MAP.keys()
         ):
-            if optdim_list != [-1]:
-                if hdim not in optdim_list and not (
-                    include_gfx125_d192 and hdim in (192, 256)
-                ):
-                    continue
+            legacy_requested = (
+                optdim_list == [-1]
+                or hdim in optdim_list
+                or (include_legacy_bf16_d192_fallback and hdim in (192, 256))
+            )
+            family_requested = (
+                factory.arch.name == "gfx125"
+                and dtype == "bf16"
+                and hdim_v == 128
+                and family_hdim_requested(hdim, optdim_list)
+            )
+            if not legacy_requested and not family_requested:
+                continue
             for tile, next_tile in zip(tiles, tiles[1:]):
                 assert next_tile.F_bm0 >= tile.F_bm0, (
                     "Tiles must be ordered by increasing bm0"
@@ -2149,6 +2226,10 @@ def get_fwd_blobs(
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)
             ):
+                # The family alias must not expand the legacy tile inventory.
+                is_family = pipeline.tag in ("qr_tdm_d192_v128", "qr_tdm_v128")
+                if not (family_requested if is_family else legacy_requested):
+                    continue
                 problem_ctx = ProblemContext(
                     dtype=dtype, mode=mode, hdim=hdim, hdim_v=hdim_v
                 )
@@ -2166,12 +2247,21 @@ def get_fwd_blobs(
                 )
 
     kernel_traits = [(kernel, kernel.api_trait()) for kernel in compatible_kernels]
+    selected_family = {
+        trait.tdm_v128_key: trait
+        for kernel, trait in kernel_traits
+        if trait.is_gfx125_tdm_v128_candidate
+        and (not kernel_filter or fnmatch.fnmatch(kernel.name, kernel_filter))
+    }
+    required_gfx125_d128_fallback_keys = {
+        trait.gfx125_d192_feature_key
+        for trait in selected_family.values()
+        if trait.hdim == "128"
+    }
     required_gfx125_d192_fallback_keys = {
         trait.gfx125_d192_feature_key
-        for kernel, trait in kernel_traits
-        if trait.is_gfx125_d192_candidate_feature
-        and trait.pipeline_tag == "qr_tdm_d192_v128"
-        and (not kernel_filter or fnmatch.fnmatch(kernel.name, kernel_filter))
+        for trait in selected_family.values()
+        if trait.hdim == "192"
     }
 
     gen = list()
@@ -2181,6 +2271,13 @@ def get_fwd_blobs(
             trait.is_gfx125_d192_fallback_feature
             and trait.pipeline_tag == "qr"
             and trait.gfx125_d192_feature_key in required_gfx125_d192_fallback_keys
+        ) or (
+            trait.arch.name == "gfx125"
+            and trait.hdim == "128"
+            and trait.bn1 == 128
+            and trait.pipeline_tag in ("qr_tdm", "qr")
+            and trait.tr_load == "f"
+            and trait.gfx125_d192_feature_key in required_gfx125_d128_fallback_keys
         )
         if not filter_match and not required_fallback:
             continue
