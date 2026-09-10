@@ -62,6 +62,24 @@ def _base_config(
     return {"signature": sig, "algorithm": alg, "arch": arch}
 
 
+def _gfx11_batch_prefill_config(pipeline="batch_prefill_gfx11", **sig_overrides):
+    """Config on the gfx1100 Independent-V predicate; overrides break one clause."""
+    sig_overrides.setdefault("paged_kv", True)
+    sig_overrides.setdefault("page_size", 16)
+    sig_overrides.setdefault("kv_memory_layout", "linear")
+    cfg = _base_config(
+        family="batch_prefill",
+        arch="gfx1100",
+        pipeline=pipeline,
+        **sig_overrides,
+    )
+    cfg["signature"]["mode"] = "group"
+    cfg["algorithm"]["tile"] = [128, 32, 32, 128, 32, 128]
+    cfg["algorithm"]["wave"] = [8, 1, 1, 8, 1, 1, 1, 1, 1]
+    cfg["algorithm"]["warp"] = [16, 16, 16, 16, 16, 16, 16, 16, 16]
+    return cfg
+
+
 class TestValidateConfig(unittest.TestCase):
     def test_valid_basic_config(self):
         r = validate_config(_base_config(), SPECS)
@@ -132,6 +150,55 @@ class TestValidateConfig(unittest.TestCase):
         cfg["signature"]["mode"] = "group"
         r = validate_config(cfg, SPECS)
         self.assertTrue(r.valid, r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_valid(self):
+        r = validate_config(_gfx11_batch_prefill_config(), SPECS)
+        self.assertTrue(r.valid, r.errors)
+
+    def test_gfx1100_batch_prefill_rejects_qr_async(self):
+        cfg = _gfx11_batch_prefill_config(pipeline="qr_async")
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("batch_prefill_gfx11" in e for e in r.errors), r.errors)
+
+    def test_batch_prefill_gfx11_rejected_on_other_arch(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["arch"] = "gfx950"
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("gfx1100" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_vectorized(self):
+        cfg = _gfx11_batch_prefill_config(kv_memory_layout="vectorized")
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("linear" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_non_128_hdim(self):
+        cfg = _gfx11_batch_prefill_config(hdim_q=96, hdim_v=128)
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("hdim 128" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_dropout(self):
+        cfg = _gfx11_batch_prefill_config(dropout=True)
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("dropout" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_block_size_128(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["algorithm"]["wave"] = [4, 1, 1, 4, 1, 1, 1, 1, 1]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("block size 256" in e for e in r.errors), r.errors)
+
+    def test_gfx1100_batch_prefill_gfx11_rejects_other_tile(self):
+        cfg = _gfx11_batch_prefill_config()
+        cfg["algorithm"]["tile"] = [128, 128, 32, 128, 32, 128]
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("N0=32" in e for e in r.errors), r.errors)
 
     def test_splitkv_combine_bn1_must_be_32(self):
         cfg = _base_config(family="fwd_splitkv_combine", pipeline="qr")
