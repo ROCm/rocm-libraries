@@ -513,3 +513,13 @@ baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
 Configuration, asymmetric aligned layouts in segment_interleave, consolidated
 derived-state cases in Solution, LDS token selection in Component, and focused
 reduction/fixup paths in GSU and StreamK.
+
+## D27 — Refresh config-driven emit results after develop changes
+
+**ADR:** [`adr/0014-refresh-config-emit-results-after-develop.md`](adr/0014-refresh-config-emit-results-after-develop.md)
+
+**Decision:** Re-record the 75 set-cover emit nodes against current `develop`
+and an in-tree `rocisa` build. Seventy-one nodes retain their kernel counts and
+emitter return codes. Four reviewed nodes change count, and every retained
+kernel still emits with return code `0`; ADR 0014 records those cases and the
+upstream cause.
