@@ -24,9 +24,18 @@ namespace TensileLite::Client::HostNumerics
 {
     namespace detail
     {
-        using namespace roc::host_numerics;
         using TensileLite::Client::checkedHostNumericsPtrdiff;
         using TensileLite::Client::hostNumericsLayout;
+        using roc::host_numerics::ActivationFunction;
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::MathMode;
+        using roc::host_numerics::OutputSelection;
+        using roc::host_numerics::ScalarCategory;
+        using roc::host_numerics::ScalarType;
+        using roc::host_numerics::Shape;
+        using roc::host_numerics::Tensor;
+        using roc::host_numerics::scalarTypeInfo;
+        using roc::host_numerics::storageBytesForLayout;
 
         inline TranslationFailure failure(TranslationFailureCode code, std::string reason)
         {
@@ -266,6 +275,7 @@ namespace TensileLite::Client::HostNumerics
         using MatrixAxis      = detail::MatrixAxis;
         using OutputSelection = roc::host_numerics::OutputSelection;
         using ScalarType = roc::host_numerics::ScalarType;
+        using Shape      = roc::host_numerics::Shape;
         using Tensor     = roc::host_numerics::Tensor;
 
         Tensor makeAddendTensor(const Layout& layout, std::span<const std::byte> source) const
@@ -291,8 +301,9 @@ namespace TensileLite::Client::HostNumerics
             normalizeProblem(ContractionProblemGemm const& problem,
                              OutputSelection               outputSelection)
         {
-            using namespace roc::host_numerics;
             using detail::failure;
+            using roc::host_numerics::IdentityActivation;
+            using roc::host_numerics::scalarTypeInfo;
 
             if(problem.boundIndices().size() != 1 || problem.freeIndicesA().size() != 1
                || problem.freeIndicesB().size() != 1 || problem.batchIndices().size() != 1)
@@ -462,7 +473,6 @@ namespace TensileLite::Client::HostNumerics
         std::optional<TranslationFailure> bindInputs(ContractionProblemGemm const& problem,
                                                      ContractionInputs const&      inputs)
         {
-            using namespace roc::host_numerics;
             using detail::failure;
 
             if(batches == 0 || m == 0 || n == 0)
@@ -820,7 +830,6 @@ namespace TensileLite::Client::HostNumerics
 
         detail::BatchInputs materializeBatch(size_t batch) const
         {
-            using namespace roc::host_numerics;
             const detail::BatchPlan& plan = batchPlans.at(batch);
             Tensor currentA = readA ? Tensor::copyEncodedBackingStorage(
                                           typeA, plan.a.layout, plan.a.storage)
@@ -973,7 +982,12 @@ namespace TensileLite::Client::HostNumerics
 
     void TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
     {
-        using namespace roc::host_numerics;
+        using roc::host_numerics::ScalarType;
+        using roc::host_numerics::Tensor;
+        using roc::host_numerics::addInto;
+        using roc::host_numerics::matmulInto;
+        using roc::host_numerics::multiply;
+        using roc::host_numerics::multiplyInto;
 
         const auto isZero = [](const Tensor& value) {
             return value.item<std::complex<double>>() == std::complex<double>(0.0, 0.0);
@@ -1034,8 +1048,6 @@ namespace TensileLite::Client::HostNumerics
 
     void GemmInvocationAdapter::execute(roc::host_numerics::GemmBackend backend) const
     {
-        using namespace roc::host_numerics;
-
         for(size_t batch = 0; batch < batchCount(); ++batch)
         {
             auto translation = translateBatch(batch);
@@ -1056,8 +1068,13 @@ namespace TensileLite::Client::HostNumerics
     std::variant<TranslatedGemmBatch, TranslationFailure> GemmInvocationAdapter::translateBatch(
         size_t batch) const
     {
-        using namespace roc::host_numerics;
         using detail::failure;
+        using roc::host_numerics::ActivationApplication;
+        using roc::host_numerics::OutputConversion;
+        using roc::host_numerics::OutputSelection;
+        using roc::host_numerics::ScalarType;
+        using roc::host_numerics::Shape;
+        using roc::host_numerics::Tensor;
 
         const ScalarType accumulatorType = m_state->operationAccumulatorType;
 
@@ -1136,21 +1153,29 @@ namespace TensileLite::Client::HostNumerics
                 std::visit(
                     [&](auto& function) {
                         using Function = std::remove_cvref_t<decltype(function)>;
-                        if constexpr(std::is_same_v<Function, ClippedReluActivation>)
+                        if constexpr(std::is_same_v<
+                                         Function,
+                                         roc::host_numerics::ClippedReluActivation>)
                         {
                             function.lower = m_state->activationParameter0;
                             function.upper = m_state->activationParameter1;
                         }
-                        else if constexpr(std::is_same_v<Function, GeluScalingActivation>)
+                        else if constexpr(std::is_same_v<
+                                              Function,
+                                              roc::host_numerics::GeluScalingActivation>)
                             function.scale = m_state->activationParameter0;
-                        else if constexpr(std::is_same_v<Function, LeakyReluActivation>)
+                        else if constexpr(std::is_same_v<
+                                              Function,
+                                              roc::host_numerics::LeakyReluActivation>)
                             function.negativeSlope = m_state->activationParameter0;
-                        else if constexpr(std::is_same_v<Function, TanhActivation>)
+                        else if constexpr(
+                            std::is_same_v<Function, roc::host_numerics::TanhActivation>)
                         {
                             function.inputScale  = m_state->activationParameter0;
                             function.outputScale = m_state->activationParameter1;
                         }
-                        else if constexpr(std::is_same_v<Function, SwishActivation>)
+                        else if constexpr(
+                            std::is_same_v<Function, roc::host_numerics::SwishActivation>)
                             function.beta = m_state->activationParameter0;
                     },
                     epilogue.options.activation);
