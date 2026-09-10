@@ -65,6 +65,7 @@ reconciles actual runtime behaviour, which is the form step 9 requires.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -74,33 +75,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dispatch_parity import (  # noqa: E402
     ParityError,
     _bind_provider,
+    _eligible,
     _import,
     _load_profile,
     _required,
     resolve_shapes,
 )
-
-
-def _eligible(candidate, request):
-    """Ask the candidate the COMPLETE eligibility question.
-
-    Returns ``(ok, reason, degraded)``. ``degraded`` is True when only the residual
-    predicate could be consulted, and the caller MUST carry that into the report: a
-    served=True obtained without the capability gate is an unverified answer, and one
-    that silently looks identical to a verified one is worse than no answer at all.
-    """
-    admits = getattr(candidate, "admits", None)
-    if callable(admits):
-        ok, reason = admits(request)
-        return ok, reason, False
-    supports = getattr(candidate, "_supports", None)
-    if callable(supports):
-        ok, reason = supports(request)
-        return ok, f"{reason} (predicate only: no public eligibility accessor)", True
-    raise ParityError(
-        f"candidate {getattr(candidate, 'spec_id', candidate)!r} exposes neither "
-        f"`admits` nor `_supports`; this tool cannot ask it about eligibility."
-    )
 
 
 def reference_serves(shapes: list[dict], profile: dict) -> dict:
@@ -109,10 +89,8 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
     Scoped, never library-wide. A sibling candidate serving a shape this kernel refuses
     is a different kernel's job, not this integration's gap.
 
-    The request is constructed inside the try for the same reason it is in
-    `dispatch_parity`: a structurally-invalid request raises at CONSTRUCTION, before any
-    predicate runs, so a check that only calls the predicate reports those shapes as
-    supported and ships a wrong denominator.
+    Request construction and reference API failures are operational errors. Only
+    a validated false eligibility result is an ordinary decline.
     """
     entry = profile.get("reference_candidates") or {}
     if not entry:
@@ -134,9 +112,16 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
             "coverage as this integration's gap."
         )
 
-    candidates = [c for c in registry() if getattr(c, attribute, None) == family]
+    try:
+        if not callable(registry):
+            raise TypeError("candidate registry is not callable")
+        inspect.signature(registry).bind()
+        registered = list(registry())
+        candidates = [c for c in registered if getattr(c, attribute, None) == family]
+    except Exception as exc:
+        raise ParityError(f"reference candidate registry failed: {exc}") from exc
     if not candidates:
-        available = sorted({str(getattr(c, attribute, "?")) for c in registry()})
+        available = sorted({str(getattr(c, attribute, "?")) for c in registered})
         raise ParityError(
             f"no registered candidate has {attribute}={family!r}. Available "
             f"{attribute} values: {available}. A profile naming a family that does not "
@@ -178,6 +163,15 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
         via = _import(
             *_required(via_decl, "reference_request.via", "module", "function")
         )
+        # DECLARED and unusable is an error, never a fallback. A profile that names
+        # a translator has said its corpus is in the wrong vocabulary for the
+        # reference; quietly constructing the request class directly instead asks
+        # the reference a question the profile said it would not understand, and
+        # every per-shape type rejection then reads as a decline.
+        if not callable(via):
+            raise ParityError("reference_request.via must name a callable")
+    if not isinstance(request_cls, type):
+        raise ParityError("reference_request.class must name a request class")
 
     out = {}
     for index, shape in enumerate(shapes):
@@ -188,11 +182,19 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
         if arch and "arch" not in fields:
             fields["arch"] = arch
         try:
-            request = via(fields) if via is not None else request_cls(**fields)
+            if via is not None:
+                inspect.signature(via).bind(fields)
+                request = via(fields)
+            else:
+                inspect.signature(request_cls).bind(**fields)
+                request = request_cls(**fields)
+            if not isinstance(request, request_cls):
+                raise TypeError("reference translator returned the wrong request type")
         except Exception as exc:
-            out[index] = (False, f"{type(exc).__name__}: {exc}")
-            continue
-        served, why, degraded = False, None, False
+            raise ParityError(
+                f"reference request {index} construction failed: {exc}"
+            ) from exc
+        served, why = False, None
         # Collect EVERY candidate's verdict, then choose the reason deliberately. The
         # naive loop kept whichever decline came last, and on a family with more than
         # one member that is arbitrary: scoping on a shared `algorithm` matches both the
@@ -203,32 +205,19 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
         # still right; the evidence step 9 exists to collect was uniformly wrong.
         reasons = []
         for candidate in candidates:
-            try:
-                # `admits`, NOT the underscore predicate. The library's own docstring
-                # is explicit: admits is "the only eligibility question a caller should
-                # ask", because registered candidates keep their arch and dtype gates in
-                # `capability` and the predicate carries only the residual checks. Its
-                # worked example is a candidate whose predicate "happily accepts" a
-                # target its capability block forbids -- so calling the predicate alone
-                # would report the reference as serving a shape it cannot, and turn a
-                # correct hipDNN decline into a phantom coverage gap.
-                ok, reason, partial = _eligible(candidate, request)
-            except Exception as exc:  # a predicate that raises is a decline, loudly
-                ok, reason, partial = False, f"{type(exc).__name__}: {exc}", False
-            if ok:
-                served, degraded = True, partial
+            # Every candidate is consulted, even after an acceptance: a later
+            # broken API must not be hidden by an earlier successful predicate. A
+            # candidate whose eligibility API is missing or unusable raises
+            # ParityError out of `_eligible`; only a validated verdict returns here.
+            ok, reason = _eligible(candidate, request)
+            if ok and not served:
+                served = True
                 why = str(getattr(candidate, "spec_id", family))
-                break
-            reasons.append((getattr(candidate, "spec_id", "?"), str(reason)))
+            if not ok:
+                reasons.append((getattr(candidate, "spec_id", "?"), reason))
         if not served:
             why = _decline_reason(reasons)
-        # A served=True reached through the degraded path is an UNVERIFIED answer, and
-        # the caveat has to survive into the report rather than being thrown away with
-        # the string it arrived in.
-        out[index] = (
-            served,
-            why + (" [UNVERIFIED: predicate only]" if degraded else ""),
-        )
+        out[index] = (served, why)
     return out
 
 
@@ -249,7 +238,6 @@ def _decline_reason(reasons: list[tuple[str, str]]) -> str:
     ]
     spec_id, reason = (substantive or reasons)[0]
     return f"{reason} [{spec_id}]"
-    return out
 
 
 def main(argv=None) -> int:
@@ -283,9 +271,44 @@ def main(argv=None) -> int:
         profile = _load_profile(args.profile)
         _bind_provider(profile.get("provider_root"))
         shapes = json.loads(Path(args.shapes).read_text())
+        if (
+            not isinstance(shapes, list)
+            or not shapes
+            or any(not isinstance(s, dict) for s in shapes)
+        ):
+            raise ParityError(
+                "--shapes must contain a nonempty list of request mappings"
+            )
+        graph_owners = {}
+        shape_names = []
+        for index, shape in enumerate(shapes):
+            provenance = shape.get("_provenance") or {}
+            occurrences = shape.get("_provenance_occurrences") or [provenance]
+            if not isinstance(occurrences, list) or any(
+                not isinstance(p, dict) for p in occurrences
+            ):
+                raise ParityError("provenance occurrences must be a list of mappings")
+            names = {p["graph"] for p in occurrences if p.get("graph")}
+            for name in names:
+                if (
+                    not isinstance(name, str)
+                    or (name in graph_owners and graph_owners[name] != index)
+                    or (name.isdigit() and int(name) != index)
+                ):
+                    raise ParityError("ambiguous graph name in shape corpus")
+                graph_owners[name] = index
+            shape_names.append(names)
         ours = resolve_shapes(shapes, profile)
         theirs = reference_serves(shapes, profile)
-    except ParityError as exc:
+    # Everything above is setup and interrogation: loading the profile, binding the
+    # provider, reading the corpus, building requests through the integration's own
+    # factory, and asking the reference. Every failure in there is OPERATIONAL --
+    # the comparison did not happen -- so it exits 2 whatever it was raised as. An
+    # enumerated exception list let a factory that raised, say, TypeError instead of
+    # the expected ValueError escape as a traceback with exit 1, which reads as an
+    # ordinary unreconciled-decline result. The escape flags below are about what a
+    # COMPLETED comparison found and cannot reach this.
+    except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
 
@@ -304,26 +327,39 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             return 2
+        if any(
+            not isinstance(reason, str) or not reason.strip()
+            for reason in declines.values()
+        ):
+            print("FAIL: every decline must carry a nonempty reason", file=sys.stderr)
+            return 2
 
     both_serve, both_decline, only_reference, only_ours = [], [], [], []
     matched_keys = set()
     for index, resolution in enumerate(ours):
         we_serve = resolution.spec is not None
-        name = (shapes[index].get("_provenance") or {}).get("graph")
+        runtime_reasons = []
         if args.declines:
             # A runtime declines file overrides the offline answer: what the engine
             # ACTUALLY did beats what the dispatcher says it could do.
             key = str(index)
-            for candidate_key in (key, name):
-                if candidate_key and candidate_key in declines:
+            for candidate_key in {key, *shape_names[index]}:
+                if candidate_key in declines:
                     matched_keys.add(candidate_key)
+                    runtime_reasons.append(declines[candidate_key])
                     we_serve = False
         they_serve, why = theirs[index]
         if we_serve and they_serve:
             both_serve.append(index)
         elif they_serve:
             only_reference.append(
-                (index, why, resolution.reason or "no variant matched")
+                (
+                    index,
+                    why,
+                    "; ".join(runtime_reasons)
+                    or resolution.reason
+                    or "no variant matched",
+                )
             )
         elif we_serve:
             # WE serve a shape the reference declines. Not a coverage gap -- the
@@ -390,37 +426,6 @@ def main(argv=None) -> int:
             f"reason -- agreement about nothing.\n  Add '{match_key}' to "
             f"request.defaults, or pass --allow-empty if a corpus that\n  nothing "
             f"serves is genuinely what you meant to reconcile.",
-            file=sys.stderr,
-        )
-        if not args.allow_empty:
-            return 2
-
-    # The OTHER way this gate passes by asking nothing, and the one `reference_request`
-    # exists for. If the reference's request class is wrong for it -- typically because
-    # `request.class` is an ADAPTER in the generator side's vocabulary -- every
-    # candidate refuses it at its own type check. That refusal is per shape and is
-    # recorded as an ordinary decline, so the run reads as agreement while not one of
-    # the reference's answers is about applicability.
-    #
-    # The `nothing_served` guard above does NOT catch this: our side still serves, so
-    # the comparison looks live. What gives it away is that EVERY reference decline is
-    # a construction/type failure rather than a support answer.
-    reference_declines = [why for _, why in only_ours] + [
-        why for _, why in both_decline
-    ]
-    type_errors = [
-        why
-        for why in reference_declines
-        if "TypeError" in why or ("expected" in why and "got" in why)
-    ]
-    if reference_declines and len(type_errors) == len(reference_declines):
-        print(
-            "\nFAIL: EVERY reference decline is a type/construction error, not a "
-            "support answer.\n  The reference was asked in a vocabulary it does not "
-            "accept, so nothing was\n  actually reconciled. This is the failure "
-            "`reference_request:` exists for: declare\n  the reference's own request "
-            "class (and `via:` if the corpus needs translating)\n  so the reference is "
-            f"asked in its own terms.\n  First: {type_errors[0][:96]}",
             file=sys.stderr,
         )
         if not args.allow_empty:
