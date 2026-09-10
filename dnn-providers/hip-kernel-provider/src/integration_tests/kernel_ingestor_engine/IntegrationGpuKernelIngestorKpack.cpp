@@ -64,6 +64,11 @@ constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 /// FLOAT add. That makes it the fallback ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
 
+/// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so
+/// one epsilon is the whole budget, and the same number is right for a FLOAT fixture
+/// and a HALF one.
+constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
+
 /// Distinguishes the packaged FIXTURE's archive from every other root's in the shared
 /// descriptor tree. Each source root packs under its own archive group, so the group name
 /// is what names an archive to a particular root; this is the group the fixture root is
@@ -622,7 +627,8 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(*graph, /*seed=*/0);
 }
 
 // ---------------------------------------------------------------------------
@@ -641,7 +647,8 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(*graph, /*seed=*/0);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration

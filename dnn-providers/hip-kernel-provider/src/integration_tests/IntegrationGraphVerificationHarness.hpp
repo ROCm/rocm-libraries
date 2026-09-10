@@ -63,14 +63,28 @@ protected:
     }
 
 protected:
+    /// Builds @p graph, runs it on device and on the CPU reference, and validates every
+    /// output against the validator registered for that tensor.
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    {
+        auto result = graph.build(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        ASSERT_NO_FATAL_FAILURE(verifyBuiltGraph(graph, seed));
+    }
+
+    /// verifyGraph() for a caller that has already built its own plans.
+    ///
+    /// Suites that pin an engine, set knobs or drive create_execution_plan_ext() have to
+    /// stage the build themselves, so they cannot use verifyGraph()'s build step -- but
+    /// everything after it is the same, and duplicating it is how a second copy came to
+    /// discover outputs by a hardcoded uid, materialise virtual tensors and compare
+    /// every dtype as float.
+    void verifyBuiltGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
         hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
         std::vector<int64_t> outputTensorIds;
-
-        auto result = graph.build(_handle);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 
@@ -89,6 +103,10 @@ protected:
         {
             registerValidator();
         }
+        // Drained, not accumulated. A single test body may verify several graphs, and a
+        // queue that kept every closure would re-run registrations for graphs that are
+        // already gone.
+        _deferredValidators.clear();
 
         for(const auto& tensorId : outputTensorIds)
         {
@@ -109,72 +127,28 @@ protected:
         }
     }
 
-    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on device with an
-    /// already-sized `workspace`, and compares against CpuReferenceGraphExecutor. Reseeds
-    /// inputs from `seed` so repeated calls never compare stale buffers. `reductionLength`
-    /// widens the tolerance for kernels that accumulate: GPU and CPU sum in different
-    /// orders, so a K-term sum needs ~K*epsilon of slack where a pointwise op needs one.
+    /// Registers one validator per non-virtual output of @p graph, each built from that
+    /// tensor's own data type.
     ///
-    /// Unlike verifyGraph() this drives an already-built graph and validates the single
-    /// output at uid 3, for suites that stage the build themselves.
-    void executeAndVerify(hipdnn_frontend::graph::Graph& graph,
-                          void* workspace,
-                          unsigned int seed,
-                          int reductionLength = 1)
+    /// @p epsilonMultiple is expressed in epsilons of THIS FIXTURE'S element type, not in
+    /// absolute units: a K-term sum needs ~K of them, an elementwise op needs one, and
+    /// the same number then means the same thing in a FLOAT fixture and a HALF one.
+    /// Hardcoding an absolute float epsilon is how a HALF comparison ends up ~4000x
+    /// tighter than the type can represent.
+    void registerValidatorsForOutputs(hipdnn_frontend::graph::Graph& graph,
+                                      float epsilonMultiple = 1.0f)
     {
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
-        hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
+        const float tolerance
+            = epsilonMultiple * static_cast<float>(std::numeric_limits<DataType>::epsilon());
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                gpuBundle.addTensor(
-                    *tensorAttr,
-                    hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
-                cpuBundle.addTensor(
-                    *tensorAttr,
-                    hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
-            }
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
+                if(!tensorAttr->get_is_virtual())
                 {
-                    gpuBundle.addTensor(
-                        *tensorAttr,
-                        hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
-                    cpuBundle.addTensor(
-                        *tensorAttr,
-                        hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                    registerValidator(tensorAttr, tolerance);
                 }
             }
         });
-
-        for(auto& [uid, tensor] : gpuBundle.tensors)
-        {
-            // Per-uid offset so the operands are never byte-identical: a+a and a+b are
-            // indistinguishable to allClose() when both operands hold the same bytes.
-            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
-            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
-        }
-
-        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
-        auto result = graph.execute(_handle, deviceVariantPack, workspace);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-
-        auto [serializedGraph, serErr] = graph.to_binary();
-        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
-
-        auto& gpuOut = gpuBundle.getTensor(3);
-        auto& cpuOut = cpuBundle.getTensor(3);
-        gpuOut.markDeviceModified();
-        const auto tolerance
-            = static_cast<float>(reductionLength) * std::numeric_limits<float>::epsilon();
-        EXPECT_TRUE(
-            hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float>(tolerance, tolerance)
-                .allClose(cpuOut, gpuOut));
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
@@ -188,13 +162,18 @@ protected:
                            float relativeTolerance)
     {
         _deferredValidators.emplace_back([=]() {
-            _tensorIdToValidatorMap.insert(
-                {attr->get_uid(),
-                 hipdnn_test_sdk::utilities::createAllCloseValidator(
-                     hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
-                     absoluteTolerance,
-                     relativeTolerance)});
-            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+            // insert_or_assign, never insert: map::insert KEEPS the existing entry, so a
+            // later registration for the same uid would be silently discarded and the
+            // first graph's validator would judge every graph after it. Graphs in one
+            // suite routinely share output uids, and they do not share dtypes or
+            // accumulation depths.
+            _tensorIdToValidatorMap.insert_or_assign(
+                attr->get_uid(),
+                hipdnn_test_sdk::utilities::createAllCloseValidator(
+                    hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                    absoluteTolerance,
+                    relativeTolerance));
+            _tensorIdToNameMap.insert_or_assign(attr->get_uid(), attr->get_name());
         });
     }
 
@@ -218,13 +197,21 @@ protected:
         });
     }
 
+    /// Seeds every tensor in @p bundle.
+    ///
+    /// The seed is offset PER UID so two operands never hold identical bytes: `a + a` and
+    /// `a + b` agree elementwise when they do, and a comparison that cannot tell them
+    /// apart passes for an operation that ignores one of its inputs.
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
     {
         for(auto& tensorPair : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
         }
     }
 
@@ -282,7 +269,7 @@ private:
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         gpuBundle.addTensor(*tensorAttr,
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
-        _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
+        _tensorIdToNameMap.insert_or_assign(tensorId, tensorAttr->get_name());
 
         return true;
     }
