@@ -1,0 +1,157 @@
+- MinimumRequiredVersion: 5.0.0
+- gfx950
+- Architecture: gfx950
+  CUCount: 256
+- - Device 75a0
+- Activation: true
+  ActivationComputeDataType: 0
+  ActivationNoGuard: false
+  ActivationType: hipblaslt_all
+  AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  BetaOnlyUseBias: false
+  BiasDataTypeList:
+  - 0
+  - 7
+  BiasSrc: D
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 21
+  DataTypeA: 21
+  DataTypeAmaxD: 0
+  DataTypeB: 21
+  DataTypeE: 7
+  DataTypeMXSA: 22
+  DataTypeMXSB: 22
+  DestDataType: 7
+  F32XdlMathOp: 0
+  Gradient: false
+  GroupedGemm: false
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index01MXSA: 0
+  Index01MXSB: 1
+  Index1: 1
+  IndexAssignmentsA:
+  - 3
+  - 0
+  - 2
+  IndexAssignmentsB:
+  - 3
+  - 1
+  - 2
+  IndexAssignmentsLD:
+  - 4
+  - 5
+  - 6
+  - 7
+  IndexAssignmentsMXSA:
+  - 3
+  - 0
+  - 2
+  IndexAssignmentsMXSB:
+  - 3
+  - 1
+  - 2
+  IndexAssignmentsMetadata:
+  - 3
+  - 0
+  - 2
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 0
+  IndexUnrollM: 0
+  IndexUnrollMXSA: 0
+  IndexUnrollMXSB: 0
+  IndicesBatch:
+  - 2
+  IndicesFree:
+  - 0
+  - 1
+  IndicesSummation:
+  - 3
+  MXBlockA: 32
+  MXBlockB: 32
+  MacDataTypeA: 21
+  MacDataTypeB: 21
+  MirrorDimsA: []
+  MirrorDimsB: []
+  MirrorDimsMXSA: []
+  MirrorDimsMXSB: []
+  MirrorDimsMetadata: []
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  OutputAmaxD: false
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SetConstStrideBias: []
+  SilentHighPrecisionAccumulate: false
+  Sparse: 0
+  StochasticRounding: false
+  StridedBatched: true
+  SupportUserArgs: true
+  SwizzleTensorA: false
+  SwizzleTensorB: false
+  TLUA: false
+  TLUB: false
+  TLUMXSA: false
+  TLUMXSB: false
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: true
+  UseBias: 1
+  UseE: false
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  UseScaleAB: Scalar
+  UseScaleAlphaVec: 1
+  UseScaleCD: false
+- - CustomKernelName: Custom_Cijk_Alik_Bljk_F4BS_MX_BH_Bias_SA_SAV_SS1_SVW8_SK3_UserArgs_MT256x256_MI16x16_shortname0_gfx950
+    InternalSupportParams:
+      KernArgsVersion: 2
+      SupportCustomStaggerU: true
+      SupportCustomWGM: true
+      SupportUserGSU: false
+      UseSFC: false
+      UseUniversalArgs: true
+    AssignedDerivedParameters: false
+    AssignedProblemIndependentDerivedParameters: false
+- null
+- - - - 32768
+      - 6144
+      - 1
+      - 4096
+    - 0
+  - - - 32768
+      - 4096
+      - 1
+      - 4096
+    - 0
+  - - - 32768
+      - 28672
+      - 1
+      - 4096
+    - 0
+  - - - 32768
+      - 4096
+      - 1
+      - 14336
+    - 0
+- null
+- null
+- DeviceEfficiency
+- Equality
