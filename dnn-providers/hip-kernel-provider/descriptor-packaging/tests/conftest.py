@@ -186,7 +186,9 @@ def requires_msgpack():
     signature-parsing coverage instead of reporting a broken environment.
     """
     if msgpack is None:
-        pytest.fail("msgpack is not importable, but it ships as a rocm_kpack dependency")
+        pytest.fail(
+            "msgpack is not importable, but it ships as a rocm_kpack dependency"
+        )
 
 
 def _note(owner, note_type, payload):
