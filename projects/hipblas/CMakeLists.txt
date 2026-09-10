@@ -80,15 +80,16 @@ option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 # USE_CUDA: select the CUDA backend, invoking nvcc directly without hipcc.
 # This replaces the old hipcc-based USE_CUDA flow (which set ENV{HIP_PLATFORM}
 # for hipconfig). The previous USE_CUDA was deprecated because it depended on
-# hipcc/hipconfig; this new option drives the backend via CMake's FindCUDAToolkit
-# and nvcc directly — no hipcc or hipconfig involvement.
+# hipcc/hipconfig; this new option drives the CUDA backend via nvcc directly —
+# no hipcc or hipconfig involvement.
 # Pass -DUSE_CUDA=ON to cmake (or --cuda to rmake.py/install.sh) to enable.
 option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 if(USE_CUDA)
-  # CUDA backend: use the CUDAToolkit module (requires nvcc on PATH or
-  # CMAKE_CUDA_COMPILER set by the caller).  No hipcc involvement.
-  find_package(CUDAToolkit REQUIRED)
+  # Use the legacy FindCUDA module (available since CMake 2.8) so that the
+  # minimum required CMake version does not need to be raised. FindCUDAToolkit
+  # (the modern alternative with imported targets) requires CMake 3.17.
+  find_package(CUDA REQUIRED)
   set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
 else()
   # AMD backend: hip::host / hip::device imported targets drive compilation.
