@@ -37,6 +37,7 @@ from codegen_common import (
     ROWCOL_TENSOR_QUANT_EPILOGUE_MAP,
     ROWCOL_TENSOR_QUANT_PIPELINE_MAP,
     ROWCOL_TENSOR_QUANT_SUPPORTED_LAYOUTS,
+    validate_rowcol_tensor_quant_gfx_arch,
     make_tensorquant_kernel_name,
     rowcol_tensor_quant_default_tile,
 )
@@ -614,6 +615,16 @@ def main() -> int:
                              "Defaults to the gfx9 MFMA tile.")
     args = parser.parse_args()
 
+    # Validate before anything uses it. This value never reaches a compiler -- it
+    # only picks a tile -- so an unrecognized target is not caught downstream the way
+    # a bad --offload-arch would be: it silently falls through to the gfx9 MFMA tile,
+    # which on WMMA hardware compiles and returns garbage. Refuse instead.
+    try:
+        gfx_arch = validate_rowcol_tensor_quant_gfx_arch(args.gfx_arch)
+    except ValueError as e:
+        log.error("%s", e)
+        return 1
+
     cfg: Optional[dict] = None
     if args.config_json:
         try:
@@ -626,7 +637,7 @@ def main() -> int:
             cfg = json.load(f)
 
     if args.list_names:
-        specs = _build_specs(cfg or _default_config(args.gfx_arch))
+        specs = _build_specs(cfg or _default_config(gfx_arch))
         for s in specs:
             print(s.name)
         return 0
@@ -635,7 +646,7 @@ def main() -> int:
         output_dir=args.output_dir,
         config=cfg,
         parallel=not args.no_parallel,
-        gfx_arch=args.gfx_arch,
+        gfx_arch=gfx_arch,
     )
     return 0 if paths else 1
 
