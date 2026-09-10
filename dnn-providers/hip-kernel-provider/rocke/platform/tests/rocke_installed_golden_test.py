@@ -103,10 +103,7 @@ def main() -> int:
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    print(
-        f"rocKE installed golden gate: PASS "
-        f"({flavors}, golden={golden.name})"
-    )
+    print(f"rocKE installed golden gate: PASS " f"({flavors}, golden={golden.name})")
     return 0
 
 
