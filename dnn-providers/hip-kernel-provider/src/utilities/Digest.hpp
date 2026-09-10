@@ -13,8 +13,8 @@ namespace hip_kernel_provider::utilities
 /// `hashlib.sha256(...).hexdigest()` produces, so comparing against a descriptor's
 /// `kernel.source.sha256` is plain string equality.
 ///
-/// Not inlined: the vendored header defines an unqualified global `SHA256` class, and
-/// declaring it here keeps that in one translation unit rather than every consumer.
+/// Declared rather than defined here so consumers need only this header, not the
+/// SHA-256 implementation behind it.
 std::string sha256Hex(const void* data, std::size_t size);
 
 } // namespace hip_kernel_provider::utilities

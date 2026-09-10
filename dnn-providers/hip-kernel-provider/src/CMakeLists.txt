@@ -14,19 +14,6 @@ add_library(
     utilities/sha256.cpp
 )
 
-# utilities/sha256.{h,cpp} is LekKit's MIT SHA-256, byte-identical to the copies
-# projects/rocfft/shared and projects/hipfft/shared carry, so provenance stays checkable
-# with diff. It is upstream's .c compiled as C++ because this provider declares
-# LANGUAGES CXX; renaming beats enabling C here. Held to neither the project warning set
-# nor clang-tidy, because meeting them means editing it -- -Wold-style-cast alone rejects
-# six lines. ../.clang-format-ignore excludes it from formatting for the same reason.
-set_source_files_properties(
-    utilities/sha256.cpp
-    PROPERTIES SKIP_LINTING ON
-               COMPILE_OPTIONS
-               "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>"
-)
-
 add_subdirectory(engines)
 
 target_include_directories(hip_kernel_provider_impl PUBLIC
@@ -35,6 +22,7 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_BINARY_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/engines/
 )
+
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
@@ -47,7 +35,9 @@ clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
 
 # Static library for unit tests to link against (provides access to internal implementation)
-add_library(hip_kernel_provider_private STATIC $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider_private STATIC
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_include_directories(hip_kernel_provider_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
@@ -118,7 +108,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
-add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
+add_library(hip_kernel_provider SHARED
+    $<TARGET_OBJECTS:hip_kernel_provider_impl>
+)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
