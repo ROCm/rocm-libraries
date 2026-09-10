@@ -218,7 +218,7 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
             dst.as<uint8_t>(), src.as<uint8_t>(), datatype, arg, b, m_n, k / 2, ld / 2, colMaj);
         return;
     default:
-        hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
+        throw std::invalid_argument("Unsupported datatype in swizzle_tensor_type().");
     }
 }
 
@@ -2837,7 +2837,25 @@ void testing_matmul_with_bias(const Arguments&                                  
                           ? hostBufferTensor(hD_gold_epl, Talpha, dLayout, false)
                           : hostBufferTensor(hD_gold, To, dLayout, pointerArrayMode);
 
-                using namespace roc::host_numerics;
+                using roc::host_numerics::ActivationApplication;
+                using roc::host_numerics::ClampActivation;
+                using roc::host_numerics::EpilogueOptions;
+                using roc::host_numerics::EpilogueOutputs;
+                using roc::host_numerics::GeluActivation;
+                using roc::host_numerics::IdentityActivation;
+                using roc::host_numerics::Layout;
+                using roc::host_numerics::MatmulOptions;
+                using roc::host_numerics::OutputConversion;
+                using roc::host_numerics::ReluActivation;
+                using roc::host_numerics::ScalarType;
+                using roc::host_numerics::Shape;
+                using roc::host_numerics::SiluActivation;
+                using roc::host_numerics::Tensor;
+                using roc::host_numerics::add;
+                using roc::host_numerics::matmulWithBlasBackend;
+                using roc::host_numerics::multiply;
+                using roc::host_numerics::referenceEpilogueInto;
+                using roc::host_numerics::referenceSumInto;
 
                 const ScalarType computeTypeA
                     = isScaleAMXFormat
@@ -2861,7 +2879,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesA.push_back(
                         hScaleA.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.a.scaleElements}))
                             .expandDims(1));
@@ -2870,7 +2888,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesA.push_back(
                         hScaleAlphaVec.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.scaleAlphaElements}))
                             .expandDims(1));
@@ -2880,7 +2898,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 {
                     matmulOptions.preQuantizationScalesB.push_back(
                         hScaleB.at(gemmIdx)
-                            .tensor(hipblaslt::host_numerics::scalarType(Tc),
+                            .tensor(hipblaslt::host_numerics::scalarType(Talpha),
                                     Layout::contiguousLastDimensionFastest(
                                         Shape{preparedProblem.b.scaleElements}))
                             .expandDims(0));
@@ -2891,11 +2909,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                 const Tensor beta  = hipblaslt::host_numerics::scalarValue(preparedProblem.beta,
                                                                           dataTypes.coefficient);
                 const Tensor scaleC
-                    = arg.scaleC ? hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Tc)
-                                 : Tensor::scalar(accumulatorType, 1);
+                    = arg.scaleC
+                          ? hipblaslt::host_numerics::realOnlyScalarValue(scaleCValue, Talpha)
+                          : Tensor::scalar(accumulatorType, 1);
                 const Tensor outputScale
                     = arg.scaleD && !preparedProblem.epilogueEnabled
-                          ? hipblaslt::host_numerics::scalarValue(scaleDValue, Tc)
+                          ? hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
 
                 std::optional<Tensor> referenceAccumulator;
@@ -2989,9 +3008,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                         epilogueOptions.activation
                             = ClampActivation{arg.activation_arg1, arg.activation_arg2};
                         break;
-                    default:
+                    case hipblaslt_activation_type::none:
+                    case hipblaslt_activation_type::sigmoid:
                         epilogueOptions.activation = IdentityActivation{};
                         break;
+                    default:
+                        throw std::invalid_argument("Invalid hipBLASLt activation type.");
                     }
                     epilogueOptions.activationApplication
                         = arg.gradient && arg.activation_type != hipblaslt_activation_type::none
@@ -3083,10 +3105,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                 beta_ptr  = (void*)&(firstPreparedProblem.beta.i32);
                 break;
             default:
-                hipblaslt_cerr << "FATAL: Unsupported type in pointer setup for hipblasLtMatmul"
-                               << std::endl;
-                alpha_ptr = nullptr;
-                beta_ptr  = nullptr;
+                throw std::invalid_argument(
+                    "Unsupported coefficient type in hipblasLtMatmul pointer setup.");
             }
         }
     }
