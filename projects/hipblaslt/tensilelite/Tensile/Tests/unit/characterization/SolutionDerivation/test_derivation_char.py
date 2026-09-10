@@ -35,6 +35,7 @@ fully-derived solution state. The exhaustive reject matrix of the two giant
 increment — see resistance.md.
 """
 
+import copy
 import importlib
 
 import pytest
@@ -354,3 +355,164 @@ def test_problem_independent_derivation_enables_f32x_emulation(real_state, isa_i
     assert real_state["UseDirect32XEmulation"] is True
     assert real_state["UseMFMAF32XEmulation"] is True
     assert real_state["UseDot2F32XEmulation"] is False
+
+
+def test_disable_runtime_stagger_u_resets_fields_without_pollution():
+    state = {
+        "StaggerU": 9,
+        "StaggerUMapping": 8,
+        "StaggerUStride": 7,
+        "InternalSupportParams": {
+            "SupportCustomStaggerU": True,
+            "Other": 42,
+        },
+    }
+
+    S._disableRuntimeStaggerU(state)
+
+    assert (state["StaggerU"], state["StaggerUMapping"], state["StaggerUStride"]) == (
+        0, 0, 0
+    )
+    assert state["InternalSupportParams"] == {
+        "SupportCustomStaggerU": False,
+        "Other": 42,
+    }
+
+
+@pytest.mark.parametrize(
+    "prefetch,tdm,disabled",
+    [
+        (True, 3, True),
+        (True, 0, False),
+        (False, 3, False),
+        (False, 0, False),
+    ],
+)
+def test_disable_unsupported_runtime_stagger_u_requires_pap_and_tdm3(
+    prefetch, tdm, disabled
+):
+    state = {
+        "PrefetchAcrossPersistent": prefetch,
+        "TDMInst": tdm,
+        "StaggerU": 9,
+        "StaggerUMapping": 8,
+        "StaggerUStride": 7,
+        "InternalSupportParams": {"SupportCustomStaggerU": True},
+    }
+
+    S._disableUnsupportedRuntimeStaggerU(state)
+
+    expected = 0 if disabled else 9
+    assert state["StaggerU"] == expected
+    assert state["InternalSupportParams"]["SupportCustomStaggerU"] is (not disabled)
+
+
+@pytest.mark.parametrize(
+    "streamk,atomic,expected",
+    [
+        (3, 0, True),
+        (0, 0, False),
+        (4, 0, False),
+        (3, 1, False),
+    ],
+)
+def test_validate_streamk_force_dp_only(streamk, atomic, expected):
+    state = {
+        "StreamKForceDPOnly": True,
+        "StreamK": streamk,
+        "StreamKAtomic": atomic,
+    }
+    assert S._validateStreamKForceDPOnly(state, False) is expected
+    assert state.get("Valid", True) is expected
+
+
+def test_validate_streamk_force_dp_only_disabled_short_circuits():
+    state = {"StreamKForceDPOnly": False}
+    assert S._validateStreamKForceDPOnly(state, False) is True
+    assert "Valid" not in state
+
+
+@pytest.mark.parametrize(
+    "tc,index,expected",
+    [
+        ("A", 11, True),
+        ("A", 12, False),
+        ("B", 21, True),
+        ("B", 22, False),
+        (None, 11, True),
+        (None, 21, True),
+    ],
+)
+def test_extractable_index_excludes_final_packed_index(tc, index, expected):
+    state = {
+        "PackedC0IndicesX": [10, 11, 12],
+        "PackedC1IndicesX": [20, 21, 22],
+    }
+    if tc is None:
+        result = S.isExtractableIndex(state, index)
+    else:
+        result = S.isExtractableIndex(state, index, tc)
+    assert result is expected
+
+
+def test_activation_setting_defaults_to_empty_enum():
+    setting = S.activationSetting()
+    assert setting.activationEnum == ""
+    assert not setting.activationEnum
+
+
+def _mx_state(load="Auto", scale="Auto", tdm=0, isa=(9, 4, 2), mx_block=False):
+    return {
+        "ProblemType": {"MXBlockA": mx_block, "MXBlockB": False},
+        "MXLoadInst": load,
+        "MXScaleFormat": scale,
+        "TDMInst": tdm,
+        "ISA": isa,
+        "StreamK": 0,
+        "Valid": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "state,asm_caps,arch_caps,expected",
+    [
+        (_mx_state(tdm=2), {"HasTDM": True}, {"HasMXScaleSwizzle": True},
+         (True, "TDM", "InMemorySwizzle")),
+        (_mx_state(), {"HasTDM": True}, {"HasMXScaleSwizzle": False},
+         (True, "BufferLoad", "NoSwizzle")),
+        (_mx_state(isa=(9, 5, 0), mx_block=True), {"HasTDM": True},
+         {"HasMXScaleSwizzle": True}, (True, "BufferLoad", "HostPreSwizzle")),
+        (_mx_state(load="GlobalLoad", scale="NoSwizzle"), {"HasTDM": True},
+         {"HasMXScaleSwizzle": True}, (False, "GlobalLoad", "NoSwizzle")),
+    ],
+    ids=["tdm", "buffer-load", "gfx950-host-preswizzle", "unsupported-global-load"],
+)
+def test_mx_scale_layout_and_transport(state, asm_caps, arch_caps, expected):
+    result = S._deriveAndValidateMXScaleLayoutAndTransport(
+        state, asm_caps, arch_caps, False
+    )
+    assert (result, state["MXLoadInst"], state["MXScaleFormat"]) == expected
+    assert state["Valid"] is result
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"GlobalReadVectorWidthA": 4},
+        {"GlobalReadVectorWidthA": 8},
+        {"GlobalReadVectorWidthA": 1},
+        {"EnableMatrixInstruction": False},
+        {"LocalReadVectorWidthA": 8},
+        {"NumThreads": 250},
+    ],
+    ids=["b64", "b128", "sub-dword", "not-mi", "wide-lrvw", "bad-wave-count"],
+)
+def test_direct_to_lds_rejects_unsupported_shapes(real_state, isa_info_map, overrides):
+    state = copy.deepcopy(real_state)
+    state.pop("SolutionIndex", None)
+    state.pop("SolutionNameMin", None)
+    state.update({"GlobalReadVectorWidthA": 2, "UseGeneralizedNLCOneA": True})
+    state.update(overrides)
+    state["Valid"] = True
+
+    assert Solution.isDirectToLdsDoable(state, "A", isa_info_map, False) is False
