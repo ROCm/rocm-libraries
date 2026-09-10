@@ -206,28 +206,4 @@ namespace TensileLite::Client
             roc::host_numerics::IndexOrder::FirstDimensionFastest);
     }
 
-    inline roc::host_numerics::ComparisonReport
-        compareHostBuffers(rocisa::DataType                             type,
-                           const void*                                  observed,
-                           const void*                                  expected,
-                           const roc::host_numerics::Layout&            layout,
-                           const roc::host_numerics::ComparisonOptions& options)
-    {
-        const auto   scalarType = toHostNumericsScalarType(type);
-        const size_t bytes      = roc::host_numerics::storageBytesForLayout(scalarType, layout);
-        if(observed == nullptr && bytes != 0)
-            throw std::invalid_argument("TensileLite observed comparison buffer is null.");
-        if(expected == nullptr && bytes != 0)
-            throw std::invalid_argument("TensileLite expected comparison buffer is null.");
-        return roc::host_numerics::compare(
-            roc::host_numerics::Tensor::copyEncodedBackingStorage(
-                scalarType,
-                layout,
-                std::span<const std::byte>(static_cast<const std::byte*>(observed), bytes)),
-            roc::host_numerics::Tensor::copyEncodedBackingStorage(
-                scalarType,
-                layout,
-                std::span<const std::byte>(static_cast<const std::byte*>(expected), bytes)),
-            options);
-    }
 } // namespace TensileLite::Client
