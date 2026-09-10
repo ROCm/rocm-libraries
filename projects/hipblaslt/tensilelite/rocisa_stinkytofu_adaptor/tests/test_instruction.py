@@ -2633,6 +2633,23 @@ class TestWaitCntInstructions(unittest.TestCase):
         self.assertIsInstance(inst, Instruction)
         self.assertTrue(inst.waitAll)
 
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_swaitcnt_wait_all_splits_four_typed_waits(self):
+        # Native setupInstructions order: dscnt, kmcnt, loadcnt, storecnt.
+        insts = SWaitCnt(waitAll=True, comment="wait for swizzle operation").to_stinky_logical()
+        self.assertIsInstance(insts, list)
+        self.assertEqual(len(insts), 4)
+        for inst in insts:
+            self.assertEqual(inst.comment, "(Wait all)")
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_swaitcnt_load_and_ds_stay_separate(self):
+        insts = SWaitCnt(vlcnt=0, dscnt=0, comment="pair").to_stinky_logical()
+        self.assertIsInstance(insts, list)
+        self.assertEqual(len(insts), 2)
+        self.assertEqual(insts[0].comment, "pair")
+        self.assertEqual(insts[1].comment, "pair")
+
     def test_swaitcnt_composite_deepcopy(self):
         inst = SWaitCnt(vlcnt=1, comment="sync")
         dup = copy.deepcopy(inst)
