@@ -363,13 +363,6 @@ def validate_warp_configuration(
     # for the ASAN configure in projects/composablekernel/CMakeLists.txt, which sets
     # GPU_TARGETS to "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+".
     #
-    # Second reason, independent of the first: dispatcher/python/gemm_utils.py
-    # deliberately mirrors this function ("Unknown arch => permissive (matches
-    # Old-TE's log-and-allow behavior)") so that the bridge and Old-TE emit the same
-    # instance set. It does a raw .get too. Making this side strict for suffixed
-    # names and not that one diverges the two sets, which is the exact failure that
-    # comment exists to prevent.
-    #
     # Widening the table to match arch_specs.json would be a real fix, but it
     # changes what seven instance builders generate on their primary targets and
     # belongs in its own PR with its own build evidence -- not smuggled in as a
