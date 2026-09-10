@@ -367,6 +367,10 @@ BenchmarkProblems:
           - Exact: [256, 511, 3, 256]   # odd N with batch 3
           - Exact: [512, 127, 1, 512]   # odd N against a larger M
           - Exact: [256, 65,  1, 256]   # small odd N
+          - Exact: [256, 256, 1, 32]    # K below a window: the tail carries the GEMM
+          - Exact: [256, 256, 1, 128]   # half a window
+          - Exact: [32,  256, 1, 256]   # small M -- A is the free-contig (stacked) side
+          - Exact: [32,  32,  1, 32]    # smallest problem on this layout
 
   -
     - # NN at DepthU 512 and Stream-K, the axes the group above holds fixed.
@@ -462,6 +466,10 @@ BenchmarkProblems:
           - Exact: [511, 256, 3, 256]   # odd M with batch 3
           - Exact: [127, 512, 1, 512]   # odd M against a larger N
           - Exact: [65,  256, 1, 256]   # small odd M
+          - Exact: [256, 256, 1, 32]    # K below a window: the tail carries the GEMM
+          - Exact: [256, 256, 1, 128]   # half a window
+          - Exact: [256, 32,  1, 256]   # small N -- B is the free-contig (stacked) side
+          - Exact: [32,  32,  1, 32]    # smallest problem on this layout
 
   -
     - # TT at DepthU 512 and Stream-K, the mirror of the NN group above.
@@ -554,6 +562,14 @@ BenchmarkProblems:
           - Exact: [200, 200, 1, 352]   # M and N edge with a 32-element K tail
           - Exact: [16, 16, 1, 256]     # smallest free dim a TLU=1 operand takes
           - Exact: [514, 514, 1, 256]   # even, but 2 mod 8 rather than tile-aligned
+          # K below one DepthU: the unroll loop never runs a whole iteration, so
+          # the tail carries the entire GEMM.  Every case above has at least one
+          # full window before its tail, which leaves the zero-window path untested.
+          - Exact: [256, 256, 1, 32]    # K = ASEM floor, no full window at all
+          - Exact: [256, 256, 1, 128]   # half a window
+          - Exact: [256, 256, 1, 224]   # one element short of a window
+          - Exact: [200, 200, 1, 96]    # M and N edge with no full window
+          - Exact: [32, 32, 1, 32]      # smallest problem the layout accepts
 
 
   -
