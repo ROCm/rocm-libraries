@@ -437,7 +437,7 @@ def build_operation_umd(
 
 
 def build_specialization_contract(config: IngestorConfig, ids: dict) -> dict:
-    """The ``provenance.specialization_contract`` every UKD of this bundle carries.
+    """The ``provenance.specialization_contract`` this bundle's KDP carries.
 
     The declaration is DATA, and it is self-contained on purpose: a machine
     checking a shipped bundle must be able to say which metadata fields the
@@ -623,10 +623,6 @@ def build_kdp(
             "kernel_source": kernel.kernel_source.as_document(),
             "metadata": metadata,
             "priority": kernel.priority,
-            # Emitted AFTER the spec composition above and after minting, so the
-            # ids in it are this bundle's real ids and the declaration describes
-            # the spec that actually ships.
-            "provenance": {"specialization_contract": contract},
         }
         if kernel.arch:
             entry["arch"] = list(kernel.arch)
@@ -645,6 +641,15 @@ def build_kdp(
         "matchers": matchers,
         "engine": ids["ued"],
         "dispatch": ids["udd"],
+        # Declared ONCE for the whole pack, and emitted AFTER minting so the ids in
+        # it are this bundle's real ids. Every inline kernel below is one engine's,
+        # one KMD's, one field partition's, so the declaration they would each
+        # repeat is the same object -- and repeating it grew a 2733-kernel pack
+        # 2.8x in identical boilerplate. A reader resolves a kernel's own
+        # declaration first and this one second
+        # (``hkp_pack.agreement.resolved_contract``), so a kernel needing different
+        # terms can still state them.
+        "provenance": {"specialization_contract": contract},
         "kernelDescriptors": kernel_descriptors,
     }
     if pack.arch:
