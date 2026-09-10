@@ -183,9 +183,11 @@ class SQLiteBase
 protected:
 public:
     SQLiteBase(DbKinds, const fs::path& filename_, bool is_system_)
-        : filename(filename_), is_system(is_system_)
+        : filename(filename_),
+          is_system(is_system_),
+          disable_file_io(!is_system_ && IsUserDbDisabled())
     {
-        if(DisableUserDbFileIO && !is_system)
+        if(disable_file_io)
             return;
 
         MIOPEN_LOG_I2("Initializing " << (InMemDb ? "In Memory " : "")
@@ -292,7 +294,7 @@ public:
     inline auto FindRecord(U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return Ret{};
         return reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...);
     }
@@ -300,7 +302,7 @@ public:
     template <typename... U>
     inline auto RemoveRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveRecordUnsafe(args...);
     }
@@ -308,7 +310,7 @@ public:
     template <typename... U>
     inline auto StoreRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->StoreRecordUnsafe(args...);
     }
@@ -316,7 +318,7 @@ public:
     template <typename... U>
     inline auto Remove(const U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveUnsafe(args...);
     }
@@ -325,7 +327,7 @@ public:
     inline auto Update(const U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return Ret{};
         return reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...);
     }
@@ -333,15 +335,21 @@ public:
     template <typename... U>
     inline bool Load(U&&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return false;
         return reinterpret_cast<Derived*>(this)->LoadUnsafe(args...);
     }
 
     fs::path filename;
-    bool dbInvalid;
+    bool dbInvalid = true;
     SQLite sql;
     bool is_system;
+
+    /// Whether file I/O against this database is suppressed. Latched at construction, so that
+    /// every operation on a given instance sees one consistent answer even if the debug override
+    /// behind IsUserDbDisabled() is flipped between constructions. Always false for the system
+    /// databases, which the user-db switch does not govern.
+    const bool disable_file_io;
 };
 
 template <typename Derived>

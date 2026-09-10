@@ -64,9 +64,9 @@ inline bool isVGPR(const StinkyRegister& reg) {
 /// `v_cvt_pk_f32_bf8`, `v_cvt_pk_f32_fp8`: `_e32` uses a 7-bit field for the
 /// **in-bank** VGPR index (0..255 per MODE VGPR MSBs). Physical VGPRs 0..1023
 /// map to **logical** indices `phys % 256` within the current 256-register
-/// group; promotion uses that logical span on
-/// **sources only** (not dst). Virtual registers (pending allocation) skip this
-/// rule.
+/// group. Most narrow converts use **sources** for `_e32` vs `_e64`; `v_cvt_f16_f32`
+/// uses the **destination** (verified with `llvm-mc -show-encoding` on gfx1250).
+/// Virtual registers (pending allocation) skip this rule.
 inline bool vgprOperandExceedsVop1CvtE32IndexLimit(const StinkyRegister& reg) {
     if (!isVGPR(reg) || isPseudoReg(reg)) return false;
     if ((reg.reg.idx & StinkyRegister::kVirtualBit) != 0) return false;
@@ -86,6 +86,12 @@ inline bool isVcvtNarrowSrcBankFamily(const char* mnemonic) {
            std::strcmp(mnemonic, "v_cvt_f16_f32") == 0 ||
            std::strcmp(mnemonic, "v_cvt_pk_f32_bf8") == 0 ||
            std::strcmp(mnemonic, "v_cvt_pk_f32_fp8") == 0;
+}
+
+/// `v_cvt_f16_f32` alone promotes on the **destination** VGPR bank index; the
+/// other narrow converts in `isVcvtNarrowSrcBankFamily` use **sources**.
+inline bool isVcvtF16F32DestBankPromotion(const char* mnemonic) {
+    return mnemonic && std::strcmp(mnemonic, "v_cvt_f16_f32") == 0;
 }
 
 /// True if the operand is VCC, vcc_lo, or vcc_hi (vector condition code).
@@ -184,10 +190,10 @@ inline bool parseLiteralStringToInt(const std::string& s, int32_t& out) {
 ///   1) VOP3P modifiers: non-empty **`op_sel`**, **`op_sel_hi`**, or
 ///   **`byte_sel`** forces VOP3 (8 B)
 ///      (all compact VALU, including the narrow converts below).
-///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_f16_f32`, **when (1) did
-///   not apply**: any **source**
-///      VGPR whose **logical** index (`phys % 256`, plus `num`) spans above
-///      **127** requires `_e64` (8 B); **dst VGPR is not used** for this rule.
+///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_pk_*`, **when (1) did not
+///   apply**: any **source** VGPR whose **logical** index (`phys % 256`, plus
+///   `num`) spans above **127** requires `_e64` (8 B). **`v_cvt_f16_f32` uses the
+///   destination** VGPR for this rule instead (src index is ignored).
 ///   3) `v_cndmask_b32` / `v_add_co_ci_u32` with three sources: 8 B if the last
 ///   source is not
 ///      VCC; 4 B if the last source is VCC.
@@ -210,8 +216,14 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
                            // v_cvt_f32_fp8 byte_sel
         }
         if (isVcvtNarrowSrcBankFamily(mnemonic)) {
-            for (const StinkyRegister& s : srcs)
-                if (vgprOperandExceedsVop1CvtE32IndexLimit(s)) return 8;
+            if (isVcvtF16F32DestBankPromotion(mnemonic)) {
+                const auto& destRegs = inst.getDestRegs();
+                if (!destRegs.empty() && vgprOperandExceedsVop1CvtE32IndexLimit(destRegs[0]))
+                    return 8;
+            } else {
+                for (const StinkyRegister& s : srcs)
+                    if (vgprOperandExceedsVop1CvtE32IndexLimit(s)) return 8;
+            }
         }
         // v_cndmask_b32 / v_add_co_ci_u32: 3 sources; 4 bytes iff last source is
         // VCC, else 8 bytes.

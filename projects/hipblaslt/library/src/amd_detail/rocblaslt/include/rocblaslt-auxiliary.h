@@ -454,6 +454,11 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
 // for internal use during testing, fetch arch name
 std::string rocblaslt_internal_get_arch_name();
 
+// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
+// own tree only, no fallback), otherwise the base name. Filenames inside the
+// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
+std::string rocblaslt_internal_get_library_arch_name();
+
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
 

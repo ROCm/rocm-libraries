@@ -2,6 +2,7 @@
 
 Status:  Accepted
 Defect:  AIHPBLAS-4298
+Commit:  6cc940d (PR #7989) — https://github.com/ROCm/rocm-libraries/commit/6cc940d0933919993dd871fb134664a3bac779af — landed on develop via PR #7989's squash merge, 74e4693; this ADR file itself was added later, in PR #8676 (`2824bbb1238`)
 
 ## Context
 While characterizing `TensileBenchmarkCluster`, the `--results-only` flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep or RunBenchmarkStep or RunResultsStep` during construction.

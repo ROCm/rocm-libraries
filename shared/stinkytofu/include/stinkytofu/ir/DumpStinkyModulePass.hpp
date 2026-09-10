@@ -39,12 +39,22 @@ struct DumpStinkyModulePassConfig {
     /// If non-empty, write Stinky textual IR (AsmPrinter: st.func / op form) to this file.
     std::string stirPath;
 
+    /// Write the Stinky textual IR to stdout instead of stirPath.
+    ///
+    /// FileCheck tests match the dump directly, so they need it on a stream they
+    /// can pipe rather than in a file left in the build directory.
+    bool stirToStdout = false;
+
     /// When true, also emit assembly (StinkyAsmEmitter) to asmPath or a derived path.
     bool emitAsm = false;
 
     /// Output path for StinkyAsmEmitter. If empty while emitAsm is true, uses stirPath with
     /// its extension replaced by ".s", or "<stirPath>.s" if there is no extension.
     std::string asmPath;
+
+    /// If non-empty, also write SSA live ranges and peak pressure here, or to
+    /// stdout for "-". A function without attached SSA prints a header only.
+    std::string ssaLiveOut;
 
     AsmPrinterOptions printerOptions{};
     AsmEmitterOptions emitterOptions{};
