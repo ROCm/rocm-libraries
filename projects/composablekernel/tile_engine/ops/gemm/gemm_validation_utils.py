@@ -4,6 +4,33 @@
 import logging
 from typing import Tuple, List
 
+
+def _base_gfx_arch(gpu_target: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``"gfx942:sramecc+:xnack-"`` -> ``"gfx942"``. Empty input is passed through
+    unchanged; this is a normalizer, not a validator.
+
+    This is the ONE place in this module that knows the rule. Call it at the
+    boundary of a function rather than re-deriving it at each comparison site --
+    the failure mode it prevents is a normalized test sitting a few lines above a
+    raw one, so that a suffixed target takes different branches of the same
+    function.
+
+    Duplication note: ``dispatcher/codegen/codegen_common.py`` carries the
+    identical helper (``normalize_gfx_arch``) and cannot be imported from here.
+    The dependency direction is dispatcher -> tile_engine (see
+    ``dispatcher/python/gemm_utils.py``, which imports this module), and
+    tile_engine is on the deprecation path, so new shared infrastructure must not
+    be parked here for dispatcher to consume. The two copies are held together by
+    ``dispatcher/tests/test_codegen_common.py::TestNormalizeGfxArch``, which
+    asserts they agree on the same inputs.
+    """
+    if not gpu_target:
+        return gpu_target
+    return gpu_target.split(":", 1)[0]
+
+
 GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
 GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
@@ -392,7 +419,7 @@ def validate_lds_capacity(
     matrix_b_size = (tile_n * tile_k) * element_size(b_datatype)
     total_tile_in_lds = matrix_a_size + matrix_b_size
 
-    base_gpu_target = gpu_target.split(":")[0] if gpu_target else gpu_target
+    base_gpu_target = _base_gfx_arch(gpu_target)
     hw_lds_size = LDS_SIZE_MAP.get(base_gpu_target, DEFAULT_LDS_SIZE)
     double_buffer = pipeline in ["preshufflev2", "compv4"]
     max_tile_size = hw_lds_size // 2 if double_buffer else hw_lds_size

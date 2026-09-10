@@ -657,6 +657,46 @@ class TestNormalizeGfxArch(unittest.TestCase):
         self.assertEqual(normalize_gfx_arch("notagfx:weird"), "notagfx")
         self.assertEqual(normalize_gfx_arch(":xnack-"), "")
 
+    def test_agrees_with_the_tile_engine_copy(self):
+        """The deliberate duplicate in tile_engine must not drift from this one.
+
+        tile_engine cannot import codegen_common (dependency direction is
+        dispatcher -> tile_engine, and tile_engine is on the deprecation path),
+        so the rule exists twice on purpose. This test is what keeps the two
+        honest, and the docstrings on both sides point at it. Skipped rather than
+        failed if the tile_engine tree is absent, so the dispatcher tests stay
+        runnable on their own.
+        """
+        te_path = (
+            DISPATCHER_DIR.parent
+            / "tile_engine"
+            / "ops"
+            / "gemm"
+            / "gemm_validation_utils.py"
+        )
+        if not te_path.exists():
+            self.skipTest("tile_engine tree not present")
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_te_gemm_validation_utils_for_test", te_path
+        )
+        te = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(te)
+
+        for arch in (
+            "",
+            "gfx942",
+            "gfx950",
+            "gfx1250",
+            "gfx1250:xnack-",
+            "gfx942:sramecc+:xnack-",
+            "notagfx:weird",
+            ":xnack-",
+        ):
+            with self.subTest(arch=arch):
+                self.assertEqual(te._base_gfx_arch(arch), normalize_gfx_arch(arch))
+
 
 class TestRowColTensorQuantDefaultTile(unittest.TestCase):
     """gfx1250 tile selection is EXACT, not a gfx12 family match.

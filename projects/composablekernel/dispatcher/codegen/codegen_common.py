@@ -644,7 +644,18 @@ def normalize_gfx_arch(arch: str) -> str:
     once at the boundary instead of scattering substring tests that happen to
     tolerate the suffix.
 
-    This is the single source of truth for that rule; do not re-implement it.
+    Single source of truth *for the dispatcher tree*: everything under
+    ``dispatcher/`` must call this rather than open-coding ``split(":")``.
+
+    It is deliberately not claimed to be repo-wide, because it is not.
+    ``tile_engine/`` cannot import it: the dependency direction is
+    dispatcher -> tile_engine (``dispatcher/python/gemm_utils.py`` imports
+    ``gemm_validation_utils``), and tile_engine is on the deprecation path, so
+    moving the helper there to collapse the two copies would park new shared
+    infrastructure in the tree that is going away.
+    ``tile_engine/ops/gemm/gemm_validation_utils.py`` therefore keeps its own
+    ``_base_gfx_arch``; the two are pinned to identical behaviour by
+    ``dispatcher/tests/test_codegen_common.py::TestNormalizeGfxArch``.
     """
     return arch.split(":", 1)[0]
 
