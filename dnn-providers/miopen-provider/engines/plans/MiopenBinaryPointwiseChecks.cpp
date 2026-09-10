@@ -39,8 +39,8 @@ struct TensorInfo
     uint32_t rank;
 };
 
-// Check 17: packed, channels-first strides. For every axis with dims[i] > 1, strides[i] must
-// equal the product of the dims to its right; axes with dims[i] == 1 are unconstrained (never
+// Packed, channels-first strides. For every axis with dims[i] > 1, strides[i] must equal the
+// product of the dims to its right; axes with dims[i] == 1 are unconstrained (never
 // dereferenced). This single pass also covers the "last axis" special case in the spec: the
 // running product starts at 1, so an all-ones tail already forces strides[r-1] == 1 there.
 void checkPacked(const TensorInfo& tensor, const std::string& label)
@@ -80,7 +80,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "graph contains unsupported node attributes");
     }
 
-    // 3: compute_data_type lives on the node, not on PointwiseAttributes.
     if(opGraph.getNode(0).compute_data_type() != DataType::FLOAT)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -89,9 +88,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
 
     const auto& attrs = opGraph.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
 
-    // 4: the mode must be one of the five binary pointwise ops this provider implements. This
-    // check only determines mappability; execute() re-derives the full op/scaleA/scaleB mapping
-    // independently at plan-execution time.
     switch(attrs.operation())
     {
     case PointwiseMode::ADD:
@@ -108,7 +104,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
                     attrs.operation())));
     }
 
-    // 5: in_1 must be present -- otherwise this is a unary node.
     const auto in1Uid = attrs.in_1_tensor_uid();
     if(!in1Uid.has_value())
     {
@@ -116,7 +111,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
                                                        "requires in_1_tensor_uid to be present");
     }
 
-    // 6: in_2 must be absent -- ternary nodes (e.g. BINARY_SELECT) are out of scope.
     if(attrs.in_2_tensor_uid().has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -128,8 +122,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
     const auto in1UidValue = *in1Uid;
     const auto outUid = attrs.out_0_tensor_uid();
 
-    // 7: all three uids must resolve. Named separately from findTensorAttributes' own
-    // INTERNAL_ERROR-flavoured throw so the message test has something specific to assert.
     const auto& tensorMap = opGraph.getTensorMap();
     auto findAttr = [&tensorMap](int64_t uid) -> const TensorAttributes* {
         auto it = tensorMap.find(uid);
@@ -147,9 +139,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
             "one or more of in_0/in_1/out_0 tensor uids do not resolve in the graph's tensor map");
     }
 
-    // 8: shared IO-tensor validation (non-virtual, FLOAT/HALF, uniform dtype, dims/strides
-    // present and equal length). This function doesn't prefix its own exception message; the
-    // caller's catch adds the prefix.
     pointwise_applicability::validatePointwiseIoTensors({in0Attr, in1Attr, outAttr},
                                                         "Binary pointwise");
 
@@ -161,7 +150,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
                                                        "does not support pass-by-value tensors");
     }
 
-    // 10: none may be ragged (dead code today, cheap to keep).
     if(in0Attr->ragged_offset_tensor_uid().has_value()
        || in1Attr->ragged_offset_tensor_uid().has_value()
        || outAttr->ragged_offset_tensor_uid().has_value())
@@ -181,8 +169,8 @@ void validateBinaryPointwise(const IGraph& opGraph)
     const TensorInfo in1{in1Attr, in1UidValue, in1Attr->dims()->size()};
     const TensorInfo out{outAttr, outUid, outAttr->dims()->size()};
 
-    // 13: rank(out) in [3, 5]. The lower bound is load-bearing: without it a rank-0 tensor
-    // would index strides[r-1] out of bounds in check 17.
+    // rank(out) in [3, 5]. The lower bound is load-bearing: without it a rank-0 tensor would
+    // index strides[r-1] out of bounds in checkPacked.
     if(out.rank < 3 || out.rank > 5)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -190,9 +178,9 @@ void validateBinaryPointwise(const IGraph& opGraph)
             "output tensor rank must be between 3 and 5, got " + std::to_string(out.rank));
     }
 
-    // 14: strict rank equality, no padding: hipDNN's broadcast rules don't specify a pad
-    // direction, and MIOpen's solver dispatch keys on A's rank without comparing it to C's, so a
-    // padded rank could silently dispatch wrong.
+    // Strict rank equality, no padding: hipDNN's broadcast rules don't specify a pad direction,
+    // and MIOpen's solver dispatch keys on A's rank without comparing it to C's, so a padded
+    // rank could silently dispatch wrong.
     if(in0.rank != out.rank || in1.rank != out.rank)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -218,7 +206,7 @@ void validateBinaryPointwise(const IGraph& opGraph)
         }
     }
 
-    // 16: numel(out) <= INT32_MAX -- MIOpen narrows work_per_wg to int.
+    // numel(out) <= INT32_MAX -- MIOpen narrows work_per_wg to int.
     const auto* outDims = out.attr->dims();
     int64_t numel = 1;
     for(flatbuffers::uoffset_t i = 0; i < out.rank; ++i)
@@ -236,8 +224,8 @@ void validateBinaryPointwise(const IGraph& opGraph)
     checkPacked(in1, "in_1");
     checkPacked(out, "out_0");
 
-    // 18: A = in_0, no operand swap. Requiring dims equality (not merely numel) is deliberate --
-    // a same-count/different-shape A is a silent-wrong-answer path.
+    // A = in_0, no operand swap. Requiring dims equality (not merely numel) is deliberate -- a
+    // same-count/different-shape A is a silent-wrong-answer path.
     const auto* in0Dims = in0.attr->dims();
     for(flatbuffers::uoffset_t i = 0; i < out.rank; ++i)
     {
@@ -251,7 +239,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
         }
     }
 
-    // 19: B may broadcast per-axis.
     const auto* in1Dims = in1.attr->dims();
     for(flatbuffers::uoffset_t i = 0; i < out.rank; ++i)
     {
@@ -262,10 +249,6 @@ void validateBinaryPointwise(const IGraph& opGraph)
                 "the second input is not broadcastable to the output at axis " + std::to_string(i));
         }
     }
-
-    // Nothing left to assemble here: the plan re-derives A/B/mode itself from the same attrs and
-    // tensorMap, relying on the already-enforced invariant that A == in_0 and operands are never
-    // swapped.
 }
 
 } // namespace
