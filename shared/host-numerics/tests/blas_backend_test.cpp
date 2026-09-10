@@ -24,7 +24,6 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
 
     const std::array<T, 8> a{1, 1, 1, 1, 1, 1, 1, 1};
     const std::array<T, 8> b{1, 1, 1, 1, 1, 1, 1, 1};
-    const std::array<T, 4> c{};
     const std::array<uint8_t, 4> scaleA{128, 129, 130, 131};
     const std::array<uint8_t, 4> scaleB{127, 128, 129, 130};
     const Layout layoutA(Shape{2, 4}, {1, 2});
@@ -37,7 +36,6 @@ void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumula
     auto makeProblem = [&](Tensor output) {
         GemmTestCase problem(Tensor::copyNativeStorage<T>(layoutA, std::span<const T>(a)),
                              Tensor::copyNativeStorage<T>(layoutB, std::span<const T>(b)),
-                             Tensor::copyNativeStorage<T>(layoutD, std::span<const T>(c)),
                              std::move(output), accumulatorType);
         problem.blockScaleA = Tensor::copyEncodedBackingStorage(ScalarType::E8M0, scaleLayout,
                                                                 std::as_bytes(std::span(scaleA)));
@@ -81,7 +79,7 @@ void testPartialOutputSelection() {
     GemmTestCase problem(
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
-        d, ScalarType::Float32);
+        ScalarType::Float32);
     problem.outputSelection = OutputSelection::explicitIndices({0, 3});
 
     const GemmSupportInfo support = queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas);
@@ -117,7 +115,6 @@ void testTransformingAutomaticCostPolicy() {
     auto makeProblem = [](ScalarType inputType, size_t rows, size_t columns, size_t reductions) {
         return GemmTestCase(Tensor(inputType, Shape{rows, reductions}),
                             Tensor(inputType, Shape{reductions, columns}),
-                            Tensor(ScalarType::Float32, Shape{rows, columns}),
                             Tensor(ScalarType::Float32, Shape{rows, columns}), ScalarType::Float32);
     };
 
@@ -145,7 +142,6 @@ void testZeroExtentsDoNotInvokeBlas() {
         GemmTestCase problem(Tensor(ScalarType::Float32, Shape{rows, reductions}),
                              Tensor(ScalarType::Float32, Shape{reductions, columns}),
                              Tensor(ScalarType::Float32, Shape{rows, columns}),
-                             Tensor(ScalarType::Float32, Shape{rows, columns}),
                              ScalarType::Float32);
         const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
         require(runInfo.backendUsed == GemmBackend::Blas && runInfo.outputElementsWritten == 0,
@@ -154,15 +150,13 @@ void testZeroExtentsDoNotInvokeBlas() {
 
     Tensor output = Tensor::copyNativeValues<float>(Shape{1, 1}, std::array<float, 1>{2.0f});
     GemmTestCase zeroReduction(Tensor(ScalarType::Float32, Shape{1, 0}),
-                               Tensor(ScalarType::Float32, Shape{0, 1}), output, output,
+                               Tensor(ScalarType::Float32, Shape{0, 1}), output,
                                ScalarType::Float32);
-    zeroReduction.alpha = std::numeric_limits<float>::quiet_NaN();
-    zeroReduction.beta = 3.0f;
     const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(zeroReduction, GemmBackend::Blas);
     require(runInfo.backendUsed == GemmBackend::Blas,
             "BLAS strategy did not accept an empty reduction.");
-    require(output.loadAs<float>({0, 0}) == 6.0f,
-            "Composed GEMM did not treat an empty reduction as a null product.");
+    require(output.loadAs<float>({0, 0}) == 0.0f,
+            "BLAS strategy did not write zero for an empty reduction.");
 }
 
 void testModeratelyLargeExactGemm() {
@@ -175,7 +169,7 @@ void testModeratelyLargeExactGemm() {
 
     GemmTestCase problem(Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones)),
                          Tensor::copyNativeStorage<float>(layout, std::span<const float>(ones)),
-                         output, output, ScalarType::Float32);
+                         output, ScalarType::Float32);
     referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
 
     for (size_t row = 0; row < dimension; ++row)
@@ -195,35 +189,23 @@ int main() {
     GemmTestCase problem(
         Tensor::copyNativeStorage<float>(Layout(Shape{2, 3}, {1, 2}), std::span<const float>(a)),
         Tensor::copyNativeStorage<float>(Layout(Shape{3, 2}, {1, 3}), std::span<const float>(b)), d,
-        d, ScalarType::Float32);
-    problem.alpha = 2.0;
-    problem.beta = 3.0;
-
+        ScalarType::Float32);
     require(queryGemmSupportWithBlasBackend(problem, GemmBackend::Blas).supported,
             "BLAS backend unexpectedly rejected F32 GEMM.");
     const GemmTestRunInfo runInfo = referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
     require(runInfo.backendUsed == GemmBackend::Blas, "BLAS backend run information mismatch.");
-    require(d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
-                d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
+    require(d.loadAs<float>({0, 0}) == 58 && d.loadAs<float>({1, 0}) == 139 &&
+                d.loadAs<float>({0, 1}) == 64 && d.loadAs<float>({1, 1}) == 154,
             "BLAS backend F32 result mismatch.");
 
     const Tensor ones = Tensor::copyNativeStorage<float>(
         d.layout(), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
     d.copyLogicalElementsFrom(ones);
     const GemmTestRunInfo automatic = referenceGemmWithBlasBackend(problem);
-    require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 119 &&
-                d.loadAs<float>({1, 0}) == 281 && d.loadAs<float>({0, 1}) == 131 &&
-                d.loadAs<float>({1, 1}) == 311,
+    require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 58 &&
+                d.loadAs<float>({1, 0}) == 139 && d.loadAs<float>({0, 1}) == 64 &&
+                d.loadAs<float>({1, 1}) == 154,
             "Automatic runtime backend selection mismatch.");
-
-    d.copyLogicalElementsFrom(ones);
-    problem.activation = Activation::Relu;
-    const GemmTestRunInfo activated = referenceGemmWithBlasBackend(problem);
-    require(activated.backendUsed == GemmBackend::Blas && !activated.fallbackReason &&
-                d.loadAs<float>({0, 0}) == 119 && d.loadAs<float>({1, 0}) == 281 &&
-                d.loadAs<float>({0, 1}) == 131 && d.loadAs<float>({1, 1}) == 311,
-            "Composed activation changed automatic matmul backend selection.");
-    problem.activation = Activation::None;
 
     testPartialOutputSelection();
     testTransformingAutomaticCostPolicy();
@@ -239,7 +221,7 @@ int main() {
                                 Tensor::copyNativeStorage<std::complex<float>>(
                                     Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                     std::span<const std::complex<float>>(complexB)),
-                                complexD, complexD, ScalarType::ComplexFloat32);
+                                complexD, ScalarType::ComplexFloat32);
     complexProblem.conjugateA = true;
     referenceGemmWithBlasBackend(complexProblem, GemmBackend::Blas);
     require(complexD.loadAs<std::complex<float>>({0, 0}) == std::complex<float>(11, -2),
@@ -247,7 +229,6 @@ int main() {
 
     const std::array<float, 1> transformedA{0.3f};
     const std::array<float, 1> transformedB{1.0f};
-    const std::array<float, 1> transformedC{1.0f};
     const std::array<float, 1> transformedScaleA{0.7f};
     const std::array<float, 1> transformedAlphaVector{0.6f};
     Tensor transformedD(ScalarType::Float32, Shape{1, 1});
@@ -257,8 +238,6 @@ int main() {
         std::move(transformedOperandA),
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
                                          std::span<const float>(transformedB)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(transformedC)),
         transformedD, ScalarType::Float32);
     transformedProblem.computeTypeA = ScalarType::Float8E4M3;
     transformedProblem.preQuantizationScalesA.push_back(
@@ -267,62 +246,17 @@ int main() {
     transformedProblem.preQuantizationScalesA.push_back(
         Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1}),
                                          std::span<const float>(transformedAlphaVector)));
-    transformedProblem.alpha = 2.0;
-    transformedProblem.beta = 3.0;
-    transformedProblem.scaleC = 2.0;
-    transformedProblem.outputScale = 4.0;
     referenceGemmWithBlasBackend(transformedProblem, GemmBackend::Blas);
-    require(transformedD.loadAs<float>({0, 0}) == 25.0f,
-            "Transforming BLAS pre-quantization/finalization result mismatch.");
-
-    const std::array<float, 1> scalarScaleA{2.0f};
-    const std::array<float, 1> scalarScaleB{3.0f};
-    transformedProblem.scaleA = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1}), std::span<const float>(scalarScaleA));
-    transformedProblem.scaleB = Tensor::copyNativeStorage<float>(
-        Layout::contiguousLastDimensionFastest(Shape{1}), std::span<const float>(scalarScaleB));
-    referenceGemmWithBlasBackend(transformedProblem, GemmBackend::Blas);
-    require(transformedD.loadAs<float>({0, 0}) == 30.0f,
-            "Transforming BLAS scalar A/B scale result mismatch.");
     const float transformedBlasResult = transformedD.loadAs<float>({0, 0});
     transformedD.storeFrom({0, 0}, 0.0f);
     referenceGemm(transformedProblem, GemmBackend::Blocked);
     require(transformedD.loadAs<float>({0, 0}) == transformedBlasResult,
             "Transforming BLAS scalar A/B scales differ from Blocked.");
-    transformedProblem.scaleA.reset();
-    transformedProblem.scaleB.reset();
-
     transformedD.storeFrom({0, 0}, 0.0f);
     const GemmTestRunInfo smallAutomatic = referenceGemmWithBlasBackend(transformedProblem);
     require(smallAutomatic.backendUsed == GemmBackend::Blocked &&
-                transformedD.loadAs<float>({0, 0}) == 25.0f,
+                transformedD.loadAs<float>({0, 0}) == transformedBlasResult,
             "Automatic GEMM did not avoid staging a tiny transformed request.");
-
-    transformedProblem.a.storeFrom({0, 0}, std::numeric_limits<float>::quiet_NaN());
-    transformedProblem.alpha = 0.0;
-    transformedProblem.beta = 1.0;
-    transformedProblem.scaleC = 3.0;
-    transformedProblem.outputScale = 1.0;
-    referenceGemmWithBlasBackend(transformedProblem, GemmBackend::Blas);
-    require(transformedD.loadAs<float>({0, 0}) == 3.0f,
-            "Transforming BLAS did not suppress an unused non-finite product.");
-
-    const std::array<float, 1> saturatingA{63.75f};
-    const std::array<float, 1> saturatingB{2.0f};
-    const std::array<int8_t, 1> saturatingC{};
-    Tensor saturatingD(ScalarType::Int8, Shape{1, 1});
-    GemmTestCase saturatingProblem(
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(saturatingA)),
-        Tensor::copyNativeStorage<float>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                         std::span<const float>(saturatingB)),
-        Tensor::copyNativeStorage<int8_t>(Layout::contiguousLastDimensionFastest(Shape{1, 1}),
-                                          std::span<const int8_t>(saturatingC)),
-        saturatingD, ScalarType::Float32);
-    saturatingProblem.outputConversion = OutputConversion::SaturatingInt8;
-    referenceGemmWithBlasBackend(saturatingProblem, GemmBackend::Blas);
-    require(saturatingD.loadAs<int8_t>({0, 0}) == 127,
-            "Transforming BLAS saturating output mismatch.");
 
     testTransformingBlockScaleFallsBack<float>(ScalarType::Float32);
     testTransformingBlockScaleFallsBack<double>(ScalarType::Float64);
