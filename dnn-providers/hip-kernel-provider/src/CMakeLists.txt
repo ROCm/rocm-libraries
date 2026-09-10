@@ -106,6 +106,14 @@ endif()
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
+if(HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE)
+    # TARGET_OBJECTS does not propagate the object library's link interface.
+    target_link_libraries(hip_kernel_provider PRIVATE rocke_core "${ROCKE_COMGR_LIBRARY}")
+    if(UNIX AND NOT APPLE)
+        target_link_options(hip_kernel_provider PRIVATE "LINKER:-z,defs")
+    endif()
+endif()
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
     # interface, so the plugin has to name the kpack reader itself.

@@ -469,6 +469,10 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
     {
         return KernelSourceKind::HSACO_FILE;
     }
+    if(text == "rocke_recipe")
+    {
+        return KernelSourceKind::ROCKE_RECIPE;
+    }
     if(text == "rocke_builder")
     {
         return KernelSourceKind::ROCKE_BUILDER;
@@ -807,17 +811,23 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     // The union of every kind's keys, checked ahead of the kind switch so that a key
     // belonging to a kind this build cannot dispatch fails with the honest "no
     // implementation yet" below rather than a misleading "unknown key".
-    requireKnownKeys(
-        root,
-        {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
-        where);
+    requireKnownKeys(root,
+                     {"kind",
+                      "source_file",
+                      "entry_point",
+                      "library",
+                      "toc_key",
+                      "symbol",
+                      "sha256",
+                      "bundle",
+                      "recipe_key"},
+                     where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
     source.kind = kernelSourceKindFromString(kindText, where);
-    // Kinds are accepted only where an adapter can call them: the dispatch handler never
-    // inspects source.kind, so accepting one it cannot serve would let applicability
-    // advertise a kernel that throws at plan-build time instead of failing cleanly at load.
+    // Parse the supported representations here. The state manager separately checks
+    // whether the pack's resolved dispatch handler supports the source kind.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
         // Not cross-checked against the provider's embedded kernel map: that map is
@@ -838,6 +848,12 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
         source.tocKey = requireString(root, "toc_key", where);
         source.symbol = requireString(root, "symbol", where);
         source.sha256 = requireString(root, "sha256", where);
+    }
+    else if(source.kind == KernelSourceKind::ROCKE_RECIPE)
+    {
+        requireKnownKeys(root, {"kind", "bundle", "recipe_key"}, where);
+        source.recipe = RecipeSource{requireString(root, "bundle", where),
+                                     requireString(root, "recipe_key", where)};
     }
     else
     {

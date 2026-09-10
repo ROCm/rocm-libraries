@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "id": "8056c7be-8437-4bbb-bcb9-3fec68164388",
+  "name": "hipkernel:sdpa_recipe",
+  "matchers": [
+    "5401c084-c18f-4d39-8ed3-d6fa44eb29c3"
+  ],
+  "engine": "ad33f966-8519-4938-a200-5d43e817f1bf",
+  "dispatch": "5374d08e-7108-4b73-b8ec-2104c409cfc3",
+  "arch": [
+    "gfx950"
+  ],
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "9909cf89-4850-4e18-a10d-03f4d4029276",
+      "name": "sdpa_dense_bf16_d128_causal_short",
+      "kernel_source": {
+        "kind": "rocke_recipe",
+        "bundle": "sdpa_dense.cbor",
+        "recipe_key": "sdpa_dense_bf16_d128_causal_short"
+      },
+      "metadata": {
+        "variant": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d434d8d6-d01e-4bb9-9139-856dfd4f26d9",
+      "name": "sdpa_dense_bf16_d128_causal",
+      "kernel_source": {
+        "kind": "rocke_recipe",
+        "bundle": "sdpa_dense.cbor",
+        "recipe_key": "sdpa_dense_bf16_d128_causal"
+      },
+      "metadata": {
+        "variant": 0
+      }
+    }
+  ]
+}

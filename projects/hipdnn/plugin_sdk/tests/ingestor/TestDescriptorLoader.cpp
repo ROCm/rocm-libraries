@@ -2637,4 +2637,27 @@ TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
     EXPECT_EQ(sets.front().engine.name, "test:valid");
 }
 
+TEST(TestDescriptorLoader, RecipeSourceRequiresBundleAndEntryAndRejectsForeignFields)
+{
+    using hipdnn_plugin_sdk::ingestor::detail::parseKernelSource;
+    nlohmann::json source{
+        {"kind", "rocke_recipe"}, {"bundle", "recipes/sdpa.cbor"}, {"recipe_key", "sdpa"}};
+    const auto parsed = parseKernelSource(source, "test recipe");
+    ASSERT_TRUE(parsed.recipe.has_value());
+    EXPECT_EQ(parsed.kind, hipdnn_plugin_sdk::ingestor::KernelSourceKind::ROCKE_RECIPE);
+    EXPECT_EQ(parsed.recipe->bundle, "recipes/sdpa.cbor");
+    EXPECT_EQ(parsed.recipe->recipeKey, "sdpa");
+    for(const auto* key : {"bundle", "recipe_key"})
+    {
+        auto missing = source;
+        missing.erase(key);
+        EXPECT_THROW(parseKernelSource(missing, "test recipe"), std::exception);
+        auto empty = source;
+        empty[key] = "";
+        EXPECT_THROW(parseKernelSource(empty, "test recipe"), std::exception);
+    }
+    source["entry_point"] = "precompiled_symbol";
+    EXPECT_THROW(parseKernelSource(source, "test recipe"), std::exception);
+}
+
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
