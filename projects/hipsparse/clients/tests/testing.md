@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-09-10
 
 This document describes how hipSPARSE is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -92,8 +92,10 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./hipsparse-test --gtest_filter='*checkin*-*known_
 **Purpose:** validate hardware-independent logic — descriptor/handle construction, enum/type
 marshalling, and argument validation — that can be checked without dispatching a compute kernel.
 
-hipSPARSE does not maintain a separate host-only unit-test binary; hardware-independent checks live
-inside the single `hipsparse-test` GoogleTest binary as:
+hipSPARSE does not maintain a separate host-only unit-test binary (`clients/unittests/` is a
+rocSPARSE-only layout). Kernel and internal-primitive coverage belongs in rocSPARSE's
+`rocsparse-unit-test` / `rocsparse-unit-test-device`; hipSPARSE should not copy that compile-in
+pattern. Hardware-independent checks live inside the single `hipsparse-test` GoogleTest binary as:
 
 * **Descriptor / bad-argument tests** — plain `TEST()` cases such as
   `clients/tests/test_dnmat_descr.cpp` (`dnmat_descr_bad_arg.*`) validate descriptor create/destroy
@@ -114,7 +116,8 @@ inside the single `hipsparse-test` GoogleTest binary as:
 **How to run:** `./hipsparse-test --gtest_filter='*bad_arg*'` runs the argument-validation surface.
 
 **What is NOT covered by unit tests:** numerical correctness of marshalled routines (requires the
-backend on a GPU) and anything below the hipSPARSE API in rocSPARSE/cuSPARSE.
+backend on a GPU) and anything below the hipSPARSE API in rocSPARSE/cuSPARSE (those libraries own
+their own suites; rocSPARSE internals are covered by `projects/rocsparse/clients/unittests/`).
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
 paths, pursued in phases. Because hipSPARSE is a thin marshalling layer, most of its lines are

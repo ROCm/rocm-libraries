@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-09-10
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -15,7 +15,7 @@ about and closed.
 ## Component Overview
 
 rocALUTION is a sparse linear algebra library for **iterative solvers and preconditioners**, built in
-C++ and HIP with a portable, backend-agnostic design. Version 4.1.0. It provides Krylov solvers,
+C++ and HIP with a portable, backend-agnostic design. It provides Krylov solvers,
 direct solvers, algebraic multigrid, and a large family of preconditioners on top of the ROCm math
 stack.
 
@@ -93,7 +93,7 @@ preconditioner algorithms, backend initialization/ordering, and the host impleme
 Unlike GPU-bound math libraries, a large fraction of rocALUTION's logic is genuinely host-testable:
 every solver and preconditioner has a host backend, so its algorithm can be run and validated on a
 machine with no GPU (`./install.sh -c --host`). These cases live in the same `rocalution-test`
-binary and use a mix of GoogleTest styles:
+binary (there is no `clients/unittests/` split like rocSPARSE) and use a mix of GoogleTest styles:
 
 * **Parameterized** (`INSTANTIATE_TEST_CASE_P` + `TestWithParam<tuple>`) — the solver/preconditioner
   suites (float and double as separate `TEST_P` cases, e.g. `cg_float`, `cg_double`).

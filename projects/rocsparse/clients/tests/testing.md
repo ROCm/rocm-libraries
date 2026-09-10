@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-08-06
+**Last Updated:** 2026-09-10
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -25,11 +25,11 @@ runtime and toolchain. It optionally depends on **rocBLAS** (`BUILD_WITH_ROCBLAS
 **rocPRIM**, and optionally uses rocTX for tracing (`BUILD_WITH_ROCTX`).
 
 **Key architectural constraint that shapes testing:** almost every rocSPARSE routine dispatches a
-GPU kernel and its result is only meaningful on real AMD hardware. The hardware-independent surface
-(argument validation, descriptor/handle management, format-conversion bookkeeping, workspace-size
-queries) is small relative to the device code, so confidence comes overwhelmingly from
-device-executed integration tests that compare against a host reference rather than from pure host
-unit tests.
+GPU kernel and its result is only meaningful on real AMD hardware, so numerical confidence still
+comes from device-executed integration tests that compare against a host reference. Internal
+building blocks (hidden-visibility primitives, info structs, host-pure utilities) are now also
+exercised in isolation by a dedicated unit-test layer under `clients/unittests/`, which compiles
+selected library translation units directly into the test binaries.
 
 ---
 
@@ -70,7 +70,9 @@ The functional suites that read `.csr` inputs need the SuiteSparse test matrices
 | Any routine | `./clients/staging/rocsparse-test --gtest_filter='*quick*-*known_bug*'` | Yes |
 | A specific routine | `./clients/staging/rocsparse-test --gtest_filter='*csrmv*'` | Yes |
 | Something PR-scoped | `./clients/staging/rocsparse-test --gtest_filter='*quick*:*pre_checkin*-*known_bug*'` | Yes |
-| Argument/format validation only | the same, filtered to `*bad_arg*` | No (bad-arg cases are host-side) |
+| Host-pure util / enum / type helper | `./clients/staging/rocsparse-unit-test` (or `ctest -R '^rocsparse-unit-test$'`) | No |
+| Internal primitive / kernel / info struct | `HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` | Yes |
+| Argument/format validation only | `./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` | No (bad-arg cases are host-side) |
 
 On the single-GPU container, run through the serializer pinned to device 0:
 
@@ -83,8 +85,10 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 
 **3. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**4. Open the PR** targeting `develop`. The pre-checkin GTest run (`*quick*:*pre_checkin*`, excluding
-`*known_bug*`) is the merge gate; another rocSPARSE team member reviews and approves.
+**4. Open the PR** targeting `develop`. The merge gate is the TheRock CTest `standard` category
+(`quick` + `pre_checkin` on `rocsparse-test`, excluding `*known_bug*`). Internal Jenkins
+`precheckin` also runs the CPU `rocsparse-unit-test` binary first. Another rocSPARSE team member
+reviews and approves.
 
 ---
 
@@ -96,29 +100,29 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 building blocks (primitives, algorithm-selection logic, info structs), and hardware-independent logic
 such as argument validation, error-code propagation, and type/format bookkeeping.
 
-> **Work in progress:** the dedicated unit-test layer described below is being landed through a
-> series of in-flight PRs (`clients/unittests/`) and is **not yet on `develop`**. The details here
-> (binaries, sources, CTest wiring) reflect that parallel work and will be finalized in this document
-> once those PRs merge.
-
-rocSPARSE has a dedicated unit-test layer under `clients/unittests/`, being introduced in phases and
-kept deliberately separate from the YAML/Arguments-driven integration suite (`rocsparse-test`). It
-does **not** use the `gentest` data pipeline, and it compiles selected library translation units
-directly into the test binary — because `librocsparse` is built with hidden symbol visibility, the
+rocSPARSE has a dedicated unit-test layer under `clients/unittests/` on `develop`, kept
+deliberately separate from the YAML/Arguments-driven integration suite (`rocsparse-test`). It does
+**not** use the `gentest` data pipeline, and it compiles selected library translation units
+directly into the test binaries — because `librocsparse` is built with hidden symbol visibility, the
 internal (non-exported) symbols under test are not reachable by linking `roc::rocsparse`, so the
 `.cpp` files are compiled in without any library source changes. Because it reaches into private
 headers/sources under `library/src`, this layer only builds **in-tree** (it is skipped under
-`BUILD_CLIENTS_ONLY`). It is split into two binaries:
+`BUILD_CLIENTS_ONLY`). `./install.sh -c` (i.e. `BUILD_CLIENTS_TESTS=ON`) builds both binaries. It is
+split into two binaries:
 
 * **`rocsparse-unit-test`** — fast, **GPU-independent** (CPU-only) unit tests with a minimal gtest
   main. Exercises host-pure components (e.g. enum-trait, index-type and data-type utilities, the
-  csrmv-adaptive analysis logic). Registered with CTest (`ctest -R rocsparse-unit-test`) so CI can
-  run it as an early, no-GPU gate.
+  csrmv-adaptive analysis logic). Registered with CTest as `rocsparse-unit-test` (no labels). Run
+  it with `ctest -R '^rocsparse-unit-test$'` — a bare `-R rocsparse-unit-test` also matches
+  `rocsparse-unit-test-device`. Legacy Jenkins `precheckin.groovy` runs this binary as an early
+  no-GPU gate; it is **not** included in TheRock's CTest `standard` category (that YAML only
+  labels `rocsparse-test` suites named `quick/*` / `pre_checkin/*`).
 * **`rocsparse-unit-test-device`** — **GPU** unit tests that link `hip::device` and launch individual
-  library kernels/primitives in isolation (e.g. internal scan/find/sort/RLE primitives, host and
-  numeric level-1/2/3, conversion, preconditioner, reordering, and generic paths, plus internal
-  algorithm-selection and info-struct logic). It must run on a GPU through the serializer and is
-  CTest-labeled `gpu`, so it is scheduled on GPU nodes only and is **not** part of the fast CPU gate.
+  library kernels/primitives in isolation, or drive public C-API host paths that need a device
+  (e.g. internal scan/find/sort/RLE primitives, collectives, info structs, conversion, preconditioner,
+  reordering, generic paths, and host-path level-1/2/3 extras). It must run on a GPU through the
+  serializer and is CTest-labeled `gpu` only, so it is **not** part of the fast CPU gate and is
+  **not** invoked by Jenkins `precheckin` today.
 
 In addition, the integration binary `rocsparse-test` carries the hardware-independent cases that are
 naturally expressed through its YAML pipeline rather than as standalone units:
@@ -140,7 +144,8 @@ into the two binaries. This is distinct from the integration suite's three-layer
 expanded by `clients/common/rocsparse_gentest.py` into `rocsparse_test.data`), which drives the
 `_bad_arg` and numerical cases.
 
-**How to run:** `ctest -R rocsparse-unit-test` runs the CPU-only unit binary (no GPU);
+**How to run:** `ctest -R '^rocsparse-unit-test$'` (or `./clients/staging/rocsparse-unit-test`)
+runs the CPU-only unit binary (no GPU);
 `HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` runs the device unit
 binary on the GPU. The integration binary's host-side subset runs via
 `./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` (a device/driver may be initialized,
@@ -256,15 +261,15 @@ visible or reproducible from this repository.
 
 ## Why We Test This Way
 
-rocSPARSE owns its kernels, but nearly all meaningful behavior is only observable on real AMD
-hardware, so the strategy is integration-dominant: a large YAML-driven GoogleTest suite runs each
-routine on-device and validates against a host reference. The hardware-independent surface (argument
-validation, handle/descriptor lifecycle, auxiliary API) is exercised by the `*bad_arg*` and auxiliary
-cases inside that integration binary. Alongside it, a dedicated unit-test layer
-(`clients/unittests/`) is being introduced to test individual components in isolation — a fast
-CPU-only `rocsparse-unit-test` for host-pure logic and a `rocsparse-unit-test-device` that launches
-single kernels/primitives on the GPU — reaching internal code that the end-to-end suite exercises
-only indirectly.
+rocSPARSE owns its kernels, but nearly all numerical behavior is only observable on real AMD
+hardware, so the strategy is still integration-dominant: a large YAML-driven GoogleTest suite runs
+each routine on-device and validates against a host reference. The hardware-independent surface
+(argument validation, handle/descriptor lifecycle, auxiliary API) is exercised by the `*bad_arg*`
+and auxiliary cases inside that integration binary. Alongside it, a dedicated unit-test layer
+(`clients/unittests/`) tests individual components in isolation — a fast CPU-only
+`rocsparse-unit-test` for host-pure logic and a `rocsparse-unit-test-device` that launches
+single kernels/primitives (or public C-API host paths) on the GPU — reaching internal code that the
+end-to-end suite exercises only indirectly.
 
 The tier system (`quick` → `stress`) is a sampling strategy over a large combinatorial space (routine
 × data type × index type × matrix format × size); exhaustive coverage is not achievable, so the tiers
@@ -279,7 +284,9 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
 (`.github/scripts/therock_configure_ci.py`). It builds and tests only the projects whose files
 changed and, by default, runs the CTest **`standard`** category — i.e. `quick` + `pre_checkin`,
-excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). The scope can be widened per PR
+excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). Those patterns apply only to
+the `rocsparse-test` binary; `rocsparse-unit-test` and `rocsparse-unit-test-device` are separate
+CTest names and are not in the `standard` (or any other) category. The scope can be widened per PR
 with labels (`test:rocsparse`, `test_type:comprehensive` / `test_type:full`); doc-only changes
 (`*.md`, `docs/*`) skip CI. rocSPARSE and hipSPARSE share TheRock's `sparse` component
 (`projects_to_test: [rocsparse, hipsparse]` in `.github/scripts/therock_matrix.py`), so a PR touching
@@ -290,16 +297,19 @@ either one builds and tests both. Broader tiers run in the TheRock nightly workf
 
 Internal AMD **Jenkins** pipelines (`.jenkins/`) also exist but are legacy: they run across a range
 of GPUs (gfx908 / gfx90a / gfx942 / gfx950 / gfx1201) on cron/nightly triggers and mirror the same GTest filters —
-`precheckin.groovy` runs `*quick*:*pre_checkin*`, `extended.groovy` runs `*nightly*`, `asan.groovy`
-runs `*quick*:*pre_checkin*` under AddressSanitizer, and `codecov.groovy` uploads coverage. All
-Jenkins test commands exclude `*known_bug*`.
+`precheckin.groovy` runs `rocsparse-unit-test` first (`runUnitTestCommand`) then `*quick*:*pre_checkin*`
+on `rocsparse-test`, `extended.groovy` runs `*nightly*`, `asan.groovy` runs `*quick*:*pre_checkin*`
+under AddressSanitizer (integration binary only; it does not run the unit-test binaries), and
+`codecov.groovy` runs `rocsparse-unit-test` then uploads coverage. All Jenkins `rocsparse-test`
+filters exclude `*known_bug*`. The device unit binary is not invoked by `precheckin` or `asan`.
 
 ### Validation Gates and Ownership
 
 | Validation Area | Required Before Merge | Owner | Notes |
 |---|---|---|---|
 | Build (Linux; changed projects) | Yes | CI / DevOps | TheRock CI; Jenkins `precheckin`/`static`/`debug` (legacy) |
-| Unit / bad-arg tests | Yes | Component team | In the CTest `standard` category (`quick`+`pre_checkin`) |
+| Dedicated unit tests (`rocsparse-unit-test*`) | Partial | Component team | CPU binary: Jenkins `precheckin` / `codecov`. Device binary: local / `make coverage` only. Neither CTest name matches `test_categories.yaml`, so TheRock `standard` does not run them. |
+| Bad-arg / auxiliary tests | Yes | Component team | Inside `rocsparse-test`, CTest `standard` (`quick`+`pre_checkin`) |
 | Integration tests | Yes | Component team | `standard` category, excluding `*known_bug*` |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | Yes | CI / DevOps | `clang-format`, `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
@@ -319,8 +329,8 @@ Jenkins test commands exclude `*known_bug*`.
 
 | Status | Applies to |
 |---|---|
-| Trusted gate | TheRock CI `standard` category (`quick`+`pre_checkin`, excluding `*known_bug*`) on changed projects |
-| Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results; ASAN lane |
+| Trusted gate | TheRock CI `standard` category (`quick`+`pre_checkin` on `rocsparse-test`, excluding `*known_bug*`) on changed projects; Jenkins `precheckin` also runs `rocsparse-unit-test` |
+| Informational | Coverage upload (Codecov), including best-effort `rocsparse-unit-test*` under `coverage_analysis` (failures ignored); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
 **Flaky / known-bug policy:** rocSPARSE has no `known_bugs.yaml`. A case that exposes a tracked
@@ -349,17 +359,20 @@ make coverage_cleanup coverage GTEST_FILTER='*quick*:*pre_checkin*-*known_bug*'
 ```
 
 The report is produced under `coverage-report/`; exclusions are applied by
-`scripts/filter_lcov_exclusions.py`. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov with
-flag `rocSPARSE`.
+`scripts/filter_lcov_exclusions.py`. The `coverage_analysis` target also runs
+`rocsparse-unit-test` and `rocsparse-unit-test-device` (best-effort: failures are `|| true` so they
+cannot abort the coverage upload) and passes those binaries as extra `llvm-cov` `-object`s so
+compile-in library TUs are attributed. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
+with flag `rocSPARSE`.
 
 **Code coverage vs. test coverage** are distinct:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
-  platforms). Historically, host-side instrumentation did not capture device kernels, so rocSPARSE's
-  measured code coverage understated work done on-device. The new `rocsparse-unit-test-device` binary
-  (`clients/unittests/`) is instrumented under `BUILD_CODE_COVERAGE` and compiles library device
-  sources directly in, so it begins to capture device-path coverage; broad device coverage is still
-  being phased in.
+  platforms). Host-side instrumentation of `rocsparse-test` still misses most device kernels.
+  `rocsparse-unit-test-device` is instrumented under `BUILD_CODE_COVERAGE` and compiles library
+  device sources directly in, so those paths can emit LLVM profile data. Inventory is incomplete
+  (not every kernel is unit-tested) and a coverage run still sees only one wavefront size (see
+  below).
 
 **Wavefront-size gap:** the reported coverage percentage is currently computed on either 32-wavefront
 hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
@@ -430,7 +443,8 @@ device configurations are not ASAN-covered.
 | Scenario | What to add |
 |---|---|
 | New host-pure utility or internal building block (no GPU) | A unit test in `clients/unittests/` built into `rocsparse-unit-test`; compile the internal `.cpp` under test directly into the binary |
-| New internal kernel/primitive to test in isolation | A unit test built into `rocsparse-unit-test-device` (runs on GPU via the serializer) |
+| New internal kernel/primitive / info struct to test in isolation | A unit test built into `rocsparse-unit-test-device` (runs on GPU via the serializer) |
+| New public C-API host-path coverage that needs a device but not a YAML matrix | A unit test in `rocsparse-unit-test-device` that links `roc::rocsparse` (no compile-in TU) |
 | New argument/format validation or status-code path | A `testing_<routine>_bad_arg` case (host-side, no kernel) |
 | New or changed on-device routine behavior | A YAML case in `test_<routine>.yaml` at the appropriate tier, validated against the host reference |
 | New data type or index type | Extend the typed config (`rocsparse_test_config*`); the parameterized suite picks up the combinations |
@@ -446,9 +460,10 @@ device configurations are not ASAN-covered.
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
-| Device-code coverage not captured (host-side instrumentation only) | High | High | Codecov reports host paths; device coverage untracked |
+| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `rocsparse-test` host instrumentation does not; reports are single-wavefront |
+| Dedicated unit binaries not in TheRock `standard`; device binary not in Jenkins `precheckin` | Medium | Medium | CPU binary on Jenkins `precheckin`/`codecov`; device binary local + `make coverage` (failures ignored) |
+| Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
-| Dedicated unit-test layer still being phased in | Low | Medium | `rocsparse-unit-test` (CPU) + `rocsparse-unit-test-device` (GPU) under `clients/unittests/`; `*bad_arg*` / auxiliary cases also cover host paths inside `rocsparse-test` |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
 
 ---
