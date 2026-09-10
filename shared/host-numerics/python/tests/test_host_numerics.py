@@ -2271,9 +2271,7 @@ class TensorAndGemmTests(unittest.TestCase):
         )
         expected = np.float32(np.maximum(combined, np.float32(0.0)) * output_scale)
 
-        product = hv.matmul(
-            hv.from_numpy(a), hv.from_numpy(b), hv.ScalarType.Float32
-        )
+        product = hv.matmul(hv.from_numpy(a), hv.from_numpy(b), hv.ScalarType.Float32)
         combined_tensor = hv.add(
             hv.multiply(product, float(alpha)),
             hv.multiply(hv.from_numpy(c), float(beta * scale_c)),
