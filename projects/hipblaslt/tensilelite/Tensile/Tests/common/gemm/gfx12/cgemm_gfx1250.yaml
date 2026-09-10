@@ -22,6 +22,7 @@ BenchmarkProblems:
     - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: False, UseBeta: True, Batched: True}
     - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
       ForkParameters: &cwmma
+        - 1LDSBuffer: [0]
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
