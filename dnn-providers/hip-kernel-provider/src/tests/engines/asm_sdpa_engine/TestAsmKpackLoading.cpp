@@ -55,7 +55,8 @@ void verifyKernelExtraction(const std::string& archivePath,
 
 std::string kpackPath(const std::string& arch)
 {
-    return std::string(ASM_KPACK_TEST_DIR) + "/hip_kernel_provider_sdpa_" + arch + ".kpack";
+    return std::string(ASM_KPACK_TEST_DIR) + "/" + arch + "/hip_kernel_provider_sdpa_" + arch
+           + ".kpack";
 }
 
 // =============================================================================

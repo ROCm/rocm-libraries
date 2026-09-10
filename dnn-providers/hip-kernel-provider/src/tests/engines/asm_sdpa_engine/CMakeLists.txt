@@ -25,7 +25,7 @@ target_include_directories(hip_kernel_provider_tests PRIVATE
 
 # Path to the build-tree kpack archives for real loading tests
 target_compile_definitions(hip_kernel_provider_tests PRIVATE
-    ASM_KPACK_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/asm_kernels/kpack"
+    ASM_KPACK_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa"
 )
 
 # Ensure codegen runs before compiling the tests
