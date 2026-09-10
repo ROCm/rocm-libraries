@@ -32,6 +32,10 @@ public:
             .WillByDefault(
                 ::testing::Return(hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView{
                     _defaultGraphBuffer.GetBufferPointer(), _defaultGraphBuffer.GetSize()}));
+        // Default: an empty tensor map (no ragged tensors), so isApplicable()
+        // ragged-tensor guards pass without every test stubbing getTensorMap().
+        // Tests exercising ragged rejection override this via ON_CALL/EXPECT_CALL.
+        ON_CALL(*this, getTensorMap()).WillByDefault(::testing::ReturnRef(_emptyTensorMap));
     }
 
     MOCK_METHOD(const hipdnn_flatbuffers_sdk::data_objects::Graph&,
@@ -74,6 +78,8 @@ public:
 private:
     flatbuffers::FlatBufferBuilder _defaultGraphBuffer;
     flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> _defaultGraphBuilder;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _emptyTensorMap;
 };
 
 }

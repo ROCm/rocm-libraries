@@ -3,7 +3,7 @@
 
 // Verifies that the CPU reference plan builders reject any graph containing a
 // ragged tensor. The check lives in every plan builder's isApplicable (see
-// CHECK_NO_RAGGED_TENSORS in PlanUtils.hpp); here we exercise it end-to-end
+// CHECK_NO_RAGGED_TENSORS in ApplicabilityUtils.hpp); here we exercise it end-to-end
 // through CpuReferenceGraphExecutor::isApplicable, which dispatches to the
 // correct builder for each node.
 

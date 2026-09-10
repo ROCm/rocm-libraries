@@ -44,7 +44,7 @@ TEST(TestPluginPublic, HipdnnPluginGetApiVersionSuccess)
     auto status = hipdnnPluginGetApiVersion(&version);
 
     ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.2.0");
+    EXPECT_STREQ(version, "1.3.0");
 }
 
 TEST(TestPluginPublic, HipdnnPluginGetApiVersionNullPtr)
