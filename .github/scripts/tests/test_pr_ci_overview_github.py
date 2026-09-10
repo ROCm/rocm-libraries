@@ -194,7 +194,7 @@ def test_workflow_runs_are_top_level_only_and_exclude_gating_runs_and_admin() ->
         },
     ]
 
-    assert sut._normalize_workflow_runs(runs, {10}, {1}) == [
+    assert sut._normalize_workflow_runs(runs, {10}, {1}, set()) == [
         {
             "key": "workflow:2",
             "name": "Component CI",
@@ -229,7 +229,7 @@ def test_new_run_wins_when_older_run_is_cancelled_later() -> None:
         },
     ]
 
-    normalized = sut._normalize_workflow_runs(runs, set(), set())
+    normalized = sut._normalize_workflow_runs(runs, set(), set(), set())
     overview = renderer.parse_overview(
         {"required_checks": [], "workflow_runs": normalized}
     )
@@ -259,7 +259,7 @@ def test_same_named_workflow_is_not_hidden_unless_its_run_is_gating() -> None:
         },
     ]
 
-    normalized = sut._normalize_workflow_runs(runs, {10}, {1})
+    normalized = sut._normalize_workflow_runs(runs, {10}, {1}, set())
 
     assert [item["id"] for item in normalized] == [11]
 
@@ -283,7 +283,35 @@ def test_newer_attempt_of_gating_workflow_stays_out_of_informational_section() -
         },
     ]
 
-    assert sut._normalize_workflow_runs(runs, {100}, {7}) == []
+    assert sut._normalize_workflow_runs(runs, {100}, {7}, set()) == []
+
+
+def test_required_context_hint_hides_parent_before_summary_job_exists() -> None:
+    runs = [
+        {
+            "id": 101,
+            "workflow_id": 7,
+            "name": "TheRock Multi-Arch CI",
+            "status": "in_progress",
+            "created_at": "2026-09-09T10:05:00Z",
+        },
+        {
+            "id": 102,
+            "workflow_id": 8,
+            "name": "Component CI",
+            "status": "in_progress",
+            "created_at": "2026-09-09T10:05:00Z",
+        },
+    ]
+
+    normalized = sut._normalize_workflow_runs(
+        runs,
+        set(),
+        set(),
+        {"TheRock Multi-Arch CI"},
+    )
+
+    assert [item["name"] for item in normalized] == ["Component CI"]
 
 
 def test_collect_overview_produces_condensed_gate_based_report(

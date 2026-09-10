@@ -43,6 +43,14 @@ _IGNORED_WORKFLOWS = {
     "PR CI Overview",
 }
 
+# Requiredness still comes exclusively from GitHub's effective rules. These
+# names only connect a required summary context to its parent workflow before
+# the deferred summary job has been created and can provide a run ID.
+_REQUIRED_CONTEXT_WORKFLOWS = {
+    "Multi-Arch CI Summary": "TheRock Multi-Arch CI",
+    "pre-commit": "pre-commit",
+}
+
 _STATE_MAP = {
     "ACTION_REQUIRED": "failure",
     "CANCELLED": "cancelled",
@@ -140,7 +148,17 @@ def collect_overview(repo: str, pr_number: int) -> dict[str, list[dict[str, Any]
         and isinstance((workflow_id := run.get("workflow_id")), int)
         and not isinstance(workflow_id, bool)
     }
-    workflow_runs = _normalize_workflow_runs(runs, gating_run_ids, gating_workflow_ids)
+    gating_workflow_names = {
+        workflow_name
+        for context in expected_contexts
+        if (workflow_name := _REQUIRED_CONTEXT_WORKFLOWS.get(context)) is not None
+    }
+    workflow_runs = _normalize_workflow_runs(
+        runs,
+        gating_run_ids,
+        gating_workflow_ids,
+        gating_workflow_names,
+    )
     return {
         "required_checks": required_checks,
         "workflow_runs": workflow_runs,
@@ -391,11 +409,12 @@ def _normalize_workflow_runs(
     runs: Iterable[Mapping[str, Any]],
     gating_run_ids: set[int],
     gating_workflow_ids: set[int],
+    gating_workflow_names: set[str],
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for run in runs:
         name = str(run.get("name") or "").strip()
-        if not name or name in _IGNORED_WORKFLOWS:
+        if not name or name in _IGNORED_WORKFLOWS or name in gating_workflow_names:
             continue
         workflow_id = run.get("workflow_id")
         run_id = run.get("id")
