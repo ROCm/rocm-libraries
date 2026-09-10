@@ -1233,17 +1233,20 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
-      # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is the
-      # number of K-subtiles per depth-U iteration: 1 for fp8 (AB_B8, subtileShape K=1),
-      # 2 for fp4/bf16 (AB_B4/AB_B16, subtileShape K=2).
-      # TLU=1 (column-major / free-dim contiguous) geometries load one MFMA-K per
-      # DU iteration (subtileShape K=1), so their DU unit is a single MatrixInstK.
-      dtype_a = state["ProblemType"]["DataTypeA"]
-      tluA = state["ProblemType"].get("TLUA", False)
-      if dtype_a.is8bitFloat() or tluA:
-        numSubIterK = 1
-      else:
-        numSubIterK = 2
+      # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is
+      # the subtileShape K of the geometry picked below: 1 for fp8 (AB_B8) and for
+      # every TLU=1 geometry (column-major / free-dim contiguous, one MFMA-K per DU
+      # iteration), 2 for row-major fp4/bf16 (AB_B4/AB_B16).
+      #
+      # DepthU is shared, so it has to satisfy whichever operand asks for more.  NN
+      # and TT mix the two layouts, so answering for A alone would under-size the
+      # unit on NN, where A is TLU=1 and asks for 1 while the row-major B still
+      # needs 2.
+      def subIterKFor(tc):
+        if state["ProblemType"][f"TLU{tc}"]:
+          return 1
+        return 1 if state["ProblemType"][f"DataType{tc}"].is8bitFloat() else 2
+      numSubIterK = max(subIterKFor('A'), subIterKFor('B'))
       # An MX scale local read covers 2 scale MMA tiles in K, so the scales need
       # two MatrixInstK per DepthU however few the data side needs.
       if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
@@ -1256,7 +1259,7 @@ class Solution(collections.abc.Mapping):
 
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
-        tlu = state["ProblemType"].get(f"TLU{tc}", False)
+        tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
