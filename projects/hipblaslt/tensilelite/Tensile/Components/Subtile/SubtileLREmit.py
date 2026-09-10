@@ -473,7 +473,7 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     elif tc == 'B' and wgM > 1:
       module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wgM.bit_length()-1), src=vgpr(waveId), comment="waveIdN = waveId / %d" % wgM))
     # LDS offset per wave = waveId_axis * (mt / numWavesThisAxis * (du*bpe + pad))
-    rowBytes = int(du * bpe) + int(getattr(tileInfo, "ldsRowPadBytes", 0))
+    rowBytes = int(du * bpe) + int(tileInfo.ldsRowPadBytes)
     ldsPerWave = int(mt // numWavesThisAxis) * rowBytes
     tmpSgpr = writer.sgprPool.checkOut(1)
     module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(ldsPerWave), comment="LDS bytes per wave for %s" % tc))
@@ -769,7 +769,7 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   if axisWaves > 1:
     mWaves = kernel["MIWaveGroup"][0]
     localSub0 = int(tileInfo.localSubtileGrid[0])
-    wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
+    wavesPerStrip = int(tileInfo.grWavesPerStrip)
     if wavesPerStrip > 1:
       # Shared strip: it holds every axis-wave's M tiles side by side, so a wave
       # steps WITHIN the strip by its own M-tile window rather than by whole
@@ -845,7 +845,7 @@ def _lraTileAssignment_rowMajorSingle(writer, kernel, module, tileInfo):
   loadWidth = tileInfo.loadWidthLR
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   ldsKBytes = subIterKBytes if writer.states.subtileLdsSwizzle else tileInfo.depthUBytes
-  padBytes = int(getattr(tileInfo, "ldsRowPadBytes", 0))
+  padBytes = int(tileInfo.ldsRowPadBytes)
   ldsRowStride = ldsKBytes + padBytes
   numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
   blockSize = ldsKBytes // loadWidth
@@ -912,7 +912,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   # With LDS swizzling (gfx950), K-row is one subtile group; without, full DepthU.
   ldsKBytes = subIterKBytes if writer.states.subtileLdsSwizzle else tileInfoA.depthUBytes
-  padBytes = int(getattr(tileInfoA, "ldsRowPadBytes", 0))
+  padBytes = int(tileInfoA.ldsRowPadBytes)
   ldsRowStride = ldsKBytes + padBytes
   numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
   blockSize = ldsKBytes // loadWidth
@@ -1039,7 +1039,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     subtileShapeK = int(tileInfo.subtileShape[1])
     depthUBytes = int(tileInfo.depthUBytes)
     # Add padding
-    rowPadBytes = getattr(tileInfo, "ldsRowPadBytes", 0)
+    rowPadBytes = tileInfo.ldsRowPadBytes
     rowStride = depthUBytes + rowPadBytes
     offsetStride = subtileShapeM * instM * rowStride
     offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)

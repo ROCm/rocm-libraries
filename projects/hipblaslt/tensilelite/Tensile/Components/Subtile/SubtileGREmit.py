@@ -318,7 +318,7 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
   # consecutive localSubtile rows one GR load covers (>1 only for bc==1 with
   # wave-cooperative expansion, i.e. loadRatioGR > 1).
   localSubtileRowCount = int(ti.localSubtileGrid[0])
-  gran = tile.localGRGranularity(getattr(ti, "grLoadWaves", ti.numWaves))
+  gran = tile.localGRGranularity(ti.grLoadWaves)
   perpDimSize = math.ceil(localSubtileRowCount / gran[0])
   tmpSgprBuffer = 3
   sgprLimit = writer.states.regCaps["MaxSgpr"] - tmpSgprBuffer
@@ -1307,11 +1307,11 @@ def _tluCoopWaveId(writer, kernel, module, tileInfo, dst):
   Returns True if the index can be non-zero.
   """
   tc = tileInfo.tc
-  coop = int(getattr(tileInfo, "grCoopWaves", 1))
+  coop = int(tileInfo.grCoopWaves)
   if coop <= 1:
     module.add(VMovB32(dst=vgpr(dst), src=0, comment="%s: single fetching wave" % tc))
     return False
-  perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
+  perStrip = max(1, int(tileInfo.grWavesPerStrip))
   kSplit = max(1, coop // perStrip)
   if kSplit <= 1:
     ok = _tluWaveAxisId(writer, kernel, module, tc, dst)
@@ -1362,7 +1362,7 @@ def _tluStripIdx(writer, kernel, module, tc, ti, dst):
   strip, so callers can skip the step.
   """
   strips = int(ti.globalSubtileGrid[0])
-  perStrip = max(1, int(getattr(ti, "grWavesPerStrip", 1)))
+  perStrip = max(1, int(ti.grWavesPerStrip))
   if strips <= 1 or perStrip <= 1:
     return False
   assert perStrip & (perStrip - 1) == 0, \
@@ -1384,9 +1384,9 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
   """
   tc = tileInfo.tc
   axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
-  wavesPerStrip = int(getattr(tileInfo, "grWavesPerStrip", 1))
-  coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
-  winSplit = int(getattr(tileInfo, "grKWindowSplit", 1))
+  wavesPerStrip = int(tileInfo.grWavesPerStrip)
+  coopWaves = int(tileInfo.grCoopWaves)
+  winSplit = int(tileInfo.grKWindowSplit)
   if axisWaves <= 1 and coopWaves <= 1 and winSplit <= 1:
     return None
   dst = writer.vgprPool.checkOut(1, tag="_tluWaveAxisGlobalOffset_%s" % tc)
@@ -1472,10 +1472,10 @@ def _tluKWaveSlots(tileInfo):
   window of a winSplit-sized group -- both the scheduler's grA.k and the
   globalReadDoSubtile loop step by winSplit -- so one run is one window.
   """
-  coop = int(getattr(tileInfo, "grCoopWaves", 1))
-  perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
+  coop = int(tileInfo.grCoopWaves)
+  perStrip = max(1, int(tileInfo.grWavesPerStrip))
   kSplit = max(1, coop // perStrip)
-  winSplit = max(1, int(getattr(tileInfo, "grKWindowSplit", 1)))
+  winSplit = max(1, int(tileInfo.grKWindowSplit))
   kRowsPerWindow = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
   if selectTLUColScatter(tileInfo) is not None:
     # col_scatter: the load index IS the K column (col = col_group*N + L), so a
@@ -1509,7 +1509,7 @@ def _tluKSliceTerms(writer, kernel, module, tileInfo, src, dst, sliceUnit, runUn
   """
   tc = tileInfo.tc
   kSplit, winSplit, _, _ = _tluKWaveSlots(tileInfo)
-  otherWaves = int(getattr(tileInfo, "grOtherAxisWaves", 1))
+  otherWaves = int(tileInfo.grOtherAxisWaves)
   tmpS = writer.sgprPool.checkOut(1, tag="%s_s_%s" % (tag, tc), preventOverflow=False)
   if kSplit > 1:
     if kSplit < otherWaves:
@@ -1652,7 +1652,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   # within it by whole load-blocks (each takes a slice of the strip's
   # K rows) rather than interleaved within one block, so a wave still advances
   # m0 by its own single-wave block, not by the cooperative total.
-  coopWaves = int(getattr(tileInfo, "grCoopWaves", 1))
+  coopWaves = int(tileInfo.grCoopWaves)
   if isTLU1 and coopWaves > 1:
     # TLU=1 only: loadRatioGR folds in every cooperating wave, so undo it to get
     # the bytes a single wave's own load block covers.  TLU=0 keeps the
@@ -1734,7 +1734,7 @@ def globalReadDoSubtile(tc, writer, kernel):
 
   # A K-window split hands each wave every grKWindowSplit'th run of windows, so
   # the loop issues one window per run and the runtime base picks the run.
-  winSplit = int(getattr(tileInfo, "grKWindowSplit", 1))
+  winSplit = int(tileInfo.grKWindowSplit)
   for j in range(0, int(tileInfo.localSubtileGrid[1]), winSplit):
     for i in range(tileInfo.localSubtileGrid[0]):
       module.addComment0("Emit load for %s subtile: [%u, %u]"%(tc, i, j))
@@ -1812,8 +1812,8 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
   axisWaves = kernel["MIWaveGroup"][0] if tc == 'A' else kernel["MIWaveGroup"][1]
   stripStride = stripStrideBytes(ti)
   localSub0 = int(ti.localSubtileGrid[0])
-  wavesPerStrip = int(getattr(ti, "grWavesPerStrip", 1))
-  coopWaves = int(getattr(ti, "grCoopWaves", 1))
+  wavesPerStrip = int(ti.grWavesPerStrip)
+  coopWaves = int(ti.grCoopWaves)
   if wavesPerStrip > 1:
     # Shared strip: the waves sharing one write into it at a contiguous run of
     # DTL load-blocks each (its share of the strip's K rows).  numGRPerSubtile is
@@ -1824,7 +1824,7 @@ def _grDTLInitBase_tlu(writer, kernel, module, tc, ti):
     perWaveBytes = int(ti.numGRPerSubtile * blkBytes)
   else:
     perWaveBytes = int(localSub0 * stripStride)
-  winSplit = int(getattr(ti, "grKWindowSplit", 1))
+  winSplit = int(ti.grKWindowSplit)
   # The write base must be keyed the same way as the global offset: by the
   # fetching-wave index for shared strips, by the axis id otherwise.
   if (coopWaves > 1) if wavesPerStrip > 1 else (axisWaves > 1 or coopWaves > 1 or winSplit > 1):
@@ -2019,7 +2019,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   # Sourced from TileInfo.ldsRowPadBytes so GR and LR
   # see the same value.
   tileInfoForTc = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  padAmountBytes = int(getattr(tileInfoForTc, "ldsRowPadBytes", 0))
+  padAmountBytes = int(tileInfoForTc.ldsRowPadBytes)
   padIntervalBytes = int(du * bpe) if padAmountBytes else 0
 
   mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
