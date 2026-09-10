@@ -252,7 +252,7 @@ class _SetupNewTilePapTdmWriter:
     def calculateLoopNumIter(self, kernel, tpa, tpb, loop_idx):
         return self._module("calculateLoopNumIter")
 
-    def openA2AShardLoop(self, kernel):
+    def openA2AShardLoop(self, kernel, tpb):
         return self._module("openA2AShardLoop")
 
     def localReadInitPointers(self, kernel, tpa, tpb):

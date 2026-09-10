@@ -303,6 +303,113 @@ class TestA2AGemmEnqueueLoops:
         ), "W == 1 does not skip the packing pass"
 
 
+class TestA2AGemmPacketBody:
+    """The COPY_SUBWIN + ATOMIC pair the enqueuer places for each token block."""
+
+    # MacroTile1 of the config: one token block's row count, and rect_y once the
+    # tail block is behind us.
+    _MT_TOKEN = 256
+
+    # srdShiftLeft["B"] (GlobalReadVectorWidthB, 8 here) * bpeGR (bf16).
+    _PRE_PAD = 16
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _segment_base(self, src):
+        import re
+
+        from Tensile.Components.Signature import fusedA2AKernArgLayout
+
+        m = re.search(
+            r"s_load_dword s\[sgprA2AShardCounter\], "
+            r"s\[sgprKernArgAddress:sgprKernArgAddress\+1\], (0x[0-9a-f]+)",
+            src,
+        )
+        assert m, "no FusedW kernarg load in the emitted kernel"
+        return int(m.group(1), 16) - fusedA2AKernArgLayout()["FusedW"]
+
+    def _queue_loop_body(self, src):
+        import re
+
+        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
+        assert head and tail, "no a2a queue loop in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def _packet_loop_body(self, src):
+        import re
+
+        head = re.search(r"^label_a2a_packet_loop\w*:", src, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_packet_loop\w*", src, re.M)
+        assert head and tail, "no a2a packet loop in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def test_both_packets_share_one_register_block(self):
+        import re
+
+        body = self._packet_loop_body(self._src())
+        copy = re.search(r"s_mov_b32 s(\d+), 0x\w+[^\n]*SUBWIN DW0", body)
+        atom = re.search(r"s_mov_b32 s(\d+), 0x\w+[^\n]*ATOMIC DW0", body)
+        assert copy and atom, "the COPY + ATOMIC pair is not emitted"
+        assert copy.group(1) == atom.group(1), "the two packets use different blocks"
+
+    def test_tail_block_row_count_is_clamped(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        pkt = re.search(r"^label_a2a_packet_loop\w*:", body, re.M)
+        assert pkt, "no packet loop inside the queue loop"
+        assert re.search(
+            r"s_min_u32 s\d+, s\d+, %d\b" % self._MT_TOKEN, body[: pkt.start()]
+        ), "rect_y is not clamped against the macro tile before the packet loop"
+
+    def test_row_count_saturates_after_the_tail_block(self):
+        import re
+
+        assert re.search(
+            r"v_mov_b32 v\d+, %d\b" % self._MT_TOKEN,
+            self._packet_loop_body(self._src()),
+        ), "rect_y never settles at the full macro tile inside the packet loop"
+
+    def test_copy_source_is_the_peer_input_pointer(self):
+        from Tensile.Components.SdmaRingEmitter import OFF_recvPtr
+
+        src = self._src()
+        want = self._segment_base(src) + OFF_recvPtr
+        assert (
+            "offset:%d " % want in self._queue_loop_body(src)
+            or "offset:%d\n" % want in self._queue_loop_body(src)
+        ), "the peer input pointer at offset %d is never loaded" % want
+
+    def test_atomic_target_is_the_local_flag_block(self):
+        import re
+
+        from Tensile.Components.Signature import FUSED_A2A_MODE1_FLAG_OFFSET
+
+        body = self._queue_loop_body(self._src())
+        assert re.search(
+            r"s_add_u32 s\d+, s\[sgprA2ACounterPtr\], s\d+[^\n]*\n"
+            r"s_addc_u32 s\d+, s\[sgprA2ACounterPtr\+1\], 0",
+            body,
+        ), "the ATOMIC target is not derived from this device's counter block"
+        assert re.search(
+            r"s_add(?:c)?_u32 s\d+, s\d+, %d\b" % FUSED_A2A_MODE1_FLAG_OFFSET, body
+        ), "the flag slot does not sit at the mode-1 flag block offset"
+
+    def test_destination_undoes_the_address_pre_pad(self):
+        import re
+
+        # defineAndResources subtracts srdShiftLeft["B"] * bpeGR from AddressB;
+        # the gather destination is the tensor base, so it adds that back.
+        assert re.search(
+            r"s_add_u32 s\d+, s\[sgprAddressB\], %d\b" % self._PRE_PAD,
+            self._queue_loop_body(self._src()),
+        ), "the destination base never re-adds the AddressB pre-pad"
+
+
 class TestA2AGemmRegisterBudget:
     """The emitted kernel's SGPR high-water mark."""
 
