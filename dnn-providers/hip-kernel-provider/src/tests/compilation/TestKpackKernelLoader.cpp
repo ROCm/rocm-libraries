@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -20,15 +21,14 @@
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "compilation/KpackProgram.hpp"
-#include "tests/utilities/ScratchDirectory.hpp"
 
 namespace hip_kernel_provider::compilation
 {
 namespace
 {
 
-using hip_kernel_provider::tests::claimScratchDirectory;
 using hipdnn_plugin_sdk::HipdnnPluginException;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr const char* SCRATCH_LABEL = "kpackloader";

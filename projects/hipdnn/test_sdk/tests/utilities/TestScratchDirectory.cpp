@@ -7,44 +7,38 @@
 
 #include <gtest/gtest.h>
 
-#include "tests/utilities/ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
-/**
- * @file TestScratchDirectory.cpp
- * @brief Not gated on the ingestor: the helper is plain filesystem code, and a build with
- *        the ingestor off should still catch a regression in it.
- */
-namespace hip_kernel_provider::tests
+namespace hipdnn_test_sdk::utilities
 {
 namespace
 {
 
-using hipdnn_test_sdk::utilities::ScopedDirectory;
-
 constexpr const char* SCRATCH_LABEL = "scratchsuite";
 
-[[nodiscard]] unsigned long counterOf(const std::filesystem::path& claimed)
+[[nodiscard]] unsigned long long counterOf(const std::filesystem::path& claimed)
 {
     const std::string name = claimed.filename().string();
     const auto separator = name.rfind('_');
     EXPECT_NE(separator, std::string::npos) << name;
-    return std::stoul(name.substr(separator + 1));
+    return std::stoull(name.substr(separator + 1));
 }
 
+// The counter only moves forward, so the name to squat on has to be computed from the one
+// already claimed. The sentinel separates retry from clear: a helper that called remove_all
+// on the taken name would pass every other assertion here.
 TEST(TestScratchDirectory, WalksPastANameSomethingElseAlreadyHoldsAndLeavesItIntact)
 {
     const ScopedDirectory first = claimScratchDirectory(SCRATCH_LABEL);
     const std::string name = first.path().filename().string();
     const auto separator = name.rfind('_');
     ASSERT_NE(separator, std::string::npos) << name;
-    const unsigned long firstCounter = counterOf(first.path());
+    const unsigned long long firstCounter = counterOf(first.path());
 
     const std::filesystem::path squatted
         = first.path().parent_path()
           / (name.substr(0, separator + 1) + std::to_string(firstCounter + 1));
     ASSERT_TRUE(std::filesystem::create_directory(squatted));
-    // Separates retry from clear: a helper that cleared the taken name would pass every other
-    // assertion here.
     const std::filesystem::path sentinel = squatted / "held-by-someone-else";
     std::ofstream{sentinel} << "occupied";
     ASSERT_TRUE(std::filesystem::exists(sentinel));
@@ -66,7 +60,7 @@ TEST(TestScratchDirectory, NamesTheDirectoryAfterItsLabelAndACounter)
     const ScopedDirectory claimed = claimScratchDirectory(SCRATCH_LABEL);
     const std::string name = claimed.path().filename().string();
 
-    EXPECT_EQ(name.rfind(std::string("hkp_") + SCRATCH_LABEL + '_', 0), 0U) << name;
+    EXPECT_EQ(name.rfind(std::string("hipdnn_test_") + SCRATCH_LABEL + '_', 0), 0U) << name;
     const auto separator = name.rfind('_');
     ASSERT_NE(separator, std::string::npos) << name;
     EXPECT_EQ(name.find_first_not_of("0123456789", separator + 1), std::string::npos) << name;
@@ -87,4 +81,4 @@ TEST(TestScratchDirectory, ReportsAnUnusableTempDirectoryRatherThanNameExhaustio
 }
 
 } // namespace
-} // namespace hip_kernel_provider::tests
+} // namespace hipdnn_test_sdk::utilities

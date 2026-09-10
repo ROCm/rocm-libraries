@@ -3,13 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <random>
-#include <sstream>
-
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
@@ -125,35 +123,6 @@ void touchFile(const std::filesystem::path& p)
     const std::ofstream f(p);
     ASSERT_TRUE(f.good()) << "Failed to create " << p;
 }
-
-/// A scratch directory for one scan case. ScopedDirectory throws rather than adopting an
-/// existing name, so a fixed one fails whichever of two concurrent runs started second. The
-/// counter walks past a taken name; create_directory is atomic, so test-and-claim is one step.
-ScopedDirectory claimScanDirectory(const std::string& label)
-{
-    static const unsigned s_session = std::random_device{}();
-    const std::filesystem::path base = std::filesystem::temp_directory_path();
-
-    std::ostringstream prefix;
-    prefix << "test_scan_" << label << '_' << std::hex << s_session << '_';
-
-    for(int attempt = 0; attempt < 64; ++attempt)
-    {
-        try
-        {
-            return {base / (prefix.str() + std::to_string(attempt))};
-        }
-        catch(const std::filesystem::filesystem_error&)
-        {
-            throw;
-        }
-        catch(const std::runtime_error&)
-        {
-            continue;
-        }
-    }
-    throw std::runtime_error("claimScanDirectory: no free scratch name under the temp dir");
-}
 } // namespace
 
 TEST(TestScanBundleJsonFiles, NonexistentDirectory)
@@ -164,7 +133,7 @@ TEST(TestScanBundleJsonFiles, NonexistentDirectory)
 
 TEST(TestScanBundleJsonFiles, EmptyDirectory)
 {
-    const ScopedDirectory dir = claimScanDirectory("empty");
+    const ScopedDirectory dir = claimScratchDirectory("scan_empty");
 
     auto results = scanBundleJsonFiles(dir.path());
     EXPECT_TRUE(results.empty());
@@ -172,7 +141,7 @@ TEST(TestScanBundleJsonFiles, EmptyDirectory)
 
 TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 {
-    const ScopedDirectory dir = claimScanDirectory("recursive");
+    const ScopedDirectory dir = claimScratchDirectory("scan_recursive");
     const auto nested = dir.path() / "sub1" / "sub2";
     std::filesystem::create_directories(nested);
 
@@ -195,7 +164,7 @@ TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 
 TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 {
-    const ScopedDirectory dir = claimScanDirectory("meta");
+    const ScopedDirectory dir = claimScratchDirectory("scan_meta");
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
@@ -208,7 +177,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
 TEST(TestScanBundleJsonFiles, ReturnsSortedPaths)
 {
-    const ScopedDirectory dir = claimScanDirectory("sorted");
+    const ScopedDirectory dir = claimScratchDirectory("scan_sorted");
     const auto subC = dir.path() / "c_dir";
     const auto subA = dir.path() / "a_dir";
     std::filesystem::create_directory(subC);

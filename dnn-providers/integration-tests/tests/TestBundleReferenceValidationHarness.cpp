@@ -19,10 +19,10 @@
 #include <string>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
-#include "ScratchDirectory.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -30,6 +30,7 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -48,7 +49,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("bundle_reference_validation_"));
+        _scopedDir.emplace(claimScratchDirectory("bundle_reference_validation"));
         _tempDir = _scopedDir->path();
 
         using ::testing::Return;

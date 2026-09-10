@@ -18,6 +18,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "compilation/ICompiledProgram.hpp"
 #include "compilation/IKernelCompiler.hpp"
@@ -26,7 +27,6 @@
 #include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
-#include "tests/utilities/ScratchDirectory.hpp"
 
 /**
  * @file TestIngestorKernelCode.cpp
@@ -46,8 +46,8 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using hip_kernel_provider::kernel_ingestor_engine::testing::buildPointwiseGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
-using hip_kernel_provider::tests::claimScratchDirectory;
 using hipdnn_plugin_sdk::HipdnnPluginException;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 constexpr const char* SCRATCH_LABEL = "ingestorkernelcode";
