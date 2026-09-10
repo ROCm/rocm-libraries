@@ -18,6 +18,9 @@ on:
       amdgpu_families:
         type: string
         required: true
+      amdgpu_targets:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -113,6 +116,7 @@ jobs:
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
