@@ -53,6 +53,9 @@ using namespace stinkytofu;
 // Gate for the ESM2 VALU source-operand VA_VDST stamp (the src-operand WAR hazard).
 bool g_enableESM2TrackValuVsrc = false;
 
+// Shared-VA-order refinements, from InsertWaitAluOptions.
+bool g_sharedOrderCountFollowers = false;
+
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
 // global op / prefetch reads it" case. global_prefetch does not carry IF_GLOBALLoad,
@@ -203,6 +206,11 @@ inline unsigned computeXdlSinceCap(const HWModel::WaitHide& wh) {
     return 2 * static_cast<unsigned>(maxHide);
 }
 
+// Pipes whose producers may take their follower count from the shared VA order.
+inline bool isCountablePipe(VaPipe p) {
+    return p == PIPE_CSMACC || p == PIPE_DPMACC || p == PIPE_TRANS || p == PIPE_XDL;
+}
+
 // ---------------------------------------------------------------------------
 // Instruction classifiers
 // ---------------------------------------------------------------------------
@@ -350,6 +358,8 @@ struct VgprStamp {
     bool pairedFlat = false;
     // Ordinal step this producer took.
     unsigned vaInc = 1;
+    // This producer's ticket in the shared VA order.
+    unsigned vaOrdShared = 0;
     // Matrix-op steps since this producer stamped, saturating at g_xdlSinceCap. An age, not
     // a position: a merge rebases positions, and an age survives that.
     unsigned xdlSince = 0;
@@ -458,6 +468,7 @@ class WaitcntBrackets {
             VaPipe pipe = vaPipeOfEvent(ev);
             unsigned inc = hasMatrixScalePair(inst) ? 2u : 1u;
             vaPipeUB[pipe] += inc;
+            vaUB += inc;
             unsigned ord = vaPipeUB[pipe];
             if (pipe == PIPE_XDL) latchXdlForm(inst, inc);
             noteIssue(pipe, inc);
@@ -472,6 +483,7 @@ class WaitcntBrackets {
                 VgprStamp& s = scores[k];
                 s.vaOrd[pipe] = ord;
                 s.vaInc = inc;
+                s.vaOrdShared = vaUB;
                 s.xdlSince = 0;
                 s.unmodeledSince = false;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
@@ -596,6 +608,13 @@ class WaitcntBrackets {
         return !s.unmodeledSince;
     }
 
+    // Whether the shared VA order may supply this stamp's follower count.
+    static bool sharedCountApplies(const VgprStamp& s) {
+        for (int p = 0; p < NUM_VA_PIPE; ++p)
+            if (s.vaOrd[p] != 0 && !isCountablePipe(static_cast<VaPipe>(p))) return false;
+        return true;
+    }
+
     // Whether the stamp names a VA producer at all, live or retired.
     static bool hasVaProducer(const VgprStamp& s) {
         for (int p = 0; p < NUM_VA_PIPE; ++p)
@@ -617,6 +636,14 @@ class WaitcntBrackets {
         }
         if (p == PIPE_CSMACC) {
             const unsigned since = s.xdlSince;
+            // Count from the producer's own ticket in the shared order.
+            if (g_sharedOrderCountFollowers && sharedCountApplies(s) && s.vaOrdShared != 0 &&
+                !waitHideSatisfied(since, xdlInc, xdlHideCsmacc)) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from shared order ["
+                                     << (vaUB - s.vaOrdShared) << " vs per-pipe " << followers
+                                     << "]\n");
+                return vaUB - s.vaOrdShared;
+            }
             if (!modeledPipesOnlySince(s)) {
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     no-skip va_vdst (other "
                                         "units outstanding) [CSMACC matrix-ops="
@@ -632,6 +659,13 @@ class WaitcntBrackets {
 
     // Wait needed for this reg's VA producers.
     unsigned vaFollowers(const VgprStamp& s) const {
+        // The weaker count stops the per-pipe floor rising, so test the shared floor instead.
+        if (g_sharedOrderCountFollowers && hasVaProducer(s) &&
+            (s.vaOrdShared == 0 || s.vaOrdShared <= vaLB)) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drained by shared order [ord="
+                                 << s.vaOrdShared << " vaLB=" << vaLB << "]\n");
+            return ~0u;
+        }
         unsigned f = ~0u;
         for (int p = 0; p < NUM_VA_PIPE; ++p)
             if (s.vaOrd[p] && s.vaOrd[p] > vaPipeLB[p])
@@ -694,7 +728,9 @@ class WaitcntBrackets {
     void applyWaitcnt(CounterType c, unsigned count) {
         if (count == kNoWait) return;
         if (c == CT_VA_VDST) {
-            // count bounds every pipe.
+            // count bounds the shared order and every pipe.
+            unsigned newVaLB = vaUB >= count ? vaUB - count : 0u;
+            if (newVaLB > vaLB) vaLB = newVaLB;
             for (int P = 0; P < NUM_VA_PIPE; ++P) {
                 unsigned oldLB = vaPipeLB[P];
                 unsigned newLB = vaPipeUB[P] >= count ? vaPipeUB[P] - count : 0u;
@@ -738,6 +774,18 @@ class WaitcntBrackets {
 
         mergeXdlForm(other);
 
+        // Shared VA order: widen like a pipe, keeping the shift for the stamps below.
+        unsigned myShiftShared = 0, otherShiftShared = 0;
+        const unsigned myOldFloorShared = vaLB, otherOldFloorShared = other.vaLB;
+        {
+            unsigned mineIF = vaUB - vaLB;
+            unsigned otherIF = other.vaUB - other.vaLB;
+            unsigned newUB = vaLB + std::max(mineIF, otherIF);
+            myShiftShared = newUB - vaUB;
+            otherShiftShared = newUB - other.vaUB;
+            vaUB = newUB;
+        }
+
         {
             unsigned mineIF = vmUB - vmLB;
             unsigned otherIF = other.vmUB - other.vmLB;
@@ -775,6 +823,8 @@ class WaitcntBrackets {
                          fMyOldFloor[FIFO_LDS], fOtherOldFloor[FIFO_LDS], strictDom, "vmLds");
             mergeSlotOrd(s.vmOrdTex, o ? o->vmOrdTex : 0, fMyShift[FIFO_TEX], fOtherShift[FIFO_TEX],
                          fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom, "vmTex");
+            mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
+                         myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
             mergeStampAge(s, o, myVa, oVa, strictDom);
             // Paired survives the join only if both paths agree.
             s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
@@ -854,6 +904,9 @@ class WaitcntBrackets {
         }
     }
 
+    // VA_VDST shared UB/LB.
+    unsigned vaUB = 0;
+    unsigned vaLB = 0;
     // VA_VDST per-pipe UB/LB.
     std::array<unsigned, NUM_VA_PIPE> vaPipeUB = {};
     std::array<unsigned, NUM_VA_PIPE> vaPipeLB = {};
@@ -884,8 +937,9 @@ class InsertWaitAluPassImpl : public Pass {
     VGPRHalfKeyer keyer{};
 
    public:
-    explicit InsertWaitAluPassImpl(bool enableESM2TrackValuVsrc) {
-        g_enableESM2TrackValuVsrc = enableESM2TrackValuVsrc;
+    explicit InsertWaitAluPassImpl(const InsertWaitAluOptions& opts) {
+        g_enableESM2TrackValuVsrc = opts.enableESM2TrackValuVsrc;
+        g_sharedOrderCountFollowers = opts.sharedOrderCountFollowers;
     }
 
    private:
@@ -1250,6 +1304,8 @@ class InsertWaitAluPassImpl : public Pass {
                              << " vmVsrcLds=" << waitHideStr(g_waitHide->vmVsrcLds)
                              << " vmVsrcTex=" << waitHideStr(g_waitHide->vmVsrcTex)
                              << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
+                             << " countFollowers=" << g_sharedOrderCountFollowers << "\n");
     }
 
    public:
@@ -1274,8 +1330,7 @@ char InsertWaitAluPassImpl::ID = 0;
 // future callee<->caller analysis.
 class InsertWaitAluModulePass : public ModulePass {
    public:
-    explicit InsertWaitAluModulePass(bool enableESM2TrackValuVsrc)
-        : enableESM2TrackValuVsrc(enableESM2TrackValuVsrc) {}
+    explicit InsertWaitAluModulePass(const InsertWaitAluOptions& opts) : opts(opts) {}
 
     const char* getName() const override {
         return "InsertWaitAluModulePass";
@@ -1283,7 +1338,7 @@ class InsertWaitAluModulePass : public ModulePass {
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
                           ModuleAnalysisManager& /*MAM*/) override {
-        InsertWaitAluPassImpl impl(enableESM2TrackValuVsrc);
+        InsertWaitAluPassImpl impl(opts);
         AnalysisManager AM;
         registerAllAnalyses(AM);
 
@@ -1302,16 +1357,16 @@ class InsertWaitAluModulePass : public ModulePass {
     }
 
    private:
-    bool enableESM2TrackValuVsrc;
+    InsertWaitAluOptions opts;
 };
 
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertWaitAluPass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluPassImpl>(enableESM2TrackValuVsrc);
+std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts) {
+    return std::make_unique<InsertWaitAluPassImpl>(opts);
 }
-std::unique_ptr<ModulePass> createInsertWaitAluModulePass(bool enableESM2TrackValuVsrc) {
-    return std::make_unique<InsertWaitAluModulePass>(enableESM2TrackValuVsrc);
+std::unique_ptr<ModulePass> createInsertWaitAluModulePass(InsertWaitAluOptions opts) {
+    return std::make_unique<InsertWaitAluModulePass>(opts);
 }
 }  // namespace stinkytofu
