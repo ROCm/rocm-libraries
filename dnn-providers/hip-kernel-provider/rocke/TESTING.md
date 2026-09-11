@@ -258,6 +258,26 @@ convention and same rule as `KNOWN_VIOLATIONS` in
 shrinks.** An entry that starts compiling is itself reported as a failure, so a
 fix cannot leave dead weight behind.
 
+### 4.5 Do the two engines carry the same declares? (the table check)
+
+§4.3 sees a divergence only where a kernel in the corpus exercises it, and §4.4
+needs an LLVM toolchain. The intrinsic-declaration tables sit upstream of both
+and are maintained by hand in two files, in two languages:
+`lower_llvm._INTRINSIC_DECLS` (plus the per-flavor override dicts) and the
+`rocke_ll_decl_t` arrays in `cpp/core/lower_llvm/data.cpp`.
+[`test_intrinsic_decl_table_parity.py`](platform/tests/core/test_intrinsic_decl_table_parity.py)
+compares them on the three axes they must agree on — **key set**, **declaration
+text**, and **insertion order**. The third is the subtle one: `finalize` emits
+declares in table order, so swapping two entries changes the emitted bytes while
+every declare stays character-identical, and byte-identity catches it only if
+some corpus kernel happens to need both keys.
+
+It is the cheapest check in the stack and the only one guarding byte-identity
+*upstream* of emission: no LLVM, no comgr, no GPU, no built C++ engine — it
+reads `data.cpp` as text, so it runs on the same hosts where §4.4 can only
+report `UNVALIDATED`. It says nothing about whether either table is *correct*;
+two engines can agree on a declare LLVM rejects. That is §4.4's job.
+
 ---
 
 ## 5. Execution tiers & gating
