@@ -83,6 +83,43 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         return Policy::template GetSmemSize<Problem>();
     }
 
+    // gfx12 has no async global->LDS path. The dram view and the LDS write
+    // descriptor are a matched pair (TransformXDramDescriptor /
+    // MakeXLdsWriteBlockDescriptor), so staging through registers lands the
+    // data where the lane-linear async write would have.
+    template <typename LdsWindow, typename DramWindow>
+    CK_TILE_DEVICE static void load_block_to_lds(LdsWindow&& lds_window,
+                                                 const DramWindow& dram_window)
+    {
+#if defined(__gfx12__)
+        store_tile(lds_window, load_tile(dram_window));
+#else
+        async_load_tile(lds_window, dram_window);
+#endif
+    }
+
+    // Wait for load_block_to_lds to land: vmcnt on gfx9 (async writes LDS
+    // directly), an LDS fence on gfx12 (the store_tile leg).
+    CK_TILE_DEVICE static void wait_block_to_lds()
+    {
+#if defined(__gfx12__)
+        block_sync_lds();
+#else
+        s_waitcnt</*vmcnt=*/0>();
+#endif
+    }
+
+    // gfx12 splits the GFX9 unified counter, so the single builtin does not port.
+    CK_TILE_DEVICE static void wait_all_mem()
+    {
+#if defined(__gfx12__)
+        s_waitcnt</*vmcnt=*/0>();
+        block_sync_lds();
+#else
+        __builtin_amdgcn_s_waitcnt(0);
+#endif
+    }
+
     CK_TILE_HOST_DEVICE static LSEDataType get_validated_lse(const LSEDataType raw_lse)
     {
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || FmhaMask::IsMasking)
@@ -452,9 +489,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         decltype(load_tile(lse_dram_window)) lse_block_tile;
         decltype(load_tile(d_dram_window)) d_block_tile;
 
-        async_load_tile(q_lds_write_window, q_dram_window);
-        async_load_tile(do_lds_write_window, do_dram_window);
-        __builtin_amdgcn_s_waitcnt(0);
+        load_block_to_lds(q_lds_write_window, q_dram_window);
+        load_block_to_lds(do_lds_write_window, do_dram_window);
+        wait_all_mem();
         load_tile_transpose(qt_reg_tensor, qt_lds_read_window);
         q_reg_tensor = load_tile(q_lds_read_window);
         load_tile_transpose(dot_reg_tensor, dot_lds_read_window);
@@ -462,10 +499,10 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
         lse_block_tile = load_tile(lse_dram_window);
         d_block_tile   = load_tile(d_dram_window);
-        __builtin_amdgcn_s_waitcnt(0);
+        wait_all_mem();
         store_tile(lse_lds_write_window, lse_block_tile);
         store_tile(d_lds_write_window, d_block_tile);
-        __builtin_amdgcn_s_waitcnt(0);
+        wait_all_mem();
         lse = load_tile(lse_lds_read_window);
         d   = load_tile(d_lds_read_window);
 
@@ -485,11 +522,11 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
 
             if constexpr(is_epilogue)
             {
-                async_load_tile(k_lds_write_window, k_dram_window);
+                load_block_to_lds(k_lds_write_window, k_dram_window);
                 move_tile_window(k_dram_window, {kN0, 0});
-                async_load_tile(v_lds_write_window, v_dram_window);
+                load_block_to_lds(v_lds_write_window, v_dram_window);
                 move_tile_window(v_dram_window, {kN0, 0});
-                s_waitcnt</*vmcnt=*/0>();
+                wait_block_to_lds();
                 k_reg_tensor = load_tile(k_lds_read_window);
                 v_reg_tensor = load_tile(v_lds_read_window);
                 load_tile_transpose(kt_reg_tensor, kt_lds_read_window);
