@@ -197,9 +197,16 @@ enum class KernelSourceKind
     KPACK, ///< Prebuilt kpack archive plus toc key and symbol.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
+    ROCKE_RECIPE, ///< Offline-authored recipe bundle, specialized by a native adapter.
 };
 
-/// UKD's source. `EMBEDDED_SOURCE` and `KPACK` are implemented; a kind fills only its own
+struct RecipeSource
+{
+    std::string bundle; ///< Relative to the declaring descriptor.
+    std::string recipeKey;
+};
+
+/// UKD's source. The pack's dispatch handler admits source kinds; a kind fills only its own
 /// fields and leaves the rest empty.
 struct KernelSource
 {
@@ -226,6 +233,7 @@ struct KernelSource
     /// came from the same pack run, nothing more. The loader's defence against a wrong
     /// or corrupt payload is KpackArchive's container check, not this field.
     std::string sha256;
+    std::optional<RecipeSource> recipe = std::nullopt; ///< ROCKE_RECIPE only.
 };
 
 namespace detail
@@ -250,7 +258,7 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count is pinned here: accepting exactly seven initializers and no
+// KernelSource's field count is pinned here: accepting exactly eight initializers and no
 // more makes an inserted field ill-formed at this assertion, rather than silently
 // rebinding every value after it at a positional initialization site. Only the count --
 // two same-typed members swapped past each other still brace-initialize.
@@ -261,7 +269,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                std::string,
                                                std::string,
                                                std::string,
-                                               std::string>
+                                               std::string,
+                                               std::optional<RecipeSource>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        KernelSourceKind,
                                                        std::string,
@@ -270,6 +279,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::string,
+                                                       std::optional<RecipeSource>,
                                                        std::string>,
               "KernelSource gained or lost a field; append only, then extend this "
               "assertion.");

@@ -17,6 +17,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, nullptr},
+#ifdef HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE
+        {"hipkernel:RockeSdpaExample", &registerRockeSdpaSymbols, nullptr},
+#endif
     };
     return s_packs;
 }

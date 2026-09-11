@@ -47,6 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE "Build the native SDPA recipe integration example" OFF)
 
 # Gates the generic kernel ingestor (RFC 0017). The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
@@ -370,6 +371,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 endif()
 
 add_subdirectory(src)
+
+if(HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE)
+    if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+        message(FATAL_ERROR "The recipe example requires HIPDNN_ENABLE_KERNEL_INGESTOR")
+    endif()
+    find_package(hipdnn_frontend CONFIG REQUIRED)
+    find_package(hipdnn_backend CONFIG REQUIRED)
+    add_executable(test_frontend_sdpa
+        src/integration_tests/kernel_ingestor_engine/fixtures/rocke_recipe/test_frontend_sdpa.cpp)
+    set_target_properties(test_frontend_sdpa PROPERTIES CXX_STANDARD 20)
+    target_link_libraries(test_frontend_sdpa PRIVATE hipdnn_frontend hipdnn_backend hip::host)
+    add_dependencies(test_frontend_sdpa hip_kernel_provider)
+    install(TARGETS test_frontend_sdpa RUNTIME DESTINATION bin)
+endif()
 
 # ============================================================================
 # Code Coverage
