@@ -80,11 +80,14 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     }
 };
 
-// d=128 is the only head dim the whole fp8 family shares; fp8fp32 has no d=64 tile. No
-// splitkv/appendkv instances are generated, and all four quantization scales exist here.
+// d=128 and d=256 are the head dims the whole fp8 family shares; fp8fp32 has no d=64 tile.
+// No splitkv/appendkv instances are generated, and all four quantization scales exist at
+// both. d=256 is served by qr_tdm alone - the fp8 qr list only takes tiles with k0_loops
+// >= 2 and the (256,256) tile has one loop, so there is no fallback if it regresses.
 struct Fp8FamilyTestConfigs
 {
-    static constexpr auto HDimValues         = std::array{std::tuple{128, -1}};
+    static constexpr auto HDimValues =
+        std::array{std::tuple{128, -1}, std::tuple{256, -1}};
     static constexpr auto SplitKVHDimValues  = std::array<std::tuple<int, int>, 0>{};
     static constexpr auto AppendKVHDimValues = std::array<std::tuple<int, int>, 0>{};
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
@@ -478,19 +481,34 @@ TEST_P(General, DataTypeConfig)
 // Every other suite pins the scale to TestConfigs<T>::qscale_str, leaving the rest untested.
 // Only gfx125x has more than one, so the sweep is compiled in there alone.
 #ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP
-class QuantScale
-    : public TestWithParam<
-          std::tuple<mode_enum, const char*, std::tuple<int, int, int, int, int, std::string>>>
+enum class sink_kind
+{
+    none,
+    gptoss,
+    streamllm
+};
+
+constexpr auto kStreamLlmMask = "b:-1,0,2";
+
+class QuantScale : public TestWithParam<
+                       std::tuple<mode_enum,
+                                  const char*,
+                                  int,
+                                  sink_kind,
+                                  std::tuple<int, int, int, int, int, std::string>>>
 {
 };
 
-// hdim 128 is where perhead and blockscale exist; the non-multiple seqlens select the
-// seqlen-padded instances. No fp8 pipeline is generated with bias.
+// hdim 128 and 256 both carry all four quantization scales. The non-multiple seqlens select
+// the seqlen-padded instances; the last tuple is a tile multiple so the unpadded pack-GQA path
+// is covered too. No fp8 pipeline is generated with bias.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QuantScale,
     Combine(ModeValues,
             QScaleValues,
+            Values(128, 256),
+            Values(sink_kind::none, sink_kind::gptoss, sink_kind::streamllm),
             Values(std::tuple{2, 2, 1, 55, 256, "0"},     // GQA, seqlen_q << seqlen_k
                    std::tuple{1, 3, -1, 100, 51, "0"},    // plain MHA, seqlen_q > seqlen_k
                    std::tuple{2, 1, -1, 99, 256, "1"},    // causal
@@ -510,8 +528,11 @@ const char* qscale_init_method(std::string_view qscale)
 
 TEST_P(QuantScale, DataTypeConfig)
 {
-    auto [mode, qscale, dims_mask]                             = GetParam();
+    auto [mode, qscale, hdim, sink, dims_mask]                 = GetParam();
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    const std::string mask = sink == sink_kind::streamllm ? kStreamLlmMask : mask_str;
+    const int init_sink    = sink == sink_kind::gptoss ? 1 : 0;
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                batch,
@@ -519,8 +540,8 @@ TEST_P(QuantScale, DataTypeConfig)
                                                nhead_k,
                                                {adjust_seqlen(seqlen_q)},
                                                {adjust_seqlen(seqlen_k)},
-                                               adjust_hdim(128),
-                                               adjust_hdim(128),
+                                               adjust_hdim(hdim),
+                                               adjust_hdim(hdim),
                                                0,    // seqlen_knew
                                                {-1}, // seqlen_qpads
                                                {-1}, // seqlen_kpads
@@ -540,11 +561,17 @@ TEST_P(QuantScale, DataTypeConfig)
                                                0,     // drop_seed
                                                0,     // drop_offset
                                                false, // drop_prefs
-                                               mask_str,
+                                               mask,
                                                qscale,
                                                true, // is_rotary_interleaved
-                                               1,    // num_splits
-                                               COMMON_ARGS_INIT(qscale_init_method(qscale)));
+                                               1, // num_splits
+                                               qscale_init_method(qscale),
+                                               static_cast<uint32_t>(ck_tile::EnvValue(
+                                                   CK_TILE_ENV(CK_TILE_TEST_SEED))),
+                                               1,         // do_validation
+                                               init_sink, // init_sink_value
+                                               1,         // pack_gqa
+                                               stream_config);
     CHECK_RESULT(result);
 }
 #endif

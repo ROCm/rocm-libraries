@@ -951,6 +951,18 @@ fwd_result fmha_fwd_run(mode_enum mode,
             }
         }
     }
+    // Every descale below is dequantized_max/quantized_max with quantized_max taken as the
+    // format maximum, which treats the tensors as the image of an fp32 tensor whose amax is
+    // qkv_max. That only describes a fill saturating the format, and init=3 alone does. Under
+    // any other fill the descale contradicts its own tensor: at init=uf the logits land near
+    // 1e-4, a sink token becomes the row maximum, every P value collapses onto one number and
+    // its rounding turns into a pure gain on the output.
+    if(qscale.type != quant_scale_enum::no_scale && init_method != "3")
+    {
+        std::cerr << "qscale=" << qscale_str << " requires -init=3" << std::endl;
+        return fwd_result::invalid_args;
+    }
+
     if constexpr(is_mx)
     {
         auto gen_scales = [&](auto& scales, auto data, float range) {
@@ -1013,6 +1025,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
         float max_descale_k = qkv_max / k_dtype_max;
         float max_descale_v = qkv_max / v_dtype_max;
 
+        // Keep the band narrow. Neighbouring entries still differ, so an index off-by-one
+        // changes the answer, but no KV block dominates the softmax: the pipeline folds
+        // k_descale into s_acc per N-block, so a wide spread there would peak every row onto
+        // whichever block carries the largest scale and collapse the effective key count.
         ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
             q_descale_host);
         ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(

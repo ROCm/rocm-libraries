@@ -164,9 +164,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
-    static_assert(!(kBlockScale && kHasSink),
-                  "qr_tdm pipeline: BLOCKSCALE + sink would read the wrong descale block");
-
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
 
@@ -360,7 +357,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -1060,7 +1059,9 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -1273,6 +1274,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
         move_tile_window(k_dram_window, {kN0, 0});
+        // K's prefetch is 2 loop-iterations ahead of consumption (ptrk0/ptrk1
+        // ping-pong, see mainloop() below), so when the sink region is exactly
+        // one tile (num_sink_loop == 1) this second prefetch already targets
+        // what mainloop() consumes at i_total_loops == 0 -- the sink->normal
+        // jump must apply here. For num_sink_loop >= 2 the jump instead applies
+        // in the main loop two iterations before consumption (see the
+        // i_total_loops == num_sink_loop - 2 check below).
+        if constexpr(kHasSink)
+        {
+            if(num_sink_loop == 1)
+            {
+                move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+            }
+        }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
@@ -1295,6 +1310,17 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             // move V tile windows
             block_sync_lds<k_lds_insts>();
+            // Sink->normal window jump for V must happen before this prefetch: V is
+            // prefetched here for use one mainloop() call later (ping-pong LDS), so
+            // applying the jump after the prefetch (as done for K/bias below) would
+            // fetch the first normal-region V tile from the wrong (pre-jump) address.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 1)
+                {
+                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                }
+            }
             move_tile_window(v_dram_window, {kN0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
@@ -1437,13 +1463,17 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }
 
-            // Sink->normal window jump (prefill path)
+            // Sink->normal window jump (prefill path), bias only. V's jump is applied
+            // earlier, right before its own prefetch at the top of this lambda (see
+            // comment there) since that prefetch feeds the following mainloop() call.
+            // Bias is consumed on the same 1-iteration-ahead schedule as V (loaded at
+            // the top of the *next* mainloop() call using the position set here), so
+            // this gate is correct as-is. K's jump is handled separately below, right
+            // before K's own (2-iterations-ahead) prefetch -- see comment there.
             if constexpr(kHasSink)
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
                     move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
@@ -1574,6 +1604,20 @@ struct BlockFmhaPipelineQRKSVSTdm
             });
 
             block_sync_lds<v_lds_insts>();
+            // K's sink->normal window jump (prefill path). K is prefetched 2
+            // loop-iterations ahead of consumption (ptrk0/ptrk1 ping-pong -- the write
+            // below feeds i_total_loops+2, not i_total_loops+1 like V/bias), so the
+            // jump must fire 2 iterations before the first normal tile is consumed,
+            // i.e. at i_total_loops == num_sink_loop - 2, not num_sink_loop - 1. When
+            // num_sink_loop == 1 there is no such iteration (it would be -1); that
+            // case is instead handled in the prologue, see the comment there.
+            if constexpr(kHasSink)
+            {
+                if(i_total_loops == num_sink_loop - 2)
+                {
+                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                }
+            }
             move_tile_window(k_dram_window, {kN0, 0});
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
             load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
