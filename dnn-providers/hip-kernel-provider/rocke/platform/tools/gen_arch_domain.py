@@ -87,9 +87,20 @@ HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
 
 SCHEMA = "rocke.intrinsic_arch_domain/v1"
-DEFAULT_OUT = (
-    ROCKE / "python" / "rocke" / "core" / "arch" / "data" / "intrinsic_arch_domain.json"
-)
+DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+
+
+def default_out(flavor: str) -> Path:
+    """One artifact per flavor, named after it.
+
+    A single shared file would be wrong, not merely inconvenient: a host can
+    only ever measure its own LLVM, so whichever flavor ran last would silently
+    overwrite the others and `--check` would fail on every machine whose
+    toolchain differs from the one that blessed the file. Naming the flavor
+    makes each column independently ownable and independently checkable.
+    """
+    return DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
+
 
 STATUS_OK = "ok"
 STATUS_NAME_ABSENT = "name_absent"
@@ -159,9 +170,31 @@ _DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
 # resource as long as the *integer* operands are real values.
 _FAT_PTR = "ptr addrspace(8)"
 
+# Literal values the immediate-operand rescue tries, in order. See
+# `_probe_module`'s `literal_ints` and `_wants_literals`.
+_LITERAL_PROBE_VALUES = (0, 4)
+
+# The two ways LLVM reports "that operand had to be an immediate". llvm22
+# rejects the call in the verifier; llvm20 has no such check and instead dies
+# during type legalisation, which is why the same decl-table gap reads as a
+# frontend error on one vintage and a backend error on the other.
+_IMMEDIATE_OPERAND_DIAGS = (
+    "immarg operand has non-immediate parameter",
+    "do not know how to expand this operator's operand",
+)
+
+
+def _wants_literals(status: str, evidence: str) -> bool:
+    """True when a failure looks like our probe passed a variable where the
+    intrinsic demands a constant, rather than a real arch answer."""
+    if status not in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR):
+        return False
+    low = evidence.lower()
+    return any(d in low for d in _IMMEDIATE_OPERAND_DIAGS)
+
 
 def _probe_module(
-    decl: str, datalayout: str, literal_ints: bool = False
+    decl: str, datalayout: str, literal_ints: int | None = None
 ) -> tuple[str, str]:
     """Build a minimal module that declares an intrinsic and calls it.
 
@@ -177,12 +210,16 @@ def _probe_module(
     therefore arrive as kernel arguments, and non-generic pointers as an
     addrspacecast of one.
 
-    `literal_ints` swaps the integer kernel arguments for literals. Some
-    operands must be immediates even though the declare does not mark them
-    `immarg` -- `raw.ptr.buffer.load.lds`'s size operand is one, and with a
-    variable there it fails to legalise on *every* arch, which reads as a
-    universal arch_absent when the truth is "CDNA yes, RDNA no". This variant
-    exists only to rescue that case, and only for that one diagnostic.
+    `literal_ints`, when set, replaces every integer kernel argument with that
+    literal value. Some operands must be immediates even though the declare
+    does not mark them `immarg`: rocke's decl table is hand-written and records
+    `immarg` only where an author happened to add it, while LLVM checks the
+    real intrinsic signature. `raw.ptr.buffer.load.lds`'s size operand is the
+    example, and the two vintages report the mismatch differently -- llvm20
+    fails to legalise (on *every* arch, reading as a universal arch_absent when
+    the truth is "CDNA yes, RDNA no"), llvm22 rejects it up front with "immarg
+    operand has non-immediate parameter". This variant exists to rescue both,
+    and only those two diagnostics.
 
     The result is stored `volatile` so the call survives -O3; without it, DCE
     would drop the reference and the link would succeed spuriously.
@@ -206,8 +243,9 @@ def _probe_module(
             args.append(f"{ty} {'false' if ty == 'i1' else '0'}")
         elif ty == _FAT_PTR:
             args.append(f"{ty} poison")
-        elif literal_ints and re.fullmatch(r"i\d+", ty):
-            args.append(f"{ty} {'false' if ty == 'i1' else '4'}")
+        elif literal_ints is not None and re.fullmatch(r"i\d+", ty):
+            lit = literal_ints
+            args.append(f"{ty} {('true' if lit else 'false') if ty == 'i1' else lit}")
         elif ty == "ptr":
             args.append("ptr %base")
         elif re.fullmatch(r"ptr addrspace\(\d+\)", ty):
@@ -428,7 +466,12 @@ def main() -> int:
     ap.add_argument(
         "--check", action="store_true", help="regenerate and fail on any diff"
     )
-    ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="override the artifact path (default: one file per flavor)",
+    )
     ap.add_argument("--only", default=None, help="substring filter on decl keys")
     ap.add_argument(
         "--arch", action="append", default=None, help="limit to these arches"
@@ -493,7 +536,7 @@ def main() -> int:
     # Build every probe module first; an unparseable declare is a probe_error
     # for every arch rather than a crash mid-sweep.
     modules: dict[str, tuple[Path | None, str]] = {}
-    literal_modules: dict[str, Path] = {}
+    literal_modules: dict[str, list[Path]] = {}
     for key in keys:
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
         text, why = _probe_module(decls[key], datalayout)
@@ -503,11 +546,20 @@ def main() -> int:
         path = ir_dir / f"{stem}.ll"
         path.write_text(text)
         modules[key] = (path, "")
-        lit, why_lit = _probe_module(decls[key], datalayout, literal_ints=True)
-        if not why_lit and lit != text:
-            lit_path = ir_dir / f"{stem}.lit.ll"
-            lit_path.write_text(lit)
-            literal_modules[key] = lit_path
+        # Two literal values, tried in order. Neither is safe alone: 0 is
+        # rejected where the operand is a byte count, and a nonzero value is
+        # out of range where the operand is a small enum (an MFMA cbsz/blgp
+        # selector, say). Trying both keeps the rescue from depending on which
+        # kind of operand we happened to hit.
+        variants = []
+        for lit in _LITERAL_PROBE_VALUES:
+            lit_text, why_lit = _probe_module(decls[key], datalayout, literal_ints=lit)
+            if not why_lit and lit_text != text:
+                lit_path = ir_dir / f"{stem}.lit{lit}.ll"
+                lit_path.write_text(lit_text)
+                variants.append(lit_path)
+        if variants:
+            literal_modules[key] = variants
 
     # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
     # `opt` run instead of one link per arch, and it is the only stage that can
@@ -536,25 +588,40 @@ def main() -> int:
             return key, arch, STATUS_PROBE_ERROR, why
         out = Path(ir_dir) / f"{path.stem}.{arch}.hsaco"
         status, evidence = _probe(clang, path, arch, out)
-        # Rescue a suspected false negative. The legalisation-expand failure is
-        # the exact signature of "this operand had to be an immediate", so a
-        # literal-operand re-probe that lowers cleanly means the arch does
-        # support the intrinsic and our first probe was simply malformed.
-        # Scoped to that one diagnostic on purpose: literals give the backend
+        # Rescue a suspected false negative. Both diagnostics below are the
+        # signature of "this operand had to be an immediate" -- llvm22 says so
+        # outright, llvm20 only fails to legalise -- so a literal-operand
+        # re-probe that lowers cleanly means the arch does support the
+        # intrinsic and our first probe was simply malformed.
+        #
+        # Scoped to those two diagnostics on purpose: literals give the backend
         # strictly more information, so a blanket retry could constant-fold a
         # genuinely unsupported intrinsic away and manufacture an `ok`.
-        if (
-            status == STATUS_ARCH_ABSENT
-            and "expand this operator's operand" in evidence.lower()
-            and key in literal_modules
-        ):
-            lit_out = Path(ir_dir) / f"{path.stem}.lit.{arch}.hsaco"
-            lit_status, lit_evidence = _probe(
-                clang, literal_modules[key], arch, lit_out
-            )
-            if lit_status == STATUS_OK:
-                return key, arch, STATUS_OK, ""
-            status, evidence = lit_status, lit_evidence
+        if _wants_literals(status, evidence) and key in literal_modules:
+            # Try every literal value before giving up: a value that is out of
+            # range for one operand kind is in range for another, and stopping
+            # at the first non-OK answer would let an unlucky first choice
+            # masquerade as the arch's verdict.
+            settled: tuple[str, str] | None = None
+            last: tuple[str, str] | None = None
+            for i, lit_path in enumerate(literal_modules[key]):
+                lit_out = Path(ir_dir) / f"{path.stem}.lit{i}.{arch}.hsaco"
+                lit_status, lit_evidence = _probe(clang, lit_path, arch, lit_out)
+                if lit_status == STATUS_OK:
+                    return key, arch, STATUS_OK, ""
+                last = (lit_status, lit_evidence)
+                if settled is None and not _wants_literals(lit_status, lit_evidence):
+                    settled = last
+            # Every variant still failed to legalise -- but with no variable
+            # integer operands left, that is no longer something our probe can
+            # fix, so it is the target speaking. gfx942 takes this call with a
+            # literal size and gfx1201 does not, on both llvm20 and llvm22.
+            # The verifier's immarg complaint is excluded on purpose: surviving
+            # the literal sweep means the non-immediate operand is not an
+            # integer, which really is our module's fault.
+            if settled is None and last and last[0] == STATUS_ARCH_ABSENT:
+                settled = last
+            status, evidence = settled or (status, evidence)
         return key, arch, status, evidence
 
     # Threads, not processes: each unit of work is already its own subprocess.
@@ -628,22 +695,30 @@ def main() -> int:
             counts[s] = counts.get(s, 0) + 1
     print("\n   " + "  ".join(f"{s}={n}" for s, n in sorted(counts.items())))
 
+    out = args.out or default_out(flavor)
+
     if args.check:
-        if not args.out.is_file():
-            print(f"\nFAIL: {args.out} does not exist; run without --check first.")
-            return 1
-        if args.out.read_text() != text:
+        if not out.is_file():
+            # Not a failure. A host can only measure its own flavor, so a
+            # flavor nobody has blessed yet simply has no column to check --
+            # failing here would red every CI machine running a newer ROCm.
             print(
-                f"\nFAIL: {args.out} is stale -- regenerating changed it.\n"
+                f"\nUNVALIDATED: no committed column for {flavor} "
+                f"({out.name}); nothing to check. Run without --check to add one."
+            )
+            return 0
+        if out.read_text() != text:
+            print(
+                f"\nFAIL: {out} is stale -- regenerating changed it.\n"
                 "      Re-run without --check and commit the result."
             )
             return 1
-        print(f"\nOK: {args.out.name} is up to date.")
+        print(f"\nOK: {out.name} is up to date.")
         return 0
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(text)
-    print(f"\nwrote {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    print(f"\nwrote {out}")
     return 0
 
 
