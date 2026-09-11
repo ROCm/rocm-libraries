@@ -77,6 +77,7 @@ inline GraphSession declinedSession()
 inline GraphSession buildErrorSession(std::string error)
 {
     GraphSession session;
+    session.buildFailed = true;
     session.buildError = std::move(error);
     return session;
 }

@@ -2863,24 +2863,6 @@ def cases():
 GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
-# Cases still built and hashed, but excluded from the golden comparison because
-# their drift is unadjudicated. Deleting the case would lose the pre-drift digest
-# and re-blessing would ratify output nobody has reviewed, so the golden keeps
-# its recorded value and the comparison skips it. Remove an entry by resolving
-# the drift, not by deleting the case; --write refuses while any entry is here.
-QUARANTINED_CASES = frozenset(
-    {
-        # Drifts at all three flavors on both arches. The digests and the emitter
-        # both arrived in #10571 and nothing under platform/python has touched the
-        # family since, so the golden never matched the code it shipped with. The
-        # drift is deterministic (CI and a local host agree), so which side is
-        # right is a code-review question, not a flake.
-        "conv_wgrad_reduce/gfx942/wgM32_wgN72_fp16",
-        "conv_wgrad_reduce/gfx950/wgM32_wgN72_fp16",
-        "conv_wgrad_reduce/gfx950/wgM64_wgN576_bf16",
-    }
-)
-
 
 def run(ir_dir: Path | None = None, *, flavor: str):
     results = {}
@@ -2958,23 +2940,19 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
 def compare(base, cur):
     errors = []
     for section in ("cases", "expected_failures"):
-        bkeys = set(base.get(section, {})) - QUARANTINED_CASES
-        ckeys = set(cur.get(section, {})) - QUARANTINED_CASES
+        bkeys = set(base.get(section, {}))
+        ckeys = set(cur.get(section, {}))
         for missing in sorted(bkeys - ckeys):
             errors.append(f"{section}: missing current {missing}")
         for new in sorted(ckeys - bkeys):
             errors.append(f"{section}: new current {new}")
     for cid, brec in sorted(base.get("cases", {}).items()):
-        if cid in QUARANTINED_CASES:
-            continue
         crec = cur.get("cases", {}).get(cid)
         if not crec:
             continue
         if brec.get("sha256") != crec.get("sha256"):
             errors.append(f"{cid}: {brec.get('sha256')} -> {crec.get('sha256')}")
     for cid, brec in sorted(base.get("expected_failures", {}).items()):
-        if cid in QUARANTINED_CASES:
-            continue
         crec = cur.get("expected_failures", {}).get(cid)
         if not crec:
             continue
@@ -3010,14 +2988,6 @@ def main():
     ns = ap.parse_args()
 
     if ns.write:
-        # A re-bless here would overwrite the quarantined digests with exactly
-        # the values the quarantine exists to not ratify. Resolve the drift and
-        # drop the entries first.
-        if QUARANTINED_CASES:
-            raise SystemExit(
-                "refusing to re-bless while cases are quarantined: "
-                + ", ".join(sorted(QUARANTINED_CASES))
-            )
         doc = build_golden()
         ns.write.parent.mkdir(parents=True, exist_ok=True)
         ns.write.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
