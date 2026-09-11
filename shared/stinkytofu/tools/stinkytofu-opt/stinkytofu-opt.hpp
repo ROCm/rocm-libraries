@@ -401,7 +401,9 @@ const std::vector<PassInfo> availablePasses = {
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
-         return createInsertWaitAluPass(hasPassArg(args, "enableESM2TrackValuVsrc"));
+         return createInsertWaitAluPass(
+             {hasPassArg(args, "enableESM2TrackValuVsrc"),
+              hasPassArg(args, "sharedOrderCountFollowers")});
      }},
     {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
     {"RegionClonePass",
