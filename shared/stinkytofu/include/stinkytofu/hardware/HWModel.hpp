@@ -20,8 +20,10 @@
 // and referenced by pointer; only HWModel.cpp includes the rule table itself.
 
 #include <array>
+#include <span>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/hardware/DsReadKind.hpp"
 
 namespace stinkytofu {
 
@@ -36,9 +38,28 @@ struct HazardRule;  // stinkytofu/transforms/asm/dag/HazardRules.hpp
 struct HWModel {
     /// LDS (ds_read) return-queue model.
     struct Lds {
+        struct DsLoadThroughput {
+            int defaultValue;
+            int b128;
+        };
+        struct DsLoadMaxDrainLatency {
+            int b32;
+            int b64;
+            int b128;
+            int tr8B64;
+            int tr16B128;
+        };
+
         int readQueueDepth;
         int readDrainLatency;
         int readThrottleLatency;
+        /// Overflow issue throughput used as
+        /// (overflowCount * numWaves) / throughput. Higher throughput shortens
+        /// drain; B128 is half the default, so its overflow term is larger.
+        /// Values are per WGP.
+        DsLoadThroughput dsLoadThroughput;
+        /// Experimentally measured upper bound for each DS read kind.
+        DsLoadMaxDrainLatency dsLoadMaxDrainLatency;
     };
 
     /// s_barrier_signal / s_barrier_wait timing, and branch overhead.
@@ -123,8 +144,19 @@ constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
 // Internal helper used by stinkytofu passes to model dynamic LDS drain latency
 // from per-arch HWModel facts. Not part of the exported API surface.
-int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int numWaves);
+int computeDynamicDrainLatency(const HWModel& hw, DsReadKind kind, int matchingDsLoadCount,
+                               int targetDSLoadLatency, int numWaves);
+
+/// Draft / review-only paced FIFO drain model. Not wired into any pass.
+struct DsLoadDrainEntry {
+    DsReadKind kind = DsReadKind::Unknown;
+    int latency = 0;
+};
+
+/// Independent paced-FIFO burst drain estimate. Does not modify or replace
+/// computeDynamicDrainLatency(); callers must opt in explicitly.
+int computeFifoDynamicDrainLatency(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
+                                   int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.
