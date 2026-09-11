@@ -7,6 +7,7 @@
 #include "TestMacros.hpp"
 #include "descriptors/EngineDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockDescriptor.hpp"
@@ -15,7 +16,9 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 #include <cstring>
@@ -504,6 +507,62 @@ TEST_F(TestEngineDescriptor, FinalizeFailsWithNegativeBehaviorNote)
     ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestEngineDescriptor, HeuristicResultMaterializesWithoutSelectorOrMetadataQueries)
+{
+    auto engine = getEngineDescriptor();
+    EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
+    EXPECT_CALL(*getMockGraph(), getHandle()).Times(0);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _)).Times(0);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _)).Times(0);
+
+    engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
+    EXPECT_TRUE(engine->isFinalized());
+    EXPECT_EQ(engine->getEngineId(), ENGINE_ID);
+    EXPECT_EQ(engine->getGraph(), getMockGraph());
+    (void)engine->toString(); // Logging must not trigger the deferred selector either.
+}
+
+TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPartialNotes)
+{
+    auto engine = getEngineDescriptor();
+    EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
+    engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
+    serializeEngineDetailsWithBehaviorNotes(ENGINE_ID,
+                                            {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION, -1});
+    EXPECT_CALL(*getMockGraph(), getHandle()).Times(2).WillRepeatedly(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .Times(2)
+        .WillRepeatedly(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
+        .Times(2)
+        .WillRepeatedly(
+            Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* data) {
+                *data = _serializedEngineDetails;
+            }));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _)).Times(2);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _))
+        .WillOnce(Return("engine"));
+
+    int64_t count = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, &count, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+
+    serializeEngineDetailsWithBehaviorNotes(ENGINE_ID,
+                                            {HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE});
+    hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
+    engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, &count, &note);
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(note, HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE);
+    // A second successful read is the same immutable snapshot, not another provider query.
+    engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, &count, &note);
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(note, HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE);
+}
+
 TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
 {
     auto engine = getEngineDescriptor();
@@ -938,4 +997,203 @@ TEST_F(TestEngineDescriptorWithKnobs, GetKnobInfoNullPointerWhenCountNonZero)
                                                     &returnedCount,
                                                     nullptr),
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+// Catalog enumeration (HIPDNN_ATTR_ENGINE_CANDIDATE_*). The enumerator itself is
+// mocked, so these pin what the descriptor forwards and how it reports a decline.
+
+namespace
+{
+
+std::unique_ptr<HipdnnBackendDescriptor> createFinalizedKnobChoice(const std::string& knobId,
+                                                                   int64_t value)
+{
+    auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(knobId.size()),
+                       knobId.c_str());
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &value);
+    desc->finalize();
+    return wrapper;
+}
+
+} // namespace
+
+TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedOnce)
+{
+    auto engine = getEngineDescriptor();
+    const int64_t offset = 7;
+    const int64_t limit = 3;
+    auto knobWrapper = createFinalizedKnobChoice("tile", 128);
+    auto* knobPtr = knobWrapper.get();
+
+    expectFinalizeCalls(ENGINE_ID);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
+    ASSERT_NO_THROW(engine->setAttribute(
+        HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT, HIPDNN_TYPE_INT64, 1, &offset));
+    ASSERT_NO_THROW(engine->setAttribute(
+        HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit));
+    ASSERT_NO_THROW(engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT,
+                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                         1,
+                                         &knobPtr));
+    ASSERT_NO_THROW(engine->finalize());
+
+    const std::vector<uint8_t> page{0xAB, 0xCD, 0xEF};
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, enumerateCandidates(ENGINE_ID, _, _, _, _))
+        .Times(1)
+        .WillOnce(Invoke([&page](int64_t,
+                                 const hipdnnPluginConstData_t& engineConfig,
+                                 const GraphDescriptor*,
+                                 uint64_t requestedOffset,
+                                 uint64_t requestedLimit) {
+            EXPECT_EQ(requestedOffset, 7u);
+            EXPECT_EQ(requestedLimit, 3u);
+            // The scope travels as the knobs of the engine's own config.
+            const auto* config
+                = hipdnn_flatbuffers_sdk::data_objects::GetEngineConfig(engineConfig.ptr);
+            EXPECT_EQ(config->engine_id(), ENGINE_ID);
+            EXPECT_NE(config->knobs(), nullptr);
+            EXPECT_EQ(config->knobs()->size(), 1u);
+            EXPECT_EQ(config->knobs()->Get(0)->knob_id()->str(), "tile");
+            EXPECT_EQ(config->knobs()->Get(0)->value_as_IntValue()->value(), 128);
+            return page;
+        }));
+
+    hipdnnBackendFlatbufferData_t data{};
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_CANDIDATES_EXT,
+                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                         1,
+                                         &elementCount,
+                                         &data));
+    EXPECT_EQ(elementCount, 1);
+    ASSERT_EQ(data.size, page.size());
+    EXPECT_EQ(std::memcmp(data.ptr, page.data(), page.size()), 0);
+
+    // The page is owned by the descriptor: reading it again reuses the same bytes
+    // instead of enumerating the catalog a second time.
+    hipdnnBackendFlatbufferData_t again{};
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_CANDIDATES_EXT,
+                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                         1,
+                                         nullptr,
+                                         &again));
+    EXPECT_EQ(again.ptr, data.ptr);
+}
+
+TEST_F(TestEngineDescriptor, EnumerationDeclineIsNotSupportedRatherThanAnEmptyPage)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, enumerateCandidates(_, _, _, _, _))
+        .WillOnce(Throw(HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED, "Enumeration unsupported")));
+
+    hipdnnBackendFlatbufferData_t data{};
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_ENGINE_CANDIDATES_EXT,
+                                                    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                                    1,
+                                                    nullptr,
+                                                    &data),
+                               HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(data.ptr, nullptr);
+    // A declining engine stays a perfectly usable engine descriptor.
+    EXPECT_TRUE(engine->isFinalized());
+    EXPECT_EQ(engine->getEngineId(), ENGINE_ID);
+}
+
+TEST_F(TestEngineDescriptor, CandidatePageBoundsRejectNonProgressingOrUnboundedRequests)
+{
+    auto engine = getEngineDescriptor();
+    for(const int64_t limit : {int64_t{0}, int64_t{10001}})
+    {
+        ASSERT_THROW_HIPDNN_STATUS(
+            engine->setAttribute(
+                HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit),
+            HIPDNN_STATUS_BAD_PARAM);
+    }
+    const int64_t offset = -1;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->setAttribute(
+            HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT, HIPDNN_TYPE_INT64, 1, &offset),
+        HIPDNN_STATUS_BAD_PARAM);
+    const int64_t evaluate = 2;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->setAttribute(
+            HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
+{
+    auto engine = getEngineDescriptor();
+    auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    auto* knobPtr = knobWrapper.get();
+    ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT,
+                                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                    1,
+                                                    &knobPtr),
+                               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
+TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateFlag)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    auto engine = getEngineDescriptor();
+    const int64_t evaluate = 0;
+
+    expectFinalizeCalls(ENGINE_ID);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
+    ASSERT_NO_THROW(engine->setAttribute(
+        HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate));
+    ASSERT_NO_THROW(engine->finalize());
+
+    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*getMockGraph(), getSerializedGraph())
+        .WillOnce(Return(hipdnnPluginConstData_t{_engineDetailsBuffer.data(),
+                                                 _engineDetailsBuffer.size()}));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEnginePrediction(_, _, _, _))
+        .WillOnce(Invoke([](const hipdnnPluginConstData_t& engineConfig,
+                            const hipdnnPluginConstData_t&,
+                            hipdnnEnginePredictionKind_t kind,
+                            bool evaluateModel) {
+            // The engine descriptor asks about the engine itself: a bare config, no knobs.
+            EXPECT_EQ(kind, HIPDNN_ENGINE_PREDICTION_ENGINE);
+            EXPECT_FALSE(evaluateModel);
+            const auto* config = fb::GetEngineConfig(engineConfig.ptr);
+            EXPECT_EQ(config->engine_id(), ENGINE_ID);
+            EXPECT_TRUE(config->knobs() == nullptr || config->knobs()->size() == 0u);
+            fb::EnginePredictionT prediction;
+            prediction.engine_id = ENGINE_ID;
+            prediction.kind = fb::PredictionKind::ENGINE;
+            prediction.status = fb::PredictionStatus::UNAVAILABLE;
+            prediction.reason = "no model";
+            return prediction;
+        }));
+
+    hipdnnBackendFlatbufferData_t data{};
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_EXT,
+                                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                         1,
+                                         &elementCount,
+                                         &data));
+    EXPECT_EQ(elementCount, 1);
+    ASSERT_NE(data.ptr, nullptr);
+    const auto* published = fb::GetEnginePrediction(data.ptr);
+    EXPECT_EQ(published->engine_id(), ENGINE_ID);
+    EXPECT_EQ(published->kind(), fb::PredictionKind::ENGINE);
+    EXPECT_EQ(published->status(), fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(published->reason()->str(), "no model");
 }

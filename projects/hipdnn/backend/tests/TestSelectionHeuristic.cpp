@@ -13,7 +13,10 @@
 
 #include "descriptors/mocks/MockHeuristicPlugin.hpp"
 #include "descriptors/mocks/MockHeuristicPluginResourceManager.hpp"
+#include "heuristics/prediction/PredictionBuiltIn.hpp"
 #include "plugin/HeuristicPlugin.hpp"
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -50,6 +53,66 @@ protected:
     std::shared_ptr<NiceMock<MockHeuristicPluginResourceManager>> _mockResourceManager;
     int64_t _policyId = 12345;
 };
+
+TEST(TestSelectionHeuristicHost, BoundsRequestsAndKeepsBorrowedBuffersUntilFinalizeReturns)
+{
+    auto functions = hipdnn_backend::heuristics::prediction::populateFunctionTable();
+    functions.policyFinalizeWithHost = [](hipdnnHeuristicPolicyDescriptor_t,
+                                          const hipdnnHeuristicHostCallbacks_t* host,
+                                          int32_t* applied) {
+        hipdnnPluginConstData_t first{};
+        EXPECT_EQ(host->get_prediction(host->context, 999, HIPDNN_ENGINE_PREDICTION_ENGINE, &first),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(host->get_prediction(
+                      host->context, 1, static_cast<hipdnnEnginePredictionKind_t>(999), &first),
+                  HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(host->get_prediction(host->context, 1, HIPDNN_ENGINE_PREDICTION_ENGINE, &first),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+        for(int64_t id = 2; id <= 64; ++id)
+        {
+            hipdnnPluginConstData_t next{};
+            EXPECT_EQ(
+                host->get_prediction(host->context, id, HIPDNN_ENGINE_PREDICTION_ENGINE, &next),
+                HIPDNN_PLUGIN_STATUS_SUCCESS);
+        }
+        // Growing the host's storage must not invalidate earlier loans.
+        const auto* prediction
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::EnginePrediction>(
+                first.ptr);
+        EXPECT_EQ(prediction->engine_id(), 1);
+        EXPECT_EQ(prediction->tflops(), 42);
+        *applied = 1;
+        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+    };
+    auto plugin = HeuristicPlugin::createBuiltIn(functions, "host-lifetime-test");
+    const auto policyId = hipdnn_data_sdk::utilities::policyNameToId(
+        hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME);
+    const hipdnn_data_sdk::utilities::ScopedResource<hipdnnHeuristicHandle_t> handle(
+        plugin->createHandle(), [&](auto value) { plugin->destroyHandle(value); });
+    auto manager = std::make_shared<NiceMock<MockHeuristicPluginResourceManager>>();
+    EXPECT_CALL(*manager, getPluginForPolicyId(policyId))
+        .WillRepeatedly(::testing::Return(plugin.get()));
+    EXPECT_CALL(*manager, getHeuristicHandleForPolicyId(policyId))
+        .WillRepeatedly(::testing::Return(handle.get()));
+    SelectionHeuristic selection(manager, policyId);
+    std::vector<int64_t> ids;
+    for(int64_t id = 1; id <= 64; ++id)
+    {
+        ids.push_back(id);
+    }
+    selection.setEngineIds(ids);
+    size_t calls = 0;
+    EXPECT_TRUE(selection.finalize([&](int64_t engineId, hipdnnEnginePredictionKind_t) {
+        ++calls;
+        hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
+        prediction.engine_id = engineId;
+        prediction.kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE;
+        prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
+        prediction.tflops = 42;
+        return prediction;
+    }));
+    EXPECT_EQ(calls, 64u);
+}
 
 // ========== Constructor Tests ==========
 

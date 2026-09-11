@@ -4,9 +4,11 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
@@ -123,6 +125,13 @@ public:
      */
     bool finalize();
 
+    using PredictionProvider
+        = std::function<hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT(
+            int64_t, hipdnnEnginePredictionKind_t)>;
+
+    /// Runs with borrowed prediction services, released before returning.
+    bool finalize(const PredictionProvider& predict);
+
     /**
      * @brief Retrieves the sorted engine IDs after successful finalize.
      *
@@ -137,6 +146,10 @@ public:
      * @return Vector of sorted engine IDs.
      */
     std::vector<int64_t> getSortedEngineIds();
+
+    /// Copies the optional exact result for an input engine before plugin mutation.
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
+        getEngineConfig(int64_t engineId);
 
 private:
     // Look up the plugin for _policyId via _resourceManager. Returns nullptr

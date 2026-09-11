@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
@@ -13182,4 +13183,88 @@ TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_FALSE(graph2.getPrivateGraphSubnodes().empty());
     EXPECT_FALSE(graph2.hasExecutionPlan());
+}
+
+// RFC 0007 §5.3.2/§5.3.3: HeuristicMode::A/B are prediction POLICY names, not backend
+// heuristic modes. They must reach the backend as an ordered policy list on
+// HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT -- Config first, the requested prediction
+// policies in request order with duplicates dropped, StaticOrdering last -- while
+// HIPDNN_ATTR_ENGINEHEUR_MODE still carries exactly one FALLBACK mode.
+TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
+{
+    auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9911);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _));
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     const void* arrayOfElements) {
+            EXPECT_EQ(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements),
+                      HIPDNN_HEUR_MODE_FALLBACK);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<int64_t> policyOrder;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    heurDesc, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
+        .WillOnce([&policyOrder](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t count,
+                                 const void* arrayOfElements) {
+            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
+            policyOrder.assign(ids, ids + count);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+    const auto error = detail::createEngineHeuristicDescriptorForGraph(
+        heuristicDesc,
+        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+        {HeuristicMode::B, HeuristicMode::A, HeuristicMode::B, HeuristicMode::FALLBACK});
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    EXPECT_EQ(policyOrder,
+              (std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
+                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
+                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
+                                    policyNameToId("SelectionHeuristic::StaticOrdering")}));
+}
+
+// No prediction policy requested -> the frontend must not touch the policy-order
+// attribute at all, so HIPDNN_HEUR_POLICY_ORDER and the backend's built-in default
+// keep their precedence (RFC 0007 §5.3.3).
+TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
+{
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, 1, _));
+
+    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+    const auto error = detail::createEngineHeuristicDescriptorForGraph(
+        heuristicDesc,
+        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+        {HeuristicMode::FALLBACK});
+    EXPECT_TRUE(error.is_good()) << error.get_message();
 }

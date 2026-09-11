@@ -100,6 +100,122 @@ protected:
     }
 };
 
+TEST_F(TestEngineConfigDescriptor, HeuristicResultDefersSelectionUntilWorkspaceIsRequested)
+{
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+    EXPECT_CALL(*getMockEngine(), getGraph()).WillRepeatedly(Return(getMockGraphDescriptor()));
+    EXPECT_CALL(*getMockGraphDescriptor(), getHandle()).WillOnce(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .WillOnce(Return(_mockEnginePluginResourceManager));
+    size_t selections = 0;
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getWorkspaceSize(_, _, _))
+        .WillOnce([&](auto, auto, auto) {
+            ++selections;
+            return size_t{8192};
+        });
+    setEngine();
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT scored;
+    scored.engine_id = 1;
+    auto config = getEngineConfigDescriptor();
+    config->setEngineConfig(scored, true);
+    config->finalize();
+    EXPECT_EQ(selections, 0u);
+    EXPECT_EQ(config->getEngine()->getEngineId(), 1);
+    EXPECT_EQ(selections, 0u);
+    int64_t workspace = 0;
+    config->getAttribute(
+        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspace);
+    EXPECT_EQ(workspace, 8192);
+    EXPECT_EQ(selections, 1u);
+    config->getAttribute(
+        HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, &workspace);
+    EXPECT_EQ(workspace, 8192);
+    EXPECT_EQ(selections, 1u);
+}
+
+TEST_F(TestEngineConfigDescriptor, ScoredKnobsSurviveConfigSerializationRoundTrip)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+    setEngine();
+    EngineConfigT scored;
+    scored.engine_id = 1;
+    auto knob = std::make_unique<KnobSettingT>();
+    knob->knob_id = "tile";
+    IntValueT value;
+    value.value = 128;
+    knob->value.Set(value);
+    scored.knobs.push_back(std::move(knob));
+    getEngineConfigDescriptor()->setEngineConfig(scored);
+    const auto bytes = getEngineConfigDescriptor()->getSerializedEngineConfig();
+    auto restored = UnPackEngineConfig(bytes.ptr);
+
+    // Deserialization must restore the exact scored knobs, not synthesize
+    // an engine-only config that would run the selector again.
+    auto second = std::make_shared<EngineConfigDescriptor>();
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillOnce(Return(true));
+    second->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper);
+    second->setEngineConfig(*restored);
+    scored.knobs.front()->value.AsIntValue()->value = 256;
+    restored.reset();
+    const auto roundTrip = second->getSerializedEngineConfig();
+    const auto* result = GetEngineConfig(roundTrip.ptr);
+    EXPECT_EQ(result->engine_id(), 1);
+    ASSERT_NE(result->knobs(), nullptr);
+    ASSERT_EQ(result->knobs()->size(), 1u);
+    EXPECT_EQ(result->knobs()->Get(0)->knob_id()->str(), "tile");
+    EXPECT_EQ(result->knobs()->Get(0)->value_as_IntValue()->value(), 128);
+}
+
+TEST_F(TestEngineConfigDescriptor, RejectsForeignOrAmbiguousScoredConfigurations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+    setEngine();
+    EngineConfigT config;
+    config.engine_id = 2;
+    EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
+    config.engine_id = 1;
+    config.knobs.push_back(nullptr);
+    EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
+    config.knobs.clear();
+    auto knob = std::make_unique<KnobSettingT>();
+    knob->knob_id = "tile";
+    IntValueT value;
+    value.value = 128;
+    knob->value.Set(value);
+    config.knobs.push_back(std::make_unique<KnobSettingT>(*knob));
+    config.knobs.push_back(std::move(knob));
+    EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
+}
+
+TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAttributes)
+{
+    // Catalog enumeration belongs to the engine descriptor (RFC 0017 §3): an engine
+    // config is the thing you run, so it never becomes an enumeration-only descriptor.
+    auto config = getEngineConfigDescriptor();
+    const int64_t value = 1;
+    for(const auto attribute : {HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT,
+                                HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT,
+                                HIPDNN_ATTR_ENGINE_CANDIDATES_EXT})
+    {
+        ASSERT_THROW_HIPDNN_STATUS(
+            config->setAttribute(attribute, HIPDNN_TYPE_INT64, 1, &value),
+            HIPDNN_STATUS_NOT_SUPPORTED);
+    }
+}
+
+TEST_F(TestEngineConfigDescriptor, PredictionEvaluateFlagRejectsValuesOutsideZeroOrOne)
+{
+    auto config = getEngineConfigDescriptor();
+    const int64_t evaluate = 2;
+    ASSERT_THROW_HIPDNN_STATUS(
+        config->setAttribute(
+            HIPDNN_ATTR_ENGINECFG_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestEngineConfigDescriptor, CreateEngineConfigDescriptor)
 {
     auto engineConfig = getEngineConfigDescriptor();
@@ -307,6 +423,24 @@ static flatbuffers::DetachedBuffer createSerializedKnobSetting(const std::string
         intValue.Union());
     builder.Finish(knobSetting);
     return builder.Release();
+}
+
+TEST_F(TestEngineConfigDescriptor, PredictionConstraintsDoNotRequireEngineMaterialization)
+{
+    auto config = getEngineConfigDescriptor();
+    auto knobBuffer = createSerializedKnobSetting("tile", 128);
+    hipdnnBackendFlatbufferData_t knobData = {knobBuffer.data(), knobBuffer.size()};
+    config->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE,
+                         HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                         1,
+                         &knobData);
+    const auto predictionConfig = config->getEngineConfigForPrediction(73, nullptr);
+    EXPECT_EQ(predictionConfig.engine_id, 73);
+    ASSERT_EQ(predictionConfig.knobs.size(), 1u);
+    EXPECT_EQ(predictionConfig.knobs.front()->knob_id, "tile");
+    ASSERT_NE(predictionConfig.knobs.front()->value.AsIntValue(), nullptr);
+    EXPECT_EQ(predictionConfig.knobs.front()->value.AsIntValue()->value, 128);
+    EXPECT_FALSE(config->isFinalized());
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceInvalidType)

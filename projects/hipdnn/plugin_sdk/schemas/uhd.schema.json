@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rocm.docs.amd.com/projects/hipDNN/schemas/uhd.schema.json",
+  "title": "hipDNN Universal Heuristic Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "name", "adapter"],
+  "definitions": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
+    "revision": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision"],
+      "properties": {
+        "id": {"$ref": "#/definitions/uuid"},
+        "revision": {"$ref": "#/definitions/revision"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact"],
+      "properties": {
+        "artifact": {"type": "string", "minLength": 1},
+        "hash": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "properties": {
+    "version": {"const": "1.0"},
+    "id": {"$ref": "#/definitions/uuid"},
+    "name": {"type": "string", "minLength": 1},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"]},
+    "features_signature": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"type": "string", "pattern": "^\\$.+"},
+          {"type": "object", "minProperties": 1, "maxProperties": 1}
+        ]
+      }
+    },
+    "features_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{16}$"},
+    "categorical_encoding": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": {"type": "integer"}
+      }
+    },
+    "trained_against": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ued", "kmd", "umd"],
+      "properties": {
+        "ued": {"$ref": "#/definitions/dependency"},
+        "kmd": {"$ref": "#/definitions/dependency"},
+        "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}}
+      }
+    },
+    "objective": {"enum": ["max", "min"]},
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {"type": "string", "minLength": 1},
+        "calibrated": {"type": "boolean"},
+        "transform": {"type": "string", "minLength": 1}
+      }
+    },
+    "static_order": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"order": {"type": "array", "items": {"type": "string"}}}
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol"],
+      "properties": {"symbol": {"type": "string", "minLength": 1}}
+    },
+    "table": {"$ref": "#/definitions/artifact"},
+    "tree_data": {"$ref": "#/definitions/artifact"},
+    "onnx": {"$ref": "#/definitions/artifact"},
+    "custom_library": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["library", "symbol"],
+      "properties": {
+        "library": {"type": "string", "minLength": 1},
+        "symbol": {"type": "string", "minLength": 1},
+        "hash": {"type": "string", "minLength": 1},
+        "config": {"type": "object"}
+      }
+    }
+  },
+  "oneOf": [
+    {"required": ["static_order"], "properties": {"adapter": {"const": "static_order"}}},
+    {"required": ["native"], "properties": {"adapter": {"const": "native"}}},
+    {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
+    {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
+    {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
+    {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
+  ],
+  "allOf": [
+    {"oneOf": [
+      {"required": ["static_order"]}, {"required": ["native"]},
+      {"required": ["table"]}, {"required": ["tree_data"]},
+      {"required": ["onnx"]}, {"required": ["custom_library"]}
+    ]},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "onnx"]}}},
+     "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
+    {"if": {"required": ["features_signature"]},
+     "then": {"required": ["features_hash", "trained_against"]}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "onnx", "custom_library"]}}},
+     "then": {"required": ["objective"]}}
+  ]
+}

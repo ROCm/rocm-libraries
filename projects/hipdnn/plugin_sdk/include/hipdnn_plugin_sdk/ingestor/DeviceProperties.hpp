@@ -8,13 +8,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
-#include <variant>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -75,20 +76,7 @@ inline double peakMemoryBandwidth(const DeviceProperties& properties) noexcept
 inline std::vector<std::pair<std::string, std::variant<std::int64_t, double>>>
     deviceFeatureValues(const DeviceProperties& properties)
 {
-    const auto integral = [](auto value) {
-        return std::variant<std::int64_t, double>{static_cast<std::int64_t>(value)};
-    };
-    return {
-        // Both spellings, so a signature authored against either resolves.
-        {"cu_count", integral(properties.multiProcessorCount)},
-        {"multi_processor_count", integral(properties.multiProcessorCount)},
-        {"warp_size", integral(properties.warpSize)},
-        {"total_global_mem", integral(properties.totalGlobalMem)},
-        {"memory_bus_width", integral(properties.memoryBusWidth)},
-        {"memory_clock_rate", integral(properties.memoryClockRate)},
-        {"lds_size", integral(properties.sharedMemPerBlock)},
-        {"peak_memory_bandwidth", std::variant<std::int64_t, double>{peakMemoryBandwidth(properties)}},
-    };
+    return heuristics::deviceFeatureValues(properties);
 }
 
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit

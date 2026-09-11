@@ -1,281 +1,170 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The UHD feature contract: features_signature and features_hash (RFC 0019 7.2, 7.3).
-
-This is a cross-language contract. The functions here decide what the descriptor
-says its features are and how that claim is fingerprinted; the C++ runtime
-recomputes the same fingerprint from the descriptor it loads
-(``FeatureExtractor::computeHash`` in ``backend/src/heuristics/uhd/``). If the two
-canonicalizations drift, every descriptor this tool emits fails to load.
-
-Deliberately free of LightGBM and FlatBuffers imports so the contract can be
-tested and reused without the training stack installed.
-"""
+"""Canonical inline UHD features and the shared runtime evaluator protocol."""
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-import string
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
-#: Largest numeric literal magnitude the cross-language canonical form is safe for.
-#:
-#: Above this the two JSON writers stop agreeing, in three independent ways:
-#:   - Python's repr switches a float to scientific notation at 1e16, nlohmann at
-#:     1e15, so the whole decade renders differently ("1000000000000000.0" vs "1e+15");
-#:   - an integer outside int64/uint64 keeps arbitrary precision here but degrades to
-#:     double in nlohmann -- and that lossy conversion makes distinct values collide,
-#:     so the runtime would accept a hash computed over a *different* signature;
-#:   - NaN/Infinity are a Python json extension that nlohmann rejects outright.
-#:
-#: Feature literals are tile sizes, dimensions and thresholds, so this bound is many
-#: orders of magnitude clear of anything real. Mirrored by kMaxSafeNumericLiteral in
-#: backend/src/heuristics/uhd/FeatureExtractor.cpp.
 MAX_SAFE_NUMERIC_LITERAL = 1e15
-
-__all__ = [
-    "FEATURE_NAMESPACES",
-    "MAX_SAFE_NUMERIC_LITERAL",
-    "build_features_signature",
-    "canonicalize_signature",
-    "compute_features_hash",
-    "derive_categorical_encoding",
-    "encode_feature_value",
-    "feature_reference",
-    "parse_signature_entry",
-]
-
-
-#: Namespaces the runtime binds, per RFC 0019 7.1. A reference outside these resolves
-#: to nothing at selection time (FeatureExtractionContext binds exactly device/kernel/q
-#: in backend/src/heuristics/uhd/FeatureExtractor.cpp).
-FEATURE_NAMESPACES = ("device", "kernel", "q")
-
-
-def encode_feature_value(reference: str, value) -> float:
-    """Turn one raw logged numeric value into the number the model trains on.
-
-    Strings are deliberately not handled here. A categorical value's number comes from
-    the encoding the descriptor carries (RFC 0019 §6.5), and ``build_feature_matrix``
-    applies that before reaching this function. There is no process-wide table left to
-    consult, so a string arriving here means no encoding declared this reference
-    categorical -- which is a corpus and a signature that disagree, not a lookup miss.
-
-    It raises rather than falling back to NaN or to a hash of the text. NaN is a missing
-    value to a GBDT, which routes it down ``default_left`` and returns an ordinary leaf
-    -- the row trains as data and nothing in the log says so.
-    """
-    if isinstance(value, bool):
-        return 1.0 if value else 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    if not isinstance(value, str):
-        raise TypeError(f"{reference}: cannot use {type(value).__name__} as a feature value")
-    raise ValueError(
-        f"{reference}: {value!r} is a string and no categorical_encoding declares this "
-        "reference, so there is no number it can mean. Derive an encoding from the corpus "
-        "with derive_categorical_encoding and pass it, or reduce the field through an "
-        "explicit expression."
-    )
-
-
-def _reject_unqualified(feature_cols: list[str]) -> None:
-    """Raise unless every column names one of the runtime's namespaces.
-
-    Reports the whole offending set at once: an author fixing a CSV wants the list, not
-    one name per run.
-    """
-    unqualified = [
-        col for col in feature_cols if not col.startswith(tuple(f"{ns}." for ns in FEATURE_NAMESPACES))
-    ]
-    if unqualified:
-        raise ValueError(
-            "features must be namespace-qualified with one of "
-            f"{', '.join(FEATURE_NAMESPACES)}; got {unqualified}. "
-            "Rename the CSV columns (e.g. 'batch' -> 'q.batch', 'tile_m' -> "
-            "'kernel.tile_m', 'cu_count' -> 'device.cu_count'). An unqualified name "
-            "produces a descriptor that loads but never scores."
-        )
 
 
 def feature_reference(column: str) -> str:
-    """The signature reference one training column resolves to.
-
-    The single place that knows the column -> ``$reference`` rule. The signature, the
-    categorical encoding and the feature matrix all key off it, and they have to agree
-    character for character: the runtime looks the encoding up by the reference it read
-    out of features_signature, so a second spelling here is a map the runtime never
-    finds.
-    """
-    _reject_unqualified([column])
-    return f"${column}"
+    """Use published names verbatim, adding only the reference marker."""
+    if not isinstance(column, str) or not column or column.startswith("$"):
+        raise ValueError(f"feature column must be a full published name without '$': {column!r}")
+    if any(char.isspace() for char in column):
+        raise ValueError(f"feature column contains whitespace: {column!r}")
+    return "$" + column
 
 
 def build_features_signature(feature_cols: list[str]) -> list[str]:
-    """Build the RFC 0019 features_signature from training feature columns.
+    return [feature_reference(column) for column in feature_cols]
 
-    Entries are bare field references (``$q.batch``) per RFC 0019 7.2 -- the canonical
-    spelling the runtime's feature extractor expects.
 
-    Column names must be namespace-qualified (``q.batch``, ``kernel.tile_m``,
-    ``device.cu_count``). An unqualified name such as ``batch`` produces ``$batch``,
-    which the runtime cannot resolve: it binds only the three namespaces above, so
-    every selection throws "Undefined variable" and degrades to static order. Nothing
-    downstream catches it -- registration only inspects ``$kernel.``-prefixed
-    references -- so the descriptor would load, validate, and silently never score.
-    """
-    _reject_unqualified(feature_cols)
-    return [feature_reference(col) for col in feature_cols]
+def parse_signature_entry(entry):
+    """Only canonical references and inline AST objects are descriptor entries."""
+    if isinstance(entry, str) and entry.startswith("$") and len(entry) > 1:
+        feature_reference(entry[1:])
+        return entry
+    if isinstance(entry, dict) and len(entry) == 1:
+        _validate_numeric_literals(entry)
+        return entry
+    raise ValueError("features_signature entries must be bare $references or inline expression objects")
+
+
+def signature_references(signature: list) -> list[str]:
+    """Collect reference leaves without implementing any expression semantics."""
+    references = []
+    seen = set()
+
+    def visit(node):
+        if isinstance(node, str) and node.startswith("$"):
+            feature_reference(node[1:])
+            if node not in seen:
+                seen.add(node)
+                references.append(node)
+        elif isinstance(node, dict):
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    for entry in signature:
+        visit(parse_signature_entry(entry))
+    return references
+
+
+def _validate_numeric_literals(node) -> None:
+    if isinstance(node, bool):
+        return
+    if isinstance(node, (int, float)):
+        if abs(node) >= MAX_SAFE_NUMERIC_LITERAL or not math.isfinite(node):
+            raise ValueError(f"features_signature numeric literal {node!r} must be finite with magnitude below 1e15")
+    elif isinstance(node, list):
+        for value in node:
+            _validate_numeric_literals(value)
+    elif isinstance(node, dict):
+        for value in node.values():
+            _validate_numeric_literals(value)
+
+
+def canonicalize_signature(signature: list) -> str:
+    parsed = [parse_signature_entry(entry) for entry in signature]
+    return json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False, allow_nan=False)
+
+
+def compute_features_hash(signature: list, categorical_encoding: dict | None = None) -> str:
+    """Preserve raw-reference hashes; computed training uses the helper's hash."""
+    serialized = canonicalize_signature(signature)
+    if categorical_encoding:
+        serialized += "|" + json.dumps(
+            categorical_encoding, separators=(",", ":"), sort_keys=True,
+            ensure_ascii=False, allow_nan=False,
+        )
+    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+def encode_feature_value(reference: str, value) -> float:
+    if isinstance(value, (bool, int, float)):
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError(f"{reference}: feature value must be finite, got {value!r}")
+        return numeric
+    if isinstance(value, str):
+        raise ValueError(f"{reference}: {value!r} is a string and no categorical_encoding declares this reference")
+    raise TypeError(f"{reference}: cannot use {type(value).__name__} as a feature value")
 
 
 def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[str, int]]:
-    """The string-to-code map for the corpus being trained on (RFC 0019 6.5).
-
-    Per-descriptor, not global: the vocabulary is whatever the corpus holds, and the
-    map is written into the descriptor beside the signature it belongs to, so the
-    runtime encodes with the map this model was fitted with rather than a table both
-    sides have to be kept in step with by hand.
-
-    Keyed by the full ``$``-reference, never by the trailing field name. Two columns
-    can share a trailing name and not a vocabulary -- ``kernel.dtype`` holding ``"BF16"``
-    beside ``q.attention_dense.dtype`` holding ``"bf16"`` -- and merging those is one
-    vocabulary claiming to describe two columns.
-
-    Values are taken exactly as the corpus spells them, with no case folding: the map
-    ships with the model, so an unfolded key is the key the runtime looks up. Codes run
-    from 0 in ``sorted()`` order of the values, which makes the map, the hash and every
-    split threshold reproducible from the corpus alone.
-
-    Numeric columns are absent: they already are numbers, and an entry for one would
-    claim the runtime should encode something it must read straight through.
-    """
-    encoding: dict[str, dict[str, int]] = {}
+    """Stable per-reference codes, preserving the exact published string values."""
+    encoding = {}
     for column in feature_cols:
         series = df[column]
-        # numpy kinds b/i/u/f are the numeric ones; object, string and pandas
-        # `category` report something else. Mirrors build_feature_matrix, which must
-        # take the same columns down the same branch.
         if getattr(series.dtype, "kind", "O") in "biuf":
             continue
-
-        values: set[str] = set()
-        other_types: set[str] = set()
+        values = set()
+        other_types = set()
         for value in series:
             if isinstance(value, str):
                 values.add(value)
             else:
                 other_types.add(type(value).__name__)
-
         if not values:
-            # An object column holding only numbers (a CSV with a blank cell, say).
-            # It encodes as itself, so there is nothing to map.
             continue
         if other_types:
-            raise ValueError(
-                f"feature column {column!r} mixes strings with "
-                f"{', '.join(sorted(other_types))}. A categorical column is encoded "
-                "by position, so a raw number in it would collide with whichever "
-                "value took that code. Make the column one or the other."
-            )
-
+            raise ValueError(f"feature column {column!r} mixes strings with {', '.join(sorted(other_types))}")
         encoding[feature_reference(column)] = {
             value: code for code, value in enumerate(sorted(values))
         }
     return encoding
 
 
-def parse_signature_entry(entry: str):
-    """Parse one features_signature entry to its structural form.
-
-    Mirrors ``FeatureExtractor::parseSignatureEntry`` in
-    ``backend/src/heuristics/uhd/FeatureExtractor.cpp``. RFC 0019 7.2 allows two
-    spellings: a bare field reference (``$q.seqlen_q``) or a derived JsonLogic
-    expression (``{"log2": ["$q.seqlen_q"]}``). A bare reference is not valid JSON on
-    its own, so it is lifted to a string rather than parsed.
-
-    Both sides must agree structurally, not textually: hashing raw entry strings would
-    make ``$q.batch`` and ``"$q.batch"`` -- the same reference -- hash differently, and
-    would make a derived expression hash as an opaque string here while the runtime
-    hashes it as a parsed node.
-    """
-    if entry.startswith("$"):
-        return entry
-    return json.loads(entry)
-
-
-def _validate_numeric_literals(node) -> None:
-    """Reject literals the runtime would render differently. See MAX_SAFE_NUMERIC_LITERAL."""
-    # bool is a subclass of int, and True/False render identically on both sides.
-    if isinstance(node, bool):
-        return
-
-    if isinstance(node, (int, float)):
-        if isinstance(node, float) and not math.isfinite(node):
-            raise ValueError(
-                "features_signature contains a non-finite numeric literal "
-                f"({node!r}); the runtime's JSON parser rejects these outright"
-            )
-        if abs(node) >= MAX_SAFE_NUMERIC_LITERAL:
-            raise ValueError(
-                f"features_signature contains the numeric literal {node!r}, whose "
-                "magnitude is at or above 1e15. This tool and the runtime render such "
-                "values differently, so the features_hash would not match. Rescale the "
-                "feature instead."
-            )
-        return
-
-    if isinstance(node, list):
-        for element in node:
-            _validate_numeric_literals(element)
-    elif isinstance(node, dict):
-        for value in node.values():
-            _validate_numeric_literals(value)
-
-
-def canonicalize_signature(signature: list[str]) -> str:
-    """Render a features_signature in the canonical form both sides hash.
-
-    Must match ``nlohmann::json::dump()`` on the parsed signature exactly:
-      - ``separators=(",", ":")`` -- nlohmann emits no whitespace.
-      - ``sort_keys=True``        -- nlohmann's default object type is ``std::map``,
-                                     which is key-sorted. (JsonLogic objects are
-                                     single-key, so this is belt-and-braces.)
-      - ``ensure_ascii=False``    -- nlohmann emits raw UTF-8 rather than \\uXXXX.
-    """
-    parsed = [parse_signature_entry(entry) for entry in signature]
-    _validate_numeric_literals(parsed)
-    return json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
-
-
-def compute_features_hash(
-    signature: list[str],
-    categorical_encoding: dict[str, dict[str, int]] | None = None,
-) -> str:
-    """Compute the SHA-256 fingerprint of the resolved feature contract.
-
-    Takes the signature itself, not the raw column names, so the value matches what
-    the runtime computes from the descriptor it loads.
-
-    Order is significant: RFC 0019 7.2 requires the signature to match training
-    exactly, so this must not sort the entries. A permuted signature is a real
-    feature-contract break and has to hash differently. (``sort_keys`` inside
-    canonicalize_signature sorts *object keys within* an entry, never the entries.)
-
-    RFC 0019 6.3 puts ``categorical_encoding`` inside the same fingerprint, because a
-    changed string-to-code map changes what the model reads while leaving the signature
-    text identical -- 6.5 says so outright: "features_hash does not catch it because the
-    signature text is unchanged."
-
-    The encoding is appended only when there is one, so a signature reading no string
-    field hashes exactly as it did before this argument existed. Every model shipped so
-    far is that case, and rehashing them would invalidate contracts that are intact.
-    """
-    serialized = canonicalize_signature(signature)
-    if categorical_encoding:
-        # sort_keys mirrors std::map on the C++ side, which is key-ordered; the separators
-        # match nlohmann's dump(). Both sides must render the same bytes.
-        serialized += "|" + json.dumps(
-            categorical_encoding, separators=(",", ":"), sort_keys=True, ensure_ascii=False
+def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
+    requested = str(executable) if executable else os.environ.get("HIPDNN_UHD_FEATURE_EVALUATOR", "hipdnn_uhd_features")
+    resolved = shutil.which(requested)
+    if resolved is None:
+        raise ValueError(
+            f"shared feature evaluator {requested!r} is unavailable; pass --feature-evaluator, "
+            "set HIPDNN_UHD_FEATURE_EVALUATOR, or install hipdnn_uhd_features on PATH"
         )
-    digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
-    return f"sha256:{digest}"
+    return resolved
+
+
+def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None = None,
+                          executable: str | Path | None = None) -> tuple[str, list[list[float]]]:
+    """One batch through the exact C++ expression implementation used at runtime."""
+    references = signature_references(signature)
+    columns = [reference[1:] for reference in references]
+    missing = set(columns) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing feature columns: {sorted(missing)}")
+    # to_dict preserves full floating-point precision and native list-valued bindings.
+    rows = df[columns].to_dict(orient="records")
+    request = {"signature": signature, "categorical_encoding": categorical_encoding or {}, "rows": rows}
+    result = subprocess.run(
+        [resolve_feature_evaluator(executable)],
+        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
+        capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    if result.returncode:
+        raise ValueError(f"hipdnn_uhd_features failed ({result.returncode}): {result.stderr.strip()}")
+    try:
+        response = json.loads(result.stdout)
+        digest, values = response["features_hash"], response["values"]
+        if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            raise ValueError("missing features_hash")
+        if len(values) != len(df) or any(len(row) != len(signature) for row in values):
+            raise ValueError("feature matrix shape does not match the request")
+        if any(not isinstance(value, (int, float)) or not math.isfinite(value)
+               for row in values for value in row):
+            raise ValueError("non-finite or non-numeric feature result")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid hipdnn_uhd_features response: {error}") from error
+    return digest, values

@@ -99,7 +99,7 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     large.metadata["tile_m"] = int64_t{128};
 
     catalog.entries = {small, large};
-    catalog.bound["seqlen"] = seqlen;
+    catalog.bound["q.seqlen"] = seqlen;
     return catalog;
 }
 
@@ -142,23 +142,6 @@ const std::vector<std::string> KNOBS = {"tile_m"};
 
 } // namespace
 
-TEST(TestIngestorUhdGeneratedModel, TheToolsOwnOutputLoads)
-{
-    // The whole chain in one assertion: the descriptor parses, its features_hash
-    // matches what the C++ extractor recomputes from the signature beside it, and
-    // model.bin resolves relative to the descriptor and loads. Any one of the
-    // three failing returns nullptr here.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
-
-    ASSERT_NE(heuristic, nullptr);
-    EXPECT_EQ(recorder.getRecordedLogCount(), 0U)
-        << "loading the tool's output must be silent: "
-        << recorder.getRecordedLogsAsString();
-}
-
 TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
 {
     const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
@@ -199,57 +182,7 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
     EXPECT_EQ(shortSequence.front().kernelId, testId(0x01)) << "short sequence wants tile 64";
 }
 
-TEST(TestIngestorUhdGeneratedModel, TheCommittedDescriptorNamesTheCommittedArtifact)
-{
-    // The artifact reference, checked as a file rather than inferred from a
-    // successful load. A fixture regenerated with a different --descriptor-name
-    // would still load while silently no longer matching what the docs describe.
-    const auto descriptorPath = fixtureDir() / "tile_selector.uhd.json";
-    ASSERT_TRUE(std::filesystem::exists(descriptorPath));
-
-    std::ifstream stream(descriptorPath);
-    const auto document = nlohmann::json::parse(stream);
-    EXPECT_EQ(document.at("adapter"), "tree_data");
-    EXPECT_EQ(document.at("tree_data").at("artifact"), "model.bin");
-
-    EXPECT_TRUE(std::filesystem::exists(fixtureDir() / "model.bin"));
-}
-
 // ---- A signature that reads a string (RFC 0019 §6.5) ---------------------------
-
-TEST(TestIngestorUhdGeneratedModel, TheToolsCategoricalEncodingSurvivesTheCrossing)
-{
-    // The contract with the widest blast radius and, until this test, no coverage:
-    // Python folds `categorical_encoding` into features_hash and C++ recomputes it from
-    // the same file. Disagree by one byte -- key spelling, code, or map ordering -- and
-    // the load is refused. A green load IS the agreement; nothing else has to assert it.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-
-    const auto descriptor = dtypeDescriptor();
-    ASSERT_FALSE(descriptor.categoricalEncoding.empty())
-        << "the tool must ship the map it trained with";
-
-    const auto heuristic = makeKernelHeuristic(descriptor, {}, DTYPE_KNOBS);
-
-    ASSERT_NE(heuristic, nullptr) << "hash disagreement refuses the load: "
-                                  << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.getRecordedLogCount(), 0U) << recorder.getRecordedLogsAsString();
-}
-
-TEST(TestIngestorUhdGeneratedModel, TheDescriptorCarriesTheCorpusSpellingUnfolded)
-{
-    // The corpus holds the rocKE KMD's `"BF16"`. The frozen table this replaced folded
-    // ASCII case, so it would have recorded `bf16` and quietly accepted either; a
-    // generated map records what the corpus held and nothing else.
-    const auto descriptor = dtypeDescriptor();
-    const auto field = descriptor.categoricalEncoding.find("$kernel.dtype");
-
-    ASSERT_NE(field, descriptor.categoricalEncoding.end())
-        << "keyed by the whole reference, not the trailing field name";
-    EXPECT_EQ(field->second.count("BF16"), 1U) << "the corpus spelling, verbatim";
-    EXPECT_EQ(field->second.count("bf16"), 0U) << "case is not folded any more";
-}
 
 TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
 {

@@ -545,7 +545,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_custom_command(
         OUTPUT ${_generated_model_artifacts}
         COMMAND uhd_model_gen "${HIPDNN_DESCRIPTOR_BUILD_DIR}/pointwise_model"
-        DEPENDS uhd_model_gen
+                "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
+        DEPENDS uhd_model_gen ${_staged_descriptors}
         COMMENT "Generating pointwise_model UHD and model artifact"
         VERBATIM
     )

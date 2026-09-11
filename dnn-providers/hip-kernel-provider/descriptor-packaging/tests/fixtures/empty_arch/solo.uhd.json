@@ -1,8 +1,9 @@
 {
-  "version": "0.1",
-  "id": "uhd-solo",
+  "version": "1.0",
+  "id": "1c245a40-2483-5c46-a92e-97cd450b0a51",
   "name": "Solo static-order heuristic",
   "adapter": "native",
+  "objective": "max",
   "native": {
     "symbol": "hipkernel.solo.score"
   }

@@ -21,7 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -307,8 +307,7 @@ std::optional<int64_t>
             return std::nullopt;
         }
         const auto operandBytes = checkedMultiply(*count, width);
-        if(!operandBytes.has_value()
-           || total > std::numeric_limits<int64_t>::max() - *operandBytes)
+        if(!operandBytes.has_value() || total > std::numeric_limits<int64_t>::max() - *operandBytes)
         {
             return std::nullopt;
         }

@@ -20,7 +20,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
@@ -229,8 +229,8 @@ TEST(TestConvFwdBinding, ByteCountFollowsTheOperandDtypeWidthAndFlopsDoesNot)
 /// reason the stronger assertion is absent, so its absence is not read as an oversight.
 TEST(TestConvFwdBinding, AMixedPrecisionConvIsRefusedSoPerOperandWidthCannotBeObservedHere)
 {
-    const GraphFixture fixture(buildAsymmetricConvGraph(data_objects::DataType::FLOAT,
-                                                        data_objects::DataType::HALF));
+    const GraphFixture fixture(
+        buildAsymmetricConvGraph(data_objects::DataType::FLOAT, data_objects::DataType::HALF));
 
     EXPECT_FALSE(matchesGraph(CONV_FWD, fixture.context()).has_value());
 }

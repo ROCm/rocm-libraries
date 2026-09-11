@@ -51,7 +51,7 @@ This table provides a high-level overview of the differences between cuDNN and h
      - ``hipdnnDestroy(handle)``
    * - Heuristics modes
      - All cuDNN heuristic modes
-     - Currently only ``HeurMode_t::FALLBACK``
+     - ``HeuristicMode::A``, ``HeuristicMode::B``, and ``HeuristicMode::FALLBACK``
    * - Operation support
      - All cuDNN operations
      - See :ref:`plugin-support` for more information.
@@ -67,12 +67,22 @@ See the :ref:`dimension-layouts` section of the Operation Support doccument for 
 Troubleshooting
 ===============
 
-Error: Missing Heuristic modes A and B
---------------------------------------
+Prediction modes return no ranking
+---------------------------------
 
-The heuristic implementation in hipDNN is not implemented.
+Mode A ranks engines by their graph-level UHD prediction. Mode B prefers a
+calibrated configuration prediction and falls back to the graph-level prediction
+for each engine. Neither mode benchmarks the graph. Install compatible trained
+models for the selected device architecture.
 
-To fix the problem, use a combination of ``graph::get_ranked_engine_ids()`` and ``graph::set_preferred_engine_id_ext()`` if you need more detailed control over engine selection.
+``HeuristicMode::A`` and ``HeuristicMode::B`` are not backend heuristic modes: the
+frontend turns them into the ``SelectionHeuristic::ModeA`` and
+``SelectionHeuristic::ModeB`` entries of the heuristic descriptor's ordered policy
+list, always preceded by ``SelectionHeuristic::Config`` and followed by
+``SelectionHeuristic::StaticOrdering``. If no applicable engine has a usable
+prediction, the prediction policy declines and ordinary static engine selection
+still runs, so ``graph.create_execution_plans({HeuristicMode::B})`` never fails for
+want of a model. Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
 
 Error: Different memory utilities for allocating device memory
 --------------------------------------------------------------

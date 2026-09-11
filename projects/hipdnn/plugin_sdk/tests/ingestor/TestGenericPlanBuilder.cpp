@@ -32,7 +32,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -2048,7 +2048,6 @@ TEST(TestIngestorGenericPlanBuilder,
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
-
 /// A UHD is arch-keyed, so one gfx942 model serves every gfx942 board. A corpus merged
 /// from MI300X, MI325X and MI308X therefore has to carry what each board IS, not only
 /// which one a row came from -- otherwise the model averages over hardware it cannot
@@ -2117,6 +2116,123 @@ TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheD
     // model splitting on which card a row came from has memorised the fleet.
     EXPECT_FALSE(row.contains("device.arch"));
     EXPECT_FALSE(row.contains("device.gcn_arch_name"));
+}
+
+TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCandidate)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter benchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "0");
+    const ScopedSymbols symbols(
+        "test.graph",
+        [](const MatchContext& context) {
+            auto bound = acceptGraph(context);
+            (*bound)["$attention.dims"] = std::vector<int64_t>{32, 128};
+            (*bound)["$attention.dims[0]"] = int64_t{99};
+            return bound;
+        },
+        "test.kernel",
+        countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    auto schema = makeSchema();
+    schema.fields.push_back({"vector_width", MetadataType::INT, MetadataValue{int64_t{1}}});
+    auto pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels[1].metadata["vector_width"] = int64_t{4};
+    // A device-inapplicable tuple must not appear, even though all its knob values exist.
+    auto otherDevice = makeKernel(testId(0x70), "other_device", 128, "FLOAT");
+    otherDevice.arch = {"gfx999"};
+    pack.kernels.push_back(std::move(otherDevice));
+    const StateManager manager(
+        std::move(schema),
+        {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, "vector_width"});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, manager, resolver);
+    const TestGraph graph(makeGraphId(0xDA));
+    flatbuffers::FlatBufferBuilder empty;
+    const auto all = makeEmptyEngineConfig(empty);
+    const auto first = builder.enumerateCandidates(0, graph, all, 0, 1);
+    const auto second = builder.enumerateCandidates(0, graph, all, 1, 1);
+    ASSERT_EQ(first.total_count, 2U); // Not the four-point Cartesian product.
+    ASSERT_EQ(first.candidates.size(), 1U);
+    ASSERT_EQ(second.candidates.size(), 1U);
+    EXPECT_EQ(first.candidates.front()->id, toString(testId(0x64)));
+    EXPECT_EQ(second.candidates.front()->id, toString(testId(0x65)));
+    EXPECT_EQ(first.graph_id, second.graph_id);
+    EXPECT_EQ(first.device_id, second.device_id);
+    EXPECT_EQ(nlohmann::json::parse(first.problem_features).at("test.bound_token"),
+              BOUND_TOKEN_VALUE);
+    EXPECT_FALSE(nlohmann::json::parse(first.problem_features).contains("q.test.bound_token"));
+    const auto problemFeatures = nlohmann::json::parse(first.problem_features);
+    EXPECT_EQ(problemFeatures.at("attention.dims[0]"), 99);
+    EXPECT_EQ(problemFeatures.at("attention.dims[1]"), 128);
+
+    for(const auto* page : {&first, &second})
+    {
+        const auto& candidate = *page->candidates.front();
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT enrolled;
+        enrolled.engine_id = ENGINE_ID.front();
+        for(const auto& knob : candidate.knob_settings)
+        {
+            enrolled.knobs.push_back(
+                std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>(*knob));
+        }
+        flatbuffers::FlatBufferBuilder serialized;
+        serialized.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(serialized, &enrolled));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configuration(
+            serialized.GetBufferPointer(), serialized.GetSize());
+        KnobFilterSettings settings;
+        builder.initializeExecutionSettings(0, graph, configuration, settings);
+        KnobFilterContext context;
+        context.setExecutionSettings(settings);
+        builder.buildPlan(0, graph, configuration, context);
+        EXPECT_EQ(toString(context.plan().kernel().kernelId), candidate.id);
+    }
+    flatbuffers::FlatBufferBuilder scopedBuffer;
+    const auto scope = makeIntKnobEngineConfig(scopedBuffer, "vector_width", 4);
+    const auto scoped = builder.enumerateCandidates(0, graph, scope, 0, 10000);
+    ASSERT_EQ(scoped.total_count, 1U);
+    EXPECT_EQ(scoped.candidates.front()->id, second.candidates.front()->id);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 3, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorCandidateEnumeration, RejectsAmbiguityBeforeReturningTheFirstPage)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDB));
+    flatbuffers::FlatBufferBuilder serialized;
+    const auto all = makeEmptyEngineConfig(serialized);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorCandidateEnumeration, EmptyScopedCatalogIsNotUnsupportedOrAnInvalidScope)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDC));
+    flatbuffers::FlatBufferBuilder absentBuffer;
+    const auto absent = makeIntKnobEngineConfig(absentBuffer, BLOCK_SIZE, 777);
+    const auto empty = builder.enumerateCandidates(0, graph, absent, 0, 1);
+    EXPECT_EQ(empty.total_count, 0U);
+    EXPECT_TRUE(empty.candidates.empty());
+    flatbuffers::FlatBufferBuilder invalidBuffer;
+    const auto invalid = makeIntKnobEngineConfig(invalidBuffer, "unknown_knob", 1);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, invalid, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

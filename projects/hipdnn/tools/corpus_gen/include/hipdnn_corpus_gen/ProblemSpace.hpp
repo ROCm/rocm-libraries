@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_corpus_gen/FeasibleShapeSet.hpp>
 #include <hipdnn_corpus_gen/ArgumentResolver.hpp>
+#include <hipdnn_corpus_gen/FeasibleShapeSet.hpp>
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
@@ -181,19 +181,19 @@ inline std::vector<ProblemPoint>
 /// was added to prevent.
 inline bool satisfiesConstraints(const OperationMetadata& metadata, const ProblemPoint& point)
 {
-    if(metadata.constraints.empty())
+    if(metadata.constraints.size() == 0)
     {
         return true;
     }
 
-    const hipdnn_plugin_sdk::ingestor::uhd::JsonLogicEvaluator evaluator;
     const auto context = detail::contextFor(point);
-    for(const auto& constraint : metadata.constraints)
+    auto work = metadata.constraints.workspace();
+    for(size_t i = 0; i < metadata.constraints.size(); ++i)
     {
         try
         {
-            const auto value = evaluator.evaluate(constraint, context);
-            const auto* held = std::get_if<bool>(&value);
+            const auto& value = metadata.constraints.evaluate(i, context, work);
+            const auto* held = std::get_if<bool>(&value.raw);
             if(held == nullptr || !*held)
             {
                 return false;
@@ -397,8 +397,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     if(totalCombinations > combinations.size())
     {
         corpus.skippedCombinations.push_back(
-            std::to_string(totalCombinations - combinations.size())
-            + " of " + std::to_string(totalCombinations)
+            std::to_string(totalCombinations - combinations.size()) + " of "
+            + std::to_string(totalCombinations)
             + " categorical combinations not explored (maxCombinations bound)");
     }
 
@@ -442,8 +442,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
         size_t skeletonTotal = 0;
         const auto skeleton = detail::regimeSkeleton(
-            metadata, numericWindow, corpus.numericParameters, request.maxSkeleton,
-            skeletonTotal);
+            metadata, numericWindow, corpus.numericParameters, request.maxSkeleton, skeletonTotal);
         if(skeletonTotal > skeleton.size() && index == 0)
         {
             corpus.skippedCombinations.push_back(
@@ -490,10 +489,10 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         if(!metadata.mixture.isExplorationOnly())
         {
             const auto total = static_cast<double>(request.pointsPerCombination);
-            archetypeQuota = static_cast<size_t>(
-                std::max(0.0, metadata.mixture.archetypes * total));
-            neighbourhoodQuota = static_cast<size_t>(
-                std::max(0.0, metadata.mixture.neighbourhood * total));
+            archetypeQuota
+                = static_cast<size_t>(std::max(0.0, metadata.mixture.archetypes * total));
+            neighbourhoodQuota
+                = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
         }
 
         // Attempts are capped rather than unbounded: an archetype set that this engine declines
@@ -522,8 +521,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         // belongs to the exploration rather than to noise around a rejected shape.
         const size_t neighbourhoodAttempts = anchored.empty() ? 0 : neighbourhoodQuota * 20;
         size_t drawnNearby = 0;
-        for(size_t attempt = 0;
-            attempt < neighbourhoodAttempts && drawnNearby < neighbourhoodQuota; ++attempt)
+        for(size_t attempt = 0; attempt < neighbourhoodAttempts && drawnNearby < neighbourhoodQuota;
+            ++attempt)
         {
             const auto& anchor = anchored[attempt % anchored.size()];
             const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
@@ -539,16 +538,15 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         {
             // Silence here would read as an operation with no declared workloads, which is a
             // different and much less interesting fact than an engine that serves none of them.
-            corpus.skippedCombinations.push_back(
-                "no declared archetype was admitted for " + detail::describe(categorical)
-                + "; that combination is exploration only");
+            corpus.skippedCombinations.push_back("no declared archetype was admitted for "
+                                                 + detail::describe(categorical)
+                                                 + "; that combination is exploration only");
         }
 
         // Whatever the anchored halves did not fill stays with the search, so a combination is
         // never short-changed by archetypes that did not apply.
-        search.targetCount
-            = std::max<int64_t>(0, request.pointsPerCombination
-                                       - static_cast<int64_t>(result.problems.size()));
+        search.targetCount = std::max<int64_t>(
+            0, request.pointsPerCombination - static_cast<int64_t>(result.problems.size()));
 
         // Admitted realistic points are known-good footholds, and a hit-and-run walk that starts
         // inside the region finds far more than one that has to hunt for it.

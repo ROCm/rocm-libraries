@@ -41,6 +41,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/engine_api_version.h>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -71,6 +72,90 @@ TEST(TestEnginePluginResourceManager, PluginLoading)
     {
         const EnginePluginResourceManager resourceManager(pluginManager);
     }
+}
+
+class TestEnginePredictionTransport : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        _plugin = std::make_shared<NiceMock<MockEnginePlugin>>();
+        _plugins.push_back(_plugin);
+        _manager = std::make_shared<NiceMock<MockEnginePluginManager>>();
+        ON_CALL(*_manager, getPlugins()).WillByDefault(ReturnRef(_plugins));
+        ON_CALL(*_plugin, createHandle()).WillByDefault(Return(_handle));
+        ON_CALL(*_plugin, getAllEngineIds()).WillByDefault(Return(std::vector<int64_t>{100}));
+        _resources = std::make_unique<EnginePluginResourceManager>(_manager);
+        ON_CALL(*_plugin, getPrediction(_, _, _, _, _, _))
+            .WillByDefault([this](hipdnnEnginePluginHandle_t,
+                                  const hipdnnPluginConstData_t*,
+                                  const hipdnnPluginConstData_t*,
+                                  hipdnnEnginePredictionKind_t,
+                                  bool,
+                                  hipdnnPluginConstData_t* out) {
+                _response.Clear();
+                _response.Finish(hipdnn_flatbuffers_sdk::data_objects::EnginePrediction::Pack(
+                    _response, &_prediction));
+                *out = {_response.GetBufferPointer(), _response.GetSize()};
+                return true;
+            });
+        _prediction.engine_id = 100;
+        _prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
+        _prediction.tflops = 10.0;
+        _prediction.uhd_id = "b29341f4-7a55-4b9b-b9a2-8cb3cac13368";
+        _config.engine_id = 100;
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT query(hipdnnEnginePredictionKind_t kind
+                                                                  = HIPDNN_ENGINE_PREDICTION_ENGINE)
+    {
+        flatbuffers::FlatBufferBuilder configBytes;
+        configBytes.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(configBytes, &_config));
+        const auto graphBytes = createValidGraph();
+        return _resources->getEnginePrediction(
+            {configBytes.GetBufferPointer(), configBytes.GetSize()},
+            {graphBytes.GetBufferPointer(), graphBytes.GetSize()},
+            kind);
+    }
+
+    std::shared_ptr<NiceMock<MockEnginePlugin>> _plugin;
+    std::vector<std::shared_ptr<EnginePlugin>> _plugins;
+    std::shared_ptr<NiceMock<MockEnginePluginManager>> _manager;
+    std::unique_ptr<EnginePluginResourceManager> _resources;
+    hipdnnEnginePluginHandle_t _handle = hipdnnEnginePluginHandle_t(0xdeadbeef);
+    flatbuffers::FlatBufferBuilder _response;
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT _prediction;
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT _config;
+};
+
+TEST_F(TestEnginePredictionTransport, NonfiniteEstimateCannotRankAnEngine)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.tflops = std::numeric_limits<double>::infinity();
+    const auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.engine_config, nullptr);
+}
+
+TEST_F(TestEnginePredictionTransport, RejectsConfigurationThatChangesWorkspaceConstraint)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    auto knob = std::make_unique<fb::KnobSettingT>();
+    knob->knob_id = "global.workspace_size_limit";
+    fb::IntValueT limit;
+    limit.value = 1024;
+    knob->value.Set(limit);
+    _config.knobs.push_back(std::move(knob));
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>(_config);
+    ASSERT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status,
+              fb::PredictionStatus::AVAILABLE);
+
+    _prediction.engine_config->knobs.front()->value.AsIntValue()->value = 2048;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.engine_config, nullptr);
 }
 
 TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFails)

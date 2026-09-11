@@ -3,13 +3,12 @@
 
 #pragma once
 
-#include <hipdnn_plugin_sdk/ingestor/uhd/JsonLogicEvaluator.hpp>
-
+#include <hipdnn_plugin_sdk/heuristics/uhd/DescriptorExpression.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
-#include <cmath>
 #include <map>
 #include <optional>
 #include <string>
@@ -111,11 +110,11 @@ struct Parameter
 /// exists to prevent.
 enum class FillKind
 {
-    ZEROS,             ///< Default. Correct wherever contents do not affect the work done.
-    UNIFORM,           ///< Uniform random over the tensor's dtype range.
-    SEQUENCE,          ///< 0, 1, 2, ... useful for index tensors that must be in range.
-    ROUTING_OFFSETS,   ///< Per-expert first-token offsets, skewed by `skew` (§12.2).
-    EXPERT_ASSIGNMENT  ///< Per-token expert index, consistent with the offsets.
+    ZEROS, ///< Default. Correct wherever contents do not affect the work done.
+    UNIFORM, ///< Uniform random over the tensor's dtype range.
+    SEQUENCE, ///< 0, 1, 2, ... useful for index tensors that must be in range.
+    ROUTING_OFFSETS, ///< Per-expert first-token offsets, skewed by `skew` (§12.2).
+    EXPERT_ASSIGNMENT ///< Per-token expert index, consistent with the offsets.
 };
 
 /// One tensor's declared contents.
@@ -136,23 +135,20 @@ struct BuilderArgument
 {
     enum class Kind
     {
-        DIRECT,     ///< Copy the named `$q.*` value.
-        EXPR,       ///< Evaluate an expression; arrays yield dims lists.
+        DIRECT, ///< Copy the named `$q.*` value.
+        EXPR, ///< Evaluate an expression; arrays yield dims lists.
         STRIDES_OF, ///< Row-major contiguous strides for a previously-named argument.
-        DTYPE_OF,   ///< Map a dtype string to the FlatBuffers DataType enumerator.
-        CONSTANT    ///< Literal.
+        DTYPE_OF, ///< Map a dtype string to the FlatBuffers DataType enumerator.
+        CONSTANT ///< Literal.
     };
 
     std::string name;
     Kind kind = Kind::DIRECT;
-    std::string source;                 ///< DIRECT, DTYPE_OF
-    /// EXPR: one §6.2 expression per element; an array of them yields a dims list. Held as
-    /// JSON because the expression language is JSON-logic and the evaluator is shared with
-    /// UMD criteria and UDD dispatch formulas -- one parser, validator and interpreter for
-    /// all three (RFC 0019 §6.2).
-    std::vector<nlohmann::json> value;
-    std::string of;                 ///< STRIDES_OF
-    nlohmann::json constant;        ///< CONSTANT
+    std::string source; ///< DIRECT, DTYPE_OF
+    /// Compiled once at metadata admission; all dimensions share one expression DAG.
+    hipdnn_plugin_sdk::uhd::expression::Program expressions{std::vector<nlohmann::json>{}};
+    std::string of; ///< STRIDES_OF
+    nlohmann::json constant; ///< CONSTANT
 };
 
 /// How a parameter assignment becomes a graph (§4.3.6).
@@ -184,20 +180,20 @@ struct Neighbourhood
 {
     enum class Kind
     {
-        SCALE,    ///< multiply by one of `factors` (rounded, kept >= 1)
+        SCALE, ///< multiply by one of `factors` (rounded, kept >= 1)
         MULTIPLE, ///< move by whole steps of `of`
-        VALUES,   ///< take one of an explicit list
-        MIRROR    ///< follow another parameter, optionally times one of `ratios`
+        VALUES, ///< take one of an explicit list
+        MIRROR ///< follow another parameter, optionally times one of `ratios`
     };
 
     std::string parameter;
     Kind kind = Kind::SCALE;
     std::vector<double> factors; ///< SCALE
-    int64_t of = 0;              ///< MULTIPLE: the alignment
-    std::vector<int64_t> steps;  ///< MULTIPLE: how many multiples to move
+    int64_t of = 0; ///< MULTIPLE: the alignment
+    std::vector<int64_t> steps; ///< MULTIPLE: how many multiples to move
     std::vector<int64_t> values; ///< VALUES
-    std::string mirrors;         ///< MIRROR: the parameter followed
-    std::vector<double> ratios;  ///< MIRROR: permitted ratios to it
+    std::string mirrors; ///< MIRROR: the parameter followed
+    std::vector<double> ratios; ///< MIRROR: permitted ratios to it
 };
 
 /// A correlated tuple of values drawn from a real workload (§12.2, §12.3).
@@ -266,7 +262,7 @@ struct OperationMetadata
     /// Boolean §6.2 expressions, the same language UMD criteria use. A point failing any is
     /// never proposed, which costs nothing and stops the search from mapping the frontend's
     /// validator and reporting the result as the engine's region.
-    std::vector<nlohmann::json> constraints;
+    hipdnn_plugin_sdk::uhd::expression::Program constraints{std::vector<nlohmann::json>{}};
 
     /// Recorded workload shapes, and how far a draw may drift from one (proposed §4 addition).
     ///
@@ -511,9 +507,8 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 const auto& range = body.at("range");
                 const auto low = range[0].get<int64_t>();
                 parameter.range = {low,
-                                   range[1].is_null()
-                                       ? std::numeric_limits<int64_t>::max()
-                                       : range[1].get<int64_t>()};
+                                   range[1].is_null() ? std::numeric_limits<int64_t>::max()
+                                                      : range[1].get<int64_t>()};
             }
             if(body.contains("common_values"))
             {
@@ -587,9 +582,14 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
             if(resolved.kind == BuilderArgument::Kind::EXPR && argument.contains("value"))
             {
-                for(const auto& term : argument.at("value"))
+                try
                 {
-                    resolved.value.push_back(term);
+                    resolved.expressions = hipdnn_plugin_sdk::uhd::expression::Program(
+                        argument.at("value").get<std::vector<nlohmann::json>>());
+                }
+                catch(const std::exception& error)
+                {
+                    load.errors.push_back("argument '" + resolved.name + "': " + error.what());
                 }
             }
 
@@ -598,21 +598,19 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 const auto name = detail::queryReference(text);
                 if(!name.empty() && metadata.find(name) == nullptr)
                 {
-                    load.errors.push_back("argument '" + resolved.name + "' references undeclared "
-                                          "parameter '" + name + "'");
+                    load.errors.push_back("argument '" + resolved.name
+                                          + "' references undeclared "
+                                            "parameter '"
+                                          + name + "'");
                 }
             };
             checkReference(resolved.source);
             // Every variable the expression actually reads, from the evaluator itself rather
             // than from a string scan -- which is what makes the check hold for a nested
             // expression such as a convolution's output extent.
-            for(const auto& term : resolved.value)
+            for(const auto& variable : resolved.expressions.variables())
             {
-                for(const auto& variable :
-                    hipdnn_plugin_sdk::ingestor::uhd::JsonLogicEvaluator::extractVariables(term))
-                {
-                    checkReference(variable);
-                }
+                checkReference(variable);
             }
 
             if(resolved.kind == BuilderArgument::Kind::STRIDES_OF
@@ -631,10 +629,11 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
     if(root.contains("constraints"))
     {
-        for(const auto& constraint : root.at("constraints"))
+        try
         {
-            for(const auto& variable :
-                hipdnn_plugin_sdk::ingestor::uhd::JsonLogicEvaluator::extractVariables(constraint))
+            metadata.constraints = hipdnn_plugin_sdk::uhd::expression::Program(
+                root.at("constraints").get<std::vector<nlohmann::json>>());
+            for(const auto& variable : metadata.constraints.variables())
             {
                 const auto name = detail::queryReference(variable);
                 if(!name.empty() && metadata.find(name) == nullptr)
@@ -643,7 +642,10 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                                           + "'");
                 }
             }
-            metadata.constraints.push_back(constraint);
+        }
+        catch(const std::exception& error)
+        {
+            load.errors.push_back("constraint: " + std::string(error.what()));
         }
     }
 
@@ -663,8 +665,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
             // Bound to a named object first: `items()` over a temporary iterates a value that
             // has already been destroyed.
-            const nlohmann::json declaredValues
-                = entry.value("values", nlohmann::json::object());
+            const nlohmann::json declaredValues = entry.value("values", nlohmann::json::object());
             for(const auto& [name, list] : declaredValues.items())
             {
                 // An archetype naming a parameter that does not exist is how a renamed
@@ -707,9 +708,8 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                     if(metadata.find(referenced) == nullptr)
                     {
                         load.errors.push_back("archetype '" + archetype.name + "' has '"
-                                              + parameter.name
-                                              + "' follow undeclared parameter '" + referenced
-                                              + "'");
+                                              + parameter.name + "' follow undeclared parameter '"
+                                              + referenced + "'");
                     }
                     else if(archetype.values.count(referenced) == 0)
                     {
@@ -803,12 +803,12 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 }
                 else if(metadata.find(hood.mirrors) == nullptr)
                 {
-                {
-                    std::string what = "follows undeclared parameter '";
-                    what += hood.mirrors;
-                    what += "'";
-                    complain(what);
-                }
+                    {
+                        std::string what = "follows undeclared parameter '";
+                        what += hood.mirrors;
+                        what += "'";
+                        complain(what);
+                    }
                 }
                 break;
             default:
@@ -831,8 +831,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         {
             // Normalising silently would let "0.2/0.6/0.1" read as a declaration of proportions
             // nobody wrote, and the corpus composition is exactly what this field is for.
-            load.errors.push_back("mixture shares total " + std::to_string(total)
-                                  + ", not 1.0");
+            load.errors.push_back("mixture shares total " + std::to_string(total) + ", not 1.0");
         }
     }
     else if(!metadata.archetypes.empty())
@@ -873,13 +872,15 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
             for(const auto& argument : entry.value("arguments", nlohmann::json::array()))
             {
-                const auto text = argument.is_string() ? argument.get<std::string>()
-                                                       : argument.dump();
+                const auto text
+                    = argument.is_string() ? argument.get<std::string>() : argument.dump();
                 const auto name = detail::queryReference(text);
                 if(!name.empty() && metadata.find(name) == nullptr)
                 {
-                    load.errors.push_back("tensor '" + fill.tensor + "' fill references "
-                                          "undeclared parameter '" + name + "'");
+                    load.errors.push_back("tensor '" + fill.tensor
+                                          + "' fill references "
+                                            "undeclared parameter '"
+                                          + name + "'");
                 }
                 fill.arguments.push_back(text);
             }

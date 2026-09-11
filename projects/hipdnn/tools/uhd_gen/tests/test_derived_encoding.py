@@ -57,9 +57,17 @@ def _corpus(path: Path, columns: dict[str, list]) -> Path:
 
 
 def _train(output_dir: Path, csv: Path, features: list[str], *extra: str) -> int:
+    snapshot = output_dir.parent / "provenance.json"
+    snapshot.write_text(json.dumps({
+        "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
+        "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.0"},
+        "umd": [],
+    }), encoding="utf-8")
     return main(
         [
             "train",
+            "--provenance",
+            str(snapshot),
             "--input",
             str(csv),
             "--features",
@@ -292,29 +300,19 @@ def test_encoding_is_folded_into_the_features_hash(tmp_path):
 
 
 def test_evaluation_scores_through_the_shipped_encoding(tmp_path):
-    """A scorer that encodes with a different map than the fit did ranks by thresholds
-    that mean something else, and every regret number measured through it describes a
-    model nobody has.
-
-    Pinned twice: scoring works at all (the global table has no code for these values,
-    so it cannot be what ran), and perturbing the shipped map moves the scores (so the
-    map is genuinely consulted rather than carried along)."""
+    """Changing shipped categorical codes invalidates the artifact's feature contract."""
     output_dir = tmp_path / "model"
     csv = _string_corpus(tmp_path / "bench.csv")
 
     assert _train(output_dir, csv, STRING_FEATURES) == 0
-
-    frame = pd.read_csv(csv)
-    scores = load_model(output_dir).scorer(frame)
-    assert len(scores) == len(frame)
 
     descriptor_path = output_dir / "heuristic.uhd.json"
     descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
     descriptor["categorical_encoding"]["$kernel.pipeline"] = {"intrawave": 1, "pingpong": 0}
     descriptor_path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
 
-    swapped = load_model(output_dir).scorer(frame)
-    assert not (scores == swapped).all()
+    with pytest.raises(ValueError, match="features_hash"):
+        load_model(output_dir)
 
 
 def test_a_value_outside_the_shipped_map_is_refused(tmp_path):
@@ -334,3 +332,20 @@ def test_a_value_outside_the_shipped_map_is_refused(tmp_path):
 
     assert "v3" in str(excinfo.value)
     assert "$kernel.pipeline" in str(excinfo.value)
+
+
+def test_numeric_looking_json_categories_are_not_coerced_into_numbers(tmp_path):
+    frame = pd.DataFrame({
+        "kernel.block_size": _varying(64, 256),
+        "kernel.pipeline": _varying("00", "0", period=2),
+        "tflops": _varying(20.0, 80.0, period=2),
+    })
+    corpus = tmp_path / "bench.json"
+    frame.to_json(corpus, orient="records")
+    output_dir = tmp_path / "model"
+    assert _train(output_dir, corpus, STRING_FEATURES) == 0
+    assert _descriptor(output_dir)["categorical_encoding"] == {
+        "$kernel.pipeline": {"0": 0, "00": 1}
+    }
+    scores = load_model(output_dir).scorer(frame)
+    assert scores[2] > scores[0]

@@ -22,6 +22,90 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+/// @brief Descriptor dependencies published even before the first L1 model is trained.
+inline nlohmann::json enginePredictionProvenance(const DescriptorSet& set)
+{
+    const auto dependency = [](const auto& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"revision",
+                               std::to_string(descriptor.revision.major) + "."
+                                   + std::to_string(descriptor.revision.minor)}};
+    };
+    auto provenance = nlohmann::json{{"ued", dependency(set.engine)},
+                                     {"kmd", dependency(set.schema)},
+                                     {"umd", nlohmann::json::array()}};
+    for(const auto& matcher : set.matchers)
+    {
+        provenance["umd"].push_back(dependency(matcher));
+    }
+    std::sort(provenance["umd"].begin(),
+              provenance["umd"].end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.at("id") < rhs.at("id"); });
+    return provenance;
+}
+
+/// @brief Stable selector identity, including ranker provenance but never evaluating L2.
+inline std::string engineSelectorRevision(const DescriptorSet& set)
+{
+    auto selector = enginePredictionProvenance(set);
+    selector["selector"] = "generic-untuned-v1";
+    selector["graph_match"] = set.engine.graphMatchNativeSymbol;
+    selector["knobs"] = set.engine.knobs;
+    selector["rankers"] = nlohmann::json::object();
+    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"model_hash", descriptor.modelHash},
+                              {"features_hash", descriptor.featuresHash},
+                              {"adapter", static_cast<int>(descriptor.adapter)},
+                              {"native", descriptor.nativeSymbol},
+                              {"objective", descriptor.objective},
+                              {"transform", descriptor.score.transform}};
+    };
+    for(const auto& [arch, descriptor] : set.heuristicsByArch)
+    {
+        selector["rankers"][arch] = rankerIdentity(descriptor);
+    }
+    if(set.heuristic && set.heuristicsByArch.count("default") == 0)
+    {
+        selector["rankers"]["default"] = rankerIdentity(*set.heuristic);
+    }
+    for(const auto& arch : set.unavailableHeuristicArches)
+    {
+        selector["rankers"][arch] = "unavailable";
+    }
+    for(const auto& matcher : set.matchers)
+    {
+        selector["matchers"][toString(matcher.id)] = matcher.matchSymbol;
+    }
+    for(const auto& dispatch : set.dispatches)
+    {
+        selector["dispatches"][toString(dispatch.id)] = dispatch.dispatchSymbol;
+    }
+    for(const auto& pack : set.packs)
+    {
+        auto& resolvedPack
+            = selector["packs"][toString(pack.id) + "/" + nlohmann::json(pack.arch).dump()];
+        resolvedPack["dispatch"] = toString(pack.dispatchId);
+        for(const auto& kernel : pack.kernels)
+        {
+            auto& value = resolvedPack["kernels"][toString(kernel.id)];
+            value = {{"priority", kernel.priority},
+                     {"arch", kernel.arch},
+                     {"source_kind", static_cast<int>(kernel.source.kind)},
+                     {"entry_point", kernel.source.entryPoint},
+                     {"source_file", kernel.source.sourceFile},
+                     {"toc_key", kernel.source.tocKey},
+                     {"symbol", kernel.source.symbol},
+                     {"sha256", kernel.source.sha256}};
+            for(const auto& [name, metadata] : kernel.metadata)
+            {
+                value["metadata"][name] = detail::metadataValueToJson(metadata);
+            }
+        }
+    }
+    return "generic-untuned-v1/" + uhd::sha256(selector.dump());
+}
+
 /// Takes @p set by value so a caller building both an engine and its state manager
 /// builds the set once.
 /// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
@@ -60,8 +144,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         knobs = set.engine.knobs;
     }
-    auto heuristic
-        = makeKernelHeuristic(set.heuristic, describedBy, knobs, set.heuristicsByArch);
+    auto heuristic = makeKernelHeuristic(
+        set.heuristic, describedBy, knobs, set.heuristicsByArch, set.unavailableHeuristicArches);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),
@@ -87,6 +171,10 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto engineName = set.engine.name;
     auto knobs = set.engine.knobs;
+    auto predictions = std::move(set.enginePredictionsByArch);
+    auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
+    auto provenance = enginePredictionProvenance(set);
+    auto selectorRevision = engineSelectorRevision(set);
     auto engine = std::move(set.engine);
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
@@ -96,7 +184,11 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
                                   std::move(describedBy),
                                   std::move(engineName),
                                   std::move(knobs)),
-        deviceResolver);
+        deviceResolver,
+        std::move(predictions),
+        std::move(unavailablePredictionArches),
+        std::move(selectorRevision),
+        std::move(provenance));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

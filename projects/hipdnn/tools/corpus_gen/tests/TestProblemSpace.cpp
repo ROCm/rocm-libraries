@@ -248,12 +248,10 @@ TEST(TestProblemSpace, DeclaredConstraintsKeepInvalidPointsOutOfTheSearch)
       "constraints": [ { "<=": ["$q.R", "$q.H"] } ]
     })");
 
-    ASSERT_EQ(metadata.constraints.size(), 1U);
-
-    EXPECT_TRUE(detail::satisfiesConstraints(
-        metadata, ProblemPoint{{"H", int64_t{8}}, {"R", int64_t{3}}}));
-    EXPECT_FALSE(detail::satisfiesConstraints(
-        metadata, ProblemPoint{{"H", int64_t{3}}, {"R", int64_t{8}}}));
+    EXPECT_TRUE(
+        detail::satisfiesConstraints(metadata, ProblemPoint{{"H", int64_t{8}}, {"R", int64_t{3}}}));
+    EXPECT_FALSE(
+        detail::satisfiesConstraints(metadata, ProblemPoint{{"H", int64_t{3}}, {"R", int64_t{8}}}));
 
     ExplorationRequest request;
     request.pointsPerCombination = 25;
@@ -269,8 +267,7 @@ TEST(TestProblemSpace, DeclaredConstraintsKeepInvalidPointsOutOfTheSearch)
 
 TEST(TestProblemSpace, AnUnevaluableConstraintRejectsRatherThanAdmits)
 {
-    // Treating a malformed relation as satisfied would restore exactly the behaviour the
-    // constraint was added to prevent, and would do it silently.
+    // A valid compiled expression may still be undefined for a problem.
     const auto metadata = metadataFor(R"({
       "schema_version": "1.0",
       "operation": "toy",
@@ -278,7 +275,7 @@ TEST(TestProblemSpace, AnUnevaluableConstraintRejectsRatherThanAdmits)
       "stratification_axis": "working_set",
       "regimes": {},
       "graph_builder": { "function": "b", "source": "x.hpp", "arguments": [] },
-      "constraints": [ { "no_such_operator": ["$q.H", 1] } ]
+      "constraints": [ { "<=": [{"/": ["$q.H", 0]}, 1] } ]
     })");
 
     EXPECT_FALSE(detail::satisfiesConstraints(metadata, ProblemPoint{{"H", int64_t{8}}}));
