@@ -9,6 +9,7 @@ for ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
 
 import os
 import shutil
+import subprocess
 from math import ceil
 from types import SimpleNamespace
 
@@ -246,6 +247,83 @@ def test_gfx11_max_sgpr_kernel_still_reaches_wave_cap():
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
                sgprs=ri.getRegCaps()["MaxSgpr"], ldsBytes=0, doubleVgpr=False)
     assert occ == kw.states.archCaps["MaxWavesPerSimd"]
+
+
+# ---------------------------------------------------------------------------
+# MaxSgpr – the addressable SGPR ceiling
+# ---------------------------------------------------------------------------
+
+# MaxSgpr is the highest SGPR index a kernel may allocate, plus one.  It was a
+# flat 102 -- the gfx8/gfx9 number, s0-s101 -- for every arch but gfx1250.
+# Every RDNA target addresses s0-s105, so 102 left four registers permanently
+# unusable on gfx10, gfx11 and gfx12.
+
+# One entry per SUPPORTED_ISA: (isa, target, expected MaxSgpr).
+_MAX_SGPR_BY_ISA = [
+    ((8, 0, 3), "gfx803", 102),
+    ((9, 0, 0), "gfx900", 102),
+    ((9, 0, 6), "gfx906", 102),
+    ((9, 0, 8), "gfx908", 102),
+    ((9, 0, 10), "gfx90a", 102),
+    ((9, 4, 2), "gfx942", 102),
+    ((9, 5, 0), "gfx950", 102),
+    ((10, 1, 0), "gfx1010", 106),
+    ((10, 1, 1), "gfx1011", 106),
+    ((10, 1, 2), "gfx1012", 106),
+    ((10, 3, 0), "gfx1030", 106),
+    ((11, 0, 0), "gfx1100", 106),
+    ((11, 0, 1), "gfx1101", 106),
+    ((11, 0, 2), "gfx1102", 106),
+    ((11, 0, 3), "gfx1103", 106),
+    ((11, 5, 0), "gfx1150", 106),
+    ((11, 5, 1), "gfx1151", 106),
+    ((11, 5, 2), "gfx1152", 106),
+    ((11, 5, 3), "gfx1153", 106),
+    ((12, 0, 0), "gfx1200", 106),
+    ((12, 0, 1), "gfx1201", 106),
+    ((12, 5, 0), "gfx1250", 106),
+]
+
+_MAX_SGPR_IDS = [t for _, t, _ in _MAX_SGPR_BY_ISA]
+
+
+@pytest.mark.parametrize(
+    "isa,expected",
+    [(isa, n) for isa, _, n in _MAX_SGPR_BY_ISA],
+    ids=_MAX_SGPR_IDS,
+)
+def test_max_sgpr_per_arch(isa, expected):
+    """gfx8/gfx9 address s0-s101; every RDNA target addresses s0-s105."""
+    assert _init_rocisa(isa).getRegCaps()["MaxSgpr"] == expected
+
+
+def _assembles(gfx, text):
+    """True if the assembler accepts `text` for target `gfx`."""
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    asm = shutil.which("amdclang++", path=os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])) or "amdclang++"
+    return subprocess.run(
+        [asm, "-x", "assembler", "--target=amdgcn-amd-amdhsa",
+         f"-mcpu={gfx}", "-c", "-o", os.devnull, "-"],
+        input=text, text=True, capture_output=True,
+    ).returncode == 0
+
+
+@pytest.mark.parametrize(
+    "isa,gfx", [(isa, t) for isa, t, _ in _MAX_SGPR_BY_ISA], ids=_MAX_SGPR_IDS
+)
+def test_max_sgpr_matches_assembler_ceiling(isa, gfx):
+    """MaxSgpr must be exactly the highest SGPR the assembler can encode.
+
+    s[MaxSgpr-1] must assemble and s[MaxSgpr] must not, which pins the table to
+    the toolchain rather than to a guess -- and catches a MaxSgpr raised past
+    what a target can actually address.
+    """
+    maxSgpr = _init_rocisa(isa).getRegCaps()["MaxSgpr"]
+    assert _assembles(gfx, f"s_mov_b32 s{maxSgpr - 1}, 0")
+    assert not _assembles(gfx, f"s_mov_b32 s{maxSgpr}, 0")
 
 
 # ---------------------------------------------------------------------------
