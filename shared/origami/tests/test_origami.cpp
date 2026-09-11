@@ -483,7 +483,10 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         mixed_configs.push_back(heuristic_rejected);
 
         auto mixed_results = origami::rank_configs(small_k_problem, hardware, mixed_configs);
-        REQUIRE(mixed_results.size() == 2);
+        // Both the LDS-invalid 512x512x256 and the heuristic-rejected subtile
+        // 128x128x64 (gfx950 BF16 TN, K<512) drop out; only the valid 64x64
+        // tile survives with a finite latency.
+        REQUIRE(mixed_results.size() == 1);
         REQUIRE(mixed_results.front().latency < std::numeric_limits<double>::max());
         REQUIRE(mixed_results.front().config.mt.m == 64);
       }
@@ -501,11 +504,13 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
 
         auto fallback_results =
             origami::rank_configs(small_k_problem, hardware, all_rejected_configs);
-        // The subtile=true config is filtered out even in the catastrophic
-        // fallback path; only the LDS-invalid 512x512x256 entry survives with
-        // a finite latency (the new model no longer pegs it to max).
-        REQUIRE(fallback_results.size() == 1);
-        REQUIRE(fallback_results.front().latency > 0);
+        // Every path rejects (LDS-invalid + heuristic-rejected subtile), so the
+        // catastrophic fallback keeps all candidates pegged at max latency rather
+        // than returning an empty set.
+        REQUIRE(fallback_results.size() == all_rejected_configs.size());
+        for (const auto& result : fallback_results) {
+          REQUIRE(result.latency == std::numeric_limits<double>::max());
+        }
       }
 
       // Test 3: Test tie-breaking with arithmetic intensity (TODO: Find the pair which has same
