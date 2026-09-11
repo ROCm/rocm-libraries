@@ -28,7 +28,8 @@ rocRAND has the following prerequisites:
 
 *  C++ compiler with C++11 support to use the library
 
-*  (Optional) Fortran compiler (This is only required for the Fortran wrapper. GFortran is recommended.)
+*  (Optional) Fortran compiler (This is only required for the Fortran bindings. AMDFlang and GFortran are
+   both supported.)
 
 *  (Optional) GoogleTest (This is only required to build and use the tests. Building the tests is enabled by default.)
 
@@ -128,7 +129,12 @@ using ``-DCMAKE_MODULE_PATH``. By default, this file is installed in ``/opt/rocm
 
 In addition to the built-in CMake options, the following configuration options are available:
 
-* ``BUILD_FORTRAN_WRAPPER``: Controls whether to build the Fortran wrapper. Defaults to ``OFF``.
+* ``BUILD_FORTRAN_BINDINGS``: Controls whether to build the rocRAND Fortran bindings. Defaults to ``ON``,
+  but is skipped when no Fortran compiler is available. Use ``ROCRAND_BUILD_FORTRAN_BINDINGS`` to override
+  this for rocRAND alone.
+* ``BUILD_FORTRAN_TESTS``: Controls whether to build the Fortran binding tests. Defaults to ``OFF``.
+* ``FORTRAN_ARRAY_INTERFACES``: Selects which array-argument overloads the Fortran module exposes:
+  ``none``, ``assumed-shape`` (the default) or ``assumed-rank``.
 * ``BUILD_TEST``: Controls whether to build the rocRAND tests. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Controls whether to build the rocRAND benchmarks. Defaults to ``OFF``.
 * ``BUILD_ADDRESS_SANITIZER`` Controls whether to build with address sanitization enabled. Defaults to ``OFF``.

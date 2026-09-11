@@ -59,11 +59,6 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
-# Fortran Wrapper
-if(BUILD_FORTRAN_WRAPPER)
-    enable_language(Fortran)
-endif()
-
 set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
 
 # Find or download/install rocm-cmake project
