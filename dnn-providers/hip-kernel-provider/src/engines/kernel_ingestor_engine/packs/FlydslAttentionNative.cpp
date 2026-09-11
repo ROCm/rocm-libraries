@@ -46,6 +46,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -53,10 +54,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -542,6 +546,66 @@ std::optional<BoundTokens> flydslAttentionGraphMatches(const MatchContext& conte
  * the HSACO. seq_len and batch are runtime scalars, so ONE HSACO spans all prefill
  * lengths and batches for its head-config -- no seqlen/batch equality here.
  */
+// ---------------------------------------------------------------------------
+// Within-engine multi-instance registry (bubblegum autotune).
+//
+// hipDNN's autotune ranks across ENGINES; it does NOT time multiple kernel INSTANCES
+// that all match one problem inside a single engine. When we AOT more than one HSACO for
+// the same functional tuple (e.g. tuning-knob variants: waves_per_eu, block sizes), the
+// framework hands dispatch only the score-selected one. To handle overlap NOW (until a
+// real heuristic/engine-config path exists), our escape-hatch code records every match:
+// kernel_match IS our matcher, so each time it accepts a descriptor we note (funcKey ->
+// hsaco). The dispatch handler then looks up the funcKey, and if >1 instance matched it
+// benchmarks them all on the real buffers and keeps the winner. NOT how we'd ship it.
+// ---------------------------------------------------------------------------
+using FuncKey = std::tuple<std::string, int64_t, int64_t, int64_t, int64_t>; // dtype,hs,nqh,nkv,causal
+
+std::mutex& candidateRegistryMutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+std::map<FuncKey, std::vector<std::string>>& candidateRegistry()
+{
+    static std::map<FuncKey, std::vector<std::string>> reg;
+    return reg;
+}
+
+FuncKey funcKeyOf(const KernelDefinition& kernel)
+{
+    return {kernel.getStringMetadata(std::string(DTYPE_FIELD)),
+            kernel.getIntMetadata(std::string(HEAD_SIZE_FIELD)),
+            kernel.getIntMetadata(std::string(NUM_QUERY_HEADS_FIELD)),
+            kernel.getIntMetadata(std::string(NUM_KV_HEADS_FIELD)),
+            kernel.getIntMetadata(std::string(CAUSAL_FIELD))};
+}
+
+/// Record that `kernel` (identified by its HSACO) matched its functional tuple, so the
+/// dispatch handler can enumerate all instances that matched the same problem.
+void recordMatchedInstance(const KernelDefinition& kernel)
+{
+    const auto hsaco = tryGetStringMeta(kernel, HSACO_FIELD);
+    if(!hsaco.has_value())
+    {
+        return;
+    }
+    const auto key = funcKeyOf(kernel);
+    std::lock_guard<std::mutex> guard(candidateRegistryMutex());
+    auto& names = candidateRegistry()[key];
+    if(std::find(names.begin(), names.end(), *hsaco) == names.end())
+    {
+        names.push_back(*hsaco);
+    }
+}
+
+std::vector<std::string> candidatesFor(const FuncKey& key)
+{
+    std::lock_guard<std::mutex> guard(candidateRegistryMutex());
+    const auto it = candidateRegistry().find(key);
+    return it == candidateRegistry().end() ? std::vector<std::string>{} : it->second;
+}
+
 bool flydslAttentionKernelMatches(const MatchContext& context,
                                   const BoundTokens& bound,
                                   const KernelDefinition& kernel)
@@ -583,6 +647,9 @@ bool flydslAttentionKernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // This descriptor matched the problem's functional tuple; register it so dispatch can
+    // benchmark every instance that matched (see the multi-instance registry above).
+    recordMatchedInstance(kernel);
     return true;
 }
 
@@ -613,17 +680,24 @@ AttentionBinding attentionBinding(const BoundTokens& bound)
 // Dispatch (raw-load the matched HSACO, pack the 608B kernarg)
 // ---------------------------------------------------------------------------
 
+/// One loaded flyDSL attention instance (an HSACO's module + entry). A PreparedAttention
+/// holds ALL instances that matched the problem; launch() picks the fastest on first call.
+struct AttentionInstance
+{
+    hipModule_t mod = nullptr;
+    hipFunction_t fn = nullptr;
+    std::string name; // HSACO filename, for the autotune log
+};
+
 class PreparedAttention : public PreparedDispatch
 {
 public:
-    PreparedAttention(hipModule_t mod,
-                      hipFunction_t fn,
+    PreparedAttention(std::vector<AttentionInstance> instances,
                       AttentionBinding binding,
                       AttentionProblem problem,
                       uint32_t blockThreads,
                       int64_t blockM)
-        : _mod(mod)
-        , _fn(fn)
+        : _instances(std::move(instances))
         , _binding(binding)
         , _problem(problem)
         , _blockThreads(blockThreads)
@@ -633,28 +707,37 @@ public:
 
     ~PreparedAttention() override
     {
-        if(_mod != nullptr)
+        for(auto& inst : _instances)
         {
-            static_cast<void>(hipModuleUnload(_mod));
+            if(inst.mod != nullptr)
+            {
+                static_cast<void>(hipModuleUnload(inst.mod));
+            }
         }
     }
 
     PreparedAttention(const PreparedAttention&) = delete;
     PreparedAttention& operator=(const PreparedAttention&) = delete;
 
-    hipFunction_t function() const { return _fn; }
+    const std::vector<AttentionInstance>& instances() const { return _instances; }
     const AttentionBinding& binding() const { return _binding; }
     const AttentionProblem& problem() const { return _problem; }
     uint32_t blockThreads() const { return _blockThreads; }
     int64_t blockM() const { return _blockM; }
 
+    // First-launch benchmark bookkeeping (mutable: launch() is const in the interface).
+    std::once_flag& chooseOnce() const { return _chooseOnce; }
+    void setChosen(int idx) const { _chosen = idx; }
+    int chosen() const { return _chosen; }
+
 private:
-    hipModule_t _mod = nullptr;
-    hipFunction_t _fn = nullptr;
+    std::vector<AttentionInstance> _instances;
     AttentionBinding _binding;
     AttentionProblem _problem;
     uint32_t _blockThreads = static_cast<uint32_t>(FLYDSL_DEFAULT_BLOCK_SIZE);
     int64_t _blockM = FLYDSL_DEFAULT_BLOCK_M;
+    mutable std::once_flag _chooseOnce;
+    mutable int _chosen = 0;
 };
 
 /// Writes one 40B FlyDSL 4D tensor descriptor { i32 d0,d1,d2,d3 ; i64 s0,s1,s2 } at
@@ -737,17 +820,25 @@ public:
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 std::string("flyDSL attention dispatch needs ") + FLYDSL_HSACO_DIR_ENV + " set");
         }
-        const auto hsacoName = tryGetStringMeta(kernel, HSACO_FIELD);
-        if(!hsacoName.has_value())
+        // Enumerate EVERY instance that matched this functional tuple (recorded by
+        // kernel_match). >1 means overlap -> launch() will benchmark and pick a winner.
+        // Fall back to the score-selected descriptor's own HSACO if the registry is empty.
+        std::vector<std::string> candidateNames = candidatesFor(funcKeyOf(kernel));
+        if(candidateNames.empty())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl attention: selected kernel descriptor omits 'hsaco'");
+            const auto selected = tryGetStringMeta(kernel, HSACO_FIELD);
+            if(!selected.has_value())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "flydsl attention: selected kernel descriptor omits 'hsaco'");
+            }
+            candidateNames.push_back(*selected);
         }
-        const std::string path = std::string(dir) + "/" + hsacoName.value();
 
-        std::vector<char> blob;
-        {
+        const auto loadInstance = [&](const std::string& hsacoName) -> AttentionInstance {
+            const std::string path = std::string(dir) + "/" + hsacoName;
+            std::vector<char> blob;
             FILE* f = std::fopen(path.c_str(), "rb");
             if(f == nullptr)
             {
@@ -765,23 +856,31 @@ public:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "short read on HSACO");
             }
-        }
+            hipModule_t mod = nullptr;
+            if(hipModuleLoadData(&mod, blob.data()) != hipSuccess)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "hipModuleLoadData failed for " + path);
+            }
+            hipFunction_t fn = nullptr;
+            if(hipModuleGetFunction(&fn, mod, symbol.c_str()) != hipSuccess)
+            {
+                static_cast<void>(hipModuleUnload(mod));
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "hipModuleGetFunction failed for symbol " + symbol);
+            }
+            return AttentionInstance{mod, fn, hsacoName};
+        };
 
-        hipModule_t mod = nullptr;
-        if(hipModuleLoadData(&mod, blob.data()) != hipSuccess)
+        std::vector<AttentionInstance> instances;
+        instances.reserve(candidateNames.size());
+        for(const auto& name : candidateNames)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                          "hipModuleLoadData failed for " + path);
+            instances.push_back(loadInstance(name));
         }
-        hipFunction_t fn = nullptr;
-        if(hipModuleGetFunction(&fn, mod, symbol.c_str()) != hipSuccess)
-        {
-            static_cast<void>(hipModuleUnload(mod));
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "hipModuleGetFunction failed for symbol " + symbol);
-        }
-        return std::make_unique<PreparedAttention>(mod, fn, binding, problem, blockThreads, blockM);
+        return std::make_unique<PreparedAttention>(
+            std::move(instances), binding, problem, blockThreads, blockM);
     }
 
     void launch(const Handle& handle,
@@ -856,13 +955,80 @@ public:
         const auto gridX = static_cast<unsigned int>(p.numQueryHeads);
         const auto gridY = static_cast<unsigned int>((p.seqLenQ + att.blockM() - 1) / att.blockM());
         const auto gridZ = static_cast<unsigned int>(p.batch);
+        const hipStream_t stream = handle.getStream();
 
-        if(hipModuleLaunchKernel(att.function(),
-                                 gridX, gridY, gridZ,
-                                 att.blockThreads(), 1, 1,
-                                 0,
-                                 handle.getStream(), nullptr, config.data())
-           != hipSuccess)
+        const auto launchFn = [&](hipFunction_t fn) {
+            return hipModuleLaunchKernel(fn, gridX, gridY, gridZ, att.blockThreads(), 1, 1, 0,
+                                         stream, nullptr, config.data());
+        };
+
+        // Overlap resolution: on the FIRST launch, if more than one instance matched this
+        // problem, time each on the real buffers and keep the fastest for all later calls.
+        // Bubblegum stand-in for a real heuristic/engine-config path -- proves one engine
+        // can carry multiple matching instances and pick the winner by measurement.
+        std::call_once(att.chooseOnce(), [&] {
+            const auto& insts = att.instances();
+            if(insts.size() <= 1)
+            {
+                att.setChosen(0);
+                return;
+            }
+            const char* iterEnv = std::getenv("FLYDSL_ATTENTION_AUTOTUNE_ITERS");
+            const int iters = (iterEnv != nullptr && std::atoi(iterEnv) > 0) ? std::atoi(iterEnv) : 20;
+            hipEvent_t start = nullptr;
+            hipEvent_t stop = nullptr;
+            static_cast<void>(hipEventCreate(&start));
+            static_cast<void>(hipEventCreate(&stop));
+            int best = 0;
+            float bestMs = 0.0F;
+            for(size_t i = 0; i < insts.size(); ++i)
+            {
+                for(int w = 0; w < 3; ++w) // warmup
+                {
+                    static_cast<void>(launchFn(insts[i].fn));
+                }
+                static_cast<void>(hipEventRecord(start, stream));
+                for(int it = 0; it < iters; ++it)
+                {
+                    static_cast<void>(launchFn(insts[i].fn));
+                }
+                static_cast<void>(hipEventRecord(stop, stream));
+                static_cast<void>(hipEventSynchronize(stop));
+                float ms = 0.0F;
+                static_cast<void>(hipEventElapsedTime(&ms, start, stop));
+                ms /= static_cast<float>(iters);
+                std::fprintf(stderr,
+                             "[flydsl_attention autotune] Hq=%lld/%lld D=%lld causal=%lld "
+                             "Sq=%lld Skv=%lld B=%lld  instance[%zu] %-52s %.4f ms\n",
+                             static_cast<long long>(p.numQueryHeads),
+                             static_cast<long long>(p.numKvHeads),
+                             static_cast<long long>(p.headSize),
+                             static_cast<long long>(b.causal),
+                             static_cast<long long>(p.seqLenQ),
+                             static_cast<long long>(p.seqLenKv),
+                             static_cast<long long>(p.batch), i, insts[i].name.c_str(),
+                             static_cast<double>(ms));
+                if(i == 0 || ms < bestMs)
+                {
+                    bestMs = ms;
+                    best = static_cast<int>(i);
+                }
+            }
+            static_cast<void>(hipEventDestroy(start));
+            static_cast<void>(hipEventDestroy(stop));
+            att.setChosen(best);
+            std::fprintf(stderr,
+                         "[flydsl_attention autotune] -> winner instance[%d] %s (%.4f ms) "
+                         "among %zu matches\n",
+                         best, insts[static_cast<size_t>(best)].name.c_str(),
+                         static_cast<double>(bestMs), insts.size());
+        });
+
+        const auto& insts = att.instances();
+        const int idx = att.chosen() >= 0 && att.chosen() < static_cast<int>(insts.size())
+                            ? att.chosen()
+                            : 0;
+        if(launchFn(insts[static_cast<size_t>(idx)].fn) != hipSuccess)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                           "hipModuleLaunchKernel failed");

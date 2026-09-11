@@ -47,6 +47,17 @@ def main() -> int:
             i = argv.index(flag)
             num_kv_heads = int(argv[i + 1])
             del argv[i : i + 2]
+    # Tuning knobs that DON'T change the kernarg ABI (pure codegen/occupancy/scheduling):
+    # each distinct value yields a functionally-identical HSACO with different perf, which
+    # is how we generate OVERLAPPING instances of one functional tuple for the autotune
+    # experiment. num_kv_splits is deliberately NOT exposed here (it adds a reduction
+    # workspace + changes the launch protocol -> different ABI).
+    waves_per_eu = 2
+    stagger = True
+    if "--waves" in argv:
+        i = argv.index("--waves"); waves_per_eu = int(argv[i + 1]); del argv[i : i + 2]
+    if "--no-stagger" in argv:
+        i = argv.index("--no-stagger"); stagger = False; del argv[i : i + 1]
     if len(argv) < 2:
         print(__doc__)
         return 2
@@ -60,10 +71,17 @@ def main() -> int:
         raise SystemExit(f"num_heads ({num_heads}) must be divisible by num_kv_heads ({num_kv_heads})")
     tag = "causal" if causal else "noncausal"
     hcode = f"h{num_heads}" if num_kv_heads == num_heads else f"h{num_heads}kv{num_kv_heads}"
+    # Only append a knob suffix when a non-default knob is set, so existing filenames/
+    # descriptors keep their names (waves=2, stagger on == the baked default).
+    knob = ""
+    if waves_per_eu != 2:
+        knob += f"_w{waves_per_eu}"
+    if not stagger:
+        knob += "_nostag"
     out_path = (
         Path(argv[4])
         if len(argv) > 4
-        else (_SCRATCH / f"flash_attn_real_{hcode}_d{head_dim}_{tag}_{dtype_str}_gfx950.hsaco")
+        else (_SCRATCH / f"flash_attn_real_{hcode}_d{head_dim}_{tag}_{dtype_str}{knob}_gfx950.hsaco")
     )
 
     dump_dir = Path(tempfile.mkdtemp(prefix=f"flydsl-build-fa-h{num_heads}-d{head_dim}-"))
@@ -77,7 +95,8 @@ def main() -> int:
 
     launch = build_flash_attn_dualwave_swp_module(
         num_heads=num_heads, head_dim=head_dim, causal=causal, dtype_str=dtype_str,
-        num_kv_heads=num_kv_heads,
+        num_kv_heads=num_kv_heads, waves_per_eu=waves_per_eu,
+        dualwave_swp_enable_stagger=stagger,
     )
 
     td = _torch_dtype(dtype_str)
@@ -95,6 +114,7 @@ def main() -> int:
     out_path.write_bytes(blob)
     print(
         f"[build_flash_attn_real] H={num_heads} KV={num_kv_heads} D={head_dim} {tag} dtype={dtype_str} "
+        f"waves_per_eu={waves_per_eu} stagger={stagger} "
         f"wrote {out_path} ({len(blob)} bytes) from {stage19}"
     )
     print(f"[build_flash_attn_real] dump dir (for stage-01/20 ABI decode): {dump_dir}")

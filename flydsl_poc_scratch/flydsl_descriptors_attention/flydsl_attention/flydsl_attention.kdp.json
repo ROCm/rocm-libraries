@@ -117,6 +117,28 @@
         "block_m": 256
       },
       "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-000b-4a00-9000-000000000b04",
+      "name": "flydsl_attention.bf16_h32kv8_d128_causal_w4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "causal": 1,
+        "hsaco": "flash_attn_real_h32kv8_d128_causal_bf16_w4_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
     }
   ]
 }
