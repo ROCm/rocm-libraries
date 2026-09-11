@@ -82,23 +82,14 @@ rocm_install(
     EXPORT hiprand-targets
 )
 
-set(FORTRAN_SRCS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/hiprand/src/fortran")
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
 set(CONFIG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hiprand)
-
-include(CMakePackageConfigHelpers)
-configure_package_config_file(
-    src/hiprand-fortran-config.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config.cmake
-    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-)
 
 if (BUILD_WITH_LIB STREQUAL "CUDA")
     rocm_export_targets(
         TARGETS hip::hiprand
         NAME hiprand
         NAMESPACE hip::
-        INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config.cmake"
     )
 else()
     rocm_export_targets(
@@ -108,7 +99,6 @@ else()
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE rocrand
         STATIC_DEPENDS PACKAGE rocrand
-        INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config.cmake"
     )
 endif()
 
@@ -133,9 +123,4 @@ if (WIN32)
 			    ${PROJECT_BINARY_DIR}/benchmark/$<TARGET_FILE_NAME:hiprand>
 	    )
     endif()	
-endif()
-
-# Fortran wrappers for hipRAND
-if(BUILD_FORTRAN_WRAPPER)
-    add_subdirectory(src/fortran)
 endif()

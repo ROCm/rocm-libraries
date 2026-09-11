@@ -20,7 +20,7 @@ The sequence a developer follows from writing code to getting it merged:
 
 1. Build with tests enabled: `CXX=hipcc cmake -B build -DBUILD_TEST=ON -DGPU_TARGETS=<gpu_arch>` then `make -j` (or configure with `-GNinja`). The backend defaults to rocRAND (`-DBUILD_WITH_LIB=ROCM`); rocRAND is located via `ROCRAND_FETCH_METHOD` (`PACKAGE` / `MONOREPO` / `DOWNLOAD`). On Windows use `python rmake.py -c -a <gpu_arch>`.
 2. Run the tests locally against a GPU: `cd build && ctest --output-on-failure`. For focused work, run a single binary directly, e.g. `./test/test_hiprand_api` or `./test/test_hiprand_kernel`.
-3. For Fortran or Python changes, enable/build the relevant binding (`-DBUILD_FORTRAN_WRAPPER=ON`) and run its suite (see below).
+3. For Fortran or Python changes, enable/build the relevant binding (`-DBUILD_FORTRAN_TESTS=ON`) and run its suite (see below).
 4. Run `clang-format` on changed files (config in `.clang-format`; a git hook is available via `./.githooks/install`).
 5. Open a PR. Required CI checks — **TheRock CI** and **Math CI** — must pass across the build matrix, and another hipRAND team member must review and approve.
 
@@ -30,18 +30,18 @@ The sequence a developer follows from writing code to getting it merged:
 ## Unit Testing Strategy
 **Purpose:** validate that hipRAND correctly wraps and dispatches to its backend across engine types, distributions, and interfaces. Most tests still dispatch to the device because generation is device work; isolation is achieved by testing one engine/distribution/interface at a time.
 
-* **Frameworks:** GoogleTest (C/C++), FRUIT (Fortran), and Python `unittest`.
+* **Frameworks:** GoogleTest (C/C++), plain CTest programs (Fortran), and Python `unittest`.
 * **Location:**
   * `test/test_hiprand_api.cpp` — host C API across engines (XORWOW, MRG32K3A, MTGP32, MT19937, PHILOX, SOBOL32/64, scrambled Sobol) and distributions (uniform, normal, log-normal, Poisson), plus a small host-only path (`hiprand_host`, PHILOX only).
   * `test/test_hiprand_cpp_wrapper.cpp` — the `hiprand.hpp` C++ interface, using typed suites over engine types (`hiprand_cpp_wrapper`, `_32`, `_64`, `_prng`, `_qrng`, `_offset`).
   * `test/test_hiprand_kernel.cpp` — the header-only device API (in-kernel generators, state init, Sobol direction vectors); the largest suite.
   * `test/linkage/` — multiple-translation-unit linkage / version checks (host-only).
-  * `test/fortran/` — FRUIT-based Fortran wrapper tests (`test_hiprand.f90`), gated by `BUILD_FORTRAN_WRAPPER`.
+  * `fortran/test/` — tests for the generated Fortran bindings, gated by `BUILD_FORTRAN_TESTS`: one runtime program per (generator, distribution) pair, plus `test_hiprand.F03`, the exhaustive symbol test that links every `bind(C)` interface against `libhiprand`.
   * `test/package/` — post-install smoke test via `find_package(hiprand)`.
   * `python/hiprand/tests/hiprand_test.py` — Python binding tests (`unittest`): version, constructor validation, PRNG/QRNG parameter getters/setters, and generation.
   * Shared helpers in `test/test_common.hpp` (`HIP_CHECK`, `HIPRAND_CHECK`, `hipMallocHelper`).
-* **Naming convention:** `test_hiprand_<area>.cpp` producing a matching binary (e.g. `test_hiprand_api`, `test_hiprand_kernel`); the Fortran runner builds `test_hiprand_fortran_wrapper`. Tests use `TYPED_TEST_SUITE` over engine types and `INSTANTIATE_TEST_SUITE_P(... ValuesIn(hiprand_rng_types))` for enum/ordering variation. There is **no `.cpp.in` sharding** (the suite is small enough not to need it).
-* **How to run:** `ctest --output-on-failure`, or run a binary directly. Fortran: build with `BUILD_FORTRAN_WRAPPER=ON` and run `test_hiprand_fortran_wrapper`. Python: run `python -m unittest` against `python/hiprand/tests/`.
+* **Naming convention:** `test_hiprand_<area>.cpp` producing a matching binary (e.g. `test_hiprand_api`, `test_hiprand_kernel`); the Fortran tests register as `hiprand_fortran_<generator>_<distribution>` plus `hiprand_fortran_extended`. Tests use `TYPED_TEST_SUITE` over engine types and `INSTANTIATE_TEST_SUITE_P(... ValuesIn(hiprand_rng_types))` for enum/ordering variation. There is **no `.cpp.in` sharding** (the suite is small enough not to need it).
+* **How to run:** `ctest --output-on-failure`, or run a binary directly. Fortran: build with `BUILD_FORTRAN_TESTS=ON` and run `ctest`; the runtime tests carry the `gpu` label and the symbol test the `symbols` label, so `ctest -L symbols` (or `ctest -LE gpu`) is meaningful on a machine without a GPU. Python: run `python -m unittest` against `python/hiprand/tests/`.
 * **Reproducibility / seeding:** tests use fixed seeds via `hiprandSetPseudoRandomGeneratorSeed()` for determinism (and `hiprandGenerateSeeds()` where random seeding is exercised); offsets via `hiprandSetGeneratorOffset()` for engines that support them. `HIPRAND_USE_HMM=1` switches test allocations to managed memory.
 * **Not covered by unit tests:** backend engine correctness/statistics themselves (owned by rocRAND/cuRAND), throughput/performance, and the NVIDIA/cuRAND path (not routinely exercised in this repo's CI).
 
@@ -65,7 +65,7 @@ The sequence a developer follows from writing code to getting it merged:
 | Host C API | `test/test_hiprand_api.cpp` | Validate host generation across engines/distributions | Yes | PR / Nightly |
 | Device / kernel API | `test/test_hiprand_kernel.cpp` | Validate in-kernel generators and state init | Yes | PR / Nightly |
 | C++ wrapper | `test/test_hiprand_cpp_wrapper.cpp` | Validate the `hiprand.hpp` interface across engine types | Yes | PR / Nightly |
-| Fortran wrapper | `test/fortran/` | Validate Fortran bindings (FRUIT) | Yes | Nightly / opt-in |
+| Fortran bindings | `fortran/test/` | Validate the generated Fortran bindings (CTest) | Yes, except the `symbols` test | Nightly / opt-in |
 | Python bindings | `python/hiprand/tests/` | Validate Python interface (unittest) | Yes | Nightly / opt-in |
 | Linkage / version | `test/linkage/` | Confirm library links across TUs and reports version | Minimal | PR / Nightly |
 | Package / install | `test/package/` | Post-install smoke check via `find_package(hiprand)` | Yes | Release / packaging |
@@ -74,7 +74,7 @@ The sequence a developer follows from writing code to getting it merged:
 * **What runs on CPU-only systems:** linkage/version checks and host-side argument/enum validation.
 * **FFM-simulator note:** `test_hiprand_api` and `test_hiprand_cpp_wrapper` are omitted from the `ffm-quick` tier because the MT19937 generator is prohibitively slow on the FFM simulator (hours); only `test_hiprand_kernel` and `test_hiprand_linkage` run there.
 * **Two-backend note:** the wrapper is validated against a single backend per build; this repo's CI exercises the **rocRAND (AMD)** path. The cuRAND (NVIDIA) path is validated opportunistically and is a coverage gap here.
-* **Fortran binding status:** the Fortran wrapper is **deprecated** in favor of hipfort; its tests remain to keep the legacy binding building.
+* **Fortran binding status:** the hand-written wrapper under `library/src/fortran/` has been removed and replaced by the generated `hiprand` module in `fortran/`, built under `BUILD_FORTRAN_BINDINGS` (ON where a Fortran compiler is available). The runtime tests additionally need a HIP Fortran binding and are skipped with a named message when it is absent; the symbol test is not.
 
 ## Performance & Benchmarking Testing
 **Purpose:** detect regressions in generation throughput against a per-architecture baseline over time.
@@ -147,7 +147,7 @@ hipRAND does **not** ship a populated benchmark suite. The `BUILD_BENCHMARK` fla
 ### Nightly Validation
 * **quick** category (all tests, `.*`) — the full GoogleTest suite; this category carries the `standard`/`comprehensive`/`full` labels since hipRAND's suite is small.
 * **ffm-quick** category — `test_hiprand_kernel` and `test_hiprand_linkage` only (MT19937-heavy suites excluded on the FFM simulator).
-* Fortran (FRUIT) and Python (unittest) binding suites run here rather than on every PR.
+* Fortran (CTest) and Python (unittest) binding suites run here rather than on every PR.
 * Additional hardware coverage across the default GPU target list.
 
 Note: hipRAND's `test_categories.yaml` (at the project root) defines only `quick` and `ffm-quick`, with no per-tier timeout overrides — unlike the larger rocPRIM/rocThrust/hipCUB suites.
@@ -165,7 +165,7 @@ GPU targets come from the top-level `CMakeLists.txt` default `GPU_TARGETS`/`AMDG
 | gfx103x / gfx11xx (incl. gfx1151) | Full | PR / Nightly | |
 | gfx120x / gfx1250 | Partial | Nightly | Newer targets in default list |
 
-**Explicitly not guaranteed:** the cuRAND (NVIDIA) backend path is not routinely validated in this repo's CI; the Fortran binding is deprecated (kept building, not actively expanded); multi-GPU validation is not a formal gate; non-listed gfx targets are not validated; Windows coverage is thinner than Linux.
+**Explicitly not guaranteed:** the cuRAND (NVIDIA) backend path is not routinely validated in this repo's CI; the Fortran bindings are built and tested only where a Fortran compiler is present, and their runtime tests additionally require a HIP Fortran binding; multi-GPU validation is not a formal gate; non-listed gfx targets are not validated; Windows coverage is thinner than Linux.
 
 ## Sanitizer Coverage (ASAN / TSAN)
 * **AddressSanitizer:** `BUILD_ADDRESS_SANITIZER=ON` builds an ASAN variant (`-fsanitize=address -shared-libasan`, linked with `-fuse-ld=lld`) and the package depends on `hip-runtime-amd-asan` instead of `hip-runtime-amd`. GPU targets are restricted to xnack+ variants. Catches host/device out-of-bounds and use-after-free.
