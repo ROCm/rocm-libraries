@@ -36,12 +36,11 @@ def test_accepts_spec_arch_signature():
 
 @pytest.mark.quick
 def test_rejects_keyword_only_parameter():
-    """The real case: gfx942's build_attention_dense takes `tuning`.
+    """A defaulted keyword-only tuning knob must be refused.
 
-    A defaulted keyword-only knob is invisible to the descriptor and silently
-    frozen, so the kernel ships tuned differently than anyone declared. The
-    tuning class's own docstring warns this is "exactly how a real +79% got
-    reported as -17% in this tree."
+    Such a knob is invisible to the descriptor and silently frozen, so the
+    kernel ships tuned differently than anyone declared -- exactly how a real
+    regression got mis-reported in this tree.
     """
 
     def build_tuned(spec: _Spec, *, arch: str = "gfx942", tuning: int = 7):
