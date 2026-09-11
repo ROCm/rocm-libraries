@@ -23,6 +23,12 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # and CONFIGURE_DEPENDS does not re-run on removal under every generator.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    # THROWAWAY POC pack: flyDSL HSACO via the raw-load escape hatch.
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslNative.cpp
+    # THROWAWAY POC pack: flyDSL RMSNorm HSACO FAMILY (one per hidden size N).
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslRmsNormNative.cpp
+    # THROWAWAY POC pack: flyDSL flash-attention HSACO FAMILY (one per head-config tuple).
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslAttentionNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionTiledNative.cpp

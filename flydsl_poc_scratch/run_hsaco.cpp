@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #define CK(x)                                                                                  \
@@ -60,14 +61,19 @@ int main(int argc, char** argv) {
     hipFunction_t fn;
     CK(hipModuleGetFunction(&fn, mod, sym));
 
-    // kernarg layout from the .amdgpu_metadata: out@0, a@8, b@16 (24 bytes)
-    struct {
-        void* out;
-        void* a;
-        void* b;
-    } args{dout, da, db};
+    // kernarg layout from the .amdgpu_metadata (flyDSL 0.3.x ABI): each Tensor is
+    // passed as (global_buffer ptr, by_value i32 size). kernarg_size = 44:
+    //   out_ptr@0(8) out_N@8(4)  a_ptr@16(8) a_N@24(4)  b_ptr@32(8) b_N@40(4)
+    unsigned char args[44] = {0};
+    const int32_t elems = N;
+    std::memcpy(args + 0, &dout, sizeof(void*));
+    std::memcpy(args + 8, &elems, sizeof(int32_t));
+    std::memcpy(args + 16, &da, sizeof(void*));
+    std::memcpy(args + 24, &elems, sizeof(int32_t));
+    std::memcpy(args + 32, &db, sizeof(void*));
+    std::memcpy(args + 40, &elems, sizeof(int32_t));
     size_t argsz = sizeof(args);
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &argsz,
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &argsz,
                       HIP_LAUNCH_PARAM_END};
     CK(hipModuleLaunchKernel(fn, /*gx*/ 1, 1, 1, /*bx*/ 256, 1, 1,
                              /*shmem*/ 0, /*stream*/ 0, nullptr, config));

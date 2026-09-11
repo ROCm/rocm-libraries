@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "id": "f1d50001-0006-4a00-9000-000000000006",
+  "name": "hipkernel:flydsl_rmsnorm",
+  "matchers": [
+    "f1d50001-0005-4a00-9000-000000000005"
+  ],
+  "engine": "f1d50001-0001-4a00-9000-000000000001",
+  "dispatch": "f1d50001-0004-4a00-9000-000000000004",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "f1d50001-0007-4a00-9000-000000000007",
+      "name": "flydsl_rmsnorm.f32_n64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RmsNorm.cpp",
+        "entry_point": "RmsNorm"
+      },
+      "metadata": {
+        "N": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d50001-0008-4a00-9000-000000000008",
+      "name": "flydsl_rmsnorm.f32_n128",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RmsNorm.cpp",
+        "entry_point": "RmsNorm"
+      },
+      "metadata": {
+        "N": 128,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ]
+}

@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -59,10 +60,12 @@ using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
     } while(0)
 
 // Build-time flyDSL->HSACO artifact from flydsl_poc_scratch. Absolute path is fine
-// for a throwaway. Symbol vadd_0; kernargs out@0, a@8, b@16 (24 bytes).
+// for a throwaway. Symbol vadd_0. gfx950 flyDSL 0.3.x kernarg ABI: each Tensor arg is
+// (global_buffer ptr, by_value i32 size) => 44 bytes:
+//   out_ptr@0(8) out_N@8(4)  a_ptr@16(8) a_N@24(4)  b_ptr@32(8) b_N@40(4).
 constexpr const char* FLYDSL_HSACO_PATH
-    = "/home/brpepers/rocm-libraries/.claude/worktrees/hipdnn-flydsl-poc/"
-      "flydsl_poc_scratch/vadd_flydsl.hsaco";
+    = "/home/AMD/brpepers/wt/hipdnn-flydsl-poc/"
+      "flydsl_poc_scratch/vadd_gfx950.hsaco";
 constexpr const char* FLYDSL_SYMBOL = "vadd_0";
 
 /// Author-owned launch state: a loaded HIP module + resolved function. Holds nothing
@@ -159,17 +162,23 @@ public:
         const auto b = findDeviceBuffer(INPUT_B_UID, deviceBuffers, numDeviceBuffers);
         const auto out = findDeviceBuffer(OUTPUT_UID, deviceBuffers, numDeviceBuffers);
 
-        // kernarg layout: out@0, a@8, b@16 (24 bytes)
-        struct KernArgs
-        {
-            void* out;
-            void* a;
-            void* b;
-        } args{out.ptr, a.ptr, b.ptr};
-        size_t argsz = sizeof(args);
+        // flyDSL 0.3.x ABI: (ptr, i32 size) per Tensor, 44 bytes total. This is a
+        // 1-element add, so every runtime size is 1 (thread 0 does out[0]=a[0]+b[0]).
+        std::array<unsigned char, 44> args{};
+        const int32_t elems = 1;
+        void* out_ptr = out.ptr;
+        void* a_ptr = a.ptr;
+        void* b_ptr = b.ptr;
+        std::memcpy(args.data() + 0, &out_ptr, sizeof(void*));
+        std::memcpy(args.data() + 8, &elems, sizeof(int32_t));
+        std::memcpy(args.data() + 16, &a_ptr, sizeof(void*));
+        std::memcpy(args.data() + 24, &elems, sizeof(int32_t));
+        std::memcpy(args.data() + 32, &b_ptr, sizeof(void*));
+        std::memcpy(args.data() + 40, &elems, sizeof(int32_t));
+        size_t argsz = args.size();
 
         std::array<void*, 5> config{HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                                    &args,
+                                    args.data(),
                                     HIP_LAUNCH_PARAM_BUFFER_SIZE,
                                     &argsz,
                                     HIP_LAUNCH_PARAM_END};

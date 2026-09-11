@@ -8,13 +8,13 @@
 # would otherwise win via LD_LIBRARY_PATH, causing HIPDNN_ATTR_UNKNOWN at graph build.
 set -euo pipefail
 
-REPO=/home/brpepers/rocm-libraries
+REPO=/home/AMD/brpepers/wt/hipdnn-flydsl-poc
 APP="$REPO/flydsl_poc_scratch/app/build/flydsl_hipdnn_app"
 
 export LD_LIBRARY_PATH="$REPO/build/lib:${LD_LIBRARY_PATH:-}"
 export HIPDNN_DESCRIPTOR_DIR="$REPO/flydsl_poc_scratch/flydsl_descriptors"
 export HIPDNN_PLUGIN_DIR="$REPO/build/lib/hipdnn_plugins/engines"
-export FLYDSL_HSACO_PATH="$REPO/.claude/worktrees/hipdnn-flydsl-poc/flydsl_poc_scratch/vadd_flydsl.hsaco"
+export FLYDSL_HSACO_PATH="$REPO/flydsl_poc_scratch/vadd_gfx950.hsaco"
 export HIPDNN_LOG_LEVEL="${HIPDNN_LOG_LEVEL:-info}"
 
 echo "[run] LD_LIBRARY_PATH=$LD_LIBRARY_PATH"

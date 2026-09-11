@@ -366,7 +366,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
-    add_subdirectory(descriptor-packaging)
+    # POC (throwaway): skip descriptor-packaging. It packs UKD/KMD/KDP JSON into
+    # .kpack archives via rocm_kpack's Python packer (fatal without it), which we
+    # don't need — our flyDSL selection path uses a compiled-in native pack
+    # (IngestorPacks.cpp + FlydslNative.cpp), not a packed .kpack. The C++ kpack
+    # *reader* above still links the provider (KpackArchive.cpp etc.).
+    # add_subdirectory(descriptor-packaging)
 endif()
 
 add_subdirectory(src)

@@ -2,16 +2,21 @@
 // it via the HIP module API — exactly what hipDNN's `hsaco` UKD escape hatch does
 // at runtime. Zero Python, zero flyDSL at runtime; just hipModuleLoadData + launch.
 //
-// Kernel: one thread per row, D=64, rows=8. grid=(rows,1,1) block=(1,1,1).
-// kernarg layout from .amdgpu_metadata: out@0, x@8, w@16 (24 bytes), symbol rmsnorm_0.
+// Kernel: one thread per row, N baked per HSACO. grid=(rows,1,1) block=(1,1,1).
+// flyDSL 0.3.x kernarg ABI: each Tensor arg = (global_buffer ptr 8B, by_value i32
+// size 4B). Three tensors (out,x,w) => 44 bytes:
+//   out_ptr@0 out_N@8  x_ptr@16 x_N@24  w_ptr@32 w_N@40
+// out/x sizes are rows*N (flat views); w size is N. symbol rmsnorm_0.
 //
 // build: hipcc run_rmsnorm.cpp -o run_rmsnorm
-// run:   ./run_rmsnorm rmsnorm.hsaco rmsnorm_0
+// run:   ./run_rmsnorm rmsnorm_toy_n64_gfx950.hsaco rmsnorm_0 64 8
 #include <hip/hip_runtime.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <vector>
 
@@ -24,13 +29,13 @@
         }                                                                                      \
     } while (0)
 
-static const int ROWS = 8;
-static const int D = 64;
 static const float EPS = 1e-6f;
 
 int main(int argc, char** argv) {
     const char* path = argc > 1 ? argv[1] : "rmsnorm.hsaco";
     const char* sym = argc > 2 ? argv[2] : "rmsnorm_0";
+    const int D = argc > 3 ? atoi(argv[3]) : 64;
+    const int ROWS = argc > 4 ? atoi(argv[4]) : 8;
 
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -67,14 +72,21 @@ int main(int argc, char** argv) {
     hipFunction_t fn;
     CK(hipModuleGetFunction(&fn, mod, sym));
 
-    // kernarg layout: out@0, x@8, w@16 (24 bytes)
-    struct {
-        void* out;
-        void* x;
-        void* w;
-    } args{dout, dx, dw};
+    // flyDSL 0.3.x ABI: (ptr, i32 size) per Tensor, 44 bytes interleaved.
+    unsigned char args[44] = {};
+    void* out_ptr = dout;
+    void* x_ptr = dx;
+    void* w_ptr = dw;
+    const int32_t xn = N;  // rows*D, numel of the flat out/x views
+    const int32_t wn = D;
+    std::memcpy(args + 0, &out_ptr, sizeof(void*));
+    std::memcpy(args + 8, &xn, sizeof(int32_t));
+    std::memcpy(args + 16, &x_ptr, sizeof(void*));
+    std::memcpy(args + 24, &xn, sizeof(int32_t));
+    std::memcpy(args + 32, &w_ptr, sizeof(void*));
+    std::memcpy(args + 40, &wn, sizeof(int32_t));
     size_t argsz = sizeof(args);
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &argsz,
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &argsz,
                       HIP_LAUNCH_PARAM_END};
     CK(hipModuleLaunchKernel(fn, /*gx*/ ROWS, 1, 1, /*bx*/ 1, 1, 1,
                              /*shmem*/ 0, /*stream*/ 0, nullptr, config));

@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "f1d5b1a7-0003-4a00-9000-000000000003",
+  "name": "flydsl attention variant fields (bf16 prefill)",
+  "fields": [
+    { "name": "dtype", "type": "string" },
+    { "name": "head_size", "type": "int" },
+    { "name": "num_query_heads", "type": "int" },
+    { "name": "num_kv_heads", "type": "int" },
+    { "name": "causal", "type": "int" },
+    { "name": "hsaco", "type": "string" },
+    { "name": "symbol", "type": "string" },
+    { "name": "block_threads", "type": "int" },
+    { "name": "block_m", "type": "int" }
+  ]
+}

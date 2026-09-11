@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f1d50001-0002-4a00-9000-000000000002",
+  "name": "flydsl rmsnorm selector",
+  "kind": "native",
+  "payload": "hipkernel.flydsl_rmsnorm.score"
+}

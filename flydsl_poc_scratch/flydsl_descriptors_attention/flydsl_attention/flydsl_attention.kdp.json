@@ -1,0 +1,122 @@
+{
+  "version": "1.0",
+  "id": "f1d5b1a7-0006-4a00-9000-000000000006",
+  "name": "hipkernel:flydsl_attention (bf16 prefill family)",
+  "matchers": [
+    "f1d5b1a7-0005-4a00-9000-000000000005"
+  ],
+  "engine": "f1d5b1a7-0001-4a00-9000-000000000001",
+  "dispatch": "f1d5b1a7-0004-4a00-9000-000000000004",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-000b-4a00-9000-00000000000b",
+      "name": "flydsl_attention.bf16_h32kv8_d128_causal",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "causal": 1,
+        "hsaco": "flash_attn_real_h32kv8_d128_causal_bf16_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-0007-4a00-9000-000000000007",
+      "name": "flydsl_attention.bf16_h8_d128_causal",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "causal": 1,
+        "hsaco": "flash_attn_real_h8_d128_causal_bf16_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-0008-4a00-9000-000000000008",
+      "name": "flydsl_attention.bf16_h16_d128_causal",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 16,
+        "num_kv_heads": 16,
+        "causal": 1,
+        "hsaco": "flash_attn_real_h16_d128_causal_bf16_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-0009-4a00-9000-000000000009",
+      "name": "flydsl_attention.bf16_h8_d128_noncausal",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "causal": 0,
+        "hsaco": "flash_attn_real_h8_d128_noncausal_bf16_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b1a7-000a-4a00-9000-00000000000a",
+      "name": "flydsl_attention.bf16_h16_d128_noncausal",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "FlashAttn.cpp",
+        "entry_point": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "BF16",
+        "head_size": 128,
+        "num_query_heads": 16,
+        "num_kv_heads": 16,
+        "causal": 0,
+        "hsaco": "flash_attn_real_h16_d128_noncausal_bf16_gfx950.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
+        "block_threads": 512,
+        "block_m": 256
+      },
+      "priority": 0
+    }
+  ]
+}
