@@ -203,12 +203,6 @@
 #define CK_TILE_EXPERIMENTAL_USE_MEMCPY_FOR_VECTOR_ACCESS 0
 #endif
 
-// Opt-in only: mirrors aiter's gfx1250 FMHA bwd prologue
-// s_setreg_imm32_b32 hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), 2.
-#ifndef CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE
-#define CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE 0
-#endif
-
 #ifndef CK_TILE_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE
 #define CK_TILE_WORKAROUND_SWDEV_XXXXXX_INT8_DS_WRITE_ISSUE 1
 #endif
@@ -332,18 +326,15 @@
 #endif
 
 // Write fmha bwd dK/dV back through LDS + TDM stores rather than the default
-// epilogue's per-thread buffer stores; see ck_tile::tdm_store_2d_pair.
-// NOTE: this only pays with expert scheduling mode enabled (gfx12-only builds
-// turn that on in the top-level CMakeLists). Without it, causal fmha bwd is
-// 1.65% SLOWER, because the barriers the TDM path needs are what that mode
-// lets the compiler schedule around.
+// epilogue's per-thread buffer stores; see ck_tile::tdm_store_2d_pair. Worth
+// 5.4% on gfx1250; what it wins is descriptor count, not bandwidth.
 #ifndef CK_TILE_FMHA_BWD_TDM_DKDV_STORE
 #define CK_TILE_FMHA_BWD_TDM_DKDV_STORE 1
 #endif
 
-// Probe: under a causal mask, halve the fmha bwd grid and give each workgroup
-// the mirror tile pair {x, n-1-x} so expensive and cheap tiles are balanced.
-// Batch mode only. Off by default.
+// Under a causal mask, halve the fmha bwd grid and give each workgroup the
+// mirror tile pair {x, n-1-x} so expensive and cheap tiles are balanced.
+// Batch mode only; see kMaskTilePairing for the rest of the gating.
 #ifndef CK_TILE_FMHA_BWD_MASK_TILE_PAIRING
 #define CK_TILE_FMHA_BWD_MASK_TILE_PAIRING 1
 #endif

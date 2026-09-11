@@ -1265,9 +1265,6 @@ struct FmhaBwdDQDKDVKernel
     {
         if constexpr(kIsAvailable)
         {
-#if CK_TILE_EXPERIMENTAL_FMHA_BWD_WAVE_SCHED_MODE
-            ck_tile::set_gfx125_wave_sched_mode_dep_mode_2();
-#endif
             if constexpr(!kUsePersistent)
             {
                 if constexpr(kUseQrQtrDorPipeline || kIsGroupMode)

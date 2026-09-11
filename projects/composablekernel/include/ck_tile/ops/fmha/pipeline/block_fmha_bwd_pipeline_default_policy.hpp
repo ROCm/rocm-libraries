@@ -1702,9 +1702,8 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
         // i.e. two C fragments stacked along P's row direction).  A whole-buffer
         // copy therefore only transposes when there is one fragment each way;
-        // beyond that it pairs the wrong C fragments together.  Measured with
-        // dstest/cta_probe.hip: correct at MIterPerWarp == 1, exactly 50% wrong
-        // at MIterPerWarp == 2.
+        // beyond that it pairs the wrong C fragments together: measured correct
+        // at MIterPerWarp == 1 and exactly 50% wrong at MIterPerWarp == 2.
         //
         //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
         //
@@ -1826,9 +1825,8 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         // WarpGemm::kM x kN (8 bf16 per lane), A into 16 x 32 tiles (16 per lane,
         // i.e. two C fragments stacked along P's row direction).  A whole-buffer
         // copy therefore only transposes when there is one fragment each way;
-        // beyond that it pairs the wrong C fragments together.  Measured with
-        // dstest/cta_probe.hip: correct at MIterPerWarp == 1, exactly 50% wrong
-        // at MIterPerWarp == 2.
+        // beyond that it pairs the wrong C fragments together: measured correct
+        // at MIterPerWarp == 1 and exactly 50% wrong at MIterPerWarp == 2.
         //
         //     A(am, ak) half h   <-   C(m = ak*2 + h, n = am)
         //

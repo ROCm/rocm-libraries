@@ -547,9 +547,8 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
   # Post-RA scheduling was turned off globally in a39d1d9885 (2024-04), bundled
   # with a ROCm 6.1 upgrade and with no stated reason. On gfx12 leaving it off
   # costs real performance: re-enabling it is worth +6.2%/+5.3% on fmha bwd
-  # d=128 bf16, and it composes with expert scheduling mode (which is what makes
-  # WAVE_SCHED_MODE[1:0]=2 safe, by having LLVM insert the s_wait_alu guards) for
-  # +8.9%/+8.5% together. Measured on gfx1250.
+  # d=128 bf16, and it composes with expert scheduling mode for +8.9%/+8.5%
+  # together. Measured on gfx1250.
   #
   # add_compile_options is global, so this only flips for a build that targets
   # gfx12 exclusively -- the older architectures were never re-measured and keep
