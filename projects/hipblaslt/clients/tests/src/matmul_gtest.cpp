@@ -27,6 +27,7 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
 #include "testing_matmul.hpp"
+#include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
 #include <type_traits>
@@ -48,6 +49,8 @@ namespace
                 testing_matmul(arg);
             else if(!strcmp(arg.function, "matmul_bad_arg"))
                 testing_matmul_bad_arg(arg);
+            else if(!strcmp(arg.function, "matmul_batch_offset"))
+                testing_matmul_batch_offset(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -64,7 +67,8 @@ namespace
         // Filter for which functions apply to this suite
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "matmul") || !strcmp(arg.function, "matmul_bad_arg");
+            return !strcmp(arg.function, "matmul") || !strcmp(arg.function, "matmul_bad_arg")
+                   || !strcmp(arg.function, "matmul_batch_offset");
         }
 
         // Google Test name suffix based on parameters

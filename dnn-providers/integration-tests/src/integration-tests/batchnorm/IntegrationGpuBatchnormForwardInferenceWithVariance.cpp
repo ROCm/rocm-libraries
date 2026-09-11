@@ -119,7 +119,7 @@ public:
 
     BatchnormForwardInferenceWithVariance()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BnInfVarTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BnInfVarTensorIds::MEAN_UID, -1.0f, 1.0f)
             .setRange(BnInfVarTensorIds::VARIANCE_UID, 0.1f, 1.0f)
@@ -139,7 +139,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

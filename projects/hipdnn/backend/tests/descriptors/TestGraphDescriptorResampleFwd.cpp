@@ -528,7 +528,7 @@ TEST_F(TestGraphDescriptorResampleFwd, GenerateIndexPreservedInSerialization)
     auto* attrs = graphT->nodes[0]->attributes.AsResampleFwdAttributes();
     ASSERT_NE(attrs, nullptr);
     ASSERT_TRUE(attrs->generate_index.has_value());
-    EXPECT_EQ(attrs->generate_index.value(), true);
+    EXPECT_TRUE(attrs->generate_index.value());
 }
 
 } // namespace

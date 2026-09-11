@@ -40,6 +40,8 @@ extern "C" {
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_implicit_gemm.h"
+#include "rocke/instance_conv_implicit_gemm_wgrad.h"
+#include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
@@ -2143,6 +2145,151 @@ std::vector<std::string> reduce_verify(const py::dict& d, const std::string& arc
                              rocke_build_reduce2d_new(&b, &s, arch_or_default(arch)));
 }
 
+/* =================== conv_implicit_gemm_wgrad (two-stage) ================== */
+
+rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
+                                                            std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_implicit_gemm_conv_wgrad_spec_t s = rocke_implicit_gemm_conv_wgrad_spec_default();
+    if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
+        fill_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.warp_m = dict_int(d, "warp_m", s.warp_m);
+    s.warp_n = dict_int(d, "warp_n", s.warp_n);
+    s.warp_tile_m = dict_int(d, "warp_tile_m", s.warp_tile_m);
+    s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
+    s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.split_k = dict_int(d, "split_k", s.split_k);
+    s.two_stage = dict_bool(d, "two_stage", s.two_stage);
+    s.force_deterministic = dict_bool(d, "force_deterministic", s.force_deterministic);
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "dtype_a", v))
+            s.dtype_a = keep(v);
+        if(dict_str(d, "dtype_b", v))
+            s.dtype_b = keep(v);
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "pipeline", v))
+            s.pipeline = keep(v);
+        if(dict_str(d, "epilogue", v))
+            s.epilogue = keep(v);
+    }
+    return s;
+}
+
+std::string conv_wgrad_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch));
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg = std::string("rocke_engine.conv_wgrad_lower_llvm build failed: ")
+                          + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    char* ll = nullptr;
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
+    rocke_ir_builder_free(&b);
+    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_lower_llvm");
+}
+
+std::string conv_wgrad_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_wgrad_serialize_ir",
+        rocke_implicit_gemm_conv_wgrad_spec_t,
+        conv_wgrad_build_spec,
+        rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_wgrad_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY(
+        "rocke_engine.conv_wgrad_verify",
+        rocke_implicit_gemm_conv_wgrad_spec_t,
+        conv_wgrad_build_spec,
+        rocke_build_implicit_gemm_conv_wgrad_new(&b, &s, arch_or_default(arch)));
+}
+
+/* =================== conv_wgrad_workspace_reduce (Stage 2) ================ */
+
+rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
+                                                       std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_wgrad_reduce_spec_t s = rocke_wgrad_reduce_spec_default();
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.wg_M = dict_int(d, "wg_M", s.wg_M);
+    s.wg_N = dict_int(d, "wg_N", s.wg_N);
+    s.groups = dict_int(d, "groups", s.groups);
+    {
+        std::string v;
+        if(dict_str(d, "dtype_d", v))
+            s.dtype_d = keep(v);
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+        if(dict_str(d, "problem_short", v))
+            s.problem_short = keep(v);
+    }
+    return s;
+}
+
+std::string conv_wgrad_reduce_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    rocke_wgrad_reduce_spec_t s = conv_wgrad_reduce_build_spec(d, store);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k = rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch));
+    if(!k || !rocke_ir_builder_ok(&b))
+    {
+        std::string msg = std::string("rocke_engine.conv_wgrad_reduce_lower_llvm build failed: ")
+                          + rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(msg);
+    }
+    char* ll = nullptr;
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
+    rocke_ir_builder_free(&b);
+    return take_lowered(st, ll, nullptr, "rocke_engine.conv_wgrad_reduce_lower_llvm");
+}
+
+std::string conv_wgrad_reduce_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.conv_wgrad_reduce_serialize_ir",
+        rocke_wgrad_reduce_spec_t,
+        conv_wgrad_reduce_build_spec,
+        rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch)));
+}
+
+std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY("rocke_engine.conv_wgrad_reduce_verify",
+                             rocke_wgrad_reduce_spec_t,
+                             conv_wgrad_reduce_build_spec,
+                             rocke_build_wgrad_workspace_reduce_new(&b, &s, arch_or_default(arch)));
+}
+
 /* ---- pooling (nested problem, generic lower, build takes arch) ---- */
 rocke_pooling2d_spec_t pool_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
@@ -3259,6 +3406,22 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * involved. Every failure (parse or lower) is converted to a Python exception;
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
+
+/* "'llvm20', 'llvm22', 'llvm23'" -- built from the engine's flavor ladder so
+ * the message cannot drift from what from_name() actually accepts. */
+static std::string rocke_engine_flavor_list()
+{
+    std::string out;
+    const int n = rocke_llvm_flavor_count();
+    for(int i = 0; i < n; ++i)
+    {
+        if(i)
+            out += (i + 1 == n) ? ", or " : ", ";
+        out += std::string("'") + rocke_llvm_flavor_at(i) + "'";
+    }
+    return out;
+}
+
 std::string lower_serialized_ir(const std::string& ir_text,
                                 const std::string& arch,
                                 const std::string& flavor)
@@ -3269,9 +3432,12 @@ std::string lower_serialized_ir(const std::string& ir_text,
     }
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
 
-    /* flavor: "" => AUTO (resolve from env / ROCm version); "llvm20"/"llvm22"
-     * pin the intrinsic declaration shape. An unrecognised non-empty flavor is
-     * rejected so callers get the same hard error the Python lowerer raises. */
+    /* flavor: "" => AUTO (resolve from env / ROCm version); a named flavor
+     * pins the intrinsic declaration shape. An unrecognised non-empty flavor
+     * is rejected so callers get the same hard error the Python lowerer
+     * raises. The accepted set is read from the engine's ladder rather than
+     * restated here -- a hand-written list is what goes stale when a flavor is
+     * added. */
     rocke_llvm_flavor_t fl = ROCKE_LLVM_FLAVOR_AUTO;
     if(!flavor.empty())
     {
@@ -3280,7 +3446,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         {
             throw std::runtime_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
-                + "' (expected 'llvm20' or 'llvm22')");
+                + "' (expected one of " + rocke_engine_flavor_list() + ")");
         }
     }
 
@@ -3359,7 +3525,24 @@ PYBIND11_MODULE(rocke_engine, m)
           "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
           "the Python lowerer for the same serialized IR. flavor='' resolves "
-          "the LLVM flavor automatically; 'llvm20'/'llvm22' pin it.");
+          "the LLVM flavor automatically; a name from llvm_flavors() pins it.");
+
+    /* Exposes the engine's flavor ladder so a test can assert it still equals
+     * rocke.core.lower_llvm.LLVM_FLAVORS. Without a way to read the C++ list
+     * back, the two enumerations can drift into a flavor that lowers on one
+     * engine and is rejected on the other. */
+    m.def(
+        "llvm_flavors",
+        []() {
+            std::vector<std::string> out;
+            const int n = rocke_llvm_flavor_count();
+            out.reserve((size_t)n);
+            for(int i = 0; i < n; ++i)
+                out.emplace_back(rocke_llvm_flavor_at(i));
+            return out;
+        },
+        "The LLVM flavors this engine accepts, oldest first. Must equal "
+        "rocke.core.lower_llvm.LLVM_FLAVORS.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,
@@ -3535,6 +3718,29 @@ PYBIND11_MODULE(rocke_engine, m)
          &gfx1201_wmma_gemm_lower_llvm,
          &gfx1201_wmma_gemm_serialize_ir,
          &gfx1201_wmma_gemm_verify);
+
+    /* ---- wgrad two-stage family ---- */
+    reg3("conv_wgrad", conv_wgrad_lower_llvm, conv_wgrad_serialize_ir, conv_wgrad_verify);
+    /* conv_wgrad_reduce is used by the byte-identity gate
+     * (platform/tools/check_byte_identity.py) and by external callers driving
+     * Stage 2 via the Python engine API directly.  The benchmark drives Stage 2
+     * via the Python instance layer (rocke.instances.common.conv_wgrad_workspace_reduce),
+     * not through this binding, so the registration may appear unused in that context. */
+    reg3("conv_wgrad_reduce",
+         conv_wgrad_reduce_lower_llvm,
+         conv_wgrad_reduce_serialize_ir,
+         conv_wgrad_reduce_verify);
+    m.def(
+        "conv_wgrad_workspace_bytes",
+        [](const py::dict& d) -> size_t {
+            std::deque<std::string> store;
+            rocke_implicit_gemm_conv_wgrad_spec_t s = conv_wgrad_build_spec(d, store);
+            return rocke_wgrad_conv_workspace_bytes(&s);
+        },
+        py::arg("spec"),
+        "Return workspace bytes for the two-stage deterministic wgrad path.\n"
+        "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
+        "Returns 0 when two_stage=false and force_deterministic=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

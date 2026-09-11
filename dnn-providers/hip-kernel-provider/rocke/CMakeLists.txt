@@ -6,7 +6,11 @@
 # The library/ tree is build-time-only Python (kernels/builders/dispatch); it is
 # editable-installed and wheeled by the rocke-pyenv / rocke-wheels blocks below,
 # not added as a CMake subdirectory.
-add_subdirectory(platform)
+#
+# NOTE: add_subdirectory(platform) is deferred to after the ROCKE_BUILD_PYENV /
+# ROCKE_WHEEL_DIR / ROCKE_WHEEL_VERSION declarations below so that
+# platform/CMakeLists.txt sees those variables when it registers the wheel
+# install() rules.
 
 # ---------------------------------------------------------------------------
 # rocke-pyenv: build-time editable Python environment.
@@ -70,25 +74,52 @@ if(ROCKE_BUILD_PYENV)
         CACHE PATH "Output directory for rocke Python wheels")
     set(ROCKE_WHEEL_VERSION "0.1.0" CACHE STRING "rocke Python wheel version")
 
+    # Each wheel depends on ITS OWN Python sources, not just its pyproject.toml.
+    # Without these globs a kernel edit never rebuilds the wheel, so the whole
+    # downstream staleness chain (wheel -> content digest -> venv reinstall ->
+    # repack) is inert in exactly the case it exists for: someone editing a
+    # kernel. There are two wheels and they need separate globs -- the kernel
+    # bodies live under library/, so wiring only the platform wheel would leave
+    # the real case broken.
+    file(GLOB_RECURSE _rocke_platform_sources CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/platform/python/*.py")
+    file(GLOB_RECURSE _rocke_library_sources CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/library/*.py")
+
+    # SOURCE_DATE_EPOCH makes the wheels byte-reproducible. Without it, two
+    # builds of identical sources produce wheels with different sha256s (zip
+    # entry timestamps come from file mtimes), which was measured here: two
+    # back-to-back `pip wheel` runs over an unmodified tree differed. That
+    # would make the content-digest staleness chain fire on every mtime bump --
+    # a git checkout, a touch, a fresh clone -- and force a full recompile of
+    # every kernel for every arch, which is exactly the churn the digest exists
+    # to prevent. Pinned to a fixed epoch rather than the commit date so the
+    # value does not itself become a rebuild trigger.
+    set(_rocke_wheel_env "${CMAKE_COMMAND}" -E env "SOURCE_DATE_EPOCH=1700000000")
+
     set(_rocke_platform_wheel "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_platform_wheel}"
-        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
+        COMMAND ${_rocke_wheel_env}
+                "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
                 --wheel-dir "${ROCKE_WHEEL_DIR}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform"
         DEPENDS "${ROCKE_PYENV_STAMP}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
+                ${_rocke_platform_sources}
         COMMENT "Building rocke platform wheel"
         VERBATIM)
 
     set(_rocke_library_wheel "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
     add_custom_command(
         OUTPUT "${_rocke_library_wheel}"
-        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
+        COMMAND ${_rocke_wheel_env}
+                "${ROCKE_PYENV_PYTHON}" -m pip wheel --no-deps --no-build-isolation
                 --wheel-dir "${ROCKE_WHEEL_DIR}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library"
         DEPENDS "${ROCKE_PYENV_STAMP}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
+                ${_rocke_library_sources}
         COMMENT "Building rocke-library wheel"
         VERBATIM)
 
@@ -96,3 +127,5 @@ if(ROCKE_BUILD_PYENV)
         DEPENDS "${_rocke_platform_wheel}" "${_rocke_library_wheel}"
         COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()
+
+add_subdirectory(platform)

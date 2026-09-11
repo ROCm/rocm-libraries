@@ -444,7 +444,7 @@ ROC-TX support in rocSPARSE
 
 The `ROC-TX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
 instrumentation APIs to support the high-level correlation of runtime API or activity events. When integrated with rocSPARSE, ROC-TX
-enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as :doc:`rocProfiler <rocprofiler:index>`, offering better insights
+enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as `rocProfiler <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_, offering better insights
 into runtime behavior and performance bottlenecks.
 
 To enable ROC-TX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:

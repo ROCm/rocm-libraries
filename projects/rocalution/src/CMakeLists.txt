@@ -100,6 +100,11 @@ endif()
 add_library(rocalution ${SOURCE} ${PUBLIC_HEADERS})
 add_library(roc::rocalution ALIAS rocalution)
 
+# Add Windows version resource to library
+if(WIN32 AND BUILD_SHARED_LIBS)
+    target_sources(rocalution PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
+
 set(package_depends)
 set(static_depends)
 
@@ -227,9 +232,9 @@ endif()
 set_target_properties(rocalution PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
 if(WIN32 AND BUILD_CLIENTS AND BUILD_SHARED_LIBS)
-  add_custom_command(TARGET rocalution POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/staging/$<TARGET_FILE_NAME:rocalution> ${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_FILE_NAME:rocalution>)
+  add_custom_command(TARGET rocalution POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/staging/$<TARGET_FILE_NAME:rocalution> ${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_FILE_NAME:rocalution> COMMENT "Copy rocalution DLL to clients staging directory")
   if( ${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    add_custom_command(TARGET rocalution POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/staging/rocalution.pdb ${PROJECT_BINARY_DIR}/clients/staging/rocalution.pdb )
+    add_custom_command(TARGET rocalution POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/staging/rocalution.pdb ${PROJECT_BINARY_DIR}/clients/staging/rocalution.pdb COMMENT "Copy rocalution PDB to clients staging directory")
   endif()
 endif()
 

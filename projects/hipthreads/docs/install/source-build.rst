@@ -127,7 +127,7 @@ For quick iteration on a single test, you can also build the tests through CMake
 Build and run the examples
 ==========================
 
-The ``examples/`` directory contains standalone CMake projects that each :doc:`find and link hipThreads <../how-to/use-hipthreads-in-a-project>`.
+The ``examples/`` directory contains standalone CMake projects that each :doc:`find and link hipThreads <../how-to/hipThreads-in-a-project>`.
 Each example is organized as a series of ``stepN-*`` directories showing an incremental port from CPU ``std::thread`` code to hipThreads.
 
 Each example is built and run on its own.
@@ -144,4 +144,4 @@ On Windows, use the same Ninja, clang, and ``-DCMAKE_HIP_ARCHITECTURES`` flags a
 The exact configure, build, and run commands for each step, on both Linux and Windows, are recorded in a comment at the bottom of that step's ``CMakeLists.txt``.
 Some examples need extra setup — for example, the sparse matrix multiply data is pulled with ``git lfs``, and llama3.c takes a model path as an argument — so check the ``CMakeLists.txt`` footer for the step you are building.
 
-After installing, see :doc:`../how-to/use-hipthreads-in-a-project` to consume hipThreads from your own CMake project.
+After installing, see :doc:`../how-to/hipThreads-in-a-project` to consume hipThreads from your own CMake project.

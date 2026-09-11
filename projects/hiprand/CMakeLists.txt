@@ -28,9 +28,9 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 # Set the library version
 set(VERSION_STRING "3.4.0")
 # Set the minimum required rocPRIM version
-set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCRAND_PACKAGE_VERSION "5.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocRAND
-set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
   set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
@@ -181,9 +181,11 @@ elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
-# HIP on Windows: xhip is required with clang++ to get __half defined
+# HIP on Windows: xhip is required with clang++ to get __half defined.
+# Scope it to C++ so it does not leak onto C sources (e.g. the C-compile
+# tests), where -xhip is both unnecessary and incompatible with -std=gnu11.
 if (WIN32)
-  add_compile_options(-xhip)
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-xhip>")
 endif()
 
 if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)

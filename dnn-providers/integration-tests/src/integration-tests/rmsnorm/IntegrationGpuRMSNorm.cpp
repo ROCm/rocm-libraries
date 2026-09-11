@@ -115,7 +115,7 @@ protected:
             this->registerValidator(outputs.invRms, this->getTolerance(graphObj, outputs.invRms));
         }
 
-        this->synthesis().setGlobalSeed(rmsnormTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(rmsnormTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

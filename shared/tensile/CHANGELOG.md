@@ -1,5 +1,12 @@
 # Changelog for Tensile
 
+## Tensile 4.48.0 (Unreleased)
+
+### Resolved issues
+
+- Stopped emitting spurious "found ... in a non-default ROCm location" warnings for toolchain components outside `/opt/rocm` (e.g. TheRock builds).
+- Suppressed the "Did not detect SupportedISA" warning during `TensileCreateLibrary` builds, where a GPU-less host is expected and the detected ISA does not affect code generation.
+
 ## Tensile 4.47.0 for ROCm 7.15
 
 ### Changed

@@ -35,4 +35,14 @@ if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB AND TARGET nlohmann_json::nlohmann_json)
     endif()
 endif()
 
+# The cuDNN-compatibility headers install only when hipDNN is built with
+# HIPDNN_ENABLE_CUDNN_COMPATIBILITY, so expose that as an optional component:
+# find_package(hipdnn_frontend CONFIG REQUIRED COMPONENTS cudnn_compatibility).
+set(hipdnn_frontend_cudnn_compatibility_FOUND @HIPDNN_ENABLE_CUDNN_COMPATIBILITY@)
+if(NOT hipdnn_frontend_cudnn_compatibility_FOUND
+   AND hipdnn_frontend_FIND_REQUIRED_cudnn_compatibility)
+    set(hipdnn_frontend_NOT_FOUND_MESSAGE
+        "hipdnn_frontend was built without HIPDNN_ENABLE_CUDNN_COMPATIBILITY, so the cuDNN compatibility headers are not installed.")
+endif()
+
 check_required_components(hipdnn_frontend)

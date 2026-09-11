@@ -30,11 +30,8 @@ def _sol(idx, name="s", kname="k", **extra):
 
 
 def _make_data(solutions, sizes):
-    """Build minimal logic data: [_, _, _, _, _, solutions, _, sizes]."""
-    d = [None] * 8
-    d[5] = solutions
-    d[7] = sizes
-    return d
+    """Build minimal dict-format logic data."""
+    return {"Solutions": solutions, "ExactLogic": sizes}
 
 
 def test_merge_logic_empty_incremental():
@@ -63,7 +60,7 @@ def test_merge_logic_new_size():
     merged, sizes_added, sols_added, sols_removed = M.mergeLogic(base_data, inc_data, forceMerge=False)
     assert sizes_added == 1
     assert sols_added == 1
-    assert len(merged[7]) == 2
+    assert len(merged["ExactLogic"]) == 2
 
 
 def test_merge_logic_existing_size_improved():
@@ -121,4 +118,4 @@ def test_merge_logic_no_eff_mode():
     inc_data = _make_data(inc_sols, inc_sizes)
 
     merged, sizes_added, sols_added, sols_removed = M.mergeLogic(base_data, inc_data, forceMerge=False, noEff=True)
-    assert merged[7][1][1][1] == 0.0  # noEff should set eff to 0.0
+    assert merged["ExactLogic"][1][1][1] == 0.0  # noEff should set eff to 0.0

@@ -4,12 +4,14 @@
 #
 # Cross-platform (Windows + Linux) CI/parent entrypoint for the rocKE engine.
 # One command runs: (1) the relative-path contract guard, (2) the byte-identity
-# gate, (3) the pytest suite, (4) ctest if a build dir exists. All paths are
-# derived relative to this file so the rocke/platform/ tree is copy-able verbatim.
+# gate, (3) the pytest suite, (4) the same suite again under ROCKE_BACKEND=both
+# when the engine extension is importable, (5) ctest if a build dir exists. All
+# paths are derived relative to this file so the rocke/platform/ tree is
+# copy-able verbatim.
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--only SUBSTR] [--build-root DIR]
+#       [--no-both] [--only SUBSTR] [--build-root DIR]
 
 from __future__ import annotations
 
@@ -24,6 +26,12 @@ from pathlib import Path
 ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
+
+# Same sys.path bootstrap as tests/conftest.py, so the runner can read shared
+# constants (e.g. backend.CPP_UNPORTED_ARCHES) out of the package it is testing
+# instead of restating them here and letting the two drift.
+if str(ROCKE / "python") not in sys.path:
+    sys.path.insert(0, str(ROCKE / "python"))
 
 # Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
@@ -78,11 +86,69 @@ def relative_path_guard() -> int:
     return 0
 
 
+def differential_pytest_pass() -> int:
+    """Re-run pytest with ``ROCKE_BACKEND=both`` (the cross-engine gate).
+
+    The default pass exercises one engine per assertion, so two engines that
+    each emit self-consistent but different IR both go green. ``both`` lowers
+    through each and raises ``BackendMismatch`` on any byte difference, which
+    is the only thing in the suite that can see a divergence the byte-identity
+    gate's fixed family list does not cover.
+
+    ``both`` never substitutes the Python result for a kernel the C++ engine
+    could not lower, so this pass cannot go green vacuously: a kernel is either
+    compared, or it fails, or -- for an arch named in
+    ``backend.CPP_UNPORTED_ARCHES`` -- it is reported as a skip by the
+    ``BackendCoverageGap`` hook in conftest. The skip count is the size of the
+    known gap, and it is printed below so it stays visible.
+
+    Needs the ``rocke_engine`` extension. Without it every kernel would raise
+    and the lane would prove nothing, so it is reported as a skipped *pass*
+    with a reason rather than run.
+    """
+    probe = subprocess.run(
+        [sys.executable, "-c", "import rocke_engine"],
+        capture_output=True,
+        cwd=str(TESTS),
+    )
+    if probe.returncode != 0:
+        print(
+            "\n== pytest (ROCKE_BACKEND=both): SKIPPED ==\n"
+            "   rocke_engine is not importable; build it with "
+            "-DROCKE_BUILD_PYBIND=ON and put the build dir on PYTHONPATH."
+        )
+        return 0
+    from rocke.core.backend import CPP_UNPORTED_ARCHES
+
+    print("\n== pytest (ROCKE_BACKEND=both) ==")
+    if CPP_UNPORTED_ARCHES:
+        print(
+            "   no fallback to Python in this lane; skips are the known C++ "
+            f"coverage gap (unported arches: {', '.join(CPP_UNPORTED_ARCHES)})"
+        )
+    else:
+        print(
+            "   no fallback to Python in this lane, and no arch is exempt "
+            "(backend.CPP_UNPORTED_ARCHES is empty), so every kernel here is "
+            "either compared byte-for-byte or fails; remaining skips are "
+            "environmental (torch / GPU)"
+        )
+    env = dict(os.environ, ROCKE_BACKEND="both")
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", str(TESTS), "-rs"], cwd=str(TESTS), env=env
+    ).returncode
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE test/validation runner")
     ap.add_argument("--no-guard", action="store_true")
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
+    ap.add_argument(
+        "--no-both",
+        action="store_true",
+        help="skip the ROCKE_BACKEND=both differential pytest pass",
+    )
     ap.add_argument(
         "--only",
         default="",
@@ -115,6 +181,9 @@ def main() -> int:
         status |= subprocess.run(
             [sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS)
         ).returncode
+
+    if not args.no_pytest and not args.no_both:
+        status |= differential_pytest_pass()
 
     build_root = Path(args.build_root)
     # Only ctest when the CTest-registered binaries were actually built (the

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,8 +25,12 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
 
+// The sync_split_fusion algorithm is deprecated and no longer exercised by the
+// test suite; exclude its implementation from coverage reporting.
+// LCOV_EXCL_START
+
 template <>
-struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
+struct rocsparse::csritilu0_driver_t<deprecated_rocsparse_itilu0_alg_sync_split_fusion>
 {
     //
     // History, same as algorithm 1.
@@ -167,7 +171,7 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
 
 #define INSTANTIATE(T, I, J)                       \
     template struct rocsparse::csritilu0_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::compute<T, I, J>
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::compute<T, I, J>
 
 INSTANTIATE(float, rocsparse_int, rocsparse_int);
 INSTANTIATE(double, rocsparse_int, rocsparse_int);
@@ -178,19 +182,21 @@ INSTANTIATE(rocsparse_double_complex, rocsparse_int, rocsparse_int);
 
 #define INSTANTIATE(T, J)                          \
     template struct rocsparse::csritilu0_driver_t< \
-        rocsparse_itilu0_alg_sync_split_fusion>::history<T, J>
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::history<T, J>
 
 INSTANTIATE(float, rocsparse_int);
 INSTANTIATE(double, rocsparse_int);
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(I, J)                                           \
-    template struct rocsparse::csritilu0_driver_t<                  \
-        rocsparse_itilu0_alg_sync_split_fusion>::buffer_size<I, J>; \
-    template struct rocsparse::csritilu0_driver_t<                  \
-        rocsparse_itilu0_alg_sync_split_fusion>::preprocess<I, J>;
+#define INSTANTIATE(I, J)                                                      \
+    template struct rocsparse::csritilu0_driver_t<                             \
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::buffer_size<I, J>; \
+    template struct rocsparse::csritilu0_driver_t<                             \
+        deprecated_rocsparse_itilu0_alg_sync_split_fusion>::preprocess<I, J>;
 
 INSTANTIATE(rocsparse_int, rocsparse_int);
 
 #undef INSTANTIATE
+
+// LCOV_EXCL_STOP

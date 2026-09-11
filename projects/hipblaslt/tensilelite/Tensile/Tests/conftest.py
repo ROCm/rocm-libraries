@@ -191,18 +191,59 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
 
     return rv
 
-def pytest_collection_modifyitems(items):
+def visibleDeviceCount():
+    """
+    Number of devices HIP will expose to this process.
+
+    detectAvailableGpus() reports the physical count and ignores both variables.
+    """
+    counts = [
+        len([d for d in value.split(",") if d.strip()])
+        for value in (os.environ.get("ROCR_VISIBLE_DEVICES"),
+                      os.environ.get("HIP_VISIBLE_DEVICES"))
+        if value is not None
+    ]
+    if counts:
+        return min(counts)
+
+    from Tensile.ParallelExecution import detectAvailableGpus
+    return detectAvailableGpus()
+
+def commSkipMark(config):
+    """Mark to apply to `comm` tests, or None when they can run here."""
+    if config.getoption("--build-only", default=False):
+        return None
+
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason="comm tests need 2+ devices; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
+
+    count = visibleDeviceCount()
+    if count < 2:
+        return pytest.mark.skip(
+            reason=f"comm tests need 2+ visible HIP devices, found {count}")
+    return None
+
+def pytest_collection_modifyitems(config, items):
     """
     Mainly for tests that aren't simple YAML files (including unit tests).
     Adds a mark for the root directory name to each test.
+
+    Also skips `comm` tests unless this process can reach two devices.
     """
+    commSkip = commSkipMark(config)
+
     for item in items:
-        
+
         relpath = item.fspath.relto(testdir)
         components = relpath.split(os.path.sep)
         # print(f"Items: {item}, Testdir: {testdir}, Components: {components}")
         if len(components) > 0 and len(components[0]) > 0:
             item.add_marker(getattr(pytest.mark, components[0]))
+
+        if commSkip is not None and item.get_closest_marker("comm"):
+            item.add_marker(commSkip)
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

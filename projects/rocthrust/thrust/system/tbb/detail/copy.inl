@@ -17,57 +17,119 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
-#include <thrust/detail/copy.h>
-#include <thrust/detail/type_traits/minimum_type.h>
+#include <thrust/system/tbb/detail/copy.h>
 #include <thrust/system/detail/generic/copy.h>
 #include <thrust/system/detail/sequential/copy.h>
-#include <thrust/system/tbb/detail/copy.h>
-
-#include _THRUST_STD_INCLUDE(type_traits)
+#include <thrust/detail/type_traits/minimum_type.h>
+#include <thrust/detail/copy.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system::tbb::detail
+namespace system
 {
-template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
-OutputIterator
-copy(execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
+namespace tbb
 {
-  using traversal1 = typename iterator_traversal<InputIterator>::type;
-  using traversal2 = typename iterator_traversal<OutputIterator>::type;
-  using traversal  = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
-  if constexpr (_THRUST_STD::is_convertible_v<traversal, random_access_traversal_tag>)
-  {
-    return system::detail::generic::copy(exec, first, last, result);
-  }
-  else
-  {
-    return system::detail::sequential::copy(exec, first, last, result);
-  }
-}
+namespace detail
+{
+namespace dispatch
+{
 
-template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
-OutputIterator copy_n(execution_policy<DerivedPolicy>& exec, InputIterator first, Size n, OutputIterator result)
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename OutputIterator>
+  OutputIterator copy(execution_policy<DerivedPolicy> &exec,
+                      InputIterator first,
+                      InputIterator last,
+                      OutputIterator result,
+                      thrust::incrementable_traversal_tag)
 {
-  using traversal1 = typename iterator_traversal<InputIterator>::type;
-  using traversal2 = typename iterator_traversal<OutputIterator>::type;
-  using traversal  = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
-  if constexpr (_THRUST_STD::is_convertible_v<traversal, random_access_traversal_tag>)
-  {
-    return system::detail::generic::copy_n(exec, first, n, result);
-  }
-  else
-  {
-    return system::detail::sequential::copy_n(exec, first, n, result);
-  }
-}
-} // namespace system::tbb::detail
+  return thrust::system::detail::sequential::copy(exec, first, last, result);
+} // end copy()
+
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename OutputIterator>
+  OutputIterator copy(execution_policy<DerivedPolicy> &exec,
+                      InputIterator first,
+                      InputIterator last,
+                      OutputIterator result,
+                      thrust::random_access_traversal_tag)
+{
+  return thrust::system::detail::generic::copy(exec, first, last, result);
+} // end copy()
+
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename Size,
+         typename OutputIterator>
+  OutputIterator copy_n(execution_policy<DerivedPolicy> &exec,
+                        InputIterator first,
+                        Size n,
+                        OutputIterator result,
+                        thrust::incrementable_traversal_tag)
+{
+  return thrust::system::detail::sequential::copy_n(exec, first, n, result);
+} // end copy_n()
+
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename Size,
+         typename OutputIterator>
+  OutputIterator copy_n(execution_policy<DerivedPolicy> &exec,
+                        InputIterator first,
+                        Size n,
+                        OutputIterator result,
+                        thrust::random_access_traversal_tag)
+{
+  return thrust::system::detail::generic::copy_n(exec, first, n, result);
+} // end copy_n()
+
+
+} // end dispatch
+
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename OutputIterator>
+OutputIterator copy(execution_policy<DerivedPolicy> &exec,
+                    InputIterator first,
+                    InputIterator last,
+                    OutputIterator result)
+{
+  using traversal1 = typename thrust::iterator_traversal<InputIterator>::type;
+  using traversal2 = typename thrust::iterator_traversal<OutputIterator>::type;
+
+  using traversal = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
+
+  // dispatch on minimum traversal
+  return thrust::system::tbb::detail::dispatch::copy(exec,first,last,result,traversal());
+} // end copy()
+
+
+
+template<typename DerivedPolicy,
+         typename InputIterator,
+         typename Size,
+         typename OutputIterator>
+OutputIterator copy_n(execution_policy<DerivedPolicy> &exec,
+                      InputIterator first,
+                      Size n,
+                      OutputIterator result)
+{
+  using traversal1 = typename thrust::iterator_traversal<InputIterator>::type;
+  using traversal2 = typename thrust::iterator_traversal<OutputIterator>::type;
+
+  using traversal = typename thrust::detail::minimum_type<traversal1, traversal2>::type;
+
+  // dispatch on minimum traversal
+  return thrust::system::tbb::detail::dispatch::copy_n(exec,first,n,result,traversal());
+} // end copy_n()
+
+
+} // end namespace detail
+} // end namespace tbb
+} // end namespace system
 THRUST_NAMESPACE_END

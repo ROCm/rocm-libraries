@@ -20,13 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "./base.hpp"
-
-// rocThrust
 #include <thrust/set_operations.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
+#include "base.hpp"
 
 struct op_t
 {
@@ -45,36 +41,13 @@ struct op_t
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 100;
+  settings.batch_window_size = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  queue_benchmarks<op_t>("union", executor);
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
-
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<op_t>("union", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
-  {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
-  }
-
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

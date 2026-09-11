@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -170,7 +171,7 @@ public:
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());
@@ -254,7 +255,7 @@ public:
 
     BatchnormFwdTrainingActivation()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BatchnormFwdTrainingActivTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BatchnormFwdTrainingActivTensorIds::SCALE_UID, -2.0f, 2.0f)
             .setRange(BatchnormFwdTrainingActivTensorIds::BIAS_UID, -2.0f, 2.0f)
@@ -290,7 +291,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis()
+        this->inputFillRecipes()
             .setSeed(BatchnormFwdTrainingActivTensorIds::X_UID, bnTestCase.seed)
             .setSeed(BatchnormFwdTrainingActivTensorIds::SCALE_UID, bnTestCase.seed + 1)
             .setSeed(BatchnormFwdTrainingActivTensorIds::BIAS_UID, bnTestCase.seed + 2)

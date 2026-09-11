@@ -216,24 +216,56 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e4m3, float, float, float, hipsparselt_fp8_e4m3>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<hipsparselt_fp8_e4m3, float, float, float, float>{}(arg);
+            case HIP_R_8F_E4M3:
+                return TEST<hipsparselt_fp8_e4m3, float, float, float, hipsparselt_fp8_e4m3>{}(arg);
+            default:
+                break;
+            }
         }
         else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e5m2, float, float, float, hipsparselt_fp8_e5m2>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<hipsparselt_fp8_e5m2, float, float, float, float>{}(arg);
+            case HIP_R_8F_E5M2:
+                return TEST<hipsparselt_fp8_e5m2, float, float, float, hipsparselt_fp8_e5m2>{}(arg);
+            default:
+                break;
+            }
         }
 #endif
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
         else if(Ti == HIP_R_8F_E4M3_FNUZ && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e4m3_fnuz, float, float, float>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<hipsparselt_fp8_e4m3_fnuz, float, float, float, float>{}(arg);
+            case HIP_R_8F_E4M3_FNUZ:
+                return TEST<hipsparselt_fp8_e4m3_fnuz, float, float, float, hipsparselt_fp8_e4m3_fnuz>{}(arg);
+            default:
+                break;
+            }
         }
         else if(Ti == HIP_R_8F_E5M2_FNUZ && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<hipsparselt_fp8_e5m2_fnuz, float, float, float>{}(arg);
+            switch(TGate)
+            {
+            case HIP_R_32F:
+                return TEST<hipsparselt_fp8_e5m2_fnuz, float, float, float, float>{}(arg);
+            case HIP_R_8F_E5M2_FNUZ:
+                return TEST<hipsparselt_fp8_e5m2_fnuz, float, float, float, hipsparselt_fp8_e5m2_fnuz>{}(arg);
+            default:
+                break;
+            }
         }
 #endif
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP

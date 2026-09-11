@@ -104,11 +104,11 @@ inline void sort_keys()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> offsets;
@@ -255,11 +255,11 @@ inline void sort_keys_empty_data()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> offsets(2);
@@ -387,11 +387,10 @@ inline void sort_keys_large_segments()
         }
         else
         {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                _HIPCUB_STD::numeric_limits<key_type>::min(),
-                _HIPCUB_STD::numeric_limits<key_type>::max(),
-                seed_value + seed_value_addition);
+            keys_input = test_utils::get_random_data<key_type>(size,
+                                                               std::numeric_limits<key_type>::min(),
+                                                               std::numeric_limits<key_type>::max(),
+                                                               seed_value + seed_value_addition);
         }
 
         std::vector<offset_type> offsets(3);
@@ -532,11 +531,11 @@ inline void sort_keys_unspecified_ranges()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> begin_offsets;
@@ -715,11 +714,11 @@ inline void sort_pairs()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> offsets;
@@ -912,11 +911,11 @@ inline void sort_pairs_unspecified_ranges()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<value_type> values_input(size);
@@ -1138,11 +1137,11 @@ inline void sort_keys_double_buffer()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> offsets;
@@ -1295,11 +1294,11 @@ inline void sort_pairs_double_buffer()
             }
             else
             {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    _HIPCUB_STD::numeric_limits<key_type>::min(),
-                    _HIPCUB_STD::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition);
+                keys_input
+                    = test_utils::get_random_data<key_type>(size,
+                                                            std::numeric_limits<key_type>::min(),
+                                                            std::numeric_limits<key_type>::max(),
+                                                            seed_value + seed_value_addition);
             }
 
             std::vector<offset_type> offsets;

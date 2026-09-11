@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,6 @@
 
 #if defined(__HIPSTDPAR__)
 
-#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/mismatch.h>
 
@@ -72,7 +71,7 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
   const auto n1 = l1 - f1;
   const auto n  = ::std::min(n0, n1);
 
-  const auto m = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1);
+  const auto m = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1);
 
   if (m.first == f0 + n)
   {
@@ -113,7 +112,7 @@ inline bool lexicographical_compare(execution::parallel_unsequenced_policy, I0 f
   const auto n1 = l1 - f1;
   const auto n  = ::std::min(n0, n1);
 
-  const auto m = THRUST_NS_QUALIFIER::mismatch(THRUST_NS_QUALIFIER::device, f0, f0 + n, f1, [=](auto&& x, auto&& y) {
+  const auto m = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1, [=](auto&& x, auto&& y) {
     return !r(x, y) && !r(y, x);
   });
 
