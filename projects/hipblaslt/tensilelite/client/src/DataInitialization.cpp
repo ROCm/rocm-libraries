@@ -1785,29 +1785,29 @@ namespace TensileLite
                 // unchanged descriptor means both the canonical scale and the cached
                 // swizzled bytes are still valid. gfx950 is excluded because its
                 // preswizzle choice also depends on the current solution's MI shape.
-                if(m_mxScaleLayout == MXScaleLayout::GFX1250 && descriptorsUnchanged)
+                if(m_mxScaleLayout == MxScaleStorageLayout::Gfx1250 && descriptorsUnchanged)
                 {
                     return;
                 }
 
                 auto const cachedSwizzled = m_mxSwizzledDescriptor.find(scaleTensorEnum);
                 bool const hasMatchingSwizzledScale
-                    = swizzleLayout != MXScaleLayout::None
+                    = swizzleLayout != MxScaleStorageLayout::None
                       && cachedSwizzled != m_mxSwizzledDescriptor.end()
                       && cachedSwizzled->second == scaleDesc;
 
                 // A canonical-only upload means gpuInput.valid no longer holds a
                 // trustworthy swizzled scale for this tensor, so clear the cache tag
                 // before any later reuse decision observes stale metadata.
-                if(swizzleLayout == MXScaleLayout::None)
+                if(swizzleLayout == MxScaleStorageLayout::None)
                     m_mxSwizzledDescriptor.erase(scaleTensorEnum);
 
                 // gfx950 can skip regeneration only when the descriptor is unchanged
                 // and any required preswizzled copy is already known to match this
                 // scale descriptor. When that cache hit happens, remember that
                 // gpuInput.valid already contains the solution-ready layout.
-                if(m_mxScaleLayout == MXScaleLayout::GFX950 && descriptorsUnchanged
-                   && (swizzleLayout == MXScaleLayout::None || hasMatchingSwizzledScale))
+                if(m_mxScaleLayout == MxScaleStorageLayout::Gfx950 && descriptorsUnchanged
+                   && (swizzleLayout == MxScaleStorageLayout::None || hasMatchingSwizzledScale))
                 {
                     if(hasMatchingSwizzledScale)
                         *preswizzledFlag = true;
@@ -2570,7 +2570,8 @@ namespace TensileLite
                         ptr = p.gpuInput.valid.get();
                     }
                     else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
-                            (m_mxScaleLayout == MXScaleLayout::GFX1250 || m_mxScaleLayout == MXScaleLayout::GFX950)
+                            (m_mxScaleLayout == MxScaleStorageLayout::Gfx1250
+                             || m_mxScaleLayout == MxScaleStorageLayout::Gfx950)
                             && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
                     {
                         // Already swizzled, and initOneMXSide kept the source bytes
