@@ -475,7 +475,7 @@ def _true16_half_int(op: Any) -> int:
     return _StHalf.NONE
 
 
-def _apply_true16(inst: Any, dst: Any, srcs: Any) -> None:
+def _apply_true16(inst: Any, dst: Any, srcs: Any, dst1: Any = None) -> None:
     """Attach a True16 (.l/.h) modifier derived from ``t16``-tagged operands.
 
     ``t16`` carries the half on a ``_True16Wrap`` whose register lowers to a
@@ -488,10 +488,12 @@ def _apply_true16(inst: Any, dst: Any, srcs: Any) -> None:
     if not hasattr(inst, "set_true16"):
         return
     dst0 = _true16_half_int(dst) if dst is not None else _StHalf.NONE
+    dstHi = _true16_half_int(dst1) if dst1 is not None else _StHalf.NONE
     src_sels = [_true16_half_int(s) for s in srcs]
-    if dst0 == _StHalf.NONE and all(s == _StHalf.NONE for s in src_sels):
+    if (dst0 == _StHalf.NONE and dstHi == _StHalf.NONE
+            and all(s == _StHalf.NONE for s in src_sels)):
         return
-    inst.set_true16(int(dst0), int(_StHalf.NONE), [int(s) for s in src_sels])
+    inst.set_true16(int(dst0), int(dstHi), [int(s) for s in src_sels])
 
 
 # gfx12+ style suffix on ``s_load_*`` (matches rocisa ``ReadWriteInstruction``
@@ -853,7 +855,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
                 op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
                 byte_sel=list(getattr(v, "byte_sel", None) or []),
             )
-        _apply_true16(inst, self.dst, self.srcs)
+        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -902,7 +904,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         inst = factory(dst_reg, src_reg, comment=self.comment)
         if getattr(self, 'vop3', None) is not None:
             inst.set_vop3(op_sel=self.vop3.op_sel)
-        _apply_true16(inst, self.dst, self.srcs)
+        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1349,7 +1351,7 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
                 op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
                 byte_sel=list(getattr(v, "byte_sel", None) or []),
             )
-        _apply_true16(inst, self.dst, self.srcs)
+        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1405,7 +1407,7 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
         # srcs = [shiftHex, value]; the true16 half rides on dst/value (the shift
         # amount has no half). Sels align with printed source positions.
-        _apply_true16(inst, self.dst, self.srcs)
+        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1547,7 +1549,7 @@ class VCndMaskB16(CommonInstruction):
         src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
         inst = _st.VCndMaskB16(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
         # src2 is the VCC mask (no half); align sels with printed src positions.
-        _apply_true16(inst, self.dst, self.srcs[:2])
+        _apply_true16(inst, self.dst, self.srcs[:2], self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -2097,7 +2099,7 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        _apply_true16(inst, self.dst, self.srcs)
+        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -5253,6 +5255,14 @@ class _True16Wrap:
         return self.toString()
 
 
+def _input_with_half(src: Any, sel: Any) -> Any:
+    from .container import RegisterContainer
+
+    if isinstance(src, RegisterContainer):
+        return _True16Wrap(src, sel)
+    return src
+
+
 def t16(reg: Any, sel: Any) -> Any:
     """NoSDWA-gated true16 half-select (extension.hpp::t16).
 
@@ -5263,7 +5273,7 @@ def t16(reg: Any, sel: Any) -> Any:
     from .base import getArchCaps  # noqa: WPS433
 
     if reg is not None and getArchCaps().get("NoSDWA", 0):
-        return _True16Wrap(reg, sel)
+        return _input_with_half(reg, sel)
     return reg
 
 
@@ -5274,7 +5284,7 @@ def ECvtF16toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
     if getArchCaps().get("NoSDWA", 0):
-        return VCvtF16toF32(dst=dst, src=_True16Wrap(src, sel), comment=comment)
+        return VCvtF16toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtF16toF32(
@@ -5288,11 +5298,17 @@ def ECvtF32toF16(dst: Any, src: Any, sel: Any = None, comment: str = "") -> Any:
     from .container import SDWAModifiers  # noqa: WPS433
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
-    if sel is None:
-        return VCvtF32toF16(dst=dst, src=src, comment=comment)
+    noSDWA = getArchCaps().get("NoSDWA", 0)
 
-    if getArchCaps().get("NoSDWA", 0):
-        return VCvtF32toF16(dst=_True16Wrap(dst, sel), src=src, comment=comment)
+    if sel is None:
+        # Plain 16-bit cvt is legal only on legacy; true16 must select a half
+        # (a suffix-less v_cvt_f16_f32 is fake16 and rejected by +real-true16).
+        if not noSDWA:
+            return VCvtF32toF16(dst=dst, src=src, comment=comment)
+        sel = HighBitSel.LOW
+
+    if noSDWA:
+        return VCvtF32toF16(dst=_input_with_half(dst, sel), src=src, comment=comment)
 
     dst_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtF32toF16(
@@ -5307,9 +5323,7 @@ def ECvtPkFP8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
     if getArchCaps().get("NoSDWA", 0):
-        # Match native rocisa (extension.hpp): the true16 half rides on the src
-        # operand (.l/.h) only — no op_sel (which would double-encode the half).
-        return VCvtPkFP8toF32(dst=dst, src=_True16Wrap(src, sel), comment=comment)
+        return VCvtPkFP8toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtPkFP8toF32(
@@ -5324,9 +5338,7 @@ def ECvtPkBF8toF32(dst: Any, src: Any, sel: Any, comment: str = "") -> Any:
     from .enum import HighBitSel, SelectBit  # noqa: WPS433
 
     if getArchCaps().get("NoSDWA", 0):
-        # Match native rocisa (extension.hpp): the true16 half rides on the src
-        # operand (.l/.h) only — no op_sel (which would double-encode the half).
-        return VCvtPkBF8toF32(dst=dst, src=_True16Wrap(src, sel), comment=comment)
+        return VCvtPkBF8toF32(dst=dst, src=_input_with_half(src, sel), comment=comment)
 
     src0_sel = SelectBit.WORD_1 if sel == HighBitSel.HIGH else SelectBit.WORD_0
     return VCvtPkBF8toF32(
@@ -5355,16 +5367,15 @@ def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
         )
 
     if getArchCaps().get("NoSDWA", 0):
-        # Match native rocisa (extension.hpp VCvtBF16toFP32): the true16 half rides
-        # on the src operand (.l/.h) only — no op_sel (avoids double-encoding).
         sel = HighBitSel.HIGH if (vi % 2) == 1 else HighBitSel.LOW
         return PVCvtBF16toFP32(
-            dst=dst, src=_True16Wrap(src, sel), comment="cvt bf16 to f32",
+            dst=dst, src=_input_with_half(src, sel),
+            comment="cvt bf16 to fp32. " + comment,
         )
 
     src0_sel = SelectBit.WORD_1 if (vi % 2) == 1 else SelectBit.WORD_0
     return PVCvtBF16toFP32(
         dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel),
-        comment="cvt bf16 to f32",
+        comment="cvt bf16 to fp32. " + comment,
     )
 
