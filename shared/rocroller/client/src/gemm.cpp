@@ -148,8 +148,7 @@ namespace rocRoller::Client::GEMMClient
                                                                         scaleBlockSize,
                                                                         problemParams.alpha,
                                                                         problemParams.beta);
-        const auto hostReference
-            = host_numerics::convertHostReferenceTensor<D>(floatReference);
+        const auto hostReference  = host_numerics::convertHostReferenceTensor<D>(floatReference);
         const auto acceptableError
             = host_numerics::acceptableGEMMError<A, B, D>(problemParams.k, arch.target());
         const auto comparison
@@ -197,13 +196,13 @@ namespace rocRoller::Client::GEMMClient
 
         using PackedTypeA = typename PackedTypeOf<A>::type;
         using PackedTypeB = typename PackedTypeOf<B>::type;
-        std::vector<PackedTypeA> hostA;
-        std::vector<PackedTypeB> hostB;
-        std::vector<C>           hostC;
+        std::vector<PackedTypeA>   hostA;
+        std::vector<PackedTypeB>   hostB;
+        std::vector<C>             hostC;
         roc::host_numerics::Tensor hostD(
             host_numerics::HostReferenceDetail::outputScalarType<D>(),
             host_numerics::hostOutputLayout(problemParams.m, problemParams.n));
-        std::vector<uint8_t>     hostScaleA, hostScaleB;
+        std::vector<uint8_t> hostScaleA, hostScaleB;
 
         constexpr auto seed           = 31415u;
         auto           scaleTypeA     = DataType::None;
@@ -241,9 +240,9 @@ namespace rocRoller::Client::GEMMClient
                                                                  -1.f,
                                                                  1.f,
                                                                  seed);
-        hostA = host_numerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
-        hostB = host_numerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
-        hostC = host_numerics::copyTensorStorage<C>(generatedInputs.c);
+        hostA                = host_numerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+        hostB                = host_numerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+        hostC                = host_numerics::copyTensorStorage<C>(generatedInputs.c);
         if(generatedInputs.scaleA)
             hostScaleA = host_numerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
         if(generatedInputs.scaleB)
