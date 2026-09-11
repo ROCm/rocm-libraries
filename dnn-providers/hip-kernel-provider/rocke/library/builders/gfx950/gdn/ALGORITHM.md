@@ -1,10 +1,13 @@
-# Gated DeltaNet (GDN) — design doc
+# Gated DeltaNet (GDN) — algorithm and design
 
 > **Scope.** The GDN operator family on gfx950: a dedicated single-token **decode** kernel and a
 > chunkwise **prefill** forward that ships as a mode of the existing KDA chunkwise kernel.
 > This document specifies *what* the kernels compute and *why they are shaped the way they are*.
 > It is a specification, not a tuning history, and it carries **no measurements** — latency is
 > recorded in the internal perf repository per repository compliance.
+>
+> **This file is the entry point for the family.** Its sibling `README.md` covers the host-side
+> tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute.
 
 ---
 
