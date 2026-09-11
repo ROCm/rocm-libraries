@@ -146,7 +146,8 @@ def getAllCustomKernelNames(directory=None):
         return custom_kernel_names()
     # Sorted in alphabetical order so that custom-kernel enumeration (notably the CustomKernels: ["*"]
     # wildcard) does not depend on os.listdir order, which varies with the
-    # filesystem and with how the package was installed.
+    # filesystem and with how the package was installed. iterCustomKernelFiles
+    # walks vendor subdirectories (aiter/, tensile/, ...).
     return sorted(os.path.basename(path)[:-2] for path in iterCustomKernelFiles(directory))
 
 def getCustomKernelContents(name, directory=None):
@@ -158,7 +159,7 @@ def getCustomKernelContents(name, directory=None):
         except Exception as error:
             raise RuntimeError(f"Failed to find custom kernel: {name}") from error
     try:
-        with open(os.path.join(directory, f"{name}.s")) as f:
+        with open(getCustomKernelFilepath(name, directory)) as f:
             return f.read()
     except OSError as e:
         raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name))) from e

@@ -7,7 +7,6 @@ import pytest
 
 import Tensile.CustomKernels as CustomKernels
 
-
 pytestmark = pytest.mark.unit
 
 KNOWN_CUSTOM_KERNEL = (
