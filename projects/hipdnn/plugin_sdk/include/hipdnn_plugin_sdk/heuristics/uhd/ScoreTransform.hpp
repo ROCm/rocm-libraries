@@ -17,9 +17,11 @@ namespace hipdnn_plugin_sdk::uhd
 /// `score.transform` names that transform so a consumer can invert it and recover the
 /// declared `score.units` — which is what makes cross-engine comparison meaningful.
 ///
-/// The set of transforms is closed: a descriptor naming one we cannot invert is
-/// rejected at load (see EngineRegistry::registerEngine) rather than silently
-/// reporting a transformed number as if it were in the declared units.
+/// The set of transforms is closed: a descriptor naming one we cannot invert is rejected
+/// when it is parsed (`parseUhdConfig`'s `score` block) and again where an engine binds an
+/// L1 model (`prediction_detail::validateBinding`), rather than silently reporting a
+/// transformed number as if it were in the declared units. `isSupported` below is that gate;
+/// both call it, so there is one vocabulary and not a copy per call site.
 namespace score_transform
 {
 
@@ -65,7 +67,8 @@ inline std::string supportedTransformList()
 /// @param rawScore Score from the model.
 /// @param transform Transform name from UhdConfig::scoreTransform. Must be one of
 ///        SUPPORTED_TRANSFORMS; unknown names fall through unchanged, which is only
-///        safe because registration rejects them first.
+///        safe because `isSupported` rejects them at parse (and again at L1 binding),
+///        so no path reaches here with a name this function cannot invert.
 /// @returns Score in the units declared by the UHD.
 inline double applyInverse(double rawScore, const std::string& transform)
 {

@@ -27,14 +27,19 @@ PROVENANCE = {"ued": {"id": UED, "revision": "1.0"},
               "kmd": {"id": KMD, "revision": "1.0"}, "umd": []}
 
 
-def measurement(*, engine=7, graph="graph", elapsed=2.0):
+def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5):
     name = f"provider:engine{engine}"
     return {"engine_id": engine, "engine_name": name, "graph_id": graph, "device_id": "board",
             "arch": "gfx942", "binding": {"engine": name, "role": ROLE, "arch": "gfx942",
             "selector_revision": "provider-1/immediate-2/library-3",
             "trained_against": copy.deepcopy(PROVENANCE)},
             "features": {"graph.flops": 2e12, "graph.nodes": 1, "device.cu_count": 120},
-            "robustMeanMs": elapsed, "is_valid": True,
+            # RFC 0019.13 §11.2 (:2003) pins a calibrated score to `avgTimeMs`, so that
+            # is the label. `robustMeanMs` rides along as §8.5's informational statistic
+            # and is deliberately a DIFFERENT number here: a label read from the wrong
+            # column produces a wrong TFLOPS rather than the same one.
+            "avgTimeMs": elapsed, "robustMeanMs": robust,
+            "stddevMs": 0.05, "iters": 30, "is_valid": True,
             "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
 
 
@@ -57,9 +62,14 @@ def bundle(row, prediction, training_keys=()):
                            scorer=lambda frame: np.full(len(frame), prediction))
 
 
-def test_import_derives_physical_throughput_from_full_graph_and_robust_timing():
+def test_import_derives_physical_throughput_from_full_graph_and_mean_timing():
+    """§11.2 (:2003)/§10.6.2 (:1914-1916): a calibrated score trains on `avgTimeMs`."""
     row = normalize_row(measurement())
+    # 2e12 flops / (2.0 ms * 1e9). Off robustMeanMs=2.5 this would read 800.
     assert row["tflops"] == 1000.0
+    assert row["timing_statistic"] == "avgTimeMs"
+    assert row["robustMeanMs"] == 2.5, "§8.5's statistic stays, informationally"
+    assert (row["stddevMs"], row["iters"]) == (0.05, 30), "§8.3's noise columns survive"
     assert normalize_row(row)["tflops"] == row["tflops"]
 
 
@@ -80,12 +90,17 @@ def test_unknown_work_count_and_supplied_rate_are_not_substitutes_for_flops():
         normalize_row(row)
 
 
-@pytest.mark.parametrize("where", ["envelope", "feature", "expression", "sweep"])
+@pytest.mark.parametrize("where", ["envelope", "feature", "expression", "sweep", "label"])
 def test_candidate_information_cannot_enter_an_l1_corpus_or_recipe(where):
     row = measurement()
     if where == "expression":
         with pytest.raises(ValueError):
             validate_signature([{"/": ["$graph.flops", "$kernel.tile_m"]}])
+    elif where == "label":
+        # The label is envelope, never input: a feature that reads it would be fitting
+        # the answer. `_LEAKED_FIELDS` is exempted for the row, never for the recipe.
+        with pytest.raises(ValueError):
+            validate_signature(["$graph.avgTimeMs"])
     elif where == "sweep":
         with pytest.raises(ValueError):
             normalize_corpus(pd.DataFrame([row, copy.deepcopy(row)]))
@@ -176,7 +191,7 @@ def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifac
     for index in range(24):
         row = measurement(graph=f"graph-{index}")
         row["features"]["graph.flops"] = float(2e9 * (index + 1))
-        row["robustMeanMs"] = (index + 1) / (1 + index / 240)
+        row["avgTimeMs"] = (index + 1) / (1 + index / 240)
         rows.append(row)
     (root / "engine.ued.json").write_text(json.dumps({"version": "1.0", "id": UED,
         "name": rows[0]["engine_name"], "metadata": KMD}), encoding="utf-8")

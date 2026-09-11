@@ -21,13 +21,15 @@ from .coverage import device_field_coverage, enforce_device_coverage, propose_fe
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
 from .provenance import snapshot_provenance
-from .immediate import ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
+from .immediate import LABEL_STATISTIC, ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
 
 logger = logging.getLogger(__name__)
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--graphs", nargs="+", required=True, help="Graph JSON files or corpus directories (recursive)")
+    parser.add_argument("--graphs", nargs="+", required=True,
+                        help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
+                             "as problems/*.fb -- or corpus directories (recursive)")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
     parser.add_argument("--engine", help="UED name/UUID or canonical immediate engine name")
     parser.add_argument("--engine-id", required=True, type=int, help="Public hipDNN engine ID used by hipdnn_bench")
@@ -116,6 +118,11 @@ def _knob_tuple(candidate: dict) -> tuple:
     return tuple(sorted(knobs.items()))
 
 
+def _finite_positive(value) -> bool:
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and value > 0)
+
+
 def collect_graph(command: list[str], environment: dict, log_dir: Path, commands: list,
                   *, engine_descriptor_id: str) -> tuple[list[dict], set[str]]:
     """Enumeration and timing must agree on identity, bindings and the exact tuple."""
@@ -198,6 +205,11 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
                "engine": first["engine_id"], "kernel": candidate["id"], "is_valid": result["is_valid"],
                "succeeded": result.get("succeeded"), "skip_reason": result.get("skip_reason"),
                "robustMeanMs": elapsed, "minTimeMs": result.get("min_time_ms"), "avgTimeMs": result.get("avg_time_ms"),
+               # RFC 0019.13 §8.3 makes `stddevMs` and `iters` columns of the result
+               # envelope and §8.5 records the spread "so it can be used, not merely
+               # stored": `evaluate`'s tie band keys on exactly these two names and is
+               # inert on a corpus that drops them.
+               "stddevMs": result.get("stddev_ms"), "iters": result.get("iterations"),
                "knob_settings": json.dumps(candidate["knob_settings"], sort_keys=True)}
         for mapping in (first["problem_features"], first["device_features"], candidate["kernel_features"]):
             collision = set(row) & set(mapping)
@@ -205,6 +217,14 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
                 raise ValueError(f"published feature names collide with envelope fields: {sorted(collision)}")
             row.update(mapping)
             published.update(mapping)
+        # RFC 0019.13 §8.3 (:1501-1506) derives throughput as `flops / time`, and §8.4
+        # names the same quantity as the target. Derived here, where the engine's own
+        # published `graph.flops` has just been merged in, so the corpus carries the
+        # calibrated column rather than leaving the caller to reconstruct it. The mean,
+        # not the robust mean: §11.2 (:2003) pins a calibrated score to `avgTimeMs`.
+        work, average = row.get("graph.flops"), row["avgTimeMs"]
+        if (_finite_positive(work) and _finite_positive(average)):
+            row["tflops"] = work / (average * 1e9)
         rows.append(row)
     return rows, published
 
@@ -246,9 +266,12 @@ def run_generate(args: argparse.Namespace) -> int:
         graphs = set()
         for supplied in args.graphs:
             path = Path(supplied).resolve()
-            graphs.update(path.rglob("*.json") if path.is_dir() else [path])
+            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
+            # `problems/<operation>_<n>.fb`, so a generated corpus composes with
+            # `generate` only if that form is collected alongside hand-written JSON.
+            graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
         if not graphs or any(not path.is_file() for path in graphs):
-            raise ValueError("--graphs must identify existing graph JSON files")
+            raise ValueError("--graphs must identify existing graph .json or .fb files")
         if immediate:
             if args.knob or args.dim_tile:
                 raise ValueError("L1 generation cannot use kernel knobs or dimension/tile candidate features")
@@ -278,10 +301,15 @@ def run_generate(args: argparse.Namespace) -> int:
         rows, commands, graph_inputs = [], [], []
         published = set()
         for graph_index, graph in enumerate(sorted(graphs)):
-            saved_graph = stage / "graphs" / f"{graph_index:06d}.json"
+            payload = graph.read_bytes()
+            # `hipdnn_bench` tells the two serialized forms apart by content rather than
+            # by extension, so a renamed file still loads; the staged copy follows the
+            # same rule and keeps whichever form the source was in.
+            binary = not payload.lstrip().startswith(b"{")
+            saved_graph = stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
             saved_graph.parent.mkdir(exist_ok=True)
-            if immediate:
-                graph_document = json.loads(graph.read_text(encoding="utf-8"))
+            if immediate and not binary:
+                graph_document = json.loads(payload.decode("utf-8"))
                 if not isinstance(graph_document, dict):
                     raise ValueError("graph input must be a JSON object")
                 if not graph_document.get("id"):
@@ -289,9 +317,13 @@ def run_generate(args: argparse.Namespace) -> int:
                     graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
                 _write_json(saved_graph, graph_document)
             else:
-                shutil.copyfile(graph, saved_graph)
+                # A serialized graph already carries its own id, and the bench preserves
+                # it across the deserialize/serialize round trip it does for L1, so there
+                # is nothing to inject: the identity the corpus records is the one the
+                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+                saved_graph.write_bytes(payload)
             graph_inputs.append({"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
-                                 "sha256": hashlib.sha256(graph.read_bytes()).hexdigest()})
+                                 "sha256": hashlib.sha256(payload).hexdigest()})
             command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
             if args.plugin_dir:
                 command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
@@ -324,6 +356,27 @@ def run_generate(args: argparse.Namespace) -> int:
         usable = frame.copy() if immediate else frame[frame["is_valid"] & frame["succeeded"].eq(True)].copy()
         if usable.empty:
             raise ValueError("the benchmark produced no successful valid timings")
+        if immediate:
+            target, objective, units, calibrated, statistic = "tflops", "max", "tflops", True, LABEL_STATISTIC
+        elif "tflops" in usable.columns and bool(usable["tflops"].gt(0).all()):
+            # RFC 0019 §11.1 (:1501-1506) gives `sort_kernel_catalog` a cross-engine
+            # role, and §11.2's `B only` ranking row exists only for a score that is a
+            # comparable absolute quantity. A millisecond score ranks this engine's own
+            # catalog just as well and forfeits both -- legal under RFC 0019.13 §2.5
+            # (:122-123) and §15.1 (:2387-2390), but a smaller model than the role is.
+            # `avgTimeMs` rather than the robust mean because §11.2 (:2003) pins a
+            # calibrated score to the mean.
+            target, objective, units, calibrated, statistic = "tflops", "max", "tflops", True, LABEL_STATISTIC
+        else:
+            target, objective, units, calibrated, statistic = "robustMeanMs", "min", "ms", False, "robustMeanMs"
+            logger.warning(
+                "Not every measured candidate carries a positive graph.flops and avgTimeMs, so "
+                "%s is trained on robustMeanMs/min with score.calibrated=false. That ranks this "
+                "engine's catalog correctly (RFC 0019.13 §2.5, §15.1) but forfeits the "
+                "cross-engine role RFC 0019 §11.1 gives it: the score is not comparable with "
+                "another engine's, so §11.2's `B only` ranking row does not apply and Mode B "
+                "falls back to this engine's L1 prediction instead of its configuration score.",
+                args.role)
         grouping = resolve_grouping(frame)
         split = split_problems(problem_keys(frame, grouping), args.eval_fraction, args.seed)
         train_frame = usable[~problem_keys(usable, grouping).isin(split.eval_problems)]
@@ -366,14 +419,15 @@ def run_generate(args: argparse.Namespace) -> int:
         _write_json(stage / "train.json", train_frame.to_dict(orient="records"))
         train_args = ["train", "--input", str(stage / "train.json"), "--feature-signature", str(stage / "features.json"),
                       "--provenance", str(stage / "provenance.json"),
-                      "--target", "tflops" if immediate else "robustMeanMs",
-                      "--objective", "max" if immediate else "min",
-                      "--score-units", "tflops" if immediate else "ms",
+                      "--target", target, "--objective", objective, "--score-units", units,
+                      "--timing-statistic", statistic,
                       "--role", args.role, "--group-by", *grouping.columns, "--output-dir", str(stage / "model"),
                       "--name", args.name, "--num-boost-round", str(args.num_boost_round),
                       "--early-stopping", str(args.early_stopping), "--training-arches", *arches]
+        if calibrated:
+            train_args.append("--calibrated")
         if immediate:
-            train_args.extend(["--calibrated", "--arch", args.arch or arches[0]])
+            train_args.extend(["--arch", args.arch or arches[0]])
         if args.uhd_id:
             train_args.extend(["--uhd-id", args.uhd_id])
         if args.feature_evaluator:
@@ -438,8 +492,16 @@ def run_generate(args: argparse.Namespace) -> int:
         print(f"Generated {'installable' if args.no_promote else 'installed'} UHD: {output / 'model'}")
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:
-        logger.error("%s", error)
+        # The stage holds hours of benchmarking -- the collected corpus, the captured
+        # command output, and by this point often a trained model too. RFC 0019.13 §8.7:
+        # "measurements outlive the strategy that requested them", so a failure anywhere
+        # after collection reports where they are instead of deleting them. Every path
+        # that raises after `collect_graph` reaches here, including the empty-holdout
+        # check, which fires before the stage is renamed into place. It is removed only
+        # by the successful rename below, so nothing is left behind by a run that worked.
+        if stage is not None and stage.exists():
+            logger.error("%s; the collected corpus and any trained model are preserved at %s "
+                         "(delete it once you no longer need the measurements)", error, stage)
+        else:
+            logger.error("%s", error)
         return 1
-    finally:
-        if stage is not None:
-            shutil.rmtree(stage)

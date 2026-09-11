@@ -25,6 +25,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
@@ -718,6 +719,35 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
                     .has_value());
 }
 
+TEST(TestIngestorUhdKernelHeuristic, ATransformTheRuntimeCannotInvertIsRefusedAtLoad)
+{
+    // RFC 0019 §4 and §11.3: `score.transform` exists so a consumer can invert it and recover
+    // `score.units`. A name with no inverse here reaches applyInverse, falls through its
+    // identity branch, and reports the transformed number as if it were TFLOPS -- still
+    // positive, still ordered correctly, so no assertion on the winner can see it. That is why
+    // the vocabulary is closed and closed at parse: the descriptor never becomes a heuristic.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_unknown_transform");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+
+    auto document = uhdDocument(fixture.modelFileName, "max", /*calibrated=*/true);
+    document["score"]["transform"] = "zscore";
+    EXPECT_FALSE(parseUhd(document, dir.path() / "test.uhd.json").has_value())
+        << "a UHD naming a transform with no inverse loaded";
+
+    // The gate rejects what it cannot invert, not everything it did not expect: every name
+    // score_transform advertises still loads, so the format and the runtime say the same thing.
+    for(const auto* known : uhd::score_transform::SUPPORTED_TRANSFORMS)
+    {
+        if(*known == '\0')
+        {
+            continue; // "no transform" is spelled as an absent key, which the schema requires
+        }
+        document["score"]["transform"] = known;
+        EXPECT_TRUE(parseUhd(document, dir.path() / "test.uhd.json").has_value())
+            << "a supported transform was refused: " << known;
+    }
+}
+
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngineEstimate)
 {
     // RFC 0019 §11.1's stopgap for `predict_engine_tflops`: with no distinct estimate model,
@@ -725,6 +755,10 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     // *same* number the ranking put first -- an estimate derived from a second traversal could
     // disagree with the kernel actually selected, and the engine would be ranked on a plan it
     // is not going to run.
+    //
+    // Same by construction now rather than by coincidence: estimateTflops is calibratedRanking's
+    // top entry. It used to be rankScored's top entry gated on a separate `scoreIsCalibrated()`
+    // flag, and the two answered from different places once §8.3 resolution was involved.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_engine_estimate");
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
@@ -740,6 +774,96 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     EXPECT_DOUBLE_EQ(estimate,
                      heuristic->rankScored(catalogAgainstPriority(2048), context).front().score);
     EXPECT_GT(estimate, 0.0) << "a real estimate must outrank the 0 a declining engine reports";
+
+    // And it is the calibrated ranking's own top entry, which is what makes disagreement
+    // unrepresentable rather than merely untested.
+    std::string modelId;
+    const auto calibrated
+        = heuristic->calibratedRanking(catalogAgainstPriority(2048), context, modelId);
+    ASSERT_FALSE(calibrated.empty());
+    EXPECT_DOUBLE_EQ(estimate, calibrated.front().score);
+    EXPECT_FALSE(modelId.empty()) << "a calibrated ranking did not name the model it came from";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchitectureItNames)
+{
+    // §8.3's first step, at the estimate. Calibration used to be read off the heuristic object's
+    // own `_config`, and a resolver built from per-arch entries with no `default` holds no
+    // config at all -- so the flag read false and the engine reported the 0 distrust sentinel on
+    // the very architecture it shipped a calibrated model for. §11.3's comparison then ranked it
+    // beneath every engine that answered, while its ranking was calibrated TFLOPS all along.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_estimate_per_arch");
+    const auto onNine42
+        = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"gfx942", modelDescriptor(dir.path(), onNine42)}};
+
+    // No descriptor: there is no `default` for the loader to have resolved.
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    EXPECT_GT(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
+        << "an engine holding a calibrated model for this architecture declined to estimate";
+
+    // The estimate follows the model that would rank, not the object holding the map: an
+    // architecture this UED names nothing for still reports §5 step 7's zero.
+    auto unnamed = gfx942();
+    unnamed.gcnArchName = "gfx1100";
+    EXPECT_DOUBLE_EQ(
+        heuristic->estimateTflops(catalogAgainstPriority(2048), MatchContext{graph, 0, unnamed}),
+        0.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalibratedTflops)
+{
+    // The other direction of the same defect, and the dangerous one. The flag answered from the
+    // `default` entry the resolver was built with while the gfx942 entry did the ranking, so a
+    // UED whose default is calibrated and whose gfx942 model is not put that model's
+    // uncalibrated score on §11.3's cross-engine TFLOPS scale -- a number in no particular units
+    // compared against real throughputs.
+    const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_estimate_mixed_default");
+    const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_estimate_mixed_gfx942");
+    const auto fallback
+        = writeFixture(defaultDir.path(), preferSmallTiles(), "max", {}, /*calibrated=*/true);
+    const auto specific
+        = writeFixture(archDir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
+
+    const std::map<std::string, HeuristicDescriptor> byArch{
+        {"default", modelDescriptor(defaultDir.path(), fallback)},
+        {"gfx942", modelDescriptor(archDir.path(), specific)}};
+
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, byArch);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+
+    // The gfx942 model is the one ranking: it prefers large tiles where the default prefers
+    // small, so the winner identifies which of the two produced the score being estimated from.
+    const auto ranked = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(ranked.size(), 2U);
+    ASSERT_EQ(ranked.front().kernelId, testId(0x02)) << "the default model ranked, not gfx942's";
+
+    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
+        << "an uncalibrated model's score was reported as calibrated TFLOPS";
+
+    // gfx1100 does fall through to the calibrated `default`, and still estimates zero -- for the
+    // second reason calibratedRanking is stricter than the flag was: that model was trained for
+    // gfx942 only. §9.3 keeps ranking with it out of distribution; §5 step 8 withholds the
+    // cross-engine claim. Declining to estimate is not declining to select.
+    auto unnamed = gfx942();
+    unnamed.gcnArchName = "gfx1100";
+    const MatchContext unnamedContext{graph, 0, unnamed};
+    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), unnamedContext), 0.0);
+    EXPECT_FALSE(heuristic->rankScored(catalogAgainstPriority(2048), unnamedContext).empty())
+        << "withholding the estimate stopped the engine selecting";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
@@ -1402,24 +1526,46 @@ TEST(TestIngestorUhdKernelHeuristic, InlineFeaturesReachTheTreeScorer)
     EXPECT_GT(ranked.front().score, ranked.back().score);
 }
 
-TEST(TestIngestorUhdKernelHeuristic, SingleCandidateDoesNotLoadOrCacheAMissingModel)
+TEST(TestIngestorUhdKernelHeuristic, ASingleCandidateCarriesItsModelScore)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_lazy_single");
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), "model.bin"), {}, KNOBS);
+    // RFC 0019.13 §15.2's result is `(id, score)` per candidate, and the score is the figure of
+    // merit -- not a field that may be filled in only when the ordering needed it. rankScored
+    // used to shortcut a one-entry catalog through `detail::asScored`, which stamps the 0 that
+    // §5 step 7 reserves for "no measurement", so a healthy model scoring its only surviving
+    // kernel was reported exactly as a degraded ranking. Nothing ordered wrongly, which is why
+    // it stood: the number was simply a claim the runtime had never made.
+    //
+    // The shortcut also skipped §8.3's resolution, which is what kept the model unloaded. That
+    // saving is not compatible with reporting a real score, and the score is what §15.2
+    // promises; resolution is cached per engine and architecture, so the cost is one load.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_single_candidate");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
+
     auto single = catalogAgainstPriority(2048);
-    single.entries.resize(1);
+    single.entries.resize(1); // the small tile, which preferLargeTiles scores 1.0 rather than 0
     const auto sole = heuristic->rankScored(single, context);
     ASSERT_EQ(sole.size(), 1u);
     EXPECT_EQ(sole.front().kernelId, testId(0x01));
-    EXPECT_DOUBLE_EQ(sole.front().score, 0.0);
-    // If construction or singleton selection attempted loading, it would cache the
-    // missing artifact and this first real selection would still be declared order.
-    (void)writeFixture(dir.path(), preferLargeTiles());
-    EXPECT_EQ(heuristic->rankScored(catalogAgainstPriority(2048), context).front().kernelId,
-              testId(0x02));
+    EXPECT_GT(sole.front().score, 0.0) << "the sole candidate reported the no-measurement zero";
+
+    // The same number the full catalog gives that same kernel: how many candidates survived
+    // filtering is not a fact about what one of them is worth.
+    const auto both = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(both.size(), 2u);
+    EXPECT_EQ(both.back().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(sole.front().score, both.back().score);
+
+    // An empty catalog is still answered without resolving anything: there is no candidate to
+    // score, so there is nothing a model could contribute.
+    auto empty = catalogAgainstPriority(2048);
+    empty.entries.clear();
+    EXPECT_TRUE(heuristic->rankScored(empty, context).empty());
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnUnavailableExactArchitectureDoesNotUseDefault)

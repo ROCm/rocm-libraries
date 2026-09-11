@@ -13,6 +13,7 @@
 
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 
 namespace hipdnn_plugin_sdk::uhd
@@ -324,6 +325,17 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         if(score.contains("transform"))
         {
             result.scoreTransform = text(score, "transform", where);
+            // RFC 0019 §4 and §11.3: `score.transform` exists so a consumer can invert it and
+            // recover `score.units`, which is what makes the number comparable. The vocabulary
+            // is therefore closed, and this is where it closes -- an unsupported name reaching
+            // applyInverse falls through its identity branch and reports a transformed number
+            // as if it were in the declared units: still positive, still ordered, and wrong by
+            // whatever the transform was.
+            if(!score_transform::isSupported(result.scoreTransform))
+            {
+                fail("UHD score.transform must be one of "
+                     + score_transform::supportedTransformList() + " in " + where);
+            }
         }
         if(score.contains("calibrated"))
         {

@@ -68,7 +68,7 @@
       "properties": {
         "units": {"type": "string", "minLength": 1},
         "calibrated": {"type": "boolean"},
-        "transform": {"type": "string", "minLength": 1}
+        "transform": {"enum": ["identity", "log1p", "log", "exp", "sqrt"]}
       }
     },
     "static_order": {

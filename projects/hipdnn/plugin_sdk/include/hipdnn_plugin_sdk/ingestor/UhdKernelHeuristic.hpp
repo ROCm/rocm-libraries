@@ -402,16 +402,18 @@ public:
         return scoreCandidate(_extractor->extract(ctx)).reported;
     }
 
-    /// Whatever the UHD declared. §15.1 already refused the one combination that would make
-    /// this incoherent -- calibrated together with a descending objective -- so a calibrated
-    /// score reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine
-    /// comparison to be given.
-    bool scoreIsCalibrated() const override
-    {
-        return _config.scoreCalibrated;
-    }
-
     /// @brief Scores the matching architecture in physical TFLOPS, including a singleton catalog.
+    ///
+    /// The single answer to "is this engine's score comparable against another engine's". It
+    /// replaced a `scoreIsCalibrated()` accessor that read `_config.scoreCalibrated` off *this*
+    /// object: on a resolver built by makeArchResolver that config is the `default` entry's, or
+    /// nothing at all, while the ranking comes from the architecture's own model -- so the flag
+    /// answered for a descriptor that was not the one ranking, in both directions.
+    ///
+    /// RFC 0019.13 §15.1 already refused the one combination that would make a calibrated score
+    /// incoherent -- calibrated together with a descending objective -- so a calibrated score
+    /// reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine comparison to
+    /// be given.
     std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
                                                 const MatchContext& context,
                                                 std::string& modelId) const override
@@ -464,10 +466,19 @@ public:
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {
-        // Selecting a sole candidate needs neither feature bindings nor a model.
-        if(catalog.entries.size() <= 1)
+        // An empty catalog has nothing to order and nothing to score, and saying so needs no
+        // architecture -- the one case that still short-circuits.
+        //
+        // A *sole* candidate no longer does. Its order is settled whatever it scores, but the
+        // score is RFC 0019.13 §15.2's figure of merit and `detail::asScored` stamps the 0 that
+        // §5 step 7 reserves for "no measurement" -- a claim about the model, not about how many
+        // kernels survived filtering. Stamping it for a healthy model made a one-candidate
+        // catalog indistinguishable from a degraded ranking. Resolving and scoring costs one
+        // model load per engine per architecture, cached by resolveForArch, which is what the
+        // number meaning what it says is worth.
+        if(catalog.entries.empty())
         {
-            return detail::asScored(catalog.entries);
+            return {};
         }
         // RFC 0019 §8.3: exact gcnArchName, then `default`. Resolved here rather than at
         // load because descriptor discovery is a process-wide static that runs before any
@@ -740,7 +751,8 @@ private:
     /// one layer up -- "the engine reports an estimated throughput of 0... and loses on merit
     /// rather than by exception" -- and a per-kernel score that means the same thing should say
     /// it the same way. Nothing needs the two distinguished: §15.2's callers use the order, and
-    /// the one caller that reads the value is estimateTflops, which reports 0 for this case too.
+    /// the caller that reads the value is calibratedRanking, which withholds a ranking whose top
+    /// score is not a positive measurement -- so estimateTflops reports 0 for this case too.
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
         const double raw = _adapter->score(row);

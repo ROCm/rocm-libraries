@@ -584,6 +584,121 @@ def test_noise_band_is_not_applied_to_a_target_in_other_units():
     assert "not a millisecond timing column" in report["ties"]["policy"]
 
 
+def test_a_corpus_without_stddev_names_the_missing_column_not_the_units():
+    """§8.3 makes stddevMs required; without it the band is inert, not inapplicable.
+
+    The target here IS a millisecond timing, so the units reason is simply false. The
+    band was permanently off for every corpus `generate` produced, and the report gave
+    the wrong explanation for it.
+    """
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    ).drop(columns=["stddevMs"])
+    result = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+    ties = result.report["ties"]
+
+    assert ties["noise_band_applied"] is False
+    assert "no `stddevMs` column" in ties["policy"]
+    assert "not a millisecond timing column" not in ties["policy"]
+    assert any("NO MEASUREMENT NOISE" in warning for warning in result.report["warnings"])
+
+
+# ---------------------------------------------------------------------------------
+# §11.4 references
+# ---------------------------------------------------------------------------------
+
+
+def test_the_report_carries_the_references_11_4_reads_the_model_against():
+    df = make_corpus(
+        [
+            # Corpus order is the order the engine enumerated its catalog in, which is
+            # the priority/id order Stage 1 ships: static ordering takes the slow one.
+            {"benchmark": "g1", "kernel": "shipped_first", "minTimeMs": 2.0},
+            {"benchmark": "g1", "kernel": "actually_best", "minTimeMs": 1.0},
+        ]
+    )
+    references = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["metrics"]["references"]
+
+    assert references["oracle"]["top1_regret"]["mean"] == 0.0
+    # What the ordering the model replaces costs: 2.0/1.0 - 1.
+    assert references["static_order"]["top1_regret"]["mean"] == pytest.approx(1.0)
+    assert references["static_order"]["topk_recall"]["strict"]["1"] == 0.0
+    assert references["static_order"]["topk_recall"]["strict"]["3"] == 1.0
+    # Uniform choice: one of the two candidates costs 1.0, the other nothing.
+    assert references["random"]["top1_regret"]["mean"] == pytest.approx(0.5)
+    assert references["random"]["topk_recall"]["strict"]["1"] == pytest.approx(0.5)
+
+
+def test_a_model_that_loses_to_static_order_says_so():
+    """§11.4 MUST 2: the one case where shipping is almost certainly wrong."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "shipped_first", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "slower", "minTimeMs": 2.0},
+        ]
+    )
+    result = evaluate_all(
+        df, worst_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    )
+
+    # Static order already picks the oracle; the model picks the other one.
+    assert result.report["metrics"]["references"]["static_order"]["top1_regret"]["mean"] == 0.0
+    assert result.report["metrics"]["top1_regret"]["mean"] == pytest.approx(1.0)
+    assert any("DOES NOT BEAT STATIC ORDER" in warning for warning in result.report["warnings"])
+
+
+def test_a_regime_that_regresses_against_static_order_is_named():
+    """§11.4 MUST 3: aggregate improvement can hide a regression in one regime."""
+    df = make_corpus(
+        [
+            # decode: the model beats the shipped order by a wide margin.
+            {"benchmark": "d1", "kernel": "first", "minTimeMs": 5.0, "regime": "decode"},
+            {"benchmark": "d1", "kernel": "second", "minTimeMs": 1.0, "regime": "decode"},
+            # prefill: the shipped order is already right and the model is not.
+            {"benchmark": "p1", "kernel": "first", "minTimeMs": 1.0, "regime": "prefill"},
+            {"benchmark": "p1", "kernel": "second", "minTimeMs": 1.5, "regime": "prefill"},
+        ]
+    )
+
+    def prefers_second(frame: pd.DataFrame) -> np.ndarray:
+        return np.array([0.0 if name == "second" else 1.0 for name in frame["kernel"]])
+
+    result = evaluate_all(df, prefers_second, target="minTimeMs", objective="min")
+    metrics = result.report["metrics"]
+
+    # Aggregate: the model's (0 + 0.5)/2 against static order's (4.0 + 0)/2, so the
+    # aggregate says "shipped it" and only the per-regime split says otherwise.
+    assert metrics["top1_regret"]["mean"] == pytest.approx(0.25)
+    assert metrics["references"]["static_order"]["top1_regret"]["mean"] == pytest.approx(2.0)
+    assert not any("DOES NOT BEAT STATIC ORDER" in w for w in result.report["warnings"])
+    warning = next(w for w in result.report["warnings"] if "REGIME REGRESSION" in w)
+    assert "prefill" in warning
+    assert "decode" not in warning
+
+
+def test_the_regression_check_11_4_cannot_run_is_declared_rather_than_skipped():
+    """§11.4 MUST 4 needs a previous UHD; there is no loader, so the gap is stated."""
+    df = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "minTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "minTimeMs": 2.0},
+        ]
+    )
+    gaps = evaluate_all(
+        df, oracle_scorer("minTimeMs", "min"), target="minTimeMs", objective="min"
+    ).report["not_implemented"]
+
+    assert any("§11.4 MUST 4" in gap for gap in gaps)
+    assert any("scoring time" in gap for gap in gaps)
+
+
 def test_per_regime_regret_when_the_corpus_carries_a_regime():
     df = make_corpus(
         [

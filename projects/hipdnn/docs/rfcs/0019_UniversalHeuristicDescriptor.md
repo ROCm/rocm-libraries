@@ -2345,11 +2345,16 @@ dependency-gated and land only when a concrete need appears.
     independently, so the Cartesian product of knob ranges addresses a vanishing fraction of a
     sparse catalog ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)), which made generation
     slow for moderate knob spaces and infeasible for large sparse ones. The catalog is now
-    enumerated directly, off the **engine descriptor**, which is where per-engine inspection lives
-    ([RFC 0017 §3](0017_UniversalKernelDescriptor.md)): set
+    enumerated directly, off the **engine descriptor**, which is where per-engine inspection lives.
+    The transport is `hipdnnEnginePluginEnumerateCandidates`, an **optional** engine-plugin export an
+    engine may decline, owned by the plugin SDK ([Section 11.3](#113-cross-engine-comparison)) and
+    named as one of the ABI additions by
+    [RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works) — the clause that until this
+    resolution asserted no engine or plugin-ABI interface was introduced at all, and was amended for
+    it rather than cited against itself. A caller sets
     `HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT`, `HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT` and the
     optional `HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT` knob-choice array before finalizing the
-    engine, then read `HIPDNN_ATTR_ENGINE_CANDIDATES_EXT` with `hipdnnBackendGetAttribute`.
+    engine, then reads `HIPDNN_ATTR_ENGINE_CANDIDATES_EXT` with `hipdnnBackendGetAttribute`.
     Answers to the sub-questions:
     - **Knob tuples, plus ids.** Each entry carries its complete enrolled knob tuple, a stable
       candidate id, and its published `$kernel.*` feature map — not an opaque handle. The tuple is

@@ -249,7 +249,12 @@ TEST_F(TestEnginePredictor, InvalidScoreAndTransformNeverBecomeAvailable)
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
     _features.bind("graph.work", 1000.0);
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
-    cfg.scoreTransform = "sqrt";
+    // An uninvertible transform, not merely an unusual one. `sqrt` stood here while
+    // validateBinding kept its own {identity, log1p} list; it now asks
+    // score_transform::isSupported, which accepts every transform this runtime can invert --
+    // so pinning the gate needs a name no inverse exists for. Recovering TFLOPS from a
+    // z-score needs the training distribution's mean and variance, which no UHD carries.
+    cfg.scoreTransform = "zscore";
     _features.bind("graph.work", 2.0);
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
     cfg.scoreTransform = "identity";

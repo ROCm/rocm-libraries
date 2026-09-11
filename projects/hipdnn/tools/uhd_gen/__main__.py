@@ -259,9 +259,22 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--calibrated",
         action="store_true",
-        help="Declare the score cross-engine comparable (RFC 0019 §12.3). Only pass "
-        "this if the target really is calibrated across engines; it is not verified "
-        "here, and an unwarranted claim silently corrupts cross-engine comparison.",
+        help="Declare the score cross-engine comparable: RFC 0019 §4.1's "
+        "score.calibrated header, which RFC 0019 §11.3 reads when it compares "
+        "predicted throughput across engines. Only pass this if the target really is "
+        "calibrated across engines; it is not verified here, and an unwarranted claim "
+        "silently corrupts cross-engine comparison. RFC 0019.13 §11.2 additionally "
+        "requires --timing-statistic avgTimeMs alongside it.",
+    )
+    parser.add_argument(
+        "--timing-statistic",
+        default=None,
+        dest="timing_statistic",
+        help="Which measured timing the target was derived from (avgTimeMs, "
+        "minTimeMs, robustMeanMs). Recorded in the manifest per RFC 0019.13 §10.5, "
+        "because §11.2 refuses cross-engine comparison between models trained on "
+        "different statistics. Required with --calibrated, which §11.2 pins to "
+        "avgTimeMs.",
     )
     parser.add_argument(
         "--group-by",
@@ -373,7 +386,7 @@ def _resolve_uhd_id(requested: str | None) -> str:
 
 def _run_train(args: argparse.Namespace) -> int:
     from .provenance import snapshot_provenance, validate_provenance
-    from .immediate import ROLE, read_corpus, training_binding, validate_signature
+    from .immediate import LABEL_STATISTIC, ROLE, read_corpus, training_binding, validate_signature
 
     immediate = args.role == ROLE
     binding = None
@@ -404,6 +417,13 @@ def _run_train(args: argparse.Namespace) -> int:
                 raise ValueError("L1 training groups must be benchmark device, never engine/candidate rows")
             args.group_by = ["benchmark", "device"]
             args.calibrated = True
+            # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): L1 always declares a
+            # calibrated score, so its label is `avgTimeMs` and the manifest says so.
+            if args.timing_statistic not in (None, LABEL_STATISTIC):
+                raise ValueError(
+                    f"predict_engine_tflops labels are derived from {LABEL_STATISTIC}; "
+                    f"--timing-statistic {args.timing_statistic} contradicts the corpus")
+            args.timing_statistic = LABEL_STATISTIC
             observed_arches = sorted(df["arch"].unique())
             if args.training_arches and sorted(set(args.training_arches)) != observed_arches:
                 raise ValueError("--training-arches must match the measured immediate corpus")
@@ -428,6 +448,16 @@ def _run_train(args: argparse.Namespace) -> int:
                 before = len(df)
                 df = df[df["is_valid"].astype(str).str.lower() == "true"]
                 logger.info("Dropped %d row(s) with is_valid=False", before - len(df))
+            # RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train
+            # its score on `avgTimeMs`". A calibrated model is the one whose absolute
+            # value gets compared across engines, and minimum- or robust-mean-derived
+            # throughput is optimistically biased, so the claim is checked rather than
+            # trusted. Uncalibrated ranking may use any statistic; it just has to say
+            # which, because §11.2 refuses to compare models trained on different ones.
+            if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
+                raise ValueError(
+                    "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
+                    f"§11.2); got {args.timing_statistic!r}")
         if df.empty:
             raise ValueError("No valid rows to train on")
         signature = (
@@ -535,6 +565,10 @@ def _run_train(args: argparse.Namespace) -> int:
         "dropped_constant_features": dropped, "drop_constant_features": bool(args.drop_constant_features),
         "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
         "score_units": args.score_units or args.target, "score_calibrated": args.calibrated,
+        # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2
+        # refuses cross-engine comparison between models trained on different ones, so
+        # a consumer has to be able to read it off the artifact rather than infer it.
+        "timing_statistic": args.timing_statistic,
         "score_transform": "log1p", "group_by": groups or [], "num_trees": model.num_trees(),
         "feature_importance": {
             name: {"gain": float(gain), "split": int(split)}

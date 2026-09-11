@@ -31,6 +31,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -144,6 +145,18 @@ class ProblemResult:
     #: oracle. Equals `oracle_rank` when nothing ties with it.
     tied_rank: int
     tied_candidates: int
+    #: §11.4's static-order reference: the pick Stage 1's shipped `priority`/`id`
+    #: ordering (§2.1) makes, and where the oracle sits in that ordering. The corpus
+    #: preserves engine enumeration order, so the static pick is this problem's first
+    #: usable candidate row and the static ranking is the row order itself.
+    static_order_value: float
+    static_order_regret: float
+    static_order_oracle_rank: int
+    static_order_tied_rank: int
+    #: §11.4's random reference: uniform choice from `V(p)`. Both figures are exact
+    #: expectations over the candidate set, never sampled, so neither moves run to run.
+    random_regret: float
+    random_tail_fraction: float
 
 
 @dataclass
@@ -339,6 +352,17 @@ def regret_of(picked: float, oracle: float, objective: str) -> float:
     return max(value, 0.0)
 
 
+def _regret_vector(values: np.ndarray, oracle_value: float, objective: str) -> np.ndarray:
+    """`regret_of`, vectorised over one problem's whole candidate set.
+
+    Used wherever a metric needs every candidate's shortfall rather than one pick's:
+    the tie mask, and §11.4's random reference, whose expected regret is the mean of
+    exactly these numbers.
+    """
+    cost = values / oracle_value - 1.0 if objective == "min" else 1.0 - values / oracle_value
+    return np.maximum(cost, 0.0)
+
+
 def _tie_mask(
     values: np.ndarray,
     oracle_position: int,
@@ -367,20 +391,17 @@ def _tie_mask(
       when the target is a millisecond timing column, because `stddevMs` is in
       milliseconds and comparing it against a TFLOPS target would be a units error.
       For `avgTimeMs` the standard error is exactly `stddevMs/sqrt(iters)`; for
-      `minTimeMs` and `robustMeanMs` the sample spread is only a scale for the noise
-      rather than that estimator's own error, so this band is approximate -- and
-      deliberately so, since the alternative is to have no noise notion at all for the
-      §8.5 default statistic.
+      `minTimeMs` -- §8.5's default target -- and for `robustMeanMs`, the statistic
+      `hipdnn_bench` reports beside it, the sample spread is only a scale for the
+      noise rather than that estimator's own error, so this band is approximate --
+      and deliberately so, since the alternative is to have no noise notion at all
+      for either.
 
     The report carries strict recall alongside the tie-aware one, so nothing is hidden
     by this choice: a reader who distrusts the tolerance can read the strict column.
     """
     oracle_value = float(values[oracle_position])
-    if objective == "min":
-        cost = values / oracle_value - 1.0
-    else:
-        cost = 1.0 - values / oracle_value
-    tied = cost <= rel_tolerance
+    tied = _regret_vector(values, oracle_value, objective) <= rel_tolerance
 
     if stddev is not None and iters is not None:
         counts = np.where(np.isfinite(iters) & (iters > 0), iters, 1.0)
@@ -491,7 +512,33 @@ def evaluate_corpus(
     exclusions.missing_target_rows = int((valid & ~np.isfinite(values)).sum())
     usable = valid & np.isfinite(values)
 
-    if target in MILLISECOND_TARGETS and "stddevMs" in eval_df.columns:
+    if target not in MILLISECOND_TARGETS:
+        stddev_all = iters_all = None
+        noise_available = False
+        noise_absent_reason = (
+            f"the target {target!r} is not a millisecond timing column, so the corpus "
+            "spread is not in comparable units"
+        )
+    elif "stddevMs" not in eval_df.columns:
+        # §8.3 makes `stddevMs` and `iters` required columns of the result envelope.
+        # A producer that drops them turns the band off without changing any number in
+        # the report, so the absence is stated here rather than silently folded into
+        # "the units do not match".
+        stddev_all = iters_all = None
+        noise_available = False
+        noise_absent_reason = (
+            "this corpus carries no `stddevMs` column, though the target is a "
+            "millisecond timing. §8.3 lists `stddevMs` and `iters` as required columns "
+            "of the result envelope"
+        )
+        warnings.append(
+            "NO MEASUREMENT NOISE: the corpus has no `stddevMs` column, so the "
+            f"tie-aware recall for target {target!r} falls back to the "
+            f"{tie_rel_tolerance:.1%} relative tolerance alone and the "
+            "--tie-sigma band never applies. §8.3 requires `stddevMs` and `iters`; "
+            "re-collect with a producer that emits them."
+        )
+    else:
         stddev_all = pd.to_numeric(eval_df["stddevMs"], errors="coerce")
         iters_all = (
             pd.to_numeric(eval_df["iters"], errors="coerce")
@@ -499,9 +546,7 @@ def evaluate_corpus(
             else pd.Series(1.0, index=eval_df.index)
         )
         noise_available = True
-    else:
-        stddev_all = iters_all = None
-        noise_available = False
+        noise_absent_reason = None
 
     results: list[ProblemResult] = []
     # Grouped by hand rather than through `Series.groupby`: the keys here are tuples,
@@ -564,6 +609,18 @@ def evaluate_corpus(
             iters_all.loc[candidates.index].to_numpy(dtype=float) if noise_available else None,
         )
 
+        # §11.4's two non-oracle references, read off the same measured values.
+        #
+        # Static order is the `priority`/`id` ordering the engine ships in Stage 1
+        # (§2.1) -- what the model has to beat to justify existing. The corpus rows of
+        # a problem are in the order the engine enumerated its candidates, so the
+        # static pick is the FIRST usable row and the static ranking is the row order.
+        static_order_value = float(measured[0])
+        # Random is uniform choice from V(p), §11.4's sanity floor. Both figures are
+        # exact expectations over the candidate set -- the mean candidate regret, and
+        # the share of candidates in the tail -- so neither moves between runs.
+        candidate_regrets = _regret_vector(measured, oracle_value, objective)
+
         regime = None
         if regime_column is not None:
             labels = rows[regime_column].astype(str).str.strip()
@@ -580,6 +637,12 @@ def evaluate_corpus(
                 oracle_rank=int(rank_of[oracle_position]),
                 tied_rank=int(rank_of[tied].min()),
                 tied_candidates=int(tied.sum()),
+                static_order_value=static_order_value,
+                static_order_regret=regret_of(static_order_value, oracle_value, objective),
+                static_order_oracle_rank=oracle_position,
+                static_order_tied_rank=int(np.flatnonzero(tied)[0]),
+                random_regret=float(candidate_regrets.mean()),
+                random_tail_fraction=float((candidate_regrets > regret_tail_threshold).mean()),
             )
         )
 
@@ -594,12 +657,143 @@ def evaluate_corpus(
         tie_rel_tolerance=tie_rel_tolerance,
         tie_sigma=tie_sigma,
         noise_available=noise_available,
+        noise_absent_reason=noise_absent_reason,
         regret_tail_threshold=regret_tail_threshold,
         corpus_rows=len(df),
         corpus_problems=len(split.train_problems) + len(split.eval_problems),
         warnings=warnings,
     )
     return EvaluationResult(report=report, problems=results, warnings=warnings)
+
+
+def _regime_means(
+    results: list[ProblemResult],
+    value: Callable[[ProblemResult], float],
+    regime_column: str | None,
+) -> dict[str, dict[str, float]] | None:
+    """§11.2's per-regime table for whichever per-problem quantity `value` reads."""
+    if regime_column is None:
+        return None
+    buckets: dict[str, list[float]] = {}
+    for item in results:
+        buckets.setdefault(item.regime or "<unset>", []).append(value(item))
+    return {
+        name: {"problems": len(items), "mean_regret": float(np.mean(items))}
+        for name, items in sorted(buckets.items())
+    }
+
+
+def _random_tie_recall(candidates: int, tied: int, k: int) -> float:
+    """Chance a uniformly drawn k-subset of `candidates` holds one of the `tied` rows."""
+    if k >= candidates:
+        return 1.0
+    return 1.0 - math.comb(candidates - tied, k) / math.comb(candidates, k)
+
+
+def _references(
+    results: list[ProblemResult],
+    *,
+    regime_column: str | None,
+    regret_tail_threshold: float,
+) -> dict[str, Any]:
+    """§11.4's three reference points, over exactly the problems the model was scored on.
+
+    | Reference    | Definition (§11.4)                                          |
+    |--------------|-------------------------------------------------------------|
+    | Oracle       | `v*(p)`; regret 0 by construction. Upper bound.             |
+    | Static order | The `priority`/`id` ordering the engine ships in Stage 1.   |
+    | Random       | Uniform choice from `V(p)`. Sanity floor.                   |
+
+    §11.4 MUST 1 wants every §11.2 metric against all three. Static order induces a
+    full ranking -- the corpus row order, which is the order the engine enumerated its
+    catalog in -- so regret, tail and top-k recall are the ordinary computations
+    applied to that ranking. Random induces no ranking, so its figures are exact
+    expectations over `V(p)` rather than one draw: expected regret is the mean
+    candidate regret, expected strict recall@k is `min(k, n)/n`, and expected
+    tie-aware recall@k is `1 - C(n-t, k)/C(n, k)` for the `t` candidates tied with the
+    oracle. Sampling would have made the sanity floor move between runs for no gain.
+    """
+    count = len(results)
+
+    def tail(problems: float) -> dict[str, Any]:
+        return {
+            "threshold": regret_tail_threshold,
+            "problems": problems,
+            "fraction": (problems / count) if count else None,
+        }
+
+    def recall(rank: Callable[[ProblemResult], int]) -> dict[str, float | None]:
+        return {
+            str(k): (sum(rank(item) < k for item in results) / count) if count else None
+            for k in TOP_K_VALUES
+        }
+
+    def expected(value: Callable[[ProblemResult, int], float]) -> dict[str, float | None]:
+        return {
+            str(k): (float(np.mean([value(item, k) for item in results])) if count else None)
+            for k in TOP_K_VALUES
+        }
+
+    return {
+        "definition": (
+            "RFC 0019.13 §11.4: the model's figures above are only readable against "
+            "the ordering it replaces and the floor it must clear, so both are "
+            "recomputed here over the same scored problems."
+        ),
+        "oracle": {
+            "problems": count,
+            "top1_regret": _summarise([0.0] * count),
+            "regret_tail": tail(0),
+            "topk_recall": {
+                "strict": {str(k): (1.0 if count else None) for k in TOP_K_VALUES},
+                "tie_aware": {str(k): (1.0 if count else None) for k in TOP_K_VALUES},
+            },
+            "per_regime": _regime_means(results, lambda item: 0.0, regime_column),
+            "note": (
+                "v*(p) by construction: regret 0, and the oracle is its own top pick. "
+                "The upper bound of the scale, not an achievable model."
+            ),
+        },
+        "static_order": {
+            "problems": count,
+            "top1_regret": _summarise([item.static_order_regret for item in results]),
+            "regret_tail": tail(
+                sum(item.static_order_regret > regret_tail_threshold for item in results)
+            ),
+            "topk_recall": {
+                "strict": recall(lambda item: item.static_order_oracle_rank),
+                "tie_aware": recall(lambda item: item.static_order_tied_rank),
+            },
+            "per_regime": _regime_means(
+                results, lambda item: item.static_order_regret, regime_column
+            ),
+            "note": (
+                "Stage 1's shipped priority/id ordering (§2.1), read off the corpus: a "
+                "problem's rows are in the order the engine enumerated its candidates, "
+                "so the static pick is the first row that carries a usable measurement "
+                "and the static ranking is the row order itself. A corpus whose rows "
+                "were re-sorted after collection does not carry that order, and this "
+                "reference is then a permutation rather than the shipped one."
+            ),
+        },
+        "random": {
+            "problems": count,
+            "top1_regret": _summarise([item.random_regret for item in results]),
+            "regret_tail": tail(float(sum(item.random_tail_fraction for item in results))),
+            "topk_recall": {
+                "strict": expected(lambda item, k: min(k, item.candidates) / item.candidates),
+                "tie_aware": expected(
+                    lambda item, k: _random_tie_recall(item.candidates, item.tied_candidates, k)
+                ),
+            },
+            "per_regime": _regime_means(results, lambda item: item.random_regret, regime_column),
+            "note": (
+                "Uniform choice from V(p), §11.4's sanity floor. Every figure is an "
+                "exact expectation over the candidate set rather than a sampled draw, "
+                "so `regret_tail.problems` is an expected count and can be fractional."
+            ),
+        },
+    }
 
 
 def _build_report(
@@ -614,6 +808,7 @@ def _build_report(
     tie_rel_tolerance: float,
     tie_sigma: float,
     noise_available: bool,
+    noise_absent_reason: str | None,
     regret_tail_threshold: float,
     corpus_rows: int,
     corpus_problems: int,
@@ -646,18 +841,52 @@ def _build_report(
             "below is therefore the whole report, and it is weaker than §11.2 asks for."
         )
     else:
-        buckets: dict[str, list[float]] = {}
-        for item in results:
-            buckets.setdefault(item.regime or "<unset>", []).append(item.regret)
-        per_regime = {
-            name: {"problems": len(values), "mean_regret": float(np.mean(values))}
-            for name, values in sorted(buckets.items())
-        }
+        per_regime = _regime_means(results, lambda item: item.regret, regime_column)
         per_regime_status = f"from column {regime_column!r}"
+
+    references = _references(
+        results,
+        regime_column=regime_column,
+        regret_tail_threshold=regret_tail_threshold,
+    )
+    static_regret = references["static_order"]["top1_regret"]["mean"]
+    model_regret = _summarise(regrets)["mean"]
+    # §11.4 MUST 2. "Not better", not "worse": a model that merely matches the ordering
+    # it replaces has not earned the artifact, and the epsilon keeps an exact tie from
+    # turning on float wobble.
+    if model_regret is not None and model_regret >= static_regret - _REGRET_EPSILON:
+        warnings.append(
+            "MODEL DOES NOT BEAT STATIC ORDER: mean top-1 regret "
+            f"{model_regret:.4f} against the shipped priority/id ordering's "
+            f"{static_regret:.4f} over the same {len(results)} problem(s). RFC 0019.13 "
+            "§11.4: a model that loses to the ordering it replaces is the one case "
+            "where shipping is almost certainly wrong. This does not gate emission -- "
+            "§11.4 leaves that judgement to the author."
+        )
+    # §11.4 MUST 3: an aggregate improvement can hide a regression confined to the
+    # regime the heuristic was built for, so each regime is checked on its own.
+    static_per_regime = references["static_order"]["per_regime"]
+    if per_regime is not None and static_per_regime is not None:
+        losing = [
+            name
+            for name, values in per_regime.items()
+            if values["mean_regret"] > static_per_regime[name]["mean_regret"] + _REGRET_EPSILON
+        ]
+        if losing:
+            warnings.append(
+                "REGIME REGRESSION AGAINST STATIC ORDER: "
+                + ", ".join(
+                    f"{name} {per_regime[name]['mean_regret']:.4f} vs "
+                    f"{static_per_regime[name]['mean_regret']:.4f}"
+                    for name in losing
+                )
+                + ". RFC 0019.13 §11.4: aggregate improvement can hide a regression "
+                "confined to the workloads a heuristic was built for."
+            )
 
     return {
         "schema": REPORT_SCHEMA,
-        "rfc": "0019.13 §11.2",
+        "rfc": "0019.13 §11.2, §11.4",
         "generated": datetime.now(timezone.utc).isoformat(),
         "corpus": {"rows": corpus_rows, "problems": corpus_problems},
         "target": target,
@@ -704,6 +933,7 @@ def _build_report(
             "topk_recall": recall,
             "per_regime": per_regime,
             "per_regime_status": per_regime_status,
+            "references": references,
         },
         "ties": {
             "rel_tolerance": tie_rel_tolerance,
@@ -719,8 +949,7 @@ def _build_report(
                 + (
                     f", or within {tie_sigma:g} standard errors of it using stddevMs/iters"
                     if noise_available
-                    else " (no stddevMs noise band: the target is not a millisecond "
-                    "timing column, so the corpus spread is not in comparable units)"
+                    else f" (no stddevMs noise band: {noise_absent_reason})"
                 )
                 + "."
             ),
@@ -740,6 +969,13 @@ def _build_report(
             "portions of the evaluation slice. Those are properties of a corpus "
             "collected by the campaign loop, which does not exist yet; the split here "
             "is over whatever corpus it is given.",
+            "§11.4 MUST 4: regret regression against a PREVIOUS UHD for the same engine "
+            "and arch. `evaluate` scores one --model-dir and has no loader for an "
+            "already-promoted descriptor, so there is no prior figure to compare "
+            "against; the comparison is declared here rather than silently skipped.",
+            "§11.4 item 5's per-candidate scoring time against RFC 0019 §9's `native` "
+            "baseline. §11.4 itself notes the measurement harness of §11.6 (B5) does "
+            "not exist yet, so the number has no reference to be reported against.",
         ],
         "warnings": warnings,
     }
@@ -914,7 +1150,12 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
 
     transform = descriptor.get("score", {}).get("transform", manifest.get("score_transform", "log1p"))
     if transform not in ("identity", "log1p"):
-        raise ValueError(f"unsupported score transform {transform!r}")
+        # The engine's transform vocabulary is wider (score_transform::isSupported);
+        # what is missing here is this module's inverse, not the descriptor's validity.
+        raise ValueError(
+            f"uhd_gen can only score identity or log1p transforms; this descriptor "
+            f"declares {transform!r}, which the runtime loads but `evaluate` cannot invert"
+        )
     if runtime_predictions is not None:
         if not immediate:
             raise ValueError("--predictions is only supported for engine-immediate evaluation")
@@ -1294,6 +1535,16 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
                 f"  top-{k} recall:       strict {strict[str(k)]:.4f}   "
                 f"tie-aware {tie_aware[str(k)]:.4f}"
             )
+    references = metrics["references"]
+    if regret["mean"] is not None:
+        # §11.4: the model's regret means nothing on its own. The ordering it replaces
+        # and the uniform-choice floor bracket it, so they are printed beside it.
+        print(
+            "  vs §11.4 references: static order "
+            f"{references['static_order']['top1_regret']['mean']:.4f}   "
+            f"random {references['random']['top1_regret']['mean']:.4f}   "
+            "oracle 0.0000 (mean top-1 regret)"
+        )
     if metrics["per_regime"] is None:
         print(f"  per-regime regret:  {metrics['per_regime_status'].splitlines()[0]}")
     else:

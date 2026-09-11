@@ -22,6 +22,21 @@ _LEAKED_FIELDS = frozenset({
     "robust_time_ms", "minTimeMs", "avgTimeMs", "succeeded", "is_valid",
 })
 
+#: RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train its score
+#: on `avgTimeMs`", and §10.6.2 (:1914-1916) repeats it for the engine-level estimate --
+#: minimum- and robust-mean-over-iterations are optimistically biased, and two engines
+#: trained on different statistics are not comparable at all. L1 declares
+#: `score.calibrated: true` unconditionally (`validate_model`), so its label is the
+#: arithmetic mean and nothing else.
+LABEL_STATISTIC = "avgTimeMs"
+
+#: What a normalized L1 row is allowed to carry back in: the label, the §8.5 statistic
+#: kept beside it for information, the derived rate and the validity flag. Every other
+#: name in `_LEAKED_FIELDS` is candidate/search data an immediate measurement must not
+#: have. This exemption is for the ENVELOPE only -- `validate_signature` still rejects
+#: every `_LEAKED_FIELDS` name in a feature, so no L1 feature can read its own label.
+_LABEL_FIELDS = frozenset({"tflops", "is_valid", "robustMeanMs", LABEL_STATISTIC})
+
 
 def _object(value, where: str) -> dict:
     if isinstance(value, str):
@@ -41,6 +56,26 @@ def _positive(value, where: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ValueError(f"{where} must be a positive finite number")
     return float(value)
+
+
+def _optional_spread(value, where: str) -> float | None:
+    """§8.3's `stddevMs`: nonnegative when the row carries a measurement, else absent."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value < 0):
+        raise ValueError(f"{where} must be a nonnegative finite number when present")
+    return float(value)
+
+
+def _optional_count(value, where: str) -> int | None:
+    """§8.3's `iters`: a whole iteration count when the row carries a measurement."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value < 0 or float(value) != int(value)):
+        raise ValueError(f"{where} must be a nonnegative whole number when present")
+    return int(value)
 
 
 def validate_binding(value) -> dict:
@@ -69,12 +104,19 @@ def validate_signature(signature: list, published: set[str] | None = None) -> No
 def normalize_row(value: dict) -> dict:
     """Import exactly one no-search execution; derive, rather than trust, TFLOPS."""
     value = _object(value, "immediate measurement")
-    forbidden = {name for name in value if name in _LEAKED_FIELDS - {"tflops", "is_valid", "robustMeanMs"}
+    forbidden = {name for name in value if name in _LEAKED_FIELDS - _LABEL_FIELDS
                  or name.startswith(("kernel.", "candidate.", "knob."))}
     if forbidden:
         raise ValueError(f"immediate measurements contain candidate/search data: {sorted(forbidden)}")
-    if value.get("selection_mode") != "immediate" or value.get("timing_statistic") != "robustMeanMs":
-        raise ValueError("L1 labels require selection_mode=immediate and timing_statistic=robustMeanMs")
+    if value.get("selection_mode") != "immediate":
+        raise ValueError("L1 labels require selection_mode=immediate")
+    # `hipdnn_bench --collect-immediate` declares `robustMeanMs` -- the statistic it
+    # ranks and reports on. A row this function has already produced declares the
+    # LABEL statistic instead, so both spellings read back and the label below is
+    # `avgTimeMs` either way.
+    if value.get("timing_statistic") not in ("robustMeanMs", LABEL_STATISTIC):
+        raise ValueError(
+            f"L1 labels require timing_statistic robustMeanMs or {LABEL_STATISTIC}")
     if value.get("is_valid") is not True:
         raise ValueError("L1 labels require is_valid=true")
     binding = validate_binding(value.get("binding"))
@@ -109,16 +151,23 @@ def normalize_row(value: dict) -> dict:
         if key in value and value[key] != item:
             raise ValueError(f"flattened feature {key} differs from the published feature map")
     flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
+    # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): the score this model declares
+    # `calibrated: true` MUST be trained on `avgTimeMs`. `robustMeanMs` stays on the row
+    # as the informational §8.5 statistic, never as the label.
+    average = _positive(value.get(LABEL_STATISTIC, value.get("avg_time_ms")), LABEL_STATISTIC)
     elapsed = _positive(value.get("robustMeanMs"), "robustMeanMs")
-    tflops = flops / elapsed / 1e9
+    spread = _optional_spread(value.get("stddevMs", value.get("stddev_ms")), "stddevMs")
+    iterations = _optional_count(value.get("iters", value.get("iterations")), "iters")
+    tflops = flops / average / 1e9
     _positive(tflops, "derived tflops")
     if "tflops" in value and not math.isclose(_positive(value["tflops"], "tflops"), tflops, rel_tol=1e-10):
-        raise ValueError("supplied tflops differs from graph.flops/(robustMeanMs*1e9)")
+        raise ValueError(f"supplied tflops differs from graph.flops/({LABEL_STATISTIC}*1e9)")
     return {"benchmark": graph, "device": device, "arch": arch, "engine": engine,
             "engine_name": name, "binding": json.dumps(binding, sort_keys=True),
             "features": json.dumps(features, sort_keys=True), "is_valid": True,
-            "selection_mode": "immediate", "timing_statistic": "robustMeanMs",
-            "robustMeanMs": elapsed, "tflops": tflops, **features}
+            "selection_mode": "immediate", "timing_statistic": LABEL_STATISTIC,
+            LABEL_STATISTIC: average, "robustMeanMs": elapsed, "stddevMs": spread,
+            "iters": iterations, "tflops": tflops, **features}
 
 
 def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
@@ -166,9 +215,15 @@ def validate_model(descriptor: dict) -> None:
     if descriptor.get("objective") != "max":
         raise ValueError("L1 prediction requires objective=max")
     score = descriptor.get("score", {})
+    # The transform vocabulary belongs to `score_transform::isSupported` on the runtime
+    # side; this narrower pair is not a second opinion about it. `evaluate`'s scorers
+    # implement the identity and log1p inverses only, so a descriptor declaring any
+    # other supported transform is loadable by the engine and not scoreable here --
+    # a capability limit of this tool, reported where the scoring happens.
     if (score.get("units") != "tflops" or score.get("calibrated") is not True
             or score.get("transform") not in ("identity", "log1p")):
-        raise ValueError("L1 prediction requires calibrated tflops and identity/log1p transform")
+        raise ValueError("L1 prediction requires calibrated tflops, and uhd_gen can only "
+                         "score identity or log1p transforms")
     validate_provenance(descriptor.get("trained_against"))
     validate_signature(descriptor.get("features_signature", []))
 
