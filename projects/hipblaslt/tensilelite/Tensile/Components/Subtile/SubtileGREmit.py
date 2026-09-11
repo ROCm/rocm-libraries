@@ -1233,6 +1233,20 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   return module
 
 
+def _tluKRowsPerWave(tileInfo, coopWaves):
+  """K rows one wave owns when several share a strip.
+
+  The unit has to match what the per-lane GR offset walks.  Under col_scatter
+  the load index is itself the K column (col = col_group*N + load), so a wave
+  owning numGRPerSubtile consecutive loads starts that many columns in.  On the
+  plain K ramp the lane walks chunks, so the strip's K rows divide by the group.
+  """
+  if selectTLUColScatter(tileInfo) is not None:
+    return int(tileInfo.numGRPerSubtile)
+  kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
+  return kRows // coopWaves
+
+
 def _tluWaveAxisId(writer, kernel, module, tc, dst):
   """Compute this wave's axis index for TLU multi-wave partitioning into dst.
 
@@ -1359,22 +1373,9 @@ def _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo):
     writer.vgprPool.checkIn(dst)
     return _tluKSliceGlobalOffset(writer, kernel, module, tileInfo) if wavesPerStrip <= 1 else None
   if wavesPerStrip > 1:
-    # Shared strip: the waves sharing one split its K rows, so wave a starts at
-    # K row a*kRowsPerWave.  K is the strided dim for NT, so this needs the
-    # runtime K stride.  A strip does not span the whole free dim when the tile
-    # takes more than one, so the fetch groups past the first also step along it
-    # -- that step is added after the K term, which is in bytes by then.
-    # Units must match what the per-lane GR offset walks:
-    #  - col_scatter: the load index IS the K column (col = col_group*N + L), so
-    #    a wave owning numGRPerSubtile consecutive loads starts that many K
-    #    columns in.
-    #  - K ramp: the lane walks a chunk ramp at chunksPerK chunks per K row, so
-    #    the wave's chunk base converts to whole K rows.
-    if selectTLUColScatter(tileInfo) is not None:
-      kRowsPerWave = int(tileInfo.numGRPerSubtile)
-    else:
-      kRows = int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1])
-      kRowsPerWave = kRows // coopWaves
+    # Waves sharing a strip split its K rows, so wave a starts at K row
+    # a * kRowsPerWave.  K is the strided dim on TLU=1, hence the runtime stride.
+    kRowsPerWave = _tluKRowsPerWave(tileInfo, coopWaves)
     unrollIdx = kernel["ProblemType"]["IndexUnroll"]
     strideK = writer.strideRef(tc, unrollIdx)
     tmpS = writer.sgprPool.checkOut(1, tag="_tluWaveAxisKOffset_s_%s" % tc, preventOverflow=False)
