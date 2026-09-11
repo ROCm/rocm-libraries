@@ -57,7 +57,15 @@ def main() -> None:
             "ductile",
             "tensile",
         ],
-        help="tensilelite backend. Ductile (GA) or Tensile",
+        help="Tuning backend: Ductile or Tensile",
+    )
+    parser.add_argument(
+        "--search-space",
+        type=str,
+        default=None,
+        choices=["heuristic", "generic"],
+        dest="search_space",
+        help="Search space strategy. Defaults to 'generic' for ductile, 'heuristic' for tensile",
     )
     parser.add_argument(
         "--workdir",
@@ -105,6 +113,7 @@ def main() -> None:
         keep_thr=args.keep_thr,
         arch=args.architecture,
         backend=args.backend,
+        search_space=args.search_space,
         workdir=args.workdir,
         verbose=args.verbose,
         bench_freq=args.bench_freq,

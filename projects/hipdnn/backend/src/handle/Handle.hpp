@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <optional>
 #include <spdlog/fmt/fmt.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct hipdnnHandle // NOLINT
@@ -25,6 +27,8 @@ public:
         getHeuristicPluginResourceManager() const;
     virtual size_t getEngineCount() const;
     virtual std::vector<hipdnn_backend::plugin::EngineInfo> getEngineInfos() const;
+    virtual std::optional<int64_t> findEngineIdByName(std::string_view engineName) const;
+    virtual std::optional<std::string> findEngineNameById(int64_t engineId) const;
     virtual std::string toString() const;
 
 private:

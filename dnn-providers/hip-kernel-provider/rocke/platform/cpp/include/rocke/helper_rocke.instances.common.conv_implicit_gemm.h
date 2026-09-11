@@ -166,13 +166,13 @@ int rocke_conv_problem_wo(const rocke_conv_problem_t* p);
 /* ConvProblem.M property:  N * Ho * Wo  (* Do for 3-D) */
 int rocke_conv_problem_m(const rocke_conv_problem_t* p);
 
-/* ConvProblem.N_gemm property:  K */
+/* ConvProblem.N_gemm property:  K / groups  (= kpg; per-group output channels) */
 int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p);
 
-/* ConvProblem.K_gemm property:  Y * X * C  (Z * Y * X * C for 3-D) */
+/* ConvProblem.K_gemm property:  Y * X * (C / groups)  (Z * Y * X * cpg for 3-D) */
 int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p);
 
-/* ConvProblem.flops property:  2 * M * N_gemm * K_gemm
+/* ConvProblem.flops property:  2 * M * N_gemm * K_gemm * groups
  * Computed in 64-bit to avoid the int32 overflow Python's arbitrary-precision
  * int never hits. */
 long long rocke_conv_problem_flops(const rocke_conv_problem_t* p);
@@ -204,8 +204,8 @@ static inline int rocke_conv_problem_kpg(const rocke_conv_problem_t* p)
 }
 
 /* ConvProblem.short() ->
- *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
- *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}"
+ *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}{g}"  where g="G{groups}" if groups>1 else ""
+ *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}{g}"
  * Writes the NUL-terminated string into `out` (capacity out_cap). On success
  * returns ROCKE_OK and, if out_len != NULL, sets *out_len to the byte length
  * (excluding the NUL). Returns ROCKE_ERR_VALUE on NULL args or a too-small

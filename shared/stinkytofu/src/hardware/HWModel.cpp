@@ -41,6 +41,17 @@ constexpr HWModel kGfx1250Model = {
             .rules = kCdna5HazardRules,
             .numRules = kNumCdna5HazardRules,
         },
+    .delayAlu =
+        {
+            .valuDepth = 5,
+            .transDepth = 4,
+            .saluCycleMax = 4,
+        },
+    .counters =
+        {
+            .hasSplitLoadStoreCnt = true,
+            .hasSplitStoreCntAsyncCnt = true,  // only async stores on this arch
+        },
 };
 
 // gfx1250v0: starts from the gfx1250 values. Kept as its own object so those

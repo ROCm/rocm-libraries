@@ -438,15 +438,19 @@ enabling unit tests to run without GPU hardware:
 10. **Register your engines**: In your renamed Container file (was
     `ExampleProviderContainer.cpp`), register your engines via
     `HIPDNN_REGISTER_ENGINE` with unique engine names and add lambdas to
-    create the new engines:
+    create the new engines. The macro generates a `_NAME` and an `_ID`
+    constant, and the ID is a hash of the name, so the name must be unique
+    across every plugin loaded alongside yours:
 
     ```cpp
-    HIPDNN_REGISTER_ENGINE(YOUR_ENGINE, "YOUR_ENGINE")
+    HIPDNN_REGISTER_ENGINE(YOUR_ENGINE)
 
     // In getEngineDefinitions():
     {YOUR_ENGINE_ID,
-     [](const IKernelCompiler& compiler) {
-         auto engine = std::make_unique<ExampleProviderEngine>(YOUR_ENGINE_ID);
+     YOUR_ENGINE_NAME,
+     [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
+         auto engine
+             = std::make_unique<ExampleProviderEngine>(YOUR_ENGINE_ID, YOUR_ENGINE_NAME);
          engine->addPlanBuilder(std::make_unique<YourPlanBuilder>(compiler));
          return engine;
      }},
@@ -544,7 +548,7 @@ Use the tables below when performing the rename steps in the workflow above.
 |---|---|---|---|
 | C++ classes | Brand only | `ExampleProviderContainer` | `YourNameContainer` |
 | C++ source files | Brand only | `ExampleProviderContainer.hpp` | `YourNameContainer.hpp` |
-| Engine names | Brand only | `EXAMPLE_PROVIDER_RELU_ENGINE` | Keep as-is until step 10 |
+| Engine names | Brand only | `EXAMPLE_PROVIDER_RELU_ENGINE` | `YOUR_NAME_RELU_ENGINE` -- renamed in step 10; an ID is a hash of its name, so keeping the example name collides with the example plugin |
 | Namespace | Brand + provider | `example_provider` | `your_name_provider` |
 | CMake targets | Brand + provider | `example_provider_impl` | `your_name_provider_impl` |
 | CMake options | Concatenated | `EXAMPLEPROVIDER_*` | `YOURNAMEPROVIDER_*` |
@@ -795,6 +799,14 @@ for (const auto& path : paths) {
     std::cout << "Loaded: " << path << std::endl;
 }
 ```
+
+### Engine Names
+
+The plugin names its own engines: `ExampleProviderContainer::getEngineName()`
+maps each engine ID to a string, so hipDNN displays
+`EXAMPLE_PROVIDER_RELU_ENGINE` rather than a hexadecimal engine ID.
+
+See "Engine names" in `docs/user-guides/how-to/develop-plugins.rst`.
 
 ### Engine Selection
 
