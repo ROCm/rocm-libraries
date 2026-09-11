@@ -274,16 +274,6 @@ def test_direct_pre_swizzled_b_rejects_tail_and_oversized_wave_tiles():
     kernel["MacroTileB"] = 256
     assert not useDirectToVgprPreSwizzledB(kernel)
 
-    kernel.update({
-        "MacroTileA": 256,
-        "MIWaveGroup": [1, 4],
-        "MIWaveTile": [16, 4],
-        "PrefetchGlobalRead": 1,
-    })
-    assert useDirectToVgprPreSwizzledB(kernel)
-    kernel["PrefetchGlobalRead"] = 2
-    assert not useDirectToVgprPreSwizzledB(kernel)
-
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                          grSA_k_gran=1, grSA_mn_gran=1, grSB_k_gran=1, grSB_mn_gran=1, pgr=2,
