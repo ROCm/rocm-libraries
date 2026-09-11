@@ -145,7 +145,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - TDMInst: [3]
         - TDMIterateMode: [0]
-        - LDSTrInst: [False]
+        - LDSTrInst: [True]
         - StaggerU: [0]
       BenchmarkForkParameters:
       JoinParameters:
