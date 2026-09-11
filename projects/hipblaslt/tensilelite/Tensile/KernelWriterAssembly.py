@@ -7772,15 +7772,20 @@ class KernelWriterAssembly(KernelWriter):
   def a2aShardLoopLabel(self):
     return Label("A2AShardLoopBegin", "", alignment=16)
 
-  def openA2AShardLoop(self, kernel, tPB):
+  def openA2AShardLoop(self, kernel, tPA, tPB):
     module = Module("openA2AShardLoop")
     if kernel["ProblemType"]["FusedA2AMode"] != 1:
       return module
     from .Components.Signature import fusedA2AKernArgLayout
-    offset = self.states.fusedA2AKernArgBase + fusedA2AKernArgLayout()["FusedW"]
+    layout = fusedA2AKernArgLayout()
+    base   = self.states.fusedA2AKernArgBase
     module.add(self.argLoader.loadKernArg("A2AShardCounter", "KernArgAddress",
-                                          sgprOffset=hex(offset), dword=1))
-    module.add(SWaitCnt(kmcnt=0, comment="wait FusedW for the shard trip count"))
+                                          sgprOffset=hex(base + layout["FusedW"]), dword=1))
+    # Round 0 takes this rank's own feature shard, not shard 0.
+    module.add(self.argLoader.loadKernArg("A2AFeatIdx", "KernArgAddress",
+                                          sgprOffset=hex(base + layout["FusedMyRank"]),
+                                          dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedW and FusedMyRank"))
     module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=0, comment="start at shard 0"))
     tmpVgpr = self.vgprPool.checkOut(2, tag="openA2AShardLoop_divide")
     with self.allocTmpSgpr(1, tag="openA2AShardLoop_tmpSgprInfo") as tmpSgprInfo:
@@ -7791,6 +7796,7 @@ class KernelWriterAssembly(KernelWriter):
           wavewidth=kernel["WavefrontSize"], doRemainder=False,
           comment="k_local = K / W"))
     self.vgprPool.checkIn(tmpVgpr)
+    module.add(self.a2aShiftSrd(kernel, tPA, "A2AFeatIdx"))
     module.add(self.a2aBatchSpan(kernel, tPB))
     module.add(self.a2aShardLoopLabel())
     return module
@@ -8198,7 +8204,39 @@ class KernelWriterAssembly(KernelWriter):
     self.vgprPool.checkIn(vOff)
     return module
 
+  def a2aShiftSrd(self, kernel, tP, idxName):
+    """Add `idxName` shards' worth of bytes to Srd<tc>, from the tensor's base."""
+    module = Module("a2aShiftSrd")
+    tc     = tP["tensorChar"]
+    with self.allocTmpSgpr(4, alignment=2, tag="a2aShardOffset") as tmpSgprInfo:
+      s = tmpSgprInfo.idx
+      # A is one contiguous [nFeature, W*k_local] and steps k_local along K;
+      # B is W separate [nToken, k_local] segments and jumps a whole segment.
+      if tP["isA"]:
+        unrollStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
+        if self.isConstUnitStride(unrollStride):
+          module.add(SMovB32(dst=sgpr(s), src=sgpr("A2AKLocal"),
+                             comment="elements per %s shard" % tc))
+        else:
+          module.add(SMulI32(dst=sgpr(s), src0=sgpr("A2AKLocal"), src1=unrollStride,
+                             comment="elements per %s shard" % tc))
+      else:
+        module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
+                           src1=self.strideRef(tc, tP["tileIdx"]),
+                           comment="elements per %s shard" % tc))
+      module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(s + 2), sgpr(s + 3), sgpr(s),
+                                                     sgpr(idxName),
+                                                     comment="shard offset in elements"))
+      module.add(scalarMultiply64Bpe(s + 2, s + 2, float(tP["bpeGR"]), s,
+                                     comment="shard offset"))
+      module.add(SAddU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc),
+                         src1=sgpr(s + 2), comment="Srd%s base += shard offset" % tc))
+      module.add(SAddCU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc),
+                          src1=sgpr(s + 3)))
+    return module
+
   def a2aTransitionPhase(self, kernel, tPA, tPB):
+    from .Components.Signature import fusedA2AKernArgLayout
     module = Module("a2aTransitionPhase")
     if kernel["ProblemType"]["FusedA2AMode"] != 1:
       return module
@@ -8208,39 +8246,29 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
                             comment="skip the next round's setup"))
     module.add(self.a2aWaitFlag(kernel))
-    module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
-                       comment="next shard"))
+    with self.allocTmpSgpr(1, tag="a2aFeatWrap") as tmpSgprInfo:
+      w = tmpSgprInfo.idx
+      module.add(self.argLoader.loadKernArg(w, "KernArgAddress",
+          sgprOffset=hex(self.states.fusedA2AKernArgBase + fusedA2AKernArgLayout()["FusedW"]),
+          dword=1))
+      module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                         comment="next shard"))
+      module.add(SAddU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=1,
+                         comment="next feature shard"))
+      module.add(SWaitCnt(kmcnt=0, comment="wait FusedW"))
+      module.add(SSubU32(dst=sgpr(w), src0=sgpr("A2AFeatIdx"), src1=sgpr(w),
+                         comment="feature shard - W, underflowing while below W"))
+      module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(w),
+                         comment="wrap the feature shard at W"))
     for tP in (tPA, tPB):
       tc = tP["tensorChar"]
       module.add(self.localReadResetOffsets(kernel, tP))
       module.add(self.computeLoadSrd(kernel, tP, tc,
                                      kernel["ProblemType"]["IndexAssignments%s" % tc],
                                      tP["bpeGR"]))
-      with self.allocTmpSgpr(4, alignment=2, tag="a2aShardOffset") as tmpSgprInfo:
-        s = tmpSgprInfo.idx
-        # A is one contiguous [nFeature, W*k_local] and steps k_local along K;
-        # B is W separate [nToken, k_local] segments and jumps a whole segment.
-        if tP["isA"]:
-          unrollStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
-          if self.isConstUnitStride(unrollStride):
-            module.add(SMovB32(dst=sgpr(s), src=sgpr("A2AKLocal"),
-                               comment="elements per %s shard" % tc))
-          else:
-            module.add(SMulI32(dst=sgpr(s), src0=sgpr("A2AKLocal"), src1=unrollStride,
-                               comment="elements per %s shard" % tc))
-        else:
-          module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
-                             src1=self.strideRef(tc, tP["tileIdx"]),
-                             comment="elements per %s shard" % tc))
-        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(s + 2), sgpr(s + 3), sgpr(s),
-                                                       sgpr("A2AShardIdx"),
-                                                       comment="shard offset in elements"))
-        module.add(scalarMultiply64Bpe(s + 2, s + 2, float(tP["bpeGR"]), s,
-                                       comment="shard offset"))
-        module.add(SAddU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc),
-                           src1=sgpr(s + 2), comment="Srd%s base += shard offset" % tc))
-        module.add(SAddCU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc),
-                            src1=sgpr(s + 3)))
+      # A is indexed by the feature shard, B by the gathered segment.
+      module.add(self.a2aShiftSrd(kernel, tP,
+                                  "A2AFeatIdx" if tP["isA"] else "A2AShardIdx"))
     module.add(endLabel)
     module.addComment1("A2A_TRANSITION end")
     return module

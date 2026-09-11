@@ -3081,7 +3081,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
-        module.add(self.openA2AShardLoop(kernel, tensorParametersB))
+        module.add(self.openA2AShardLoop(kernel, tensorParametersA, tensorParametersB))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -9537,6 +9537,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["FusedA2AMode"] == 1:
       self.defineSgpr("A2AShardCounter", 1)
       self.defineSgpr("A2AShardIdx", 1)
+      self.defineSgpr("A2AFeatIdx", 1)
       self.defineSgpr("A2AKLocal", 1)
       self.defineSgpr("A2ABlockLo", 1)
       self.defineSgpr("A2ABlockCount", 1)
@@ -10723,7 +10724,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Open A2A-GEMM Shard Loop
   ##############################################################################
   @abc.abstractmethod
-  def openA2AShardLoop(self, kernel, tPB):
+  def openA2AShardLoop(self, kernel, tPA, tPB):
     return ""
 
   ##############################################################################
