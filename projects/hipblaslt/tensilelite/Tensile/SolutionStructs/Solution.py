@@ -2759,7 +2759,7 @@ class Solution(collections.abc.Mapping):
       and ((numBytesB == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
-	  
+
     if state["enableLDSTrA"] or state["enableGLTrA"]:
       state["VectorWidthA"] = 1
 
@@ -4311,7 +4311,7 @@ class Solution(collections.abc.Mapping):
         # If the LRVW is set by the user, validate the configuration and rejects if,
         #   - state["LocalReadVectorWidth{tc}"] * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 if not sparse
         #   - state["LocalReadVectorWidth{tc}"] // 2 * state["ProblemType"]["MacDataType{tc}"].numRegisters() < 1 is sparse
-        #   - state["LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and LDS is not transposed 
+        #   - state["LocalReadVectorWidth{tc}"] > state["MIInputPerThread"] and LDS is not transposed
         def isAutoLRVW(tc) -> bool:
           autoLRVW = False
           if state[f"LocalReadVectorWidth{tc}"] != -1:
@@ -4353,7 +4353,7 @@ class Solution(collections.abc.Mapping):
                 = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
               ldsNumBytes = ldsNumBytesAlignedA + ldsNumBytesAlignedB + \
                             ldsNumBytesAlignedMXSA + ldsNumBytesAlignedMXSB + \
-                            ldsNumBytesAlignedMetadata 
+                            ldsNumBytesAlignedMetadata
               if ldsNumBytes > state["MaxLDS"]:
                 if wlrA > 1:
                   state["LocalReadVectorWidthA"] //= 2
@@ -4408,7 +4408,7 @@ class Solution(collections.abc.Mapping):
             if state["ProblemType"]["SwizzleTensorA"]:
               state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
-              state["GlobalReadVectorWidthA"] = 32	  
+              state["GlobalReadVectorWidthA"] = 32
             elif state["enableGLTrA"]:
               state["GlobalReadVectorWidthA"] = 8
             else:
@@ -5028,7 +5028,7 @@ class Solution(collections.abc.Mapping):
             if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
               #fallback
               tvm = totalElementsM // bGlobalReadVectorWidthMetadata
-              Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)            
+              Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
           else:
             GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM, glvwMlimit) #sum all need read
             tvm = totalElementsM // GlobalReadVectorWidth
@@ -5041,7 +5041,7 @@ class Solution(collections.abc.Mapping):
         if GlobalReadVectorWidthMetadata == 0:
           GlobalReadVectorWidthMetadata = 1
         totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-            
+
         if not Solution.setGlobalLoadTileDimClassic(state, "Metadata", state["NumLoadsMetadata"], \
             totalVectorsCoalescedM, totalElementsPerpM, depthUM, printRejectionReason):
           return
@@ -5847,11 +5847,6 @@ class Solution(collections.abc.Mapping):
       # so plain StreamK keeps the extra buffer and only PAP falls back to two.
       if state["PrefetchAcrossPersistent"]:
         state["TDMPlusLdsBuf"] = 0
-      if state["_ScheduleIterAlg"] != 0:
-        if  state["TDMPlusLdsBuf"] == 1:
-          reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
-          return
-        state["TDMPlusLdsBuf"] = 0
 
     if decouplePGR and state["1LDSBuffer"] == -1:
       # Resolve before a later rule can force 1LDSBuffer=1 over the per-tensor layout.
@@ -6543,7 +6538,7 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprSparseMetadata"]:
           reject(state, printRejectionReason, "PrefetchGL2 with Sparse requires DirectToVgprSparseMetadata=0 (TDM metadata path)")
           return
-      
+
 
     # # reject conditions with lower performance
     # if state["ScheduleIterAlg"] == 2 and \
