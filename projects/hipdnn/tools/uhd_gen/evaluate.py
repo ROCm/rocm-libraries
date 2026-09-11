@@ -52,6 +52,12 @@ DEFAULT_REGRET_TAIL_THRESHOLD = 0.05
 #: §11.2: "k = 1, 3, 5".
 TOP_K_VALUES = (1, 3, 5)
 
+#: Advisory only. §11.2 fixes no threshold for calibration error -- it requires the
+#: figures, not a verdict -- so this is the point at which a bias is worth interrupting a
+#: reader for, not a pass/fail line. Chosen to sit well above benchmark noise and well
+#: below a difference that would reorder engines of genuinely different speed.
+CALIBRATION_BIAS_WARN = 0.10
+
 DEFAULT_EVAL_FRACTION = 0.2
 DEFAULT_SEED = 0
 
@@ -449,6 +455,7 @@ def evaluate_corpus(
     tie_sigma: float = DEFAULT_TIE_SIGMA,
     regret_tail_threshold: float = DEFAULT_REGRET_TAIL_THRESHOLD,
     device_column: str | None = None,
+    score_declaration: dict | None = None,
 ) -> EvaluationResult:
     """Compute §11.2's metrics for `scorer` over the held-out slice of `df`."""
     if target not in df.columns:
@@ -549,6 +556,10 @@ def evaluate_corpus(
         noise_absent_reason = None
 
     results: list[ProblemResult] = []
+    calibration_predicted: list[float] = []
+    calibration_measured: list[float] = []
+    calibration_picked_predicted: list[float] = []
+    calibration_picked_measured: list[float] = []
     # Grouped by hand rather than through `Series.groupby`: the keys here are tuples,
     # and pandas treats a tuple key as a multi-column selector in several places. This
     # keeps the key exactly as it was built and the row index exactly as it was read.
@@ -596,6 +607,18 @@ def evaluate_corpus(
         picked_position = int(order[0])
         picked_value = float(measured[picked_position])
         regret = regret_of(picked_value, oracle_value, objective)
+
+        # §11.2's calibration inputs. Ranking only needs the ORDER of `predictions`, so
+        # nothing above would notice a score that ranks perfectly and is wrong by a
+        # constant factor -- which is exactly the failure §11.2 exists to catch, because
+        # cross-engine arbitration (RFC 0019 §11.3) compares absolute values across
+        # models that never saw each other's candidates. Kept per row, and separately for
+        # the row the model actually picked: that is the one that runs, so its error is
+        # the one an engine comparison is decided on.
+        calibration_predicted.extend(predictions.tolist())
+        calibration_measured.extend(measured.tolist())
+        calibration_picked_predicted.append(float(predictions[picked_position]))
+        calibration_picked_measured.append(picked_value)
 
         rank_of = np.empty(len(order), dtype=int)
         rank_of[order] = np.arange(len(order))
@@ -646,6 +669,33 @@ def evaluate_corpus(
             )
         )
 
+    calibration = _calibration_block(
+        score_declaration,
+        target,
+        calibration_predicted,
+        calibration_measured,
+        calibration_picked_predicted,
+        calibration_picked_measured,
+    )
+    # The report is not a gate (§11.4: "These metrics do not gate emission"), but a
+    # systematic bias is the one failure a ranking report cannot show, so it is said out
+    # loud rather than left for a reader to find in the JSON. Direction matters as much
+    # as size: an engine whose score reads high wins arbitrations it should lose, and one
+    # that reads low is passed over for work it would have done best.
+    selected = calibration.get("selected_candidate")
+    if selected is not None:
+        bias = selected["signed_relative_bias"]
+        if abs(bias) > CALIBRATION_BIAS_WARN:
+            warnings.append(
+                f"CALIBRATED SCORE IS BIASED: on the candidates this model picks it "
+                f"{'OVER' if bias > 0 else 'UNDER'}-predicts by {abs(bias):.1%} on average "
+                f"(threshold {CALIBRATION_BIAS_WARN:.0%}). Ranking within this engine is "
+                "unaffected -- a constant factor cannot reorder a catalog -- but RFC 0019 "
+                "§11.3 compares this number against other engines' predictions, so Mode A "
+                "and Mode B will "
+                f"{'favour' if bias > 0 else 'avoid'} this engine by roughly that margin."
+            )
+
     report = _build_report(
         results,
         exclusions=exclusions,
@@ -661,9 +711,105 @@ def evaluate_corpus(
         regret_tail_threshold=regret_tail_threshold,
         corpus_rows=len(df),
         corpus_problems=len(split.train_problems) + len(split.eval_problems),
+        calibration=calibration,
         warnings=warnings,
     )
     return EvaluationResult(report=report, problems=results, warnings=warnings)
+
+
+def _calibration_summary(predicted: np.ndarray, measured: np.ndarray) -> dict[str, Any]:
+    """§11.2's absolute-value figures for one set of (prediction, measurement) pairs."""
+    error = predicted - measured
+    relative = error / measured
+    return {
+        "rows": int(predicted.size),
+        "signed_bias": float(np.mean(error)),
+        "signed_relative_bias": float(np.mean(relative)),
+        "mean_absolute_error": float(np.mean(np.abs(error))),
+        "relative_absolute_error": float(np.mean(np.abs(relative))),
+        "rmse": float(np.sqrt(np.mean(error * error))),
+    }
+
+
+def _calibration_block(
+    score_declaration: dict | None,
+    target: str,
+    predicted: list[float],
+    measured: list[float],
+    picked_predicted: list[float],
+    picked_measured: list[float],
+) -> dict[str, Any]:
+    """RFC 0019.13 §11.2's calibration metrics, or why they were not computed.
+
+    §11.2 makes these "**required when `score.calibrated` is true**", and says why a
+    ranking report is not enough on its own: "A model with flawless ranking and a
+    systematic absolute bias passes every metric above and then loses every cross-engine
+    arbitration." Nothing else in the pipeline checks the absolute scale -- `train
+    --calibrated` stamps the flag the author asked for and says outright that it does not
+    verify the claim -- so this is where a biased scale is caught.
+
+    Reported in two forms. Over every scored candidate, which is the model's calibration
+    as a regressor; and over the candidate the model PICKED, which is the number
+    cross-engine selection actually consumes, and can be much better or much worse than
+    the population figure when the error correlates with the score.
+    """
+    declaration = score_declaration or {}
+    if declaration.get("calibrated") is not True:
+        return {
+            "status": "not applicable",
+            "detail": (
+                "The descriptor does not declare `score.calibrated: true`, so its score "
+                "is an ordering key and not an absolute quantity. §11.2 requires these "
+                "metrics only of a calibrated score; ranking this engine's own catalog "
+                "needs no absolute accuracy."
+            ),
+        }
+    if not measured:
+        return {
+            "status": "UNAVAILABLE",
+            "detail": "No problem produced a scored candidate, so there is nothing to compare.",
+        }
+
+    predicted_array = np.asarray(predicted, dtype=float)
+    measured_array = np.asarray(measured, dtype=float)
+    picked_predicted_array = np.asarray(picked_predicted, dtype=float)
+    picked_measured_array = np.asarray(picked_measured, dtype=float)
+    # Every relative figure divides by the measurement. `evaluate_corpus` already drops a
+    # problem whose oracle is not positive, but an individual candidate can still be zero
+    # under a `max` target, so guard here rather than emitting an infinity.
+    usable = measured_array > 0.0
+    picked_usable = picked_measured_array > 0.0
+    if not usable.any():
+        return {
+            "status": "UNAVAILABLE",
+            "detail": "No scored candidate carries a positive measurement to compare against.",
+        }
+
+    units = declaration.get("units")
+    block: dict[str, Any] = {
+        "status": "computed",
+        "units": units,
+        "target": target,
+        "all_candidates": _calibration_summary(predicted_array[usable], measured_array[usable]),
+        "selected_candidate": (
+            _calibration_summary(
+                picked_predicted_array[picked_usable], picked_measured_array[picked_usable]
+            )
+            if picked_usable.any()
+            else None
+        ),
+        "excluded_non_positive_rows": int((~usable).sum()),
+    }
+    if units is not None and units != target:
+        # Not fatal, and not silently fudged either: the two numbers are subtracted, so a
+        # reader has to be able to see whether they were on the same scale. The pipeline's
+        # own convention is `--target tflops --score-units tflops`.
+        block["warning"] = (
+            f"score.units is {units!r} but the target column is {target!r}. These figures "
+            "subtract the prediction from the measurement, so they mean nothing unless "
+            "both are the same physical quantity."
+        )
+    return block
 
 
 def _regime_means(
@@ -812,6 +958,7 @@ def _build_report(
     regret_tail_threshold: float,
     corpus_rows: int,
     corpus_problems: int,
+    calibration: dict[str, Any],
     warnings: list[str],
 ) -> dict[str, Any]:
     regrets = [item.regret for item in results]
@@ -932,6 +1079,7 @@ def _build_report(
             },
             "topk_recall": recall,
             "per_regime": per_regime,
+            "calibration": calibration,
             "per_regime_status": per_regime_status,
             "references": references,
         },
@@ -959,9 +1107,6 @@ def _build_report(
             "(§5.2). Nothing in this pipeline declares weights, so only the unweighted "
             "figure is computed -- which §11.2 says is the whole report for a blindly "
             "generated corpus, but a corpus that does declare weights needs both.",
-            "§11.2 calibration metrics (relative absolute error, signed bias, "
-            "selected-candidate calibration). Required only when score.calibrated is "
-            "true; they measure the score's absolute value, not its ranking.",
             "§11.3 shape extrapolation (leave-one-regime-out) and variant "
             "extrapolation (leave-variants-out). Both need retraining per fold; this "
             "command scores one already-trained model.",
@@ -1437,6 +1582,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
             tie_rel_tolerance=args.tie_rel_tolerance,
             tie_sigma=args.tie_sigma,
             regret_tail_threshold=args.regret_tail_threshold,
+            score_declaration=bundle.descriptor.get("score"),
         )
     except (ValueError, ObjectiveDirectionError) as error:
         logger.error("%s", error)

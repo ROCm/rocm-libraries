@@ -7,10 +7,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -191,6 +194,11 @@ public:
                   const std::vector<std::string>& knobs = {},
                   const std::map<std::string, HeuristicDescriptor>& byArch = {})
     {
+        // RFC 0019 §9.4's first component: "descriptor load and model parse". Timed from
+        // the top of the build so it covers configFrom, the extractor's signature
+        // compilation and the adapter's artifact read -- everything paid once per
+        // architecture before a single candidate is scored.
+        const auto loadStart = Clock::now();
         try
         {
             // The descriptor IS the UHD -- no second file to open, so nothing here can
@@ -301,6 +309,7 @@ public:
 
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
+            built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
             // Kept for RFC 0019 §8.3: the arch this was built from is whatever the loader
             // resolved (the `default` entry), and rank() re-resolves against the running
             // device the first time it sees one that these do not describe.
@@ -605,18 +614,35 @@ private:
 
             // RFC 0019 §6 step 2: the problem and device slots are the same for every
             // candidate, so they are evaluated once and the kernel slots overwritten.
+            // §9.4 asks for the two halves to be timed apart, because the prefix is paid
+            // once per graph while the tail is the O(N) term the RFC calls "the main lever
+            // on selection cost" -- one aggregate number cannot tell them apart.
+            const auto prefixStart = Clock::now();
             auto features = _extractor->prepare(ctx);
+            _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
+            _timing.selections.fetch_add(1, std::memory_order_relaxed);
 
             std::vector<Ranked> scored;
             scored.reserve(catalog.entries.size());
+            uint64_t tailNs = 0;
+            uint64_t scoreNs = 0;
             for(const auto& entry : catalog.entries)
             {
+                const auto tailStart = Clock::now();
                 ctx.clearKernelVars();
                 ctx.bindKernelVars(detail::kernelVarsFrom(entry));
 
                 _extractor->extractKernelInto(ctx, features);
-                scored.push_back({scoreCandidate(features.values), &entry});
+                tailNs += elapsedNs(tailStart);
+
+                const auto scoreStart = Clock::now();
+                auto score = scoreCandidate(features.values);
+                scoreNs += elapsedNs(scoreStart);
+                scored.push_back({score, &entry});
             }
+            _timing.tailNs.fetch_add(tailNs, std::memory_order_relaxed);
+            _timing.scoreNs.fetch_add(scoreNs, std::memory_order_relaxed);
+            _timing.candidates.fetch_add(scored.size(), std::memory_order_relaxed);
 
             const auto outOfRange = static_cast<size_t>(
                 std::count_if(scored.begin(), scored.end(), [](const Ranked& candidate) {
@@ -714,8 +740,33 @@ private:
                                << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
                                << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
-                               << " objective=" << _config.objective << " features_hash="
-                               << _config.featuresHash << " ranked=[" << candidates.str() << "]");
+                               << " objective=" << _config.objective
+                               << " features_hash=" << _config.featuresHash << " " << timingTrace()
+                               << " ranked=[" << candidates.str() << "]");
+    }
+
+    /// RFC 0019 §9.4's three components, as the per-unit figures the 2x-of-native budget is
+    /// stated in: load is per architecture, prefix is per selection, and tail and score are
+    /// per candidate -- which is the only form in which a regression is attributable, since
+    /// a sum over a run conflates a bigger catalog with a slower model.
+    ///
+    /// Cumulative, so a single line is a running average rather than one noisy sample. The
+    /// `native` adapter measures through this same path (only a `native` UHD with no
+    /// features_signature bypasses it), so it remains the baseline §9.4 compares against.
+    std::string timingTrace() const
+    {
+        const auto selections = _timing.selections.load(std::memory_order_relaxed);
+        const auto candidates = _timing.candidates.load(std::memory_order_relaxed);
+        const auto per = [](uint64_t total, uint64_t count) {
+            return count == 0 ? 0 : total / count;
+        };
+        std::ostringstream out;
+        out << "load_ns=" << _timing.loadNs.load(std::memory_order_relaxed)
+            << " prefix_ns=" << per(_timing.prefixNs.load(std::memory_order_relaxed), selections)
+            << " tail_ns=" << per(_timing.tailNs.load(std::memory_order_relaxed), candidates)
+            << " score_ns=" << per(_timing.scoreNs.load(std::memory_order_relaxed), candidates)
+            << " over=" << selections << "sel/" << candidates << "cand";
+        return out.str();
     }
 
     explicit UhdKernelHeuristic(std::string describedBy)
@@ -868,6 +919,38 @@ private:
     mutable std::atomic<double> _lastOutOfRangeRaw{0.0};
     mutable std::atomic<double> _lastOutOfRangeRecovered{0.0};
     std::string _describedBy;
+
+    /// steady_clock, not system_clock: these are durations, and a wall-clock adjustment
+    /// mid-selection must not show up as negative feature-extraction time.
+    using Clock = std::chrono::steady_clock;
+
+    static uint64_t elapsedNs(const Clock::time_point& start)
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+    }
+
+    /// RFC 0019 §9.4: "The components should be **wall-clocked separately** -- descriptor
+    /// load and model parse, feature extraction (shared prefix vs. per-candidate tail), and
+    /// scoring -- so a regression is attributable and so the cost of different adapters can
+    /// be compared directly". These are the numbers that requirement asks to exist; §12's
+    /// trace line reports them, so the `native` baseline and a `tree_data` model can be
+    /// compared on the same graph without a separate harness.
+    ///
+    /// Nanoseconds, accumulated over every selection this instance served. The counters sit
+    /// on the per-arch child that actually ranks, so each architecture's model is measured
+    /// separately rather than averaged with its siblings. Relaxed ordering throughout: these
+    /// are monotonic accumulators read for reporting, never for synchronisation.
+    struct SelectionTiming
+    {
+        std::atomic<uint64_t> loadNs{0}; ///< Model parse + adapter build, once per instance.
+        std::atomic<uint64_t> prefixNs{0}; ///< Shared problem/device slots, once per selection.
+        std::atomic<uint64_t> tailNs{0}; ///< Per-candidate `$kernel.*` slots.
+        std::atomic<uint64_t> scoreNs{0}; ///< Adapter inference plus the inverse transform.
+        std::atomic<uint64_t> selections{0}; ///< Denominator for prefixNs.
+        std::atomic<uint64_t> candidates{0}; ///< Denominator for tailNs and scoreNs.
+    };
+    mutable SelectionTiming _timing;
 
     /// False for an instance built by makeArchResolver: it carries candidates but no model of
     /// its own, so §8.3's `default` step has nothing to fall back to.
