@@ -237,8 +237,11 @@ bool applyDefaultFills(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
     case NA::MatmulAttributes:
     case NA::ReductionAttributes:
     case NA::ResampleFwdAttributes:
+    case NA::ResampleBwdAttributes:
     case NA::BlockScaleQuantizeAttributes:
     case NA::CustomOpAttributes:
+    case NA::MoeGroupedMatmulAttributes:
+    case NA::MoeGroupedMatmulBwdAttributes:
     case NA::NONE:
         return true;
     default:

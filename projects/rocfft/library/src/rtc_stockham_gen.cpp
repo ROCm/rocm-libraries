@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -453,6 +453,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_precision_type_decl(precision);
+    src += load_store_decls(loadOps, storeOps, cbtype);
     src += memory_gfx_h;
     src += callback_h;
     src += butterfly_constant_h;
@@ -488,17 +490,20 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     if(device1)
         src += device1->render();
     if(bluestein_load)
+    {
+        *bluestein_load = make_callback_realcomplex(*bluestein_load, cbtype, loadOps, storeOps);
         src += bluestein_load->render();
+    }
     if(bluestein_intrinsic_load)
         src += bluestein_intrinsic_load->render();
     if(bluestein_store)
+    {
+        *bluestein_store = make_callback_realcomplex(*bluestein_store, cbtype, loadOps, storeOps);
         src += bluestein_store->render();
+    }
     if(bluestein_intrinsic_store)
         src += bluestein_intrinsic_store->render();
 
-    // make_rtc removes templates from global function - add typedefs
-    // and constants to replace them
-    src += rtc_precision_type_decl(precision);
     if(unit_stride)
         src += "static const StrideBin sb = SB_UNIT;\n";
     else
@@ -535,8 +540,6 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         break;
     }
 
-    src += rtc_const_cbtype_decl(cbtype);
-
     switch(dir2regMode)
     {
     case DirectRegType::FORCE_OFF_OR_NOT_SUPPORT:
@@ -550,9 +553,21 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += "static const bool apply_large_twiddle = ";
     src += (largeTwdBase > 0 && largeTwdSteps > 0) ? "true;\n" : "false;\n";
 
-    // callback kernels need to disable buffer load/store
+    // legacy callbacks need to disable buffer load/store
     if(cbtype != CallbackType::NONE || dir2regMode == DirectRegType::FORCE_OFF_OR_NOT_SUPPORT)
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
+
+    // SPIR-V JIT callbacks can affect just one of load or store, so
+    // disable the intrinsic for the affected side as the load/store
+    // needs to go through the callback
+    if(storeOps && storeOps->has_spirv() && intrinsicMode == IntrinsicAccessType::ENABLE_BOTH)
+    {
+        intrinsicMode = IntrinsicAccessType::ENABLE_LOAD_ONLY;
+    }
+    if(loadOps && loadOps->has_spirv())
+    {
+        intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
+    }
 
     switch(intrinsicMode)
     {
@@ -573,7 +588,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += "static const size_t large_twiddle_base = " + std::to_string(largeTwdBase) + ";\n";
     src += "static const size_t large_twiddle_steps = " + std::to_string(largeTwdSteps) + ";\n";
 
-    *global = make_callback_realcomplex(*global, cbtype);
+    *global = make_callback_realcomplex(*global, cbtype, loadOps, storeOps);
 
     *global = make_rtc(*global, kernel_name);
     src += global->render();

@@ -37,7 +37,7 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
-    def _get_tune_params(self) -> OrderedDict:
+    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()

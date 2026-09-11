@@ -30,6 +30,13 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+ * ===========================================================================
+ *    he2hb is not intended for inclusion in the public API.
+ *    It is used as a step in eigenvalue solvers (heev*).
+ * ===========================================================================
+ */
+
 //------------------------------------------------------------------------------
 // Reduces Hermitian/symmetric matrix A to Hermitian/symmetric band form
 // by a unitary similarity transformation:
@@ -46,7 +53,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 //              2*kd - 1 sub-diagonals. On output, the main diagonal and kd
 //              sub-diagonals are set; other entries are destroyed.
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
-//  tau         Householder tau values.
+//  tau         Householder tau values, length n - kd.
 //
 template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
@@ -89,9 +96,9 @@ try
     size_t size_workArr;
     // extra requirements
     size_t size_D, size_V, size_W, size_X, size_Z, size_work;
-    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(n, kd, nb, batch_count, &size_scalars, &size_D,
-                                                     &size_V, &size_W, &size_X, &size_Z, &size_work,
-                                                     &size_workArr);
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(uplo, n, kd, nb, batch_count, &size_scalars,
+                                                     &size_D, &size_V, &size_W, &size_X, &size_Z,
+                                                     &size_work, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
     {

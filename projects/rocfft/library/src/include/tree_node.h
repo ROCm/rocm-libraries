@@ -37,7 +37,6 @@
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
-#include "callback_map.h"
 #include "compute_scheme.h"
 #include "data_layout.h"
 #include "enum_printer.h"
@@ -668,9 +667,6 @@ public:
     size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
-    // callback parameters
-    UserCallbacks callbacks;
-
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
 
@@ -950,7 +946,7 @@ public:
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
-    CallbackType GetCallbackType(bool enable_callbacks) const;
+    CallbackType GetCallbackType() const;
 
 protected:
     virtual void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) = 0;
@@ -1039,6 +1035,22 @@ public:
     bool         CreateDeviceResources() override;
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
+
+    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+    virtual size_t GetU32KernelIndexLimit() const
+    {
+
+        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
+                                                         : static_cast<size_t>(UINT32_MAX);
+    }
+    // Return the index type for this node's kernel.
+    // Overridden by nodes that use narrower index types
+    virtual IndexType GetKernelIndexType() const
+    {
+        return IndexType::U64;
+    }
+    // Max element index the kernel would compute for a given I/O side.
+    size_t       MaxKernelIndex(io_data_label io) const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };
@@ -1062,6 +1074,8 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    IndexType GetKernelIndexType() const override;
+
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override
@@ -1094,12 +1108,11 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan                       plan,
-                              void*                                   in_buffer[],
-                              void*                                   out_buffer[],
-                              const rocfft_execution_info_internal&   info,
-                              size_t                                  multiPlanIdx,
-                              const std::map<int, device_callback_t>& callbacks)
+    virtual void ExecuteAsync(const rocfft_plan                     plan,
+                              void*                                 in_buffer[],
+                              void*                                 out_buffer[],
+                              const rocfft_execution_info_internal& info,
+                              size_t                                multiPlanIdx)
         = 0;
 
     // wait for async operations to finish
@@ -1189,8 +1202,7 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1288,8 +1300,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1391,8 +1402,7 @@ struct CommRCCLGrouped : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1516,8 +1526,7 @@ struct CommScatter : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1626,8 +1635,7 @@ struct CommGather : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1736,8 +1744,7 @@ struct CommAllToAll : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 
@@ -1817,12 +1824,11 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr outputPtr;
     BufferPtr workPtr;
 
-    void ExecuteAsync(const rocfft_plan                       plan,
-                      void*                                   in_buffer[],
-                      void*                                   out_buffer[],
-                      const rocfft_execution_info_internal&   info,
-                      size_t                                  multiPlanIdx,
-                      const std::map<int, device_callback_t>& callbacks) override;
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 

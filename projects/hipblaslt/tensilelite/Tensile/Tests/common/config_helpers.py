@@ -151,6 +151,23 @@ def configMarks(filepath, rootDir, availableArchs):
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
 
+    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
+    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
+
+    # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
+    # fails under FFM emulation only. Turn it into an xfail only when running 
+    # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
+    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
+    # where the test must still run.
+    if (
+        os.environ.get("HSA_MODEL_MEMFILE")
+        and "gfx1250" in availableArchs
+        and markNamed("ffm_fail") in marks
+    ):
+        marks.append(pytest.mark.xfail)
+
     validate = True
     validateAll = False
     try:

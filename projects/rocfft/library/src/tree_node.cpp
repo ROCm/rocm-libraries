@@ -20,6 +20,7 @@
 
 #include "tree_node.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "logging.h"
@@ -28,6 +29,7 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -362,6 +364,31 @@ void LeafNode::SetupGridParam(GridParam& gp)
 // grid params are set up by RTC
 void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
+IndexType TransposeNode::GetKernelIndexType() const
+{
+    auto idx_limit = GetU32KernelIndexLimit();
+
+    // No scalar_type reinterpretation by this kernel (see rtc_transpose_gen.cpp).
+    // INT32_MAX, not UINT32_MAX: the compiler may sign-extend 32-bit indices to 64-bit.
+    if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+       || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit)
+    {
+        return IndexType::U64;
+    }
+    return IndexType::U32;
+}
+
+size_t LeafNode::MaxKernelIndex(io_data_label io) const
+{
+    // Offsets (iOffset/oOffset) are applied to base pointers before
+    // launch (see powX.cpp) and don't affect kernel index arithmetic.
+    const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
+    const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
+    const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+    // compute_ptrdiff returns the buffer size (one-past-the-end).
+    return compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+}
+
 void TreeNode::SetTransposeOutputLength()
 {
     switch(scheme)
@@ -591,8 +618,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -710,8 +736,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                     void*                                 in_buffer[],
                                     void*                                 out_buffer[],
                                     const rocfft_execution_info_internal& info,
-                                    size_t                                multiPlanIdx,
-                                    const std::map<int, device_callback_t>&)
+                                    size_t                                multiPlanIdx)
 {
     const auto devices = rccl.get_devices();
 
@@ -794,8 +819,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                    void*                                 in_buffer[],
                                    void*                                 out_buffer[],
                                    const rocfft_execution_info_internal& info,
-                                   size_t                                multiPlanIdx,
-                                   const std::map<int, device_callback_t>&)
+                                   size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -910,8 +934,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
                                void*                                 in_buffer[],
                                void*                                 out_buffer[],
                                const rocfft_execution_info_internal& info,
-                               size_t                                multiPlanIdx,
-                               const std::map<int, device_callback_t>&)
+                               size_t                                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
@@ -1042,8 +1065,7 @@ void CommGather::ExecuteAsync(const rocfft_plan                     plan,
                               void*                                 in_buffer[],
                               void*                                 out_buffer[],
                               const rocfft_execution_info_internal& info,
-                              size_t                                multiPlanIdx,
-                              const std::map<int, device_callback_t>&)
+                              size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
@@ -1177,8 +1199,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                 void*                                 in_buffer[],
                                 void*                                 out_buffer[],
                                 const rocfft_execution_info_internal& info,
-                                size_t                                multiPlanIdx,
-                                const std::map<int, device_callback_t>&)
+                                size_t                                multiPlanIdx)
 {
     if(LOG_PLAN_ENABLED())
     {
