@@ -51,7 +51,7 @@ std::shared_ptr<ITensor> makeOffsetAux()
 
 RaggedTensor<float> makeRaggedTensor(const std::shared_ptr<ITensor>& aux)
 {
-    return RaggedTensor<float>(RAGGED_DIMS, RAGGED_STRIDES, RAGGED_SEQ_AXIS, aux);
+    return {RAGGED_DIMS, RAGGED_STRIDES, RAGGED_SEQ_AXIS, aux};
 }
 
 // Asserts the call was rejected *for raggedness* rather than by some unrelated shape
