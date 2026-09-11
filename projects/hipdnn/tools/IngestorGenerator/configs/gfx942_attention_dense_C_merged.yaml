@@ -1,0 +1,1173 @@
+dialect: packaged
+authored_subpath: rocKE/gfx942_attention_dense
+engine:
+  name: hipkernel:Gfx942AttentionDense
+  sdk_version: 1.0.0
+  knobs:
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - seqlen_q
+  - seqlen_kv
+  - batch
+  - causal
+  - block_m
+  - block_n
+  - waves_per_eu
+  - persistent
+  - num_persistent
+  - use_exp2_fast
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: seqlen_q
+  type: int
+  default_value: 256
+- name: seqlen_kv
+  type: int
+  default_value: 256
+- name: batch
+  type: int
+  default_value: 2
+- name: causal
+  type: int
+  default_value: 1
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+- name: waves_per_eu
+  type: int
+  default_value: 2
+- name: persistent
+  type: int
+  default_value: 0
+- name: num_persistent
+  type: int
+  default_value: 304
+- name: use_exp2_fast
+  type: int
+  default_value: -1
+graph_match:
+  shape: shared_shape
+  discriminator: none
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+packs:
+- name: attention_dense
+  arch:
+  - gfx942
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx942/attention_dense.py
+    builder: build_attention_dense
+  variants:
+  - name: attention_dense.v_{dtype}_b{batch}_hq{num_query_heads}_kv{num_kv_heads}_sq{seqlen_q}_d{head_size}_c{causal}_bm{block_m}_bn64_w{waves_per_eu}_p{persistent}_{tag}
+    metadata: [dtype, use_exp2_fast]
+    spec_order: [block_n, num_persistent, lds_k_group_pad, lds_row_pad, lazy_rescale, iglp, batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, block_m, waves_per_eu, persistent, use_exp2_fast]
+    policy_knobs: [use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_persistent: 304, lds_k_group_pad: 8, lds_row_pad: 8, lazy_rescale: true, iglp: false}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      knobs1:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      knobs2:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, use_exp2_fast: false, tag: ed}
+      knobs3:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, tag: ed}
+      knobs4:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: false, use_exp2_fast: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 4, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 64, block_n: 64, waves_per_eu: 4, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      knobs5:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, tag: 'e{md_use_exp2_fast}'}
+      knobs6:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true, use_exp2_fast: false, tag: ed}
+      knobs7:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: false, tag: ed}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, tag: 'e{md_use_exp2_fast}'}
+    shapes:
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 3, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs6}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs7, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs6}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs6}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs6}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs6}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs6}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 37632, seqlen_kv: 37632, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 6144, seqlen_kv: 6144, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs2}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs2}
+  - name: attention_dense.f_{dtype}_b{batch}_hq{num_query_heads}_kv{num_kv_heads}_sq{seqlen_q}_sk{seqlen_kv}_d{head_size}_c1_bm256_bn64_w{waves_per_eu}_p{persistent}
+    metadata: [dtype, use_exp2_fast]
+    spec_order: [block_n, num_persistent, lds_k_group_pad, lds_row_pad, lazy_rescale, iglp, batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, block_m, waves_per_eu, persistent, use_exp2_fast]
+    policy_knobs: [use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_persistent: 304, lds_k_group_pad: 8, lds_row_pad: 8, lazy_rescale: true, iglp: false, causal: true}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false}
+      knobs1:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true}
+      knobs2:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true, use_exp2_fast: false}
+      knobs3:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, use_exp2_fast: false}
+      knobs4:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: false}
+    shapes:
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 32768, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs2}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs2}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs3}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs4}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs3}
+  - name: attention_dense.v_{dtype}_b{batch}_hq{num_query_heads}_kv{num_kv_heads}_sq{seqlen_q}_d{head_size}_c{causal}_bm{block_m}_bn64_w{waves_per_eu}_p{persistent}_{tag}_policy
+    metadata: [dtype, use_exp2_fast]
+    spec_order: [block_n, num_persistent, lds_k_group_pad, lds_row_pad, lazy_rescale, iglp, batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, block_m, waves_per_eu, persistent]
+    policy_knobs: [use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_persistent: 304, lds_k_group_pad: 8, lds_row_pad: 8, lazy_rescale: true, iglp: false}
+    knob_sets:
+      knobs0:
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, tag: e1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, tag: e1}
+      knobs1:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, tag: ed}
+      knobs2:
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, tag: e1}
+      knobs3:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true, tag: ed}
+    shapes:
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 3, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 8, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 256, seqlen_kv: 512, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 5, seqlen_q: 512, seqlen_kv: 256, num_query_heads: 6, num_kv_heads: 6, head_size: 128, causal: false, dtype: bf16, knobs: knobs2, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 37632, seqlen_kv: 37632, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 6144, seqlen_kv: 6144, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 4, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 0}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+  - name: attention_dense.f_{dtype}_b{batch}_hq{num_query_heads}_kv{num_kv_heads}_sq{seqlen_q}_sk{seqlen_kv}_d{head_size}_c1_bm256_bn64_w{waves_per_eu}_p{persistent}_policy
+    metadata: [dtype, use_exp2_fast]
+    spec_order: [block_n, num_persistent, lds_k_group_pad, lds_row_pad, lazy_rescale, iglp, batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, block_m, waves_per_eu, persistent]
+    policy_knobs: [use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_persistent: 304, lds_k_group_pad: 8, lds_row_pad: 8, lazy_rescale: true, iglp: false, causal: true}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true}
+      knobs1:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true}
+      knobs2:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false}
+    shapes:
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 64, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, dtype: fp16, knobs: knobs1, resolved: {use_exp2_fast: 1}}
+  - name: attention_dense.full_{ordinal:05d}_{dtype}_b{batch}_hq{num_query_heads}_kv{num_kv_heads}_sq{seqlen_q}_skv{seqlen_kv}_d{head_size}_c{causal}_bm{block_m}_e{md_use_exp2_fast}
+    metadata: [dtype, head_size, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, batch, causal, block_m, block_n, waves_per_eu, persistent, num_persistent, use_exp2_fast]
+    spec_order: [batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, block_n, block_m, waves_per_eu, persistent, num_persistent, lds_k_group_pad, lds_row_pad, lazy_rescale, iglp, use_exp2_fast]
+    policy_knobs: [use_exp2_fast]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_persistent: 304, lds_k_group_pad: 8, lds_row_pad: 8, lazy_rescale: true, iglp: false}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: false, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 4, persistent: false, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 4, persistent: false, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: false, use_exp2_fast: false, ordinal_offset: 4}
+      knobs1:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, ordinal_offset: 3}
+      knobs2:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: false, ordinal_offset: 4}
+      knobs3:
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 4, persistent: true, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 4, persistent: true, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 4, persistent: true, use_exp2_fast: false, ordinal_offset: 4}
+      knobs4:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, use_exp2_fast: false, ordinal_offset: 4}
+      knobs5:
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 0}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 1}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: false, use_exp2_fast: true, ordinal_offset: 2}
+      knobs6:
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 0}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 1}
+      knobs7:
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 0}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 1}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, use_exp2_fast: true, ordinal_offset: 2}
+      knobs8:
+      - {block_m: 128, block_n: 64, waves_per_eu: 4, persistent: true, ordinal_offset: 0}
+      - {block_m: 64, block_n: 64, waves_per_eu: 4, persistent: true, ordinal_offset: 1}
+      knobs9:
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 0}
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 1}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: true, ordinal_offset: 2}
+      - {block_m: 256, block_n: 64, waves_per_eu: 2, persistent: true, use_exp2_fast: true, ordinal_offset: 3}
+      knobs10:
+      - {block_m: 128, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 0}
+      - {block_m: 64, block_n: 64, waves_per_eu: 2, persistent: false, ordinal_offset: 1}
+    shapes:
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 20}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 25}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 30}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 35}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 50}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 55}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 60}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 65}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 80}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 85}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 8, num_kv_heads: 1, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 90}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 8, num_kv_heads: 1, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 95}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 155}
+    - {batch: 1, seqlen_q: 62208, seqlen_kv: 62208, num_query_heads: 9, num_kv_heads: 9, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 165}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 170}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 175}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 180}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 185}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 190}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 195}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 200}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 205}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 210}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 215}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 220}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 225}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 230}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 235}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 240}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 245}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 250}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 255}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 260}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 265}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 270}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 275}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 280}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 285}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 290}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 295}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 300}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 305}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 310}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 315}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 320}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 325}
+    - {batch: 1, seqlen_q: 4608, seqlen_kv: 4608, num_query_heads: 24, num_kv_heads: 24, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 330}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 336}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 341}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 346}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 351}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 356}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 361}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 365}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 370}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 375}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 380}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 385}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 390}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 395}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 400}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 405}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 410}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 415}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 420}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 425}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 435}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 441}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 445}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 451}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 455}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 461}
+    - {batch: 1, seqlen_q: 256, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 466}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 471}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 476}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 481}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 491}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 496}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 501}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 506}
+    - {batch: 1, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 510}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 516}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 520}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 526}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 530}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 536}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 540}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 545}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 550}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 556}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 560}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 566}
+    - {batch: 1, seqlen_q: 6144, seqlen_kv: 6144, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 571}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 575}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 581}
+    - {batch: 1, seqlen_q: 37632, seqlen_kv: 37632, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 586}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 591}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 596}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 601}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 606}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 32768, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 611}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 616}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 621}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 626}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 631}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 636}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 641}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 646}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 651}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 656}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 661}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 666}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 671}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 676}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 681}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 686}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 690}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 65536, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 695}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 700}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 131072, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 705}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 711}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 715}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 65536, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 720}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 725}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 131072, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 730}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 736}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 741}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 746}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 750}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 756}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 761}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 766}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 770}
+    - {batch: 1, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 776}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 781}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 786}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 791}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 796}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 801}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 10, num_kv_heads: 10, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 805}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 810}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 815}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 820}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 825}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 830}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 835}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 840}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 845}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 850}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 855}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 860}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 865}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 870}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 875}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 880}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 885}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 890}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 895}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 900}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 905}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 910}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 915}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 920}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 925}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 930}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 935}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 940}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 945}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 950}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 955}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 960}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 965}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 970}
+    - {batch: 2, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 975}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 980}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 985}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 990}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 995}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1000}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1005}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1010}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1015}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1021}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 1026}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1031}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1036}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1041}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1046}
+    - {batch: 2, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1051}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1056}
+    - {batch: 2, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1061}
+    - {batch: 2, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1066}
+    - {batch: 2, seqlen_q: 32768, seqlen_kv: 32768, num_query_heads: 128, num_kv_heads: 128, head_size: 64, causal: true, dtype: bf16, knobs: knobs8, resolved: {use_exp2_fast: 1}, ordinal: 1071}
+    - {batch: 3, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1076}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1240}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1245}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1250}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1255}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1260}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1265}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1270}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1275}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1280}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1285}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1290}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1295}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1300}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1305}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1310}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1315}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1320}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1325}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1330}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1335}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1340}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1345}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1350}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1355}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1360}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1365}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1370}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1375}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1380}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1385}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 1391}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 1396}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1400}
+    - {batch: 4, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1405}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1410}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1415}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1420}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1425}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1430}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1435}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1440}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1445}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1490}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1495}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1500}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1505}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1510}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1515}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1520}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1525}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1530}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1535}
+    - {batch: 8, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1540}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs0, resolved: {use_exp2_fast: 1}, ordinal: 1545}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1550}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1555}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1560}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1565}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1570}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1575}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1580}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1585}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1590}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1595}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1600}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1605}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1610}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1615}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1620}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1625}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1630}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1635}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1640}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1645}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 1651}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1655}
+    - {batch: 8, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1660}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1665}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1670}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1675}
+    - {batch: 8, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1680}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1685}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1690}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1695}
+    - {batch: 8, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1700}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1705}
+    - {batch: 8, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1710}
+    - {batch: 15, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1715}
+    - {batch: 15, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1720}
+    - {batch: 15, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1725}
+    - {batch: 15, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1730}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1735}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1740}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1745}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1750}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1755}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1760}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1765}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1770}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1775}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 2, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1780}
+    - {batch: 16, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs1, resolved: {use_exp2_fast: 0}, ordinal: 1785}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1790}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1795}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1800}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1805}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1810}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1815}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1820}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1825}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1830}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1835}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1840}
+    - {batch: 16, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1845}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1850}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1855}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1860}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1865}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1870}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1875}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1880}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1885}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1890}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1895}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1900}
+    - {batch: 16, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1905}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1910}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1915}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1920}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1925}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1930}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1935}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1940}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1945}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1950}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1955}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1960}
+    - {batch: 16, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1965}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1970}
+    - {batch: 16, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 1975}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1980}
+    - {batch: 16, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1985}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 1990}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: false, dtype: bf16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 1995}
+    - {batch: 128, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 16, num_kv_heads: 16, head_size: 128, causal: false, dtype: bf16, knobs: knobs9, resolved: {use_exp2_fast: 0}, ordinal: 2000}
+    - {batch: 128, seqlen_q: 1024, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 64, causal: false, dtype: bf16, knobs: knobs3, resolved: {use_exp2_fast: 1}, ordinal: 2005}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2091}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2096}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2101}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2106}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2111}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2116}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2121}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2136}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2141}
+    - {batch: 1, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2145}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2151}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2156}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2161}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2166}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2171}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2176}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2181}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2186}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2191}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2196}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2201}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2206}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2211}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2216}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2221}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2226}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2231}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 4, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2236}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2241}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2246}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2251}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2256}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2261}
+    - {batch: 1, seqlen_q: 512, seqlen_kv: 512, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs10, resolved: {use_exp2_fast: 1}, ordinal: 2266}
+    - {batch: 1, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2271}
+    - {batch: 1, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2276}
+    - {batch: 1, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2281}
+    - {batch: 1, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 128, num_kv_heads: 8, head_size: 128, causal: true, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2286}
+    - {batch: 2, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 10, num_kv_heads: 10, head_size: 64, causal: false, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 2290}
+    - {batch: 2, seqlen_q: 256, seqlen_kv: 256, num_query_heads: 20, num_kv_heads: 20, head_size: 64, causal: false, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 2295}
+    - {batch: 2, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2301}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 12, num_kv_heads: 12, head_size: 64, causal: true, dtype: fp16, knobs: knobs2, resolved: {use_exp2_fast: 1}, ordinal: 2465}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2471}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2476}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2480}
+    - {batch: 4, seqlen_q: 1024, seqlen_kv: 1024, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2485}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: true, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2490}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: true, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2495}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2500}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2505}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: false, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2510}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: true, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2515}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2521}
+    - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2566}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 2567}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2570}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 2572}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2575}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2578}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2580}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2583}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2585}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2588}

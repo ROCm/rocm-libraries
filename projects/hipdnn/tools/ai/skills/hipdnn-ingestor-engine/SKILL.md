@@ -301,9 +301,8 @@ Every completion report this skill produces states, explicitly:
 Most of the pipeline is op-agnostic and driven by a per-kernel **profile** — a kernel
 states its dispatcher, request class, predicate, matcher vocabulary, policy-owned knobs,
 sweep candidates and launch surfaces, and the tools do the rest without being edited.
-A profile lives at `configs/<slug>.profile.yaml`; the integration branch stacked on this
-one carries a worked example, and a second arch was driven end to end by copying it and
-changing about six values.
+`configs/gfx942_attention_dense.profile.yaml` is the worked example; a second arch was
+driven end to end by copying it and changing about six values.
 
 **Four things are genuinely per-op, and pretending otherwise is worse than saying so.**
 Each one below is a place where you must supply knowledge the tools cannot infer, and
@@ -345,8 +344,8 @@ its Python source, its C++ mirror, the KMD fields it branches on, its guard and 
 `$GEN/tools/launch_surface.py --check` verifies the declaration is honest and **names any
 surface with no guard or no test**. An unguarded surface is a legitimate thing to ship; an
 unguarded surface nobody wrote down is not. **Test:** extract the geometry into a pure
-function of descriptor metadata, in a `<Pack>Geometry.hpp` beside the pack, and test it
-per shape family. Inside `prepare()` that arithmetic is unreachable without a
+function of descriptor metadata and test it per shape family — `Gfx942AttentionDenseGeometry.hpp`
+and its test are the pattern. Inside `prepare()` that arithmetic is unreachable without a
 device, which is exactly why it went unchecked while most shipped shapes never ran.
 
 ### 4. The scorer is native, so reachability needs a declaration

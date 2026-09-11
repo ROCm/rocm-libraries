@@ -32,6 +32,12 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// otherwise unobservable. Defined in PointwiseNative.cpp beside the handler it serves.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 
+/// The kpack module cache the gfx942 dense-attention pack loads through,
+/// process-lifetime. Same rationale and same placement as the pointwise accessor
+/// above: it belongs to the kernel-code path, and it is declared rather than kept
+/// internal so the definition beside its handler has external linkage.
+compilation::KpackModuleCache& gfx942AttentionDenseKpackModuleCache();
+
 /// The program plus the kernel resolved out of it, in the shape every pack's
 /// PreparedDispatch already holds. Returned together because the kernel is a
 /// non-owning view into the program and the two must be stored side by side.
