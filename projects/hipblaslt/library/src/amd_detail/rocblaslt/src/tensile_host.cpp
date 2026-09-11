@@ -5043,9 +5043,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, and uniform summation order (Synchronizer
         // pointer skipped at selection; launch still throws if it is missing).
-        // With USO off this must reproduce the pre-USO check, which was
-        // problemPredicate && taskPredicate as two separate tests.
-        // streamKDynamicQueueSupported() stays unconditional.
+        // With USO off, check exactly as before the feature: problemPredicate
+        // && taskPredicate, nothing else.
         bool swMatch;
         if(tensile_prob.getParams().uniformSummationOrder())
         {
@@ -5058,8 +5057,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         else
         {
             swMatch = (*solution->problemPredicate)(tensile_prob)
-                      && (*solution->taskPredicate)(task)
-                      && solution->streamKDynamicQueueSupported(tensile_prob, *hardware);
+                      && (*solution->taskPredicate)(task);
         }
         if(!swMatch)
         {
@@ -5148,9 +5146,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
             TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
-            // With uniform summation order OFF this must reproduce the pre-USO
-            // check, which was hardwarePredicate && problemPredicate (no
-            // taskPredicate). streamKDynamicQueueSupported() is unconditional.
+            // With uniform summation order off, check exactly as before the
+            // feature: hardwarePredicate && problemPredicate, no taskPredicate.
             bool match = (*solution->hardwarePredicate)(*hardware);
             if(match)
             {
@@ -5162,9 +5159,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
                         *solution,
                         tensile_prob.gemms[i]);
                 else
-                    match = (*solution->problemPredicate)(tensile_prob.gemms[i])
-                            && solution->streamKDynamicQueueSupported(tensile_prob.gemms[i],
-                                                                      *hardware);
+                    match = (*solution->problemPredicate)(tensile_prob.gemms[i]);
             }
             if(!match)
             {

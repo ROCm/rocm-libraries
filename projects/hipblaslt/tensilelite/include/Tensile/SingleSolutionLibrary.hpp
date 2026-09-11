@@ -160,13 +160,13 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    // setGroupedGemm(true) is load-bearing for
+                    // With uniform summation order off, filter exactly as before
+                    // the feature: problemPredicate && taskPredicate, nothing
+                    // else. setGroupedGemm(true) is load-bearing for
                     // uniformSummationOrderSupported(), but it also re-aims
                     // GroupedGemmEqual / SynchronizerSizeCheck / the free-size-B
-                    // clause on this (local) problem copy. Pre-USO it was not set
-                    // here, so it stays behind the USO check together with the
-                    // softwarePredicate() call. streamKDynamicQueueSupported()
-                    // stays unconditional.
+                    // clause on this (local) problem copy, so it stays behind the
+                    // USO check together with the softwarePredicate() call.
                     bool swMatch;
                     if(problem.getParams().uniformSummationOrder())
                     {
@@ -180,8 +180,7 @@ namespace TensileLite
                     else
                     {
                         swMatch = (*solution->problemPredicate)(problem)
-                                  && (*solution->taskPredicate)(task)
-                                  && solution->streamKDynamicQueueSupported(problem, hardware);
+                                  && (*solution->taskPredicate)(task);
                     }
                     if(!swMatch)
                     {
@@ -278,9 +277,9 @@ namespace TensileLite
                         problem.setWorkspaceSizeGroupedGemm(ws);
                         problem.setGroupedGemmCount(problems.size());
                         // See the note in findBestSolution(): setGroupedGemm(true)
-                        // and the taskPredicate/softwarePredicate widening are
-                        // USO-stack additions and stay behind the USO check;
-                        // streamKDynamicQueueSupported() stays unconditional.
+                        // and the softwarePredicate() widening stay behind the
+                        // USO check so that with USO off this is the pre-feature
+                        // problemPredicate && taskPredicate filter.
                         bool swMatch;
                         if(problem.getParams().uniformSummationOrder())
                         {
@@ -291,8 +290,7 @@ namespace TensileLite
                         else
                         {
                             swMatch = (*solution->problemPredicate)(problem)
-                                      && (*solution->taskPredicate)(task)
-                                      && solution->streamKDynamicQueueSupported(problem, hardware);
+                                      && (*solution->taskPredicate)(task);
                         }
                         if(!swMatch)
                             useSolution = false;

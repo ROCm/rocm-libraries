@@ -173,20 +173,17 @@ namespace TensileLite
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                // With uniform summation order OFF this must reproduce the
-                // pre-USO filter, which was hardwarePredicate && problemPredicate.
-                // taskPredicate is a real filter (LaunchLimits / WorkspaceCheck)
-                // that the USO stack added here, so it stays behind the USO check.
-                // streamKDynamicQueueSupported() stays unconditional.
-                const bool swMatch
-                    = problem.getParams().uniformSummationOrder()
-                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                              task,
-                                              hardware,
-                                              *solution,
-                                              problem)
-                          : ((*(solution->problemPredicate))(problem)
-                             && solution->streamKDynamicQueueSupported(problem, hardware));
+                // With uniform summation order off, filter exactly as before the
+                // feature: hardwarePredicate && problemPredicate. The extra
+                // conjuncts in softwarePredicate() (taskPredicate, StreamK
+                // dynamic queue) are real filters, so they stay behind the check.
+                const bool swMatch = problem.getParams().uniformSummationOrder()
+                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                             task,
+                                                             hardware,
+                                                             *solution,
+                                                             problem)
+                                         : (*(solution->problemPredicate))(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)

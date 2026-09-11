@@ -165,13 +165,11 @@ namespace TensileLite
                 {
                     auto const& solution = *it->second;
                     Task        task(hardware, problem, *solution);
-                    // With uniform summation order OFF this must reproduce the
-                    // pre-USO filter, which was problemPredicate only. The
-                    // hardwarePredicate and taskPredicate conjuncts came in with
-                    // the USO stack and are not inert, so they stay behind the
-                    // USO check. streamKDynamicQueueSupported() is deliberately
-                    // unconditional: it excludes dynamic-queue StreamK kernels on
-                    // non-power-of-two XCD devices regardless of USO.
+                    // With uniform summation order off, filter exactly as before
+                    // the feature: problemPredicate only. The hardwarePredicate
+                    // and the softwarePredicate() conjuncts (taskPredicate,
+                    // StreamK dynamic queue) are real filters, so they stay
+                    // behind the check.
                     bool accept;
                     if(problem.getParams().uniformSummationOrder())
                     {
@@ -184,8 +182,7 @@ namespace TensileLite
                     }
                     else
                     {
-                        accept = (*solution->problemPredicate)(problem)
-                                 && solution->streamKDynamicQueueSupported(problem, hardware);
+                        accept = (*solution->problemPredicate)(problem);
                     }
                     if(accept)
                     {

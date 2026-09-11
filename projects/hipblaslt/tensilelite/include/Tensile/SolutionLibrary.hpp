@@ -88,12 +88,9 @@ namespace TensileLite
             // uniformSummationOrderSupported() is the same kind of filter:
             // under USO it admits only kernels this problem can launch
             // (Synchronizer allocation is the remaining solve()-only clause).
-            // It early-outs with `return true` when
-            // problem.getParams().uniformSummationOrder() is false, so with USO
-            // off it is inert and this conjunction is exactly the pre-USO one
-            // plus streamKDynamicQueueSupported(). Callers that need to restore
-            // a narrower pre-USO conjunction do so at the call site, guarded on
-            // uniformSummationOrder().
+            // Selection sites that did not use this full conjunction before USO
+            // call it only when uniformSummationOrder() is set, and evaluate
+            // their own narrower pre-USO conjunction otherwise.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware);

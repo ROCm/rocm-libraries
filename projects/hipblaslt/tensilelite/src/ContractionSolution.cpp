@@ -4300,16 +4300,12 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                // Mirror solve()'s SK4 / SK5-dynamic tree forcing so the grid
-                // and workspace reported here match the launch reduction.
-                origami::reduction_t reductionStrat;
-                if(sizeMapping.streamK == 4)
-                    reductionStrat = origami::reduction_t::tree;
-                else if(sizeMapping.streamK == 5)
-                    reductionStrat = effectiveDynamic ? origami::reduction_t::tree
-                                                      : getSKReduction(problem, hardware);
-                else
-                    reductionStrat = getSKReduction(problem, hardware);
+                // getSKReduction() decides, for every StreamK mode. Forcing tree
+                // for SK4 / SK5-dynamic here is not a uniform-summation-order
+                // requirement -- parallel reduction is uniform by construction
+                // -- and it changes both the grid fed to getSKGridImpl() and the
+                // size reported below.
+                auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
                                               hardware,
@@ -4337,6 +4333,14 @@ namespace TensileLite
                     // work-queue counters live at the base of the flag buffer
                     // (AddressFlags), not here, so they need no room in it.
                     size_t idealWorkspace = partialTileSize(skGrid);
+                    // Pre-uniform-summation-order sizing reserved the work-queue
+                    // region here as well. Nothing addresses those bytes, but
+                    // dropping them lowers the DP-fallback threshold, so the
+                    // reservation is kept on the non-uniform path. Mirrored in
+                    // resolveStreamKSettings() and computeStreamKDecisions().
+                    if(!problem.getParams().uniformSummationOrder()
+                       && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+                        idealWorkspace += streamKQueueRegionBytes(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -4474,11 +4478,12 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernelName.empty() || handwrittenCustomKernel())
+        if(!sizeMapping.customKernelName.empty())
         {
-            // Custom kernels currently only support single-kernel (tree) reduction.
-            // YAML records set sizeMapping.customKernelName; handwritten kernels
-            // are identified by customKernel.name && !generated.
+            // Custom kernels currently only support single-kernel (tree)
+            // reduction. handwrittenCustomKernel() is not tested here: its
+            // customKernel.name is copied from sizeMapping.customKernelName at
+            // deserialization, so it can never widen this condition.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
@@ -4725,13 +4730,10 @@ namespace TensileLite
         const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                           ? streamK5EffectiveDynamic(problem, hardware)
                                           : false;
-        if(sizeMapping.streamK == 4)
-            sk.reduction = origami::reduction_t::tree;
-        else if(sizeMapping.streamK == 5)
-            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
-                                            : getSKReduction(problem, hardware);
-        else
-            sk.reduction = getSKReduction(problem, hardware);
+        // getSKReduction() decides for every StreamK mode, including SK4 and
+        // SK5-dynamic. Parallel reduction is uniform by construction, so the
+        // dynamic-queue modes have no reason to be pinned to tree.
+        sk.reduction = getSKReduction(problem, hardware);
         sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
         sk.smCountTarget             = problem.getParams().smCountTarget();
         sk.grid = getSKGridImpl(*this,
@@ -4763,6 +4765,11 @@ namespace TensileLite
             // workspace-size queries (requiredWorkspaceSize() and
             // computeStreamKDecisions()), which carry no such term.
             size_t idealWorkspace = partialTileSize(sk.grid);
+            // Threshold parity with the pre-uniform-summation-order launch path,
+            // which reserved the work-queue region here too.
+            if(!problem.getParams().uniformSummationOrder()
+               && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+                idealWorkspace += streamKQueueRegionBytes(hardware);
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
@@ -5746,17 +5753,9 @@ namespace TensileLite
             = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware) : false;
         d.effectiveDynamic = effectiveDynamic;
 
-        // Reduction strategy. SK4 and SK5-resolved-dynamic are unconditionally tree;
-        // everything else asks getSKReduction(). Note requiredWorkspaceSize() always
-        // asks getSKReduction() and has no such special case -- see the note above.
-        origami::reduction_t reduction;
-        if(sizeMapping.streamK == 4)
-            reduction = origami::reduction_t::tree;
-        else if(sizeMapping.streamK == 5)
-            reduction = effectiveDynamic ? origami::reduction_t::tree
-                                         : getSKReduction(problem, hardware);
-        else
-            reduction = getSKReduction(problem, hardware);
+        // Reduction strategy. getSKReduction() decides for every StreamK mode --
+        // the same call resolveStreamKSettings() and requiredWorkspaceSize() make.
+        origami::reduction_t reduction = getSKReduction(problem, hardware);
 
         // Grid -- reuses getSKGridImpl (same call solve() makes), and captures the
         // fixed-grid / tree-bounds fallbacks plus the pre-tree-bounds "selected"
@@ -5821,6 +5820,10 @@ namespace TensileLite
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it.
             idealWorkspace = partialTileSize(grid);
+            // Threshold parity with the pre-uniform-summation-order sizing,
+            // which reserved the work-queue region here too.
+            if(!problem.getParams().uniformSummationOrder() && isDynamic)
+                idealWorkspace += streamKQueueRegionBytes(hardware);
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
