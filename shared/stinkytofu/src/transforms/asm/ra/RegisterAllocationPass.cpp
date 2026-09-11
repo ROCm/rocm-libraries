@@ -103,6 +103,29 @@ std::string wavesOf(GfxArchID arch, uint32_t vgprs) {
     return waves == std::numeric_limits<int>::max() ? "n/a" : std::to_string(waves);
 }
 
+/// How many values carry an index ceiling, and the tightest one.
+///
+/// The Allocate counterpart of the held-range list: same constraint, but it
+/// reaches the allocator as a limit per value rather than as frozen registers,
+/// so there are no ranges to name and the report counts instead.
+struct CappedValues {
+    size_t count = 0;
+    uint32_t ceiling = 0;
+};
+
+CappedValues cappedValuesOf(const Function& function, const AllocationConstraints& constraints) {
+    constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
+    CappedValues capped;
+    const size_t valueCount = function.ssaArena().valueCount();
+    for (size_t id = 1; id <= valueCount; ++id) {
+        const uint32_t ceiling = constraints.maxIndexFor(static_cast<SSAValueID>(id));
+        if (ceiling == kNoLimit) continue;
+        if (capped.count == 0 || ceiling < capped.ceiling) capped.ceiling = ceiling;
+        ++capped.count;
+    }
+    return capped;
+}
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
@@ -153,18 +176,22 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
         }
         text += "]";
     }
-    // Registers frozen because an operand cannot name a bank for them. Named
-    // because they are the reason the high-water mark cannot fall below them,
-    // which otherwise reads as the allocator failing to compact.
+    // What was done about operands that cannot name a bank. Reported in both
+    // modes, because under Hold these registers are why the high-water mark
+    // cannot fall below them, and under Allocate the constraint is still in
+    // force even though nothing is frozen -- a silent report there would read
+    // as no constraint at all.
     if (!unbankable.empty()) {
-        text += " unbankable[";
-        for (size_t i = 0; i < unbankable.size(); ++i) {
-            const AllocationScope::HeldRange& range = unbankable[i];
-            if (i > 0) text += " ";
-            text += regTypeToString(range.regClass) + std::to_string(range.start);
+        text += " unbankable[held";
+        for (const AllocationScope::HeldRange& range : unbankable) {
+            text += " " + regTypeToString(range.regClass) + std::to_string(range.start);
             if (range.end != range.start) text += ":" + std::to_string(range.end);
         }
         text += "]";
+    } else if (const CappedValues capped = cappedValuesOf(function, constraints);
+               capped.count > 0) {
+        text += " unbankable[allocated " + std::to_string(capped.count) + " value(s) max " +
+                std::to_string(capped.ceiling) + "]";
     }
     return text;
 }
@@ -262,12 +289,14 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
     }
 
     // Before the requested holds, so a register in both reports the constraint
-    // rather than the request. An operand that cannot name a bank is a property
-    // of the encoding, and the producer already gave it a register it can name,
-    // so holding that register is a known-good answer rather than a limit the
-    // allocator has to find room under.
+    // rather than the request.
+    //
+    // Allocate holds nothing. The ceiling is collected under either policy, so
+    // the same constraint reaches the allocator as a limit to place under.
     const std::vector<AllocationScope::HeldRange> unbankable =
-        AllocationScope::unbankableOperandRegisters(function, target);
+        options.unbankableOperands == RegisterAllocationOptions::UnbankableOperands::Hold
+            ? AllocationScope::unbankableOperandRegisters(function, target)
+            : std::vector<AllocationScope::HeldRange>{};
     if (!unbankable.empty()) scope.holdUnbankableOperands(constraints, unbankable);
 
     if (!options.pinRegisters.empty()) {
