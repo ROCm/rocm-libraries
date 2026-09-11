@@ -226,7 +226,7 @@ RppStatus contrast_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -407,7 +407,7 @@ RppStatus contrast_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -590,7 +590,7 @@ RppStatus contrast_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -775,7 +775,7 @@ RppStatus contrast_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;

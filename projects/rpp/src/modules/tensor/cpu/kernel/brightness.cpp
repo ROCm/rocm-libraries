@@ -297,7 +297,7 @@ RppStatus brightness_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp8u* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8u* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -510,7 +510,7 @@ RppStatus brightness_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp32f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -756,7 +756,7 @@ RppStatus brightness_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp16f* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp16f* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -960,7 +960,7 @@ RppStatus brightness_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp8s* srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         Rpp8s* dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -986,7 +986,7 @@ RppStatus brightness_u8_u8_host_single_image(Rpp8u* srcPtr, RpptDescPtr srcDescP
     compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
     // Single image - use intra-image parallelization
-    Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
     return brightness_u8_u8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, alphaTensor[0],
                                       betaTensor[0], roi, layoutParams, intraThreads);
@@ -1003,7 +1003,7 @@ RppStatus brightness_f32_f32_host_single_image(Rpp32f* srcPtr, RpptDescPtr srcDe
     compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
     // Single image - use intra-image parallelization
-    Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
     return brightness_f32_f32_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, alphaTensor[0],
                                         betaTensor[0] * ONE_OVER_255, roi, layoutParams,
@@ -1021,7 +1021,7 @@ RppStatus brightness_f16_f16_host_single_image(Rpp16f* srcPtr, RpptDescPtr srcDe
     compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
     // Single image - use intra-image parallelization
-    Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
     return brightness_f16_f16_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, alphaTensor[0],
                                         betaTensor[0] * ONE_OVER_255, roi, layoutParams,
@@ -1039,7 +1039,7 @@ RppStatus brightness_i8_i8_host_single_image(Rpp8s* srcPtr, RpptDescPtr srcDescP
     compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
     // Single image - use intra-image parallelization
-    Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+    Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
     return brightness_i8_i8_host_impl(srcPtr, srcDescPtr, dstPtr, dstDescPtr, alphaTensor[0],
                                       betaTensor[0], roi, layoutParams, intraThreads);

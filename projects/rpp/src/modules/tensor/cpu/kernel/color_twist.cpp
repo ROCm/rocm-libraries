@@ -432,7 +432,7 @@ RppStatus color_twist_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, R
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f brightnessParam = brightnessTensor[batchCount] * 255.0f;
         Rpp32f contrastParam = contrastTensor[batchCount];
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
@@ -753,7 +753,7 @@ RppStatus color_twist_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f brightnessParam = brightnessTensor[batchCount];
         Rpp32f contrastParam = contrastTensor[batchCount] * ONE_OVER_255;
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
@@ -1074,7 +1074,7 @@ RppStatus color_twist_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f brightnessParam = brightnessTensor[batchCount];
         Rpp32f contrastParam = contrastTensor[batchCount] * ONE_OVER_255;
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
@@ -1415,7 +1415,7 @@ RppStatus color_twist_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, R
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f brightnessParam = brightnessTensor[batchCount] * 255.0f;
         Rpp32f contrastParam = contrastTensor[batchCount];
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);

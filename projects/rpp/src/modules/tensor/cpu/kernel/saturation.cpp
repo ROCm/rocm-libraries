@@ -348,7 +348,7 @@ RppStatus saturation_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rp
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f saturationParam = saturationTensor[batchCount];
 
         Rpp8u *srcPtrImage, *dstPtrImage;
@@ -612,7 +612,7 @@ RppStatus saturation_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f saturationParam = saturationTensor[batchCount];
 
         Rpp32f *srcPtrImage, *dstPtrImage;
@@ -927,7 +927,7 @@ RppStatus saturation_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f saturationParam = saturationTensor[batchCount];
 
         Rpp16f *srcPtrImage, *dstPtrImage;
@@ -1216,7 +1216,7 @@ RppStatus saturation_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rp
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
         Rpp32f saturationParam = saturationTensor[batchCount];
 
         Rpp8s *srcPtrImage, *dstPtrImage;

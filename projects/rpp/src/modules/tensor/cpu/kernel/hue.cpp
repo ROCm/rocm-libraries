@@ -337,7 +337,7 @@ RppStatus hue_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* ds
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
         if (hueModulus < 0.0f) hueModulus += 360.0f;
@@ -604,7 +604,7 @@ RppStatus hue_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
         if (hueModulus < 0.0f) hueModulus += 360.0f;
@@ -908,7 +908,7 @@ RppStatus hue_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
         if (hueModulus < 0.0f) hueModulus += 360.0f;
@@ -1193,7 +1193,7 @@ RppStatus hue_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* ds
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
-        Rpp32u intraThreads = GetIntraImageThreads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
 
         Rpp32f hueModulus = fmodf(hueTensor[batchCount], 360.0f);
         if (hueModulus < 0.0f) hueModulus += 360.0f;

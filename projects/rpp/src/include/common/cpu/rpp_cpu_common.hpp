@@ -275,7 +275,8 @@ inline void saturate_pixel(Rpp32f& pixel, Rpp16f* dst) {
 
 // Compute the number of threads to use for intra-image parallelization
 // Based on batch size and image height
-inline Rpp32u GetIntraImageThreads(rpp::Handle& handle, Rpp32u batchSize, Rpp32u imageHeight) {
+inline Rpp32u get_intra_image_threads(const rpp::Handle& handle, Rpp32u batchSize,
+                                      Rpp32u imageHeight) {
     // If processing multiple images in batch, don't parallelize within image
     // The outer loop will parallelize across batch items
     if (batchSize > 1) {
