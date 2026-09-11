@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "rocauxiliary_laset.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -778,9 +779,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     const T zero = 0;
 
     // Clear diagonals below sub-diagonal kd, where bulges will go.
-    rocsolver_laset(handle, rocblas_fill_full, kd - 1, n, zero, zero, // opts
-                    Aband, shiftA + 2 * kd, ldab, strideA, // Aband
-                    batch_count);
+    rocsolver_laset_template<T>(handle, rocblas_fill_full, kd - 1, n, zero, zero, // opts
+                                Aband, shiftA + 2 * kd, ldab, strideA, // Aband
+                                batch_count);
 
     // Copy lower band to upper band.
     hermitianize_band(handle, n, kd - 1, Aband + shiftA, ldab, strideA, batch_count);
@@ -790,9 +791,9 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     I nt = ceildiv(n - 1, kd);
     I nv_blocks = nt * (nt + 1) / 2;
     I nv = nv_blocks * kd;
-    rocsolver_laset(handle, rocblas_fill_full, ldv, nv, zero, zero, // opts
-                    V, 0, ldv, strideV, // V
-                    batch_count);
+    rocsolver_laset_template<T>(handle, rocblas_fill_full, ldv, nv, zero, zero, // opts
+                                V, 0, ldv, strideV, // V
+                                batch_count);
 
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 

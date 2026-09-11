@@ -227,3 +227,18 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationConvFwdSerializeRoundTripFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
+
+// 1D layout tests (NCL, NLC)
+using IntegrationConvFwdSerializeRoundTrip1dFp32 = ConvForwardSerializeRoundTrip<float>;
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationConvFwdSerializeRoundTrip1dFp32);
+TEST_P(IntegrationConvFwdSerializeRoundTrip1dFp32, SerializeRoundTripExecutesCorrectly)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationConvFwdSerializeRoundTrip1dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));

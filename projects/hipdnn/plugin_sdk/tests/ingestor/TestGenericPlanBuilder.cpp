@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -35,9 +36,9 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
-#include "ContentCarryingTestGraph.hpp"
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+#include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
 
 /**
  * @file TestGenericPlanBuilder.cpp
@@ -49,6 +50,8 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1037,6 +1040,89 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
+/// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
+/// that cannot be loaded -- a kpack archive missing from the install, a symbol the module
+/// does not export -- which is a property of that one kernel, not of its pack.
+class FailsToPrepareOneBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
+{
+public:
+    explicit FailsToPrepareOneBlockSizeHandler(int64_t failingBlockSize)
+        : _failingBlockSize(failingBlockSize)
+    {
+    }
+
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == _failingBlockSize)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "the archive holds no code object for this kernel");
+        }
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const TestHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+
+private:
+    int64_t _failingBlockSize;
+};
+
+/// Constructing a GenericPlan runs prepare(), so the ranked front is where an unloadable
+/// code object surfaces -- after applicability already promised the graph. kernel_64 fails,
+/// kernel_128 takes the plan, and the WARN is the only record that a slower kernel is
+/// running.
+TEST(TestIngestorGenericPlanBuilder, FallsBackWhenTheFrontCandidateCannotPrepare)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareOneBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xB6));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    // 128, not 64: priority puts kernel_64 at the front, and the next candidate served.
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128);
+    EXPECT_EQ(context.plan().getWorkspaceSize(0), 128U);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, toString(testId(0x70))))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "the archive holds no code object for this "
+                                          "kernel"));
+}
+
 // ---------------------------------------------------------------------------
 // The winner-cache coverage gate and ranked walk at the buildPlan() lookup site
 // ---------------------------------------------------------------------------
@@ -1093,7 +1179,7 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1137,7 +1223,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
         record.push_back(rankedEntryFor(*kernel, time));
         time += 1.0;
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     const auto knobs = builder.getCustomKnobs(0, graph);
 
@@ -1184,7 +1270,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1228,7 +1314,7 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
         }
     }
     ASSERT_EQ(record.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1268,7 +1354,7 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
         entry.packId = testId(0xEE);
         record.push_back(entry);
     }
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1320,7 +1406,7 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig
@@ -1376,7 +1462,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), record);
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1420,7 +1506,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(graph, otherDevice), record);
+    manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1465,7 +1551,8 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
             record.push_back(rankedEntryFor(kernel, 0.1));
         }
     }
-    manager->recordWinner(winnerKeyFor(otherGraph, properties), record);
+    manager->recordWinner(
+        winnerKeyFor(otherGraph, properties), record, WinnerWriteCause::FRESH_MISS);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1509,7 +1596,7 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on.
     flatbuffers::FlatBufferBuilder fbb;
@@ -1562,7 +1649,7 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
     });
-    manager->recordWinner(winnerKeyFor(graph, properties), ranking);
+    manager->recordWinner(winnerKeyFor(graph, properties), ranking, WinnerWriteCause::FRESH_MISS);
 
     // The post-priming plan: benchmarking still ON, exactly as autotune leaves it.
     flatbuffers::FlatBufferBuilder fbb;
@@ -1932,7 +2019,7 @@ TEST(TestIngestorGenericPlanBuilder,
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
-    manager->recordWinner(winnerKeyFor(graph, properties), narrow);
+    manager->recordWinner(winnerKeyFor(graph, properties), narrow, WinnerWriteCause::FRESH_MISS);
 
     // Now a WIDE run, unfiltered, with benchmarking on, so sampling produces real
     // usable candidates and write-back actually fires.

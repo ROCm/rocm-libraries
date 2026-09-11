@@ -57,6 +57,8 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_CALLS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_SOURCE_NAMES)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_SYMBOLS_KERNEL)
+
 /// 0: Off.
 /// 1: Logs each option on a separate line.
 /// 2: Logs all options altogether, on single line.
@@ -503,7 +505,12 @@ void BuildAsm(const std::string& name,
         action.SetLogging(true);
         auto optAsm = miopen::SplitSpaceSeparated(options);
 #if WORKAROUND_ISSUE_3001
-        if(!target.isXnackEnabled())
+        // Only add -mno-xnack when the device's ISA actually has an xnack on/off
+        // mode (target.xnack.isReported()). Some devices (e.g. gfx90c) have no
+        // xnack mode at all, so they never report it. Adding -mno-xnack for them
+        // would build a kernel that explicitly requires xnack off, which their loader
+        // rejects because it only accepts kernels built without any xnack setting.
+        if(target.xnack.isReported() && !target.isXnackEnabled())
             optAsm.emplace_back("-mno-xnack");
 #endif
         compiler::lc::gcnasm::RemoveOptionsUnwanted(optAsm);
@@ -813,6 +820,12 @@ void BuildHip(const std::string& name,
         opts.push_back("-Wno-cuda-compat");
         opts.push_back("-fno-gpu-rdc");
         opts.push_back("-O3");
+        if(MIOPEN_DEBUG_SYMBOLS_KERNEL)
+        {
+            opts.push_back("-g");
+            MIOPEN_LOG_W("Compiling the kernel with debug symbols");
+        }
+
 #if WORKAROUND_SWDEV_413293
         opts.push_back("-fno-offload-uniform-block");
 #endif

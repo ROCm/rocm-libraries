@@ -60,8 +60,13 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
     # Defect E fix: copy .co files to build tree so build-tree test runs work without
     # manual HIP_FLASH2_KERNEL_DIR export (mirrors asm_sdpa_engine pattern)
-    file(COPY
-        ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+    # Copy every .co present, not just the legacy object: naming only the
+    # legacy one meant a build-tree ctest could never exercise a variant even
+    # when the install was correct (S. Reeder had to stage objects by hand to
+    # test the dispatcher at all).
+    file(GLOB _f2_build_cos
+         ${CMAKE_CURRENT_SOURCE_DIR}/engines/hip_flash2_engine/kernels/*.co)
+    file(COPY ${_f2_build_cos}
         DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels)
     # Override HIP_FLASH2_KERNEL_DIR at test time to point to build tree
     set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
@@ -74,17 +79,38 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # happened to exist, which also means nothing would ever exercise the installed copy.
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         # Container.cpp resolves this relative to the loaded .so first, so a
         # DESTDIR-staged, relocated, or repackaged install still finds its own
-        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # descriptors; HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
+
+    # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
+    # because it does not compile without the ingestor: KpackArchive.cpp is the only
+    # translation unit in the provider that includes <rocm_kpack/kpack.h>.
+    target_sources(hip_kernel_provider_impl PRIVATE
+        compilation/KpackArchive.cpp
+        compilation/KpackKernelLoader.cpp
+        compilation/KpackProgram.cpp
+    )
+
+    # The object library gets rocm::rocm_kpack for its include directories; the two
+    # targets that actually link have to name it themselves, because they consume the
+    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
+    # interface, so the plugin has to name the kpack reader itself.
+    target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+endif()
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -289,6 +315,20 @@ endif()
 
 # Process all kernels marked for inlining
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+
+# The plugin embeds production kernels only. A test descriptor set names its sources for
+# the test binary alone, so a test source registered here would ship in the shared
+# library.
+get_target_property(_plugin_kernel_files hip_kernel_provider_impl KERNELEMBEDDING_KERNEL_FILES)
+foreach(_plugin_kernel_file IN LISTS _plugin_kernel_files)
+    if(_plugin_kernel_file MATCHES "(^|/)test_descriptors(/|$)")
+        message(FATAL_ERROR
+                "hip_kernel_provider_impl embeds a test descriptor set's kernel source:\n"
+                "  ${_plugin_kernel_file}\n"
+                "Register it on the test binary instead.")
+    endif()
+endforeach()
+
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
     TARGET hip_kernel_provider_impl
@@ -305,3 +345,11 @@ set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
 set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 
 target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_impl
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}
+        PACK_NAMES product
+    )
+endif()

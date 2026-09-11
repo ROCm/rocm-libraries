@@ -20,11 +20,12 @@ add_executable(
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
-# libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
+# libhipdnn_backend.so. HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the binary
+# directory to the plugin engine directory, derived from the configured install layout.
 target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
+        PLUGIN_PATH="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/hip_kernel_provider"
 )
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
@@ -83,11 +84,48 @@ endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
+        kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
     )
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
+    )
+    # The one descriptor set this binary's cases resolve, as the offset from the binary to
+    # the staged tree. main() applies it when the environment names no set, so the binary
+    # runs standalone, and the offset holds in the install tree too, so no machine-specific
+    # path is compiled in or reaches the CTest files.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
+    )
+    # The shared descriptor-root resolver lives with the unit tests
+    target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests
+    )
+    # The relative layout only, never an absolute build path: the kpack suite locates the
+    # staged tree by walking from the loaded plugin exactly as the loader does, and needs
+    # the same spelling of the subdirectory the provider compiled in. An absolute path
+    # here would be baked into the installed test binary as well, naming a build tree it
+    # cannot see.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+    )
+    # The integration root is packed by three roots, and each stages under its own
+    # packaging target. Name each one individually.
+    foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
+                     hkp_packaging_archive_fixture)
+        if(TARGET ${_hkp_set})
+            add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
+        endif()
+    endforeach()
+
+    # The parent of the integration descriptor sets, which holds all three. A
+    # walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_integration_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
+        PACK_NAMES integration integration_shared archive_fixture
     )
 endif()
 

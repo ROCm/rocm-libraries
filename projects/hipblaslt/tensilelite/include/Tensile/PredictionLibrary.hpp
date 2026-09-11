@@ -35,6 +35,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
 #if ORIGAMI_ENABLE_NN
@@ -182,9 +183,11 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
+                Task task(hardware, problem, *solution);
+                const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
+                const bool swMatch = softwarePredicate(
+                    SolutionLibrarySearchType::DEFAULT, task, hardware, *solution, problem);
+                const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
                 {
@@ -192,6 +195,7 @@ namespace TensileLite
                         std::cout, "Prediction: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     solution->problemPredicate->debugEval(problem, std::cout);
+                    solution->taskPredicate->debugEval(task, std::cout);
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 

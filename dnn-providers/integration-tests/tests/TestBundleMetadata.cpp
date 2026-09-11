@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+
+#include "ScratchDirectory.hpp"
 
 #include "harness/BundleMetadata.hpp"
 
@@ -27,12 +28,17 @@ namespace
 
 /// Helper: create a temporary directory with a fake bundle JSON and optional
 /// .meta.json companion. Auto-cleans on destruction via ScopedDirectory.
+///
+/// The directory name must be unique per process AND per construction, or two test
+/// binaries running concurrently -- ctest -j N, or an install-tree and build-tree run
+/// at once -- collide and the second dies with "ScopedDirectory: Directory already
+/// exists" before reaching an assertion. scratch::makeDir() owns that; see
+/// ScratchDirectory.hpp.
 class TempBundle
 {
 public:
     explicit TempBundle(const std::string& metaJsonContent = "")
-        : _dir(std::filesystem::temp_directory_path()
-               / ("test_bundle_" + std::to_string(std::rand())))
+        : _dir(hipdnn_integration_tests::scratch::makeDir("test_bundle_"))
     {
         // Create a minimal bundle JSON (enough for path derivation)
         std::ofstream bundleFile(_dir.path() / "Bundle.json");

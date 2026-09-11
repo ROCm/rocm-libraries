@@ -74,7 +74,7 @@ rocsparse_status rocsparse::valset(rocsparse_handle    handle,
 {
 
     auto f = launch_valset<int32_t>;
-    switch(array_indextype)
+    switch(static_cast<int>(array_indextype))
     {
     case rocsparse_indextype_i32:
         break;

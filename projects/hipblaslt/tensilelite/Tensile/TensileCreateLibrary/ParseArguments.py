@@ -51,7 +51,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument("LogicPath", help="Path to LibraryLogic.yaml files.")
     argParser.add_argument("OutputPath", help="Where to write library files?")
     argParser.add_argument(
-        "RuntimeLanguage", help="Which runtime language?", choices=["OCL", "HIP", "HSA"]
+        "RuntimeLanguage", help="Which runtime language?", choices=["HIP", "HSA"]
     )
     argParser.add_argument(
         "--cxx-compiler",
