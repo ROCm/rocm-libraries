@@ -125,6 +125,8 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
     const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
     const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+    // Use physical memory layout: B, Seq, H, D for compatibility with group mode
+    const std::vector<int64_t> layout = {3, 1, 2, 0};
 
     auto graph = std::make_shared<Graph>();
     graph->set_io_data_type(DataType::FLOAT)
@@ -132,13 +134,27 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
         .set_intermediate_data_type(DataType::FLOAT);
 
     auto q = std::make_shared<TensorAttributes>();
-    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(dataType);
+    q->set_dim(qDims).set_stride(generateStrides(qDims, layout)).set_data_type(dataType);
 
     auto k = std::make_shared<TensorAttributes>();
-    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(dataType);
+    k->set_dim(kDims).set_stride(generateStrides(kDims, layout)).set_data_type(dataType);
 
     auto v = std::make_shared<TensorAttributes>();
-    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(dataType);
+    v->set_dim(vDims).set_stride(generateStrides(vDims, layout)).set_data_type(dataType);
+
+    if(config.mode == BatchMode::GROUP)
+    {
+        const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
+        const std::vector<int64_t> offsetStrides
+            = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+
+        auto raggedOffset = std::make_shared<TensorAttributes>();
+        raggedOffset->set_dim(offsetDims).set_stride(offsetStrides).set_data_type(DataType::INT64);
+
+        q->set_ragged_offset(raggedOffset);
+        k->set_ragged_offset(raggedOffset);
+        v->set_ragged_offset(raggedOffset);
+    }
 
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
@@ -181,27 +197,15 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
         break;
     }
 
-    // Configure batch mode (GROUP requires sequence length tensors)
-    auto batchMode = static_cast<BatchMode>(config.mode);
-    if(batchMode == BatchMode::GROUP)
-    {
-        const std::vector<int64_t> seqLenDims = {batch};
-        auto seqLenStrides = generateStrides(seqLenDims);
-
-        auto seqLenQ = std::make_shared<TensorAttributes>();
-        seqLenQ->set_dim(seqLenDims).set_stride(seqLenStrides).set_data_type(DataType::INT32);
-
-        auto seqLenKv = std::make_shared<TensorAttributes>();
-        seqLenKv->set_dim(seqLenDims).set_stride(seqLenStrides).set_data_type(DataType::INT32);
-
-        attributes.set_seq_len_q(seqLenQ);
-        attributes.set_seq_len_kv(seqLenKv);
-    }
-
     auto [o, stats] = graph->sdpa(q, k, v, attributes);
 
     o->set_output(true);
     o->set_data_type(dataType);
+
+    if(config.mode == BatchMode::GROUP)
+    {
+        o->set_ragged_offset(q->get_ragged_offset());
+    }
 
     return graph;
 }

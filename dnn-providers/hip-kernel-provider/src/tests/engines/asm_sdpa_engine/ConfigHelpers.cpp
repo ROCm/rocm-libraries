@@ -47,39 +47,95 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     const int64_t seqKv = 256;
 
     // Define tensor dimensions
+    // Use physical memory layout: B, Seq, H, D for compatibility with group mode
+    const std::vector<int64_t> layout = {3, 1, 2, 0};
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    const std::vector<int64_t> qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);
+    const std::vector<int64_t> qStrides
+        = hipdnn_data_sdk::utilities::generateStrides(qDims, layout);
 
     const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    const std::vector<int64_t> kStrides = hipdnn_data_sdk::utilities::generateStrides(kDims);
+    const std::vector<int64_t> kStrides
+        = hipdnn_data_sdk::utilities::generateStrides(kDims, layout);
 
     const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
-    const std::vector<int64_t> vStrides = hipdnn_data_sdk::utilities::generateStrides(vDims);
+    const std::vector<int64_t> vStrides
+        = hipdnn_data_sdk::utilities::generateStrides(vDims, layout);
 
     const std::vector<int64_t> oDims = {batch, numHeads, seqQ, config.hdim_v};
-    const std::vector<int64_t> oStrides = hipdnn_data_sdk::utilities::generateStrides(oDims);
+    const std::vector<int64_t> oStrides
+        = hipdnn_data_sdk::utilities::generateStrides(oDims, layout);
 
     int64_t uid = 1;
 
+    auto raggedUid = [&]() -> flatbuffers::Optional<int64_t> {
+        if(config.mode == BatchMode::GROUP)
+        {
+            const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
+            const std::vector<int64_t> offsetStrides
+                = hipdnn_data_sdk::utilities::generateStrides(offsetDims);
+            const auto raggedUid = uid++;
+            tensorAttributes.push_back(CreateTensorAttributesDirect(
+                builder, raggedUid, "ragged_offset", DataType::INT64, &offsetStrides, &offsetDims));
+            return raggedUid;
+        }
+        return flatbuffers::nullopt;
+    }();
+
     // Q tensor
     const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", dataType, &qStrides, &qDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            qUid,
+                                                            "q",
+                                                            dataType,
+                                                            &qStrides,
+                                                            &qDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            raggedUid));
 
     // K tensor
     const auto kUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", dataType, &kStrides, &kDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            kUid,
+                                                            "k",
+                                                            dataType,
+                                                            &kStrides,
+                                                            &kDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            raggedUid));
 
     // V tensor
     const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", dataType, &vStrides, &vDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            vUid,
+                                                            "v",
+                                                            dataType,
+                                                            &vStrides,
+                                                            &vDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            raggedUid));
 
     // O tensor
     const auto oUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", dataType, &oStrides, &oDims));
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            oUid,
+                                                            "o",
+                                                            dataType,
+                                                            &oStrides,
+                                                            &oDims,
+                                                            false,
+                                                            TensorValue::NONE,
+                                                            0,
+                                                            false,
+                                                            raggedUid));
 
     // Scale tensor (always include for SDPA)
     const std::vector<int64_t> scaleDims = {1};
@@ -95,31 +151,6 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      false,
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
-
-    // Handle GROUP mode - add sequence length tensors
-    flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
-    flatbuffers::Optional<int64_t> seqLenKvUid = flatbuffers::nullopt;
-
-    if(config.mode == BatchMode::GROUP)
-    {
-        // Sequence length tensors: shape [batch]
-        const std::vector<int64_t> seqLenDims = {batch};
-        const std::vector<int64_t> seqLenStrides = {1};
-
-        const auto seqLenQTensorUid = uid++;
-        tensorAttributes.push_back(CreateTensorAttributesDirect(
-            builder, seqLenQTensorUid, "seq_len_q", DataType::INT32, &seqLenStrides, &seqLenDims));
-        seqLenQUid = flatbuffers::Optional<int64_t>(seqLenQTensorUid);
-
-        const auto seqLenKvTensorUid = uid++;
-        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
-                                                                seqLenKvTensorUid,
-                                                                "seq_len_kv",
-                                                                DataType::INT32,
-                                                                &seqLenStrides,
-                                                                &seqLenDims));
-        seqLenKvUid = flatbuffers::Optional<int64_t>(seqLenKvTensorUid);
-    }
 
     // Determine mask-related attributes based on MaskType
     flatbuffers::Optional<int64_t> leftBound = flatbuffers::nullopt;
@@ -170,8 +201,8 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                oUid,
                                flatbuffers::nullopt, // attn_mask_tensor_uid
                                scaleUid,
-                               seqLenQUid,
-                               seqLenKvUid,
+                               flatbuffers::nullopt,
+                               flatbuffers::nullopt,
                                flatbuffers::nullopt, // seed_tensor_uid
                                flatbuffers::nullopt, // offset_tensor_uid
                                flatbuffers::nullopt, // dropout_mask_tensor_uid
