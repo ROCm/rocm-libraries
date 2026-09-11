@@ -283,6 +283,7 @@ if(ROCKE_INSTALL_TESTS)
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
       # Install library test tree so rocke_library_conv_pytest can collect tests.
+      # cmake-lint: disable=E1122
       install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests"
               DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
               PATTERN "__pycache__" EXCLUDE
