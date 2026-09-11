@@ -756,7 +756,9 @@ def build_deep(kind, arch, **kw):
 # C++ engine parity: direct-conv parity is gated via tools/check_byte_identity.py
 # (see tests/instances/parity/conv_direct_grouped_emit.* and the
 # conv_direct_grouped family in tests/instances/differential/golden/llvm_gfx_all.json).
-# If you extend parity coverage to new direct-conv variants, update the parity emitters and golden.
+# All five variants (16c, 4c, 8c, 32c, depthwise) are covered as configs 0-8.
+# If you add new direct-conv variants, add matching configs to both emitters and
+# re-bless the golden.
 # ---------------------------------------------------------------------------
 
 

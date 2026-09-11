@@ -482,12 +482,12 @@ static rocke_value_t*
         b, rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16)), ctx->s_lane);
 
     /* lds_idx = W_lds_idx*BG_cpg + wave_id*cpg + (ch_lane/4)*4
-     * Python: b.mul(ch_block_idx, b.const_i32(4)) where ch_block_idx = ch_lane/4. */
+     * Python order: ch_block_idx first, then mul_wlds/mul_wave/inner/mul_ch. */
     {
+        rocke_value_t* ch_block_idx = rocke_b_div(b, ctx->ch_lane, rocke_b_const_i32(b, 4));
         rocke_value_t* mul_wlds = rocke_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
         rocke_value_t* mul_wave = rocke_b_mul(b, ctx->wave_id, ctx->c_cpg);
         rocke_value_t* inner = rocke_b_add(b, mul_wlds, mul_wave);
-        rocke_value_t* ch_block_idx = rocke_b_div(b, ctx->ch_lane, rocke_b_const_i32(b, 4));
         rocke_value_t* mul_ch = rocke_b_mul(b, ch_block_idx, rocke_b_const_i32(b, 4));
         lds_idx = rocke_b_add(b, inner, mul_ch);
     }
@@ -511,10 +511,10 @@ static rocke_value_t*
     W_lds_idx = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16 + 2));
 
     {
+        rocke_value_t* ch_block_idx = rocke_b_div(b, ctx->ch_lane, rocke_b_const_i32(b, 4));
         rocke_value_t* mul_wlds = rocke_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
         rocke_value_t* mul_wave = rocke_b_mul(b, ctx->wave_id, ctx->c_cpg);
         rocke_value_t* inner = rocke_b_add(b, mul_wlds, mul_wave);
-        rocke_value_t* ch_block_idx = rocke_b_div(b, ctx->ch_lane, rocke_b_const_i32(b, 4));
         rocke_value_t* mul_ch = rocke_b_mul(b, ch_block_idx, rocke_b_const_i32(b, 4));
         lds_idx = rocke_b_add(b, inner, mul_ch);
     }
@@ -592,12 +592,13 @@ rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx)
             nxt = ctx->A_smem;
         }
 
-        /* Read inputs from cur (Python lines 1486-1487). */
+        /* Read inputs from cur (Python lines 1486-1487).
+         * Two separate passes to match Python op order: all in_main first,
+         * then all in_s2.  Interleaving diverges for q_subtiles > 1. */
         for(qt = 0; qt < q_subtiles; ++qt)
-        {
             in_main[qt] = rocke_dconv8c_lds_read_main(ctx, qt, cur);
+        for(qt = 0; qt < q_subtiles; ++qt)
             in_s2[qt] = rocke_dconv8c_lds_read_s2(ctx, qt, cur);
-        }
 
         /* Issue next-row DRAM loads (Python lines 1488-1490). */
         if(y + 1 < n_iters)

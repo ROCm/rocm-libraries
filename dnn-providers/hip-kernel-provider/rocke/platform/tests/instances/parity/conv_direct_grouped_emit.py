@@ -4,8 +4,9 @@
 #
 # tests/parity/conv_direct_grouped_emit.py -- Python reference emitter for the
 # direct grouped convolution parity harness. Selects one of N sampled spec
-# configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec, builds the
-# kernel via build_direct_conv_16c / build_direct_conv_4c(arch=<cfg arch>) and
+# configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec /
+# DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec, builds the
+# kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
 # prints _native_lower(arch=<cfg arch>) to stdout so it can be
 # byte-compared with the C emitter conv_direct_grouped_emit.c.
 import sys
@@ -14,8 +15,14 @@ from rocke.instances.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConv16cSpec,
     DirectConv4cSpec,
+    DirectConv8cSpec,
+    DirectConv32cSpec,
+    DirectDepthwiseSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
+    build_direct_conv_8c,
+    build_direct_conv_32c,
+    build_direct_depthwise,
 )
 
 try:
@@ -70,6 +77,34 @@ def _spec(idx: int):
             N=1, H=8, W=8, groups=16, cpg=4, kpg=4, KH=3, KW=3, PAD=1, stride=1
         )
         return ("4c", DirectConv4cSpec(problem=p, block_q=4, block_groups=16), "gfx950")
+    if idx == 6:
+        p = DirectConvProblem(
+            N=32, H=200, W=200, groups=16, cpg=8, kpg=8, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "8c",
+            DirectConv8cSpec(problem=p, block_q=16, block_groups=8, double_buffer=True),
+            "gfx950",
+        )
+    if idx == 7:
+        p = DirectConvProblem(
+            N=32, H=200, W=200, groups=8, cpg=32, kpg=32, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "32c",
+            DirectConv32cSpec(problem=p, block_q=32, block_groups=4, double_buffer=True),
+            "gfx950",
+        )
+    if idx == 8:
+        # groups must be divisible by block_ch = block_waves * wave_size (2 * 64 = 128)
+        p = DirectConvProblem(
+            N=32, H=200, W=200, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "depthwise",
+            DirectDepthwiseSpec(problem=p, block_w=16, block_waves=2),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -82,8 +117,14 @@ def main() -> int:
     kind, spec, arch = _spec(idx)
     if kind == "16c":
         kernel = build_direct_conv_16c(spec, arch=arch)
-    else:
+    elif kind == "4c":
         kernel = build_direct_conv_4c(spec, arch=arch)
+    elif kind == "8c":
+        kernel = build_direct_conv_8c(spec, arch=arch)
+    elif kind == "32c":
+        kernel = build_direct_conv_32c(spec, arch=arch)
+    else:
+        kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":
         text = _native_lower(kernel, arch=arch)
         sys.stdout.write(text)

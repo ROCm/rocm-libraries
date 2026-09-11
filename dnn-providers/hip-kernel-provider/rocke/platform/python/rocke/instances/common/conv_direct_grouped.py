@@ -220,6 +220,8 @@ def is_valid_spec_16c(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.stride != 1:
+        return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 16 or p.kpg != 16:
         return False, f"DirectConv16cSpec expects cpg=kpg=16 (got {p.cpg}, {p.kpg})"
     if p.groups % spec.block_groups != 0:
@@ -882,6 +884,8 @@ def is_valid_spec_4c(spec: DirectConv4cSpec, arch: str = "gfx950") -> Tuple[bool
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.stride != 1:
+        return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 4 or p.kpg != 4:
         return False, f"DirectConv4cSpec expects cpg=kpg=4 (got {p.cpg}, {p.kpg})"
     if spec.block_groups % 16 != 0:
@@ -1200,6 +1204,8 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.stride != 1:
+        return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 8 or p.kpg != 8:
         return False, f"DirectConv8cSpec expects cpg=kpg=8 (got {p.cpg}, {p.kpg})"
     if p.groups % spec.block_groups != 0:
@@ -1642,6 +1648,8 @@ def is_valid_spec_32c(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.stride != 1:
+        return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg != 32 or p.kpg != 32:
         return False, f"DirectConv32cSpec expects cpg=kpg=32 (got {p.cpg}, {p.kpg})"
     if p.groups % spec.block_groups != 0:
@@ -2062,6 +2070,8 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         return False, str(e)
 
     p = spec.problem
+    if p.stride != 1:
+        return False, f"stride > 1 is not supported (got {p.stride})"
     if p.cpg % 4 != 0 or p.cpg < 4:
         return False, f"cpg must be a positive multiple of 4 (got {p.cpg})"
     if p.kpg != p.cpg:
@@ -2351,13 +2361,15 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                         )
                         x_frag = b.smem_load_vN_f16(cur, c0, lds_idx, n=4)
 
-                        # Zero-mask lanes whose channel offset exceeds cpg.
-                        # Only needed when cpg is not a multiple of 16 (i.e.,
-                        # N_K_ATOMS == 1 and the single atom is partially valid).
+                        # Zero-mask lanes whose channel offset (atom_iv*16 + c4*4)
+                        # exceeds cpg.  Only needed when cpg is not a multiple of
+                        # 16 (N_K_ATOMS == 1 and the atom is partially valid), but
+                        # must use ch_off (not c4*4 alone) so atom_iv > 0 is
+                        # accounted for correctly (e.g. cpg=24, atom 1 → channels
+                        # 16–31; lanes with c4*4 ∈ {8,12} would be unmasked by the
+                        # old c4*4 >= cpg predicate, pulling in the next group's data).
                         if p.cpg % 16 != 0:
-                            c4_oob = b.cmp_ge(
-                                b.mul(c4, b.const_i32(4)), b.const_i32(p.cpg)
-                            )
+                            c4_oob = b.cmp_ge(ch_off, b.const_i32(p.cpg))
                             x_frag = b.select(c4_oob, fp16x4_zero, x_frag)
 
                         new_atom_accs = []

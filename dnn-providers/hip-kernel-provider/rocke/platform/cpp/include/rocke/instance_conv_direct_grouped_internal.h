@@ -62,6 +62,12 @@ extern "C" {
  * ===================================================================== */
 #define ROCKE_DCONV16C_MAX_PASSES 16
 
+/* Bound on the per-thread DRAM-load passes (32c).
+ * cpg=32 and block_q up to 128 with KW=3 gives the worst case:
+ *   THREADS=256 (BG=4, wave=64), NUM_VEC4=(128+2)*4*32/4=4160, PASSES=17.
+ * ===================================================================== */
+#define ROCKE_DCONV32C_MAX_PASSES 17
+
 /* Bound on the per-block accumulator-tile fan-out (q_subtiles = block_q/16 for
  * 16c; q_tiles_per_wave = block_q/4 for 4c). block_q stays small (<=16 in the
  * covered space); 8 is generous. Each tile holds KH (=3) circular acc slots. */
@@ -548,7 +554,7 @@ typedef struct rocke_dconv_32c_ctx
         rocke_value_t* W_lds;
         rocke_value_t* in_bounds;
         rocke_value_t* abs_group;
-    } chunk_meta[ROCKE_DCONV16C_MAX_PASSES];
+    } chunk_meta[ROCKE_DCONV32C_MAX_PASSES];
     int n_chunk_meta;
 
     const rocke_tensor_descriptor_t* a_desc;

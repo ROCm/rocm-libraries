@@ -123,8 +123,6 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
     ctx->lane = rocke_b_mod(b, ctx->tid, ctx->c_wave);
     ctx->q_in_lane = rocke_b_mod(b, ctx->lane, rocke_b_const_i32(b, 32));
     ctx->k_blk = rocke_b_div(b, ctx->lane, rocke_b_const_i32(b, 32));
-    /* ch_in_atom = k_blk * 4 */
-    ctx->ch_in_atom = rocke_b_mul(b, ctx->k_blk, rocke_b_const_i32(b, 4));
 
     ctx->bx = rocke_b_block_id_x(b);
     ctx->by = rocke_b_block_id_y(b);
@@ -184,6 +182,8 @@ void rocke_dconv32c_load_weights(rocke_dconv_32c_ctx_t* ctx)
     }
 
     ctx->k_out_val = rocke_b_add(b, rocke_b_mul(b, ctx->g, ctx->c_kpg), ctx->q_in_lane);
+    /* ch_in_atom = k_blk * 4: emitted here (after k_out_val) to match Python op order. */
+    ctx->ch_in_atom = rocke_b_mul(b, ctx->k_blk, rocke_b_const_i32(b, 4));
 
     ctx->n_weight_r = ctx->p.KH;
     ctx->n_weight_s = ctx->p.KW;

@@ -73,22 +73,29 @@ class _Shape:
     stride: int = 1
 
 
-# One representative shape per cpg variant.  Sizes are chosen so that the
-# output spatial dimensions are non-trivial but the total parameter count is
-# small (compile + run in seconds on a single CU).
+# One representative shape per cpg variant.  groups is chosen to be a
+# multiple of the default block_groups for each spec so that the kernel
+# actually launches on any valid machine rather than being skipped by the
+# "groups not divisible by block_groups" validator:
+#   cpg=4  → DirectConv4cSpec   default block_groups=16, DirectConvSpec default=8
+#   cpg=8  → DirectConv8cSpec   default block_groups=8
+#   cpg=16 → DirectConv16cSpec  default block_groups=8
+#   cpg=32 → DirectConv32cSpec  default block_groups=4, DirectConvSpec default=8 → lcm=8
+#   cpg=1  → DirectDepthwiseSpec default block_ch=block_waves*wave=64
 _SHAPES: List[_Shape] = [
-    # cpg=4 — DirectConv4cSpec (mfma_f32_4x4x4_f16)
-    _Shape("4c_N2H14W14_g8", N=2, H=14, W=14, groups=8, cpg=4),
+    # cpg=4 — DirectConv4cSpec (mfma_f32_4x4x4_f16); groups=16 satisfies block_groups=16
+    _Shape("4c_N2H14W14_g16", N=2, H=14, W=14, groups=16, cpg=4),
     # cpg=8 — DirectConv8cSpec (mfma_f32_16x16x16_f16, fold two K=8 slices)
-    _Shape("8c_N2H14W14_g4", N=2, H=14, W=14, groups=4, cpg=8),
+    _Shape("8c_N2H14W14_g8", N=2, H=14, W=14, groups=8, cpg=8),
     # cpg=16 — DirectConv16cSpec (mfma_f32_16x16x16_f16 or 16x16x32)
-    _Shape("16c_N2H14W14_g2", N=2, H=14, W=14, groups=2, cpg=16),
-    # cpg=32 — DirectConv32cSpec (mfma_f32_32x32x8_f16)
-    _Shape("32c_N2H8W8_g2", N=2, H=8, W=8, groups=2, cpg=32),
-    # cpg=1 — depthwise (DirectDepthwiseSpec, scalar FMA)
-    _Shape("dw_N2H14W14_g16", N=2, H=14, W=14, groups=16, cpg=1),
+    _Shape("16c_N2H14W14_g8", N=2, H=14, W=14, groups=8, cpg=16),
+    # cpg=32 — DirectConv32cSpec (mfma_f32_32x32x8_f16); groups=8 satisfies both
+    # DirectConv32cSpec default block_groups=4 and DirectConvSpec default block_groups=8
+    _Shape("32c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=32),
+    # cpg=1 — depthwise (DirectDepthwiseSpec, scalar FMA); groups=64 satisfies block_ch=64
+    _Shape("dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
     # 1×1 pointwise for cpg=16 (PAD=0, KH=KW=1)
-    _Shape("16c_1x1_N2H16W16_g2", N=2, H=16, W=16, groups=2, cpg=16, KH=1, KW=1, PAD=0),
+    _Shape("16c_1x1_N2H16W16_g8", N=2, H=16, W=16, groups=8, cpg=16, KH=1, KW=1, PAD=0),
 ]
 
 
@@ -158,12 +165,12 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
-        return True, f"skip (invalid spec): {reason}"
+        return False, f"invalid spec (shapes should be pre-validated): {reason}"
 
     try:
         kernel = build_direct_conv(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build): {e}"
+        return False, f"build failed (shapes should be pre-validated): {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -282,12 +289,12 @@ def _run_depthwise_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     ok, reason = is_valid_depthwise_spec(spec, arch=arch)
     if not ok:
-        return True, f"skip (invalid spec): {reason}"
+        return False, f"invalid spec (shapes should be pre-validated): {reason}"
 
     try:
         kernel = build_direct_depthwise(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build): {e}"
+        return False, f"build failed (shapes should be pre-validated): {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
