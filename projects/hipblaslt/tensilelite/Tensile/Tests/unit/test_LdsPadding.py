@@ -254,6 +254,34 @@ def test_max_threads_per_bank_counts_each_bank_a_thread_touches():
     assert _L._max_threads_per_bank([0, 8], 2) == 1
 
 
+def test_even_dword_only_rejects_an_odd_dword_pad():
+    cfg = {"perBlock": 256, "pad": 4}
+
+    assert _L._even_dword_only(cfg, 1.0) == {"perBlock": 0, "pad": 0}
+
+
+def test_search_padding_stops_when_no_cost_floor_exists():
+    candidates_seen = []
+
+    def costFn(candidate):
+        candidates_seen.append(candidate)
+        return None
+
+    assert _L._search_padding([16, 32], 8, lambda: None, costFn) is None
+    assert candidates_seen == [(0, 0)]
+
+
+def test_fp32_config_falls_back_when_search_finds_no_legal_candidate(monkeypatch):
+    monkeypatch.setattr(_L, "_search_padding", lambda *args: None)
+    _L._compute_fp32_config.cache_clear()
+    try:
+        config = _L._compute_fp32_config(32, 1, 2, 1, 2, 2, _K_B32, _TDM)
+    finally:
+        _L._compute_fp32_config.cache_clear()
+
+    assert config == {"perBlock": 0, "pad": 0}
+
+
 def test_no_block_carry_detects_a_carrying_pair():
     # base 256 and instOffs 256, B=512: (256 % 512) + (256 % 512) == 512,
     # which is not less than B, so the pair carries and the base/instOffs
