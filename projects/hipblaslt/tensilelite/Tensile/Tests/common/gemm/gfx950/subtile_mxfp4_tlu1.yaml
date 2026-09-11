@@ -11,6 +11,9 @@
 # the mixed layouts also put the two scale operands on different group spans in
 # the same kernel.  Stack = MIWaveTile[0]; MT = 16 * stack * waveGroup.  The 16x1
 # blocks are rectangular because acc VGPRs scale as MIWT[0]*MIWT[1]*4.
+#
+# DestDataType is S except in the four groups at the end, which cover B and H so
+# the D store is not left exercised at full width only.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -912,3 +915,155 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[256], [256], [1], [64, 64, 512]]
         - BiasTypeArgs: ['s']
+
+  -
+    - # Narrow output on NT.  Everything above is DestDataType S, so the D store
+      # is only ever exercised at full width here, even though the TN suite
+      # (subtile_mxfp4.yaml) carries b / h / s.  The epilogue is not supposed to
+      # be layout-aware, and these groups are what says so.  ComputeDataType
+      # stays S on all of them: there is no bf16-accumulate variant.
+      #
+      # Two tiles, chosen for the ends of the stack ladder: MT32x32 is a stack
+      # of 2 and MT256x256 a stack of 16, so the store sees both the shortest
+      # and the tallest strip.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1 (stack 2)
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2 (stack 16)
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [96, 96, 1, 256]     # M,N inside one macro tile
+          - Exact: [34, 66, 1, 256]     # smallest even M,N, so a partial store
+          - Exact: [32, 32, 1, 32]      # K below one window
+
+  -
+    - # Narrow output on NT, fp16.  bf16 and fp16 take the same 2-byte store
+      # path, so this is a second opinion on that path rather than new geometry.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: H
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [96, 96, 1, 256]
+          - Exact: [34, 66, 1, 256]
+
+  -
+    - # Narrow output on NN, where only A is free-dim contiguous.  The mixed
+      # layouts are the ones that would catch a store that quietly assumed both
+      # operands share a geometry.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [256, 65,  1, 256]   # odd N on the K-contiguous operand
+
+  -
+    - # Narrow output on TT, where only B is free-dim contiguous.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [65,  256, 1, 256]   # odd M on the K-contiguous operand
