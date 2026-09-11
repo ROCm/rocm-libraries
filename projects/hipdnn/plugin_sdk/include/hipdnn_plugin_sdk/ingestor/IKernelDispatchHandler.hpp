@@ -33,6 +33,7 @@ public:
 
     /// Source representations this handler can prepare. Existing adapters retain
     /// their previous admission policy unless they explicitly extend it.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual bool supportsSourceKind(KernelSourceKind kind) const
     {
         return kind == KernelSourceKind::EMBEDDED_SOURCE || kind == KernelSourceKind::KPACK;
