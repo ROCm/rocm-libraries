@@ -3665,9 +3665,11 @@ namespace TensileLite
         // Both requiredWorkspaceSize() -- the workspace query the caller sizes
         // its allocation from -- and resolveStreamKSettings() -- what solve()
         // launches -- call this on the same (reduction, grid, tiles) triple
-        // immediately after getSKGridImpl(), so query and launch cannot
-        // disagree about which reduction is in play, and therefore cannot
-        // disagree about the workspace it needs.
+        // immediately after getSKGridImpl(). For SK3 and SK5-static, where the
+        // two start from the same getSKReduction() answer, that keeps query and
+        // launch agreed on the reduction and so on the workspace. SK4 and
+        // SK5-dynamic are pinned to tree at the launch sites only; see
+        // requiredWorkspaceSize() for why the resulting divergence is bounded.
         //
         // GATED ON uniformSummationOrder. With the mode OFF this is a no-op and
         // the pre-USO behaviour is restored exactly: solve() throws on a
@@ -4300,11 +4302,19 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                // getSKReduction() decides, for every StreamK mode. Forcing tree
-                // for SK4 / SK5-dynamic here is not a uniform-summation-order
-                // requirement -- parallel reduction is uniform by construction
-                // -- and it changes both the grid fed to getSKGridImpl() and the
-                // size reported below.
+                // getSKReduction() decides here for every StreamK mode, unlike
+                // resolveStreamKSettings() / computeStreamKDecisions(), which pin
+                // SK4 and SK5-dynamic to tree. So this query can report the
+                // parallel size while the launch runs tree. It cannot make the
+                // launch overrun the caller's buffer: the launch reserves
+                // partial tiles only when they fit in the workspace it is
+                // actually given, and otherwise falls back to DP. An
+                // under-report therefore costs the partial-tile path, not
+                // memory safety. Under uniform summation order the reconcile
+                // below removes the divergence for these modes anyway -- they
+                // take the work-item branch of getSKGridImpl(), which ignores
+                // the strategy and yields skGrid <= tiles, so splitk < 2 demotes
+                // the query to tree as well.
                 auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
@@ -4730,10 +4740,18 @@ namespace TensileLite
         const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                           ? streamK5EffectiveDynamic(problem, hardware)
                                           : false;
-        // getSKReduction() decides for every StreamK mode, including SK4 and
-        // SK5-dynamic. Parallel reduction is uniform by construction, so the
-        // dynamic-queue modes have no reason to be pinned to tree.
-        sk.reduction = getSKReduction(problem, hardware);
+        // SK4 and SK5-resolved-dynamic are unconditionally tree; everything else
+        // asks getSKReduction(). requiredWorkspaceSize() always asks
+        // getSKReduction() and has no such special case, so a dynamic-queue
+        // launch can be sized for parallel and then run tree -- see the note
+        // there on why that is not a memory-safety problem.
+        if(sizeMapping.streamK == 4)
+            sk.reduction = origami::reduction_t::tree;
+        else if(sizeMapping.streamK == 5)
+            sk.reduction = effectiveDynamic ? origami::reduction_t::tree
+                                            : getSKReduction(problem, hardware);
+        else
+            sk.reduction = getSKReduction(problem, hardware);
         sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
         sk.smCountTarget             = problem.getParams().smCountTarget();
         sk.grid = getSKGridImpl(*this,
@@ -5753,9 +5771,17 @@ namespace TensileLite
             = (sizeMapping.streamK == 5) ? streamK5EffectiveDynamic(problem, hardware) : false;
         d.effectiveDynamic = effectiveDynamic;
 
-        // Reduction strategy. getSKReduction() decides for every StreamK mode --
-        // the same call resolveStreamKSettings() and requiredWorkspaceSize() make.
-        origami::reduction_t reduction = getSKReduction(problem, hardware);
+        // Reduction strategy. SK4 and SK5-resolved-dynamic are unconditionally tree;
+        // everything else asks getSKReduction(). Note requiredWorkspaceSize() always
+        // asks getSKReduction() and has no such special case -- see the note above.
+        origami::reduction_t reduction;
+        if(sizeMapping.streamK == 4)
+            reduction = origami::reduction_t::tree;
+        else if(sizeMapping.streamK == 5)
+            reduction = effectiveDynamic ? origami::reduction_t::tree
+                                         : getSKReduction(problem, hardware);
+        else
+            reduction = getSKReduction(problem, hardware);
 
         // Grid -- reuses getSKGridImpl (same call solve() makes), and captures the
         // fixed-grid / tree-bounds fallbacks plus the pre-tree-bounds "selected"
