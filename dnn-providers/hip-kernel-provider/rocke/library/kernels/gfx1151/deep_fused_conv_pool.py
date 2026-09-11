@@ -2682,7 +2682,7 @@ def _emit_maxpool_finalpack_i8(
 
 
 def build_deep_fused_conv_pool(
-    spec: Gfx1151DeepFusedConvPoolSpec, arch: str = "gfx1151"
+    spec: Gfx1151DeepFusedConvPoolSpec, *, arch: str = "gfx1151"
 ):
     """Build the gfx1151 genuine-int8/int4 fused conv0->conv1->maxpool kernel."""
     ok, why = is_valid_spec(spec, arch=arch)

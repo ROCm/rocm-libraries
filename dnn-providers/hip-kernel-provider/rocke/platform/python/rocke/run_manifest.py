@@ -26,10 +26,11 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from kernels.common.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_fp16_manifest_problem,
-)
 from .instances.common.manifest_runner.conv import run_conv_manifest_problem
+from .instances.common.manifest_runner.deep_fused_conv_pool import (
+    run_deep_fused_conv_pool_fp16_manifest_problem,
+    run_deep_fused_conv_pool_i8i4_manifest_problem,
+)
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
     run_gemm_iu8_manifest_problem,
@@ -39,9 +40,6 @@ from .instances.common.manifest_runner.matmul_nbits import (
     run_matmul_nbits_manifest_problem,
 )
 from .instances.common.manifest_runner.simple_ops import run_simple_op_manifest_problem
-from kernels.gfx1151.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_i8i4_manifest_problem,
-)
 
 # Try to import torch-based launcher, fall back to direct HIP timing if unavailable
 try:

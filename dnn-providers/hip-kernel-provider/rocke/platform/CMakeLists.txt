@@ -276,12 +276,19 @@ if(ROCKE_INSTALL_TESTS)
     # still configures; keep the guard, it is the copy-able contract.
     set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
     if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
-      foreach(_rocke_lib_pkg kernels builders)
+      foreach(_rocke_lib_pkg kernels builders dispatch)
         install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
                 PATTERN "__pycache__" EXCLUDE
                 REGEX "\\.pyc$" EXCLUDE)
       endforeach()
+      # Install library test tree so rocke_library_conv_pytest can collect tests.
+      install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/tests"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
+              PATTERN "__pycache__" EXCLUDE
+              REGEX "\\.pyc$" EXCLUDE
+              PATTERN "*.c" EXCLUDE
+              PATTERN "run_all.py" EXCLUDE)
     else()
       message(WARNING
               "rocKE: library tree not found at ${_ROCKE_LIBRARY_DIR}; the installed "
@@ -348,7 +355,7 @@ if(ROCKE_INSTALL_TESTS)
     # PYTHONPATH includes both the rocke platform package (.) and the library tree
     # (tests/library) so kernels.*, builders.*, and dispatch.* are importable.
     set(_ROCKE_LIBRARY_CONV_TESTS
-        "tests/library/tests/dispatch/conv"
+        "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")

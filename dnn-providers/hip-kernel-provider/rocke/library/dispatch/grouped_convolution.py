@@ -533,6 +533,19 @@ class ConvGroupedSpec:
                 arch=self.arch,
             ).split_k
         two_stage = self.force_deterministic and resolved_split_k > 1
+        # Apply the 2 GiB−4 workspace cap: ws_bytes is i32 in the kernel ABI, so a
+        # workspace that exceeds 2^31−1 bytes would overflow. When the cap is hit,
+        # fall back to split_k=1 (plain store, already deterministic) so callers
+        # requesting force_deterministic still get a correct result.
+        if two_stage:
+            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+            wg_M = p.K // p.groups
+            wg_N = spatial * (p.C // p.groups)
+            ws_bytes = p.groups * resolved_split_k * wg_M * wg_N * 4
+            _MAX_WS = (1 << 31) - 4  # 2 GiB - 4
+            if ws_bytes > _MAX_WS:
+                two_stage = False
+                resolved_split_k = 1
         return WgradConvSpec(
             problem=problem,
             name=self.name,

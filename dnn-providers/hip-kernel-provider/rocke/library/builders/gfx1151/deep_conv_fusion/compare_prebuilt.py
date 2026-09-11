@@ -32,9 +32,9 @@ import statistics
 import sys
 from pathlib import Path
 
-from rocke.run_manifest import (
-    _deep_fused_conv_pool_i8i4_problem,
-    _load,
+from rocke.run_manifest import _load
+from kernels.gfx1151.deep_fused_conv_pool import (
+    run_deep_fused_conv_pool_i8i4_manifest_problem as _deep_fused_conv_pool_i8i4_problem,
 )
 from rocke.runtime.hip_module import Runtime
 
