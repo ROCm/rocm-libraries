@@ -18,7 +18,10 @@ export HIPDNN_TORCH_PROVIDER_SO="$REPO/build/lib/hipdnn_plugins/engines/libhip_k
 export HIPDNN_TORCH_FRONTEND_DIR="$REPO/projects/hipdnn/python/frontend_bindings/build"
 export HIPDNN_PLUGIN_DIR="$REPO/build/lib/hipdnn_plugins/engines"
 export HIPDNN_DESCRIPTOR_DIR="$REPO/flydsl_poc_scratch/flydsl_descriptors_attention"
-export HIPDNN_DESCRIPTOR_RUNTIME_DIR="${HIPDNN_DESCRIPTOR_RUNTIME_DIR:-$REPO/flydsl_poc_scratch/rocke_pack_out/gfx950}"
+# Default to the FULL shipped rocKE set (1694 variants incl. persistent+wide_lds_dma
+# fast path) so we test best-vs-best. The old 5-instance slow-path POC pack
+# (rocke_pack_out/gfx950) is kept for reference; override RUNTIME_DIR to use it.
+export HIPDNN_DESCRIPTOR_RUNTIME_DIR="${HIPDNN_DESCRIPTOR_RUNTIME_DIR:-$REPO/flydsl_poc_scratch/rocke_pack_out_all/gfx950}"
 export FLYDSL_ATTENTION_HSACO_DIR="$REPO/flydsl_poc_scratch"
 export HIPDNN_AITER_ASM_DIR="$REPO/build/hip_kernel_provider/asm_kernels"
 export HIPDNN_TORCH_SELECT="${HIPDNN_TORCH_SELECT:-default}"
