@@ -484,14 +484,16 @@ class QuantScale
 {
 };
 
-// hdim 128 is where perhead and blockscale exist; every seqlen is a non-multiple of the tile
-// so the seqlen-padded instances get selected. No fp8 pipeline is generated with bias.
+// Cover aligned dense tiles as well as ragged sequences and masked fallbacks.
+// Head dimension 128 is where perhead and blockscale instances exist.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QuantScale,
     Combine(ModeValues,
             QScaleValues,
-            Values(std::tuple{2, 2, 1, 55, 256, "0"},      // GQA, seqlen_q << seqlen_k
+            Values(std::tuple{1, 2, -1, 256, 512, "0"},    // aligned dense
+                   std::tuple{2, 4, 2, 256, 512, "0"},     // aligned GQA
+                   std::tuple{2, 2, 1, 55, 256, "0"},      // GQA, seqlen_q << seqlen_k
                    std::tuple{1, 3, -1, 100, 51, "0"},     // plain MHA, seqlen_q > seqlen_k
                    std::tuple{2, 1, -1, 99, 256, "1"},     // causal
                    std::tuple{1, 2, 1, 1024, 256, "2"}))); // GQA, causal bottom-right
