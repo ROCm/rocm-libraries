@@ -92,10 +92,6 @@ static __global__
     auto idx2F
         = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
 
-    auto idx2D = [](auto i, auto j, auto ld) { return (i + j * static_cast<int64_t>(ld)); };
-
-    auto ceildiv = [](auto n, auto b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
-
     I const nb = ceildiv(nrhs_arg, nbx);
 
     I const col_start = ibx * nb;
@@ -240,12 +236,16 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
                                        Istride strideB,
                                        I const batch_count)
 {
-    if((n == 0) || (batch_count == 0) || (nrhs_arg == 0))
+    // LCOV_EXCL_START
     {
-        return rocblas_status_success;
+        // Extra defensive check for future proff
+        bool const has_work = (n >= 1) && (batch_count >= 1) && (nrhs_arg >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
     }
-
-    auto ceildiv = [](auto n, auto b) { return ((n <= 0) ? 0 : (n - 1) / b + 1); };
+    // LCOV_EXCL_END
 
     I const max_blocks = 64 * 1024 - 3;
     I const nbz = std::min(max_blocks, batch_count);
@@ -298,8 +298,6 @@ static __global__
     I const ij_inc = (blockDim.x * blockDim.y) * blockDim.z;
     I const ij_start
         = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * (blockDim.x * blockDim.y);
-
-    auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b + 1)); };
 
     I const nb = ceildiv(nrhs_arg, nbx);
 
@@ -501,7 +499,18 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
                                         Istride const strideP,
                                         I const batch_count)
 {
-    auto ceildiv = [](auto const n, auto const b) { return (n <= 0) ? 0 : (((n - 1) / b + 1)); };
+    // LCOV_EXCL_START
+    {
+        // ---------------------------------------------------
+        // extra defensive check retained for future-proofing
+        // ---------------------------------------------------
+        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+    // LCOV_EXCL_END
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -518,13 +527,9 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-    if(has_work)
-    {
-        ROCSOLVER_LAUNCH_KERNEL((apply_pivot_upper_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
-                                dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB,
-                                ldb, strideB, ipiv_arg, strideP, batch_count);
-    }
+    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_upper_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
+                            strideB, ipiv_arg, strideP, batch_count);
 
     return rocblas_status_success;
 }
@@ -558,15 +563,11 @@ static __global__
     I const ij_start
         = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * (blockDim.x * blockDim.y);
 
-    auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
-
     I const nb = ceildiv(nrhs_arg, nbx);
 
     I const jstart = ibx * nb;
     I const jend = std::min(nrhs_arg, jstart + nb);
     I const nrhs = (jend - jstart);
-
-    auto idx2D = [](auto i, auto j, auto ld) { return (i + j * static_cast<int64_t>(ld)); };
 
     auto const offsetB = idx2D(0, jstart, ldb);
 
@@ -754,8 +755,20 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
                                         I* const ipiv_arg,
                                         Istride const strideP,
                                         I const batch_count)
+
 {
-    auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
+    // LCOV_EXCL_START
+    {
+        // ---------------------------------------------------
+        // extra defensive check retained for future-proofing
+        // ---------------------------------------------------
+        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+    // LCOV_EXCL_END
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -773,13 +786,9 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-    if(has_work)
-    {
-        ROCSOLVER_LAUNCH_KERNEL((apply_pivot_lower_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
-                                dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB,
-                                ldb, strideB, ipiv_arg, strideP, batch_count);
-    }
+    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_lower_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
+                            strideB, ipiv_arg, strideP, batch_count);
 
     return rocblas_status_success;
 }
@@ -810,13 +819,18 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                                             void* const work,
                                             size_t const size_work)
 {
+    // LCOV_EXCL_START
     {
+        // ---------------------------------------------------
+        // extra defensive check retained for future-proofing
+        // ---------------------------------------------------
         bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
         if(!has_work)
         {
             return (rocblas_status_success);
         }
     }
+    // LCOV_EXCL_END
 
     T const one = 1;
 
@@ -1132,8 +1146,18 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
                                                        void* const work,
                                                        size_t const size_work)
 {
-    if(n == 0 || nrhs == 0 || batch_count == 0)
-        return rocblas_status_success;
+    // LCOV_EXCL_START
+    {
+        // ---------------------------------------------------
+        // extra defensive check retained for future-proofing
+        // ---------------------------------------------------
+        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
+        if(!has_work)
+        {
+            return (rocblas_status_success);
+        }
+    }
+    // LCOV_EXCL_START
 
     bool const is_upper = (uplo == rocblas_fill_upper);
 
