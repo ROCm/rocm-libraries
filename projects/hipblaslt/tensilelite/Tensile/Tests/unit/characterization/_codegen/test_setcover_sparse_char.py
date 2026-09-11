@@ -15,40 +15,39 @@ golden pins the actual per-kernel error codes rather than asserting err==0.
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_config_emits_golden
 
 pytestmark = pytest.mark.unit
 
 _CONFIGS = [
-    ("Tensile/Tests/common/sparse/gfx950/f8_gate_r.yaml", "gfx950", False),
-    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_gl2prefetch.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/sparse/gfx1250/spmm_fp16_ml1.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/sparse/gfx950/spmm_dtl.yaml", "gfx950", True),
-    ("Tensile/Tests/common/sparse/gfx94x/bf16_activation.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_all.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/sparse/gfx950/bf16_gate_r.yaml", "gfx950", True),
-    ("Tensile/Tests/common/sparse/gfx94x/spmm_i8_mi16.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/spmm_vw_lg_one.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/fp16_gate_r.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/spmm_i8is.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/i8_activation.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/spmm_bf8n.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx94x/spmm_fp16_mi16.yaml", "gfx942", True),
-    ("Tensile/Tests/common/sparse/gfx950/spmm_ldstr.yaml", "gfx950", True),
+    ("Tensile/Tests/common/sparse/gfx950/f8_gate_r.yaml", 0, "gfx950", False),
+    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_gl2prefetch.yaml", 0, "gfx1250", True),
+    ("Tensile/Tests/common/sparse/gfx1250/spmm_fp16_ml1.yaml", 0, "gfx1250", True),
+    ("Tensile/Tests/common/sparse/gfx950/spmm_dtl.yaml", 0, "gfx950", True),
+    ("Tensile/Tests/common/sparse/gfx94x/bf16_activation.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx1250/spmm_tdm_all.yaml", 0, "gfx1250", True),
+    ("Tensile/Tests/common/sparse/gfx950/bf16_gate_r.yaml", 0, "gfx950", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_i8_mi16.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_vw_lg_one.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/fp16_gate_r.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_i8is.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/i8_activation.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_bf8n.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_fp16_mi16.yaml", 0, "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx950/spmm_ldstr.yaml", 0, "gfx950", True),
 ]
 
-_IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]
+_IDS = [f"{c[0].rsplit('/', 1)[-1][:-5]}-problem{c[1]}" for c in _CONFIGS]
 
 
-@pytest.mark.parametrize("config,arch,all_ok", _CONFIGS, ids=_IDS)
-def test_setcover_sparse_emits_golden(config, arch, all_ok, snapshot):
+@pytest.mark.parametrize("config,problem_index,arch,all_ok", _CONFIGS, ids=_IDS)
+def test_setcover_sparse_emits_golden(config, problem_index, arch, all_ok, snapshot):
     """Config emits >=1 kernel (all err==0 when all_ok); golden pins per-kernel err."""
-    results = emit_kernels_from_config(config, limit=8, arch=arch)
-    assert len(results) >= 1
-    if all_ok:
-        assert all(err == 0 for (_b, _s, err) in results)
-    digest = sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
+    assert_config_emits_golden(
+        config,
+        arch,
+        snapshot,
+        limit=8,
+        all_ok=all_ok,
+        problem_index=problem_index,
     )
-    assert digest == snapshot

@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 """Phase G0 smoke test — proves the CPU-only codegen-emit harness works and is
-deterministic, and pins a compact golden digest of the emitted assembly.
+deterministic, and pins compact saved results for emitted assembly.
 
 The emit itself is what drives coverage of ``KernelWriterAssembly`` /
 ``KernelWriter``; this single gfx942 kernel already exercises thousands of lines
-of the emitter. We snapshot a *digest* (deterministic kernel name + emit return
-code + line count + sha256 of the canonicalized text) rather than the full
-~200KB of assembly, to keep the golden compact while still catching any change
-in emitted bytes.
+of the emitter. The logic-driven smoke test records kernel identity and the
+emitter return code. Config-driven tests additionally record a digest of the
+emitted opcode set, which detects instruction-kind changes without saving
+roughly 200 KB of assembly per kernel.
 """
 
 import os
@@ -22,7 +22,7 @@ from codegen_harness import (
     canonicalize_asm,
     emit_kernels_from_logic,
 )
-from config_harness import emit_kernels_from_config
+from config_harness import emit_kernels_from_config, golden_digest, solutions_from_config
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -46,6 +46,8 @@ _CONFIG = os.path.join(
     "gfx950",
     "subtile3_gr_variants.yaml",
 )
+
+_MULTI_PROBLEM_CONFIG = "Tensile/Tests/common/gemm/use_beta_false.yaml"
 
 
 def _pin_rocisa(arch, wavefront):
@@ -116,6 +118,30 @@ def test_canonicalize_neutralizes_random_labels():
     assert canon.count("_LBL0") == 2  # def + reference preserved as a pair
     assert canon.count("_LBL1") == 2
     assert canonicalize_asm(canon) == canon  # idempotent
+
+
+def test_config_golden_digest_tracks_instructions_but_not_order():
+    first = "v_cvt_f32_i32 v0, v0\nv_add_f32 v1, v1, v2\n"
+    reordered = "v_add_f32 v1, v1, v2\nv_cvt_f32_i32 v0, v0\n"
+    wrong = "v_mov_b32 v0, v0\nv_add_f32 v1, v1, v2\n"
+
+    expected = golden_digest([("kernel", first, 0)], include_source=True)
+
+    assert golden_digest([("kernel", reordered, 0)], include_source=True) == expected
+    assert golden_digest([("kernel", wrong, 0)], include_source=True) != expected
+
+
+def test_config_harness_selects_problem_entry():
+    first = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=0
+    )
+    second = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=1
+    )
+
+    assert first and second
+    assert first[0]["ProblemType"]["UseScaleCD"] is False
+    assert second[0]["ProblemType"]["UseScaleCD"] is True
 
 
 def test_emit_golden_digest(snapshot):

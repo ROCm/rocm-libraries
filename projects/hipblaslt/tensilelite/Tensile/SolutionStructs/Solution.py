@@ -177,6 +177,44 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
+  """Reject MX scale reads that are narrower than one scale block.
+
+  The WMMA_V3 in-memory-swizzle path reads one byte per MX scale. For an
+  M-major LDS layout, one local read spans ``VectorWidth`` scale bytes while an
+  MFMA input consumes ``MatrixInstK // MXBlock`` scales. A narrower read makes
+  ``LocalReadMFMA.localReadMX`` compute zero tiles per read.
+  """
+  if not asmCaps.get("HasWMMA_V3", False) \
+      or state["MXScaleFormat"] != "InMemorySwizzle":
+    return True
+
+  for tc in ("A", "B"):
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    if not mxBlock or state[f"UnrollMajorLDS{tc}"]:
+      continue
+
+    mxUnit = state["MatrixInstK"] // mxBlock
+    vectorWidth = state[f"VectorWidth{tc}"]
+    if mxUnit <= 0:
+      reject(
+          state,
+          printRejectionReason,
+          f"M-major MX-scale local read for {tc} requires "
+          f"MatrixInstK >= MXBlock{tc} ({state['MatrixInstK']} < {mxBlock})")
+      return False
+    if vectorWidth < mxUnit:
+      reject(
+          state,
+          printRejectionReason,
+          f"M-major MX-scale local read for {tc} requires "
+          f"VectorWidth{tc} >= MatrixInstK // MXBlock{tc} ({mxUnit}), "
+          f"got {vectorWidth}")
+      return False
+
+  return True
+
+
 def _disableRuntimeStaggerU(state):
   state["StaggerU"] = 0
   state["StaggerUMapping"] = 0
@@ -4025,6 +4063,10 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      if not _validateMXLocalReadWidth(
+          state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.

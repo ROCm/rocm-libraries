@@ -430,4 +430,39 @@ codes; only the content-derived basenames change.
 **Decision:** Regenerate the per-file baseline from the green post-rebase unit
 run. The update raises 16 floors, adds 14 current files, removes two entries for
 files deleted by develop, and explicitly lowers the nine reproducibly stale
-floors listed in ADR 0018. The tolerance remains 1 percentage point.
+floors listed in ADR 0018. The tolerance remains 1 percentage point. Superseded
+by D35, which corrects the reduction count and file classification.
+
+## D32 — Config-driven saved results include emitted assembly
+
+**ADR:** [`adr/0019-pin-config-driven-assembly.md`](adr/0019-pin-config-driven-assembly.md)
+
+**Decision:** Record a SHA-256 digest of the emitted opcode set next to each
+config-driven kernel's name and return code. This makes a change in instruction
+kinds observable while ignoring known register, label, count, and order
+variation.
+
+## D33 — Reject zero-width MX local reads before code generation
+
+**ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
+
+**Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
+when an M-major local read is narrower than one scale block. Remove three tests
+that counted code reached only before the previous code-generation exception.
+
+## D34 — Select config problem groups explicitly
+
+**ADR:** [`adr/0021-select-config-problem-groups.md`](adr/0021-select-config-problem-groups.md)
+
+**Decision:** Include a `BenchmarkProblems` index in every set-cover case and
+pass it through the config-driven harness. This records which problem group is
+measured when a shared YAML contains more than one group.
+
+## D35 — Correct and refresh the post-mutation coverage baseline
+
+**ADR:** [`adr/0022-correct-coverage-rebaseline.md`](adr/0022-correct-coverage-rebaseline.md)
+
+**Decision:** Correct ADR 0018's accounting from nine to ten original floor
+reductions, document the omitted `Configuration.py` and `Solution.py` changes,
+and refresh the baseline after removing invalid pre-exception coverage. The
+refresh lowers three reviewed floors, raises ten, and adds two current files.

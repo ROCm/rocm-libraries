@@ -4,6 +4,7 @@
     dict({
       'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x64x32_MI16x17o3zAEAMS8X3ErOZrzcMzlvPL1ThdZuPkW3xbxlUK5Q=',
       'err': 0,
+      'opcode_set_sha256': 'e383aaf931ddca943483a14700c38a538f4cdb2632873fd41ef3f4b6ac74f2ff',
     }),
   ])
 # ---

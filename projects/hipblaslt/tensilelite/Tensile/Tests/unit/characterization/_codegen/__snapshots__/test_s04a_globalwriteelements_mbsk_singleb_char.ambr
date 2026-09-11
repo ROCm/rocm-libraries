@@ -4,14 +4,17 @@
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1A1LnaflVLu-tUcowuXfGo5BZQvfNK1L52htQ5Nqph4I=',
       'err': 0,
+      'opcode_set_sha256': 'a676d188827c8400de2ce77130cc89776ce9d28c06b778c924632d02d16cf243',
     }),
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1Z2DqlW44D0e8MbhIsuAvjuhAqWWyD-J3ZOfGGRKv7hw=',
       'err': 0,
+      'opcode_set_sha256': 'e50af92981a8571d12708df51e15cf81775e6c3e16ca71de05e0e490519b7da7',
     }),
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1hRnDZ4dk92lbfBU4ywocLlwMAP16FDF1AX6vruWS99E=',
       'err': 0,
+      'opcode_set_sha256': '3e040042a979a7a9206944905eb34ae3e6824573cc132021964176c6e42dd07d',
     }),
   ])
 # ---

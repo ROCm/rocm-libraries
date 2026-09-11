@@ -26,7 +26,7 @@ Each module was characterized the same way, one atomic commit per module, **add-
 ### Directory layout
 
 - One subdirectory per characterized module (e.g. `DataType/`, `LibraryIO/`, `Configuration/`, `TensileLogic/`, …), each with its `test_*_char.py` files and a local `__snapshots__/`.
-- `_codegen/` — the codegen record/replay harness (`codegen_harness.py`, `config_harness.py`, `matrix.py`), the per-arch attribution fixtures, and `GPU-MOCK.md`. Codegen goldens use an order-invariant `{basename, err}` digest rather than a full assembly-text hash, because the emitter's text is order-coupled through process-global rocisa scheduler state.
+- `_codegen/` — the codegen record/replay harness (`codegen_harness.py`, `config_harness.py`, `matrix.py`), the per-arch attribution fixtures, and `GPU-MOCK.md`. Codegen goldens use an order-invariant `{basename, err}` digest. Config-driven tests that use `assert_config_emits_golden` also record a SHA-256 digest of the emitted opcode set, so adding or removing an instruction kind cannot pass only because the solution name and return code stayed constant.
 - `conftest.py` — shared fixtures for the characterization suite.
 
 ## How to run

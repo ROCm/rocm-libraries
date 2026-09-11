@@ -4,10 +4,12 @@
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16s9TrEsSQdJ62-COz4JittwCpjbVLsx8bvX0Xjr7s-NE=',
       'err': 0,
+      'opcode_set_sha256': '05e6b3826fa62b4b64d5bb30e35657082348588bf05799d3ddb27924bac0c6da',
     }),
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT192x192x32_MI161wdwsLiOTsjpQKCsEsm8IZmgXbFes64uiVPLAO-q848=',
       'err': 0,
+      'opcode_set_sha256': '82420d7534defe05375de0890af109beb020e3f08e393aa548b7abb62db4224e',
     }),
   ])
 # ---

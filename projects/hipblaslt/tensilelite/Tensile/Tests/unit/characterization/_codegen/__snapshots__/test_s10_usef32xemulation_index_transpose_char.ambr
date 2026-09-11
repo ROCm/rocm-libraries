@@ -2,12 +2,14 @@
 # name: test_s10_usef32xemulation_index_transpose_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_MX_BH_UserArgs_MT64x64x64_MI16xerkiVK2yZgsOZbYOXrSPLzH-fZLFsSFNPFCRemMCniw=',
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_BH_UserArgs_MT64x64x64_MI16xtRGE5wDlBVlvrvTdq8_EURcYrSNMI2ILUdmc74aq1Ls=',
       'err': 0,
+      'opcode_set_sha256': 'fcef467650569296989678997fa932133bff6ecddd1a9623cd7f084c902d93a6',
     }),
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT64x64x64_MI16x1nPpUBWheRQJYdp4HLZ55RUAh6ua50a7e5AAXDNYJd4U=',
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT64x64x64_MI16x1GJdTlSm8t2aZMo-BVmcLr9zYsiXvRy9nwD6LklmQGuI=',
       'err': 0,
+      'opcode_set_sha256': '9171491d48e49097e0ee7c9956d49b95c97bf782b5b2dbe54f3c92e5a338f79e',
     }),
   ])
 # ---

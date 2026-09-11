@@ -39,9 +39,11 @@ The expensive toolchain build is cached process-wide (per arch).
 import contextlib
 import copy
 import functools
+import hashlib
 import os
 import re
 import tempfile
+from collections import Counter
 
 import pytest
 
@@ -118,8 +120,10 @@ def _load_config(config_path):
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
 
 
-def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_solutions=None):
-    """Build ``Solution`` objects from a config's first BenchmarkProblems entry.
+def _solutions_from_config_unguarded(
+    config_path, assembler, isaInfoMap, limit_solutions=None, problem_index=0
+):
+    """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
     Walks the real config-driven path: ``BenchmarkProcess`` parses the
     ProblemType + ProblemSizeGroup, ``constructForkPermutations`` enumerates the
@@ -137,9 +141,14 @@ def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_s
     benchmarkProblems = config["BenchmarkProblems"]
     if not benchmarkProblems:
         return []
+    if not 0 <= problem_index < len(benchmarkProblems):
+        raise IndexError(
+            f"BenchmarkProblems index {problem_index} is out of range for "
+            f"{config_path} ({len(benchmarkProblems)} entries)"
+        )
 
     # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig].
-    problemTypeConfig, problemSizeGroupConfig = benchmarkProblems[0][0], benchmarkProblems[0][1]
+    problemTypeConfig, problemSizeGroupConfig = benchmarkProblems[problem_index][:2]
 
     debugConfig = makeDebugConfig(config.get("GlobalParameters", {}))
 
@@ -166,18 +175,22 @@ def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_s
     return solutions
 
 
-def solutions_from_config(config_path, arch=_DEFAULT_ARCH, limit_solutions=None):
+def solutions_from_config(
+    config_path, arch=_DEFAULT_ARCH, limit_solutions=None, problem_index=0
+):
     """Return fully-derived ``Solution`` objects for ``config_path`` (CPU-only).
 
     Runs under global-state isolation so it does not leak into other tests.
     """
     assembler, iim = _toolchain_for(arch)
     with _isolated_globals_with_isa(iim):
-        return _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions)
+        return _solutions_from_config_unguarded(
+            config_path, assembler, iim, limit_solutions, problem_index
+        )
 
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
-                             splitGSU=False, cluster_dim=None):
+                             splitGSU=False, cluster_dim=None, problem_index=0):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -204,7 +217,13 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     results = []
     with _isolated_globals_with_isa(iim):
-        sols = _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions=limit)
+        sols = _solutions_from_config_unguarded(
+            config_path,
+            assembler,
+            iim,
+            limit_solutions=limit,
+            problem_index=problem_index,
+        )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:
             want = list(cluster_dim)
@@ -344,12 +363,85 @@ def assert_real_gfx1250_kernels(results):
     return results
 
 
-def golden_digest(results):
-    """Order-invariant ``{basename, err}`` digest shared by the syrupy goldens."""
-    return sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
+def golden_digest(results, *, include_source=False):
+    """Return an order-invariant saved result for emitted kernels.
+
+    ``include_source`` adds a digest and line count of the canonical assembly.
+    This detects emitted-code changes without storing thousands of assembly
+    lines in each snapshot.
+    """
+    digest = []
+    for base, source, err in results:
+        item = {"basename": base, "err": err}
+        if include_source:
+            if isinstance(source, (bytes, bytearray)):
+                source = source.decode(errors="replace")
+            source = source or ""
+            opcodes = re.findall(
+                r"^\s*((?:buffer|ds|exp|flat|global|image|s|scratch|v)_[a-zA-Z0-9_.]+)\b",
+                source,
+                re.MULTILINE,
+            )
+            opcode_set = "\n".join(sorted(set(opcodes)))
+            item["opcode_set_sha256"] = hashlib.sha256(opcode_set.encode()).hexdigest()
+        digest.append(item)
+    return sorted(digest, key=lambda item: item["basename"])
+
+
+def assert_config_emits_golden(
+    config_path,
+    arch,
+    snapshot,
+    *,
+    limit=8,
+    all_ok=True,
+    validate_source=False,
+    problem_index=0,
+):
+    """Emit one configuration once and check its shared smoke-test contract."""
+    results = emit_kernels_from_config(
+        config_path, limit=limit, arch=arch, problem_index=problem_index
     )
+    assert results, f"expected >=1 kernel, got {len(results)}"
+    if all_ok:
+        assert all(err == 0 for (_base, _src, err) in results)
+    if validate_source:
+        for base, src, err in results:
+            assert err == 0, f"kernel {base!r} emitted with err={err}"
+            assert base.startswith("Cijk_")
+            assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
+            assert arch in src, f"kernel {base!r}: wrong arch in assembly"
+    assert golden_digest(results, include_source=True) == snapshot
+    return results
+
+
+def assert_config_derives_golden(config_path, arch, snapshot, *, expect_solutions):
+    """Derive one configuration once and check its saved solution-count result."""
+    solutions = solutions_from_config(config_path, arch=arch)
+    if expect_solutions:
+        assert solutions, f"expected >=1 surviving solution, got {len(solutions)}"
+    else:
+        assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
+    assert len(solutions) == snapshot
+    return solutions
+
+
+def assert_config_rejects(config_path, arch, monkeypatch, capsys, expected_rejections):
+    """Derive a configuration serially and check its exact rejection multiset."""
+    import Tensile.BenchmarkProblems as benchmark_problems
+
+    def serial_map(function, objects, *_args, **_kwargs):
+        return [function(*args) for args in objects]
+
+    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
+    solutions = solutions_from_config(config_path, arch=arch)
+    rejection_counts = Counter(
+        line.strip()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("reject:")
+    )
+    assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
+    assert rejection_counts == Counter(expected_rejections)
 
 
 _TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
