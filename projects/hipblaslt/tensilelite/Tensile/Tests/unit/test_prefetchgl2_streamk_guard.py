@@ -257,3 +257,41 @@ def test_prefetchgl2_rejects_non_dpfirst_streamk(
     )
     assert sol.get("Valid") is False
     assert GUARD_REASON in out
+
+
+# ---------------------------------------------------------------------------
+# A workgroup cluster forces round-robin GSU workgroup mapping. The cooperative
+# prefetch fan-out takes each peer's slot from WorkGroup{i} % ClusterDim, so a
+# cluster's workgroups have to agree on the K chunk. The default split
+# (GSUSumIdx = wg1 % GSU) makes the group the fast axis of the raw y grid and
+# puts every peer on a different chunk; round-robin (GSUSumIdx = wg1 /
+# NumWorkGroups1) makes it the slow axis so the cluster shares one group. It is
+# forced regardless of the tuned GlobalSplitU because SupportUserGSU is left on,
+# so GSU can arrive at runtime.
+# ---------------------------------------------------------------------------
+WGMRR = "GlobalSplitUWorkGroupMappingRoundRobin"
+
+
+@pytest.mark.parametrize("gsu", [1, 4])
+def test_prefetchgl2_cluster_forces_gsu_wgmrr(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, gsu
+):
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys,
+        StreamK=0, GlobalSplitU=gsu, PrefetchAcrossPersistent=0, ClusterDim=[2, 2],
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol[WGMRR] is True, f"cluster must force {WGMRR} on (GSU={gsu})"
+
+
+def test_prefetchgl2_without_cluster_leaves_gsu_wgmrr(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """No cluster means no cooperative fan-out to keep in step, so the mapping
+    is left at whatever was tuned."""
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys,
+        StreamK=0, GlobalSplitU=4, PrefetchAcrossPersistent=0, ClusterDim=[1, 1],
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol[WGMRR] is not True
