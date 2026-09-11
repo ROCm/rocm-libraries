@@ -449,9 +449,12 @@ static rocke_value_t* rocke_dconv32c_lds_read_input(
 
     /* ch_off = ch_start + k_blk*4
      * Python: b.add(b.const_i32(ch_start), b.mul(k_blk, b.const_i32(4)))
-     * Force Python left-to-right SSA. */
-    ch_off = rocke_b_add(
-        b, rocke_b_const_i32(b, ch_start), rocke_b_mul(b, ctx->k_blk, rocke_b_const_i32(b, 4)));
+     * Emit const(ch_start) first, then const(4)/mul, to match Python left-to-right order. */
+    {
+        rocke_value_t* c_ch_start = rocke_b_const_i32(b, ch_start);
+        rocke_value_t* mul_k = rocke_b_mul(b, ctx->k_blk, rocke_b_const_i32(b, 4));
+        ch_off = rocke_b_add(b, c_ch_start, mul_k);
+    }
 
     /* lds_idx = W_lds_idx*BG_cpg + wave_id*cpg + ch_off */
     {
