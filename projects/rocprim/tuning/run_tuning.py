@@ -64,8 +64,19 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
 
 def get_available_algorithms() -> List[str]:
     """Return list of supported tuning algorithms."""
-    return [
+    return sorted([
         "device_merge",
+        "device_adjacent_find",
+        "device_adjacent_difference",
+        "device_adjacent_difference_inplace",
+        "device_binary_search",
+        "device_lower_bound",
+        "device_upper_bound",
+        "device_search_n",
+        "device_merge_sort_block_merge",
+        "device_merge_sort_block_sort",
+        "device_radix_sort_block_sort",
+        'device_search_n',
         "device_partition_flag",
         "device_partition_predicate",
         "device_partition_three_way",
@@ -75,10 +86,10 @@ def get_available_algorithms() -> List[str]:
         "device_select_unique_by_key",
         "device_select_flag",
         "device_select_predicate",
-        "device_select_unique"
-        # Add new algorithms here
-    ]
-
+        "device_select_unique",
+        "device_radix_sort_onesweep",
+        "device_segmented_radix_sort"
+    ])
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
     """Filter algorithms based on regex pattern."""
@@ -212,3 +223,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
