@@ -73,10 +73,8 @@ protected:
                 {"objective", "max"},
                 {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}},
                 {"trained_against",
-                 {{"ued",
-                   {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
-                  {"kmd",
-                   {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+                 {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+                  {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
                   {"umd", nlohmann::json::array()}}}};
     }
 
@@ -85,10 +83,10 @@ protected:
         return parseUhdConfig(doc, _directory.path() / "model.uhd.json");
     }
 
-    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
-        predict(const UhdConfig& cfg,
-                bool evaluate = true,
-                const std::string& arch = "gfx942") const
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT predict(const UhdConfig& cfg,
+                                                                    bool evaluate = true,
+                                                                    const std::string& arch
+                                                                    = "gfx942") const
     {
         std::shared_ptr<const Model> compiled;
         if(evaluate)
@@ -154,7 +152,9 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(binding.at("role"), "predict_engine_tflops");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_EQ(binding.at("uhd_id"), cfg.uhdId);
-    EXPECT_EQ(binding.at("trained_against"), cfg.trainedAgainst);
+    // The engine, not the predictor, publishes trained_against: a staleness check needs
+    // the descriptor set the model is being compared against, which only the engine knows.
+    EXPECT_FALSE(binding.contains("trained_against"));
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
     EXPECT_EQ(predict(cfg).status, PredictionStatus::UNAVAILABLE);
 }

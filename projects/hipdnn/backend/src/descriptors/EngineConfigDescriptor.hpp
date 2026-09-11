@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <mutex>
+#include <vector>
 
 namespace hipdnn_backend
 {
@@ -26,12 +27,20 @@ private:
     bool _deferWorkspace = false;
     bool _predictionEvaluate = true;
     mutable flatbuffers::DetachedBuffer _predictionBuffer;
+    /// Buffers already handed out. HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT is readable
+    /// while the descriptor still accepts setAttribute, and its bytes are documented to
+    /// live until the descriptor dies, so an invalidated buffer is retired, not freed.
+    mutable std::vector<flatbuffers::DetachedBuffer> _retiredPredictions;
+    mutable std::mutex _predictionMutex;
 
     void ensureWorkspaceSize() const;
 
-    /// Packs the configuration-kind prediction once per input state; setAttribute
-    /// invalidates it exactly like the serialized engine config buffer.
+    /// Packs the configuration-kind prediction once per input state; setAttribute retires
+    /// the previous buffer so a caller that still holds it keeps reading valid bytes.
     const flatbuffers::DetachedBuffer& ensurePrediction() const;
+
+    /// Retires any packed prediction, under the prediction lock.
+    void invalidatePrediction();
 
     void setEngine(hipdnnBackendAttributeType_t attributeType,
                    int64_t elementCount,

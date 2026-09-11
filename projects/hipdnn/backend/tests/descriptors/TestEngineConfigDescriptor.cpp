@@ -200,9 +200,8 @@ TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAtt
                                 HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT,
                                 HIPDNN_ATTR_ENGINE_CANDIDATES_EXT})
     {
-        ASSERT_THROW_HIPDNN_STATUS(
-            config->setAttribute(attribute, HIPDNN_TYPE_INT64, 1, &value),
-            HIPDNN_STATUS_NOT_SUPPORTED);
+        ASSERT_THROW_HIPDNN_STATUS(config->setAttribute(attribute, HIPDNN_TYPE_INT64, 1, &value),
+                                   HIPDNN_STATUS_NOT_SUPPORTED);
     }
 }
 

@@ -498,8 +498,8 @@ void EngineDescriptor::setInspectionScalar(hipdnnBackendAttributeName_t attribut
     case HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT:
         THROW_IF_TRUE(value < 1 || value > MAX_CANDIDATE_LIMIT,
                       HIPDNN_STATUS_BAD_PARAM,
-                      "Candidate page limit must be in [1, "
-                          + std::to_string(MAX_CANDIDATE_LIMIT) + "]");
+                      "Candidate page limit must be in [1, " + std::to_string(MAX_CANDIDATE_LIMIT)
+                          + "]");
         _candidateLimit = value;
         break;
     default:
@@ -569,8 +569,7 @@ const std::vector<uint8_t>& EngineDescriptor::ensureCandidates() const
         EngineConfigDescriptor::validateEngineConfig(scope, _engineId);
 
         flatbuffers::FlatBufferBuilder builder;
-        builder.Finish(
-            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &scope));
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &scope));
         const auto manager = _graph->getHandle()->getPluginResourceManager();
         _candidatePage
             = manager->enumerateCandidates(_engineId,
@@ -601,9 +600,8 @@ void EngineDescriptor::getCandidates(hipdnnBackendAttributeType_t attributeType,
     }
     if(requestedElementCount == 1)
     {
-        THROW_IF_NULL(arrayOfElements,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "Candidate page output is null");
+        THROW_IF_NULL(
+            arrayOfElements, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "Candidate page output is null");
         const auto& page = ensureCandidates();
         *static_cast<hipdnnBackendFlatbufferData_t*>(arrayOfElements) = {page.data(), page.size()};
     }

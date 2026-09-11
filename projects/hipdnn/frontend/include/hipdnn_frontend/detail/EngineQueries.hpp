@@ -104,16 +104,16 @@ inline Error applyCandidateScope(hipdnnBackendDescriptor_t engineDesc,
     return {};
 }
 
-inline Error decodeEnginePrediction(const hipdnn_flatbuffers_sdk::data_objects::EnginePrediction&
-                                        source,
-                                    int64_t engineId,
-                                    PredictionKind kind,
-                                    EnginePrediction& prediction)
+inline Error
+    decodeEnginePrediction(const hipdnn_flatbuffers_sdk::data_objects::EnginePrediction& source,
+                           int64_t engineId,
+                           PredictionKind kind,
+                           EnginePrediction& prediction)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto expectedKind
-        = kind == PredictionKind::ENGINE ? fb::PredictionKind::ENGINE : fb::PredictionKind::CONFIGURATION;
+    const auto expectedKind = kind == PredictionKind::ENGINE ? fb::PredictionKind::ENGINE
+                                                             : fb::PredictionKind::CONFIGURATION;
     if(source.engine_id() != engineId || source.kind() != expectedKind)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Prediction identity does not match query"};
@@ -209,7 +209,8 @@ inline Error decodeEnginePrediction(const hipdnn_flatbuffers_sdk::data_objects::
                 default:
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Invalid prediction knob value"};
                 }
-                if(!variant.knobSettings.emplace(setting->knob_id()->str(), std::move(value)).second)
+                if(!variant.knobSettings.emplace(setting->knob_id()->str(), std::move(value))
+                        .second)
                 {
                     return {ErrorCode::HIPDNN_BACKEND_ERROR, "Duplicate prediction knob"};
                 }

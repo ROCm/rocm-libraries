@@ -1033,12 +1033,10 @@ TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedO
     EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
     ASSERT_NO_THROW(engine->setAttribute(
         HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT, HIPDNN_TYPE_INT64, 1, &offset));
+    ASSERT_NO_THROW(
+        engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit));
     ASSERT_NO_THROW(engine->setAttribute(
-        HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT, HIPDNN_TYPE_INT64, 1, &limit));
-    ASSERT_NO_THROW(engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT,
-                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                         1,
-                                         &knobPtr));
+        HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr));
     ASSERT_NO_THROW(engine->finalize());
 
     const std::vector<uint8_t> page{0xAB, 0xCD, 0xEF};
@@ -1138,11 +1136,10 @@ TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
     auto engine = getEngineDescriptor();
     auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
     auto* knobPtr = knobWrapper.get();
-    ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT,
-                                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                    1,
-                                                    &knobPtr),
-                               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->setAttribute(
+            HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr),
+        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 }
 
 TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateFlag)
@@ -1161,8 +1158,8 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateF
     EXPECT_CALL(*_mockHandle, getPluginResourceManager())
         .WillOnce(Return(_mockEnginePluginResourceManager));
     EXPECT_CALL(*getMockGraph(), getSerializedGraph())
-        .WillOnce(Return(hipdnnPluginConstData_t{_engineDetailsBuffer.data(),
-                                                 _engineDetailsBuffer.size()}));
+        .WillOnce(Return(
+            hipdnnPluginConstData_t{_engineDetailsBuffer.data(), _engineDetailsBuffer.size()}));
     EXPECT_CALL(*_mockEnginePluginResourceManager, getEnginePrediction(_, _, _, _))
         .WillOnce(Invoke([](const hipdnnPluginConstData_t& engineConfig,
                             const hipdnnPluginConstData_t&,
