@@ -38,6 +38,12 @@ module exists so the layering is explicit.
 
 from __future__ import annotations
 
+from .codegen_policy import (
+    CodegenPolicy,
+    SchedulerStrategy,
+    apply_codegen_policy,
+    codegen_policy_for_kernel,
+)
 from .ir import (
     BF16,
     F16,
@@ -87,6 +93,10 @@ from .passes import (
 from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
+    "CodegenPolicy",
+    "SchedulerStrategy",
+    "apply_codegen_policy",
+    "codegen_policy_for_kernel",
     "BF16",
     "F16",
     "F32",
