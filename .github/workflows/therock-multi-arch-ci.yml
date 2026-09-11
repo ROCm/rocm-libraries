@@ -92,7 +92,9 @@ jobs:
     name: Load CI Environment
     runs-on: ubuntu-24.04
     outputs:
-      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      # Use the manually supplied or bot-maintained baseline. An empty value
+      # causes artifact reuse to be disabled and triggers a full stage build.
+      baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
     steps:
       - name: Checkout ci-env action
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -167,18 +169,24 @@ jobs:
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
-      # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
-      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
-      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
-      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      # Copy prebuilt stages only when the resolved reuse policy provides a
+      # baseline run ID. Otherwise, leave this empty for a full stage build.
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      # Use the baseline selected by the artifact reuse policy above.
+      baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       build_python_packages: ${{ inputs.build_python_packages || false }}
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
       build_native_linux: ${{ inputs.build_native_linux || false }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # A missing baseline disables artifact reuse and causes TheRock to
+      # perform a full stage build.
+      stage_reuse_mode: >-
+        ${{
+          needs.ci-env.outputs.baseline-run-id != '' &&
+          'reuse-stage' ||
+          'off'
+        }}
       repository: ROCm/TheRock
       ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
       # Pass external repo info for stage-impact analysis.
