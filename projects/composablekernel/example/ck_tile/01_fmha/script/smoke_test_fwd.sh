@@ -300,9 +300,18 @@ run_sink_mask_tests() {
 
     # qr_tdm (gfx1250 only, prefill s>=2048): ping-pong K/V prefetch jumped late,
     # reading stale pre-jump tiles. Falls back to qr_async on gfx950, covered above.
+    # The third mask field is the sink size, and num_sink_loop = ceil(sink / kN0)
+    # with kN0=64 at d=128, so these three (sink=2) all give num_sink_loop==1 and
+    # reach only the prologue jump.
     run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=2048  -s_k=2048  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=0 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=t:2,0,2
     run_exe -prec=bf16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=4096  -s_k=4096  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=0 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:1,0,2
     run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=8192  -s_k=8192  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=0 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:2,0,2
+
+    # sink 80 and 150 span 2 and 3 kN0=64 tiles, so num_sink_loop reaches 2 and 3
+    # and the mainloop jump (i_total_loops == num_sink_loop - 2) is exercised. The
+    # sink=2 cases above never reach it.
+    run_exe -prec=bf16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=4096  -s_k=4096  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=0 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:1,0,80
+    run_exe -prec=fp16 -mode=0 -b=1 -h=1 -d=128 -d_v=128 -s=8192  -s_k=8192  -bias=n -lse=0 -iperm=0 -operm=0 -vlayout=r -num_splits=1 -page_block_size=0 -cache_batch_idx=0 -kname=$KNAME $COMMON_ARGS -mask=b:2,0,150
 }
 
 # init_sink tests: validate sink token initialization across prec/hdim/mode.
