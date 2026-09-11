@@ -59,4 +59,23 @@ class CompactingGreedyAllocator : public RegisterAllocator {
     Expected<AllocationResult> allocate(const AllocationContext& context) override;
 };
 
+/// Compacting placement ordered by how constrained a block is rather than by how
+/// hot it is, registered as "greedy-compact-freedom".
+///
+/// Every block prefers a low base, because placement takes the first that fits.
+/// So a block with few legal bases -- a wide range, an aligned one, an operand
+/// confined to one bank -- competes for them against blocks that could have gone
+/// anywhere, and under pressure arrives to find none left. Counting the bases a
+/// block could legally take and placing the fewest first is the whole of it, and
+/// it subsumes the capped phase that weight ordering needs.
+///
+/// Separate from the default while its effect on the high-water mark is
+/// measured; see FreedomOrderedGreedyAllocator.cpp.
+class FreedomOrderedGreedyAllocator : public RegisterAllocator {
+   public:
+    const char* name() const override;
+    AllocatorCapabilities capabilities() const override;
+    Expected<AllocationResult> allocate(const AllocationContext& context) override;
+};
+
 }  // namespace stinkytofu
