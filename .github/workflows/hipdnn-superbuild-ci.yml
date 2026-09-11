@@ -389,11 +389,6 @@ jobs:
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
-      # GPU_TARGET and the production source root below are coupled: both KDPs under
-      # examples/descriptors carry "arch": ["gfx942"], and a pack whose requested arches
-      # prune every KDP away is a hard error rather than a quiet skip. Retargeting this
-      # lane therefore means widening those two arch lists in the same change. See
-      # dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/README.md.
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
