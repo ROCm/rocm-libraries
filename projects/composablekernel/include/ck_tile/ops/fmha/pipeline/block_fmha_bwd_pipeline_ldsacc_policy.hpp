@@ -12,6 +12,33 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_PREFETCH_QDO 1
 #endif
 
+// Issue the dQ atomic one whole cache line at a time.
+//
+// A wave32 wmma C fragment gives lanes 0-15 row r and lanes 16-31 row r+8, each
+// 16 columns wide. At fp32 that is two 64 B pieces of two different rows, so a
+// single buffer_atomic_add_f32 straddles two 128 B lines and the kernel issues
+// exactly twice the dQ atomic L2 requests the arithmetic needs (measured
+// 16.08 M against a 8.39 M floor; aiter sits on the floor).
+//
+// The fix has two halves, and both live behind this macro:
+//   * gemm_4 packs its N iterations against the warp index rather than across
+//     it, so one warp owns 32 adjacent dQ columns instead of two 16-column
+//     blocks 64 apart (GetSGradKTBlockGemm, MakeKTRegBlockDescriptor,
+//     MakeSGradRegSliceBlockDescriptor);
+//   * the pipeline folds each N-adjacent register pair with
+//     v_permlane16_swap_b32 and stores through MakeQGradStoreBlockDistribution,
+//     which describes the folded layout: one row, 32 columns, 128 B.
+#ifndef CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
+#define CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE 1
+#endif
+
+// Second half only: set this to 0 with the above at 1 to get the packed gemm_4
+// without the fold, which prices the operand re-mapping on its own. Not a
+// shipping configuration -- it has all of the cost and none of the benefit.
+#ifndef CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
+#define CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
+#endif
+
 // Policy for the bwd pipeline that keeps the dK and dV accumulators in LDS
 // instead of registers.
 //
@@ -108,6 +135,116 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         return 0;
     }
 
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
+    // gemm_4 with PackMNIter on, which is the block gemm's own supported way of
+    // ordering the outer N dimension <NWarp, NIterPerWarp> instead of
+    // <NIterPerWarp, NWarp>.
+    //
+    // Default:  N = n_iter * (NWarp * 16) + w * 16 + nlane
+    // Packed:   N = w * (NIterPerWarp * 16) + n_iter * 16 + nlane
+    //
+    // At hdim 128 (NWarp 4, NIterPerWarp 2) the default hands warp w columns
+    // {16w..16w+15} and {64+16w..64+16w+15}: the 128 B dQ line spanning columns
+    // [32k, 32k+32) is split across two warps, so no single wave can ever write
+    // it whole. Packed, warp w owns [32w, 32w+32) -- exactly one line -- and the
+    // two wmma results it holds are the adjacent halves of it.
+    //
+    // A, B and C all flip together inside the block gemm, so the only thing this
+    // costs is re-deriving the two operand descriptors below; the register
+    // counts are unchanged because NIterPerWarp is unchanged.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetSGradKTBlockGemm()
+    {
+        using GemmProblem =
+            BlockGemmProblem<typename Problem::GemmDataType,
+                             typename Problem::KDataType,
+                             typename Problem::AccDataType,
+                             Problem::kBlockSize,
+                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
+                                                    Problem::BlockFmhaShape::kQKHeaddim,
+                                                    Problem::BlockFmhaShape::kK4>,
+                                           typename Problem::BlockFmhaShape::Gemm4BlockWarps,
+                                           typename Problem::BlockFmhaShape::Gemm4WarpTile>>;
+
+        using WarpGemm = WarpGemmDispatcher<typename Problem::GemmDataType,
+                                            typename Problem::KDataType,
+                                            typename Problem::AccDataType,
+                                            Problem::BlockFmhaShape::Gemm4WarpTile::at(number<0>{}),
+                                            Problem::BlockFmhaShape::Gemm4WarpTile::at(number<1>{}),
+                                            Problem::BlockFmhaShape::Gemm4WarpTile::at(number<2>{}),
+                                            false>;
+
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,
+                                                typename Problem::KDataType,
+                                                typename Problem::AccDataType,
+                                                typename Problem::BlockFmhaShape::Gemm4BlockWarps,
+                                                WarpGemm,
+                                                1 /*KSubTileNum*/,
+                                                true /*PackMNIter*/>;
+
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    // The dQ store layout produced by folding the gemm_4 C fragment with
+    // v_permlane16_swap_b32; see CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE above.
+    //
+    // Before the fold, register (m_iter, n_iter, e) holds
+    //     M = (mwarp*MIterPerWarp + m_iter)*16 + mlane*8 + e     mlane = lane>>4
+    //     N = (w*NIterPerWarp + n_iter)*16 + (lane & 15)
+    // After swapping the n_iter pair (2k, 2k+1), the low register holds row
+    // mlane=0 across all 32 lanes and the high register row mlane=1, both over
+    // 32 adjacent columns:
+    //     M = (mwarp*MIterPerWarp + m_iter)*16 + s*8 + e         s = which of the pair
+    //     N = (w*(NIterPerWarp/2) + k)*32 + lane
+    // which is what this encoding says. The Y order is (m_iter, k, s, e), i.e.
+    // exactly the (m_iter, n_iter, e) order the accumulator already had with
+    // n_iter split into (k, s) -- so the fold is in place and no register moves.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQGradStoreBlockDistribution()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetSGradKTBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
+
+        constexpr index_t MIterPerWarp =
+            Problem::BlockFmhaShape::kM0 / (MWarp * WarpGemm::kM);
+        constexpr index_t NIterPerWarp =
+            Problem::BlockFmhaShape::kQKHeaddim / (NWarp * WarpGemm::kN);
+
+        constexpr index_t kWarpSize = get_warp_size();
+        // Values one lane holds per wmma, and how many lanes the fragment spans
+        // down M. For the gfx12 wmma these are 8 and 2: the lane's values are
+        // contiguous in M, and the two half-waves are 8 rows apart.
+        constexpr index_t kMPerLane = WarpGemm::kM * WarpGemm::kN / kWarpSize;
+        constexpr index_t kCMLane   = WarpGemm::kM / kMPerLane;
+
+        static_assert(kCMLane == 2,
+                      "the fold assumes the C fragment spans exactly two half-waves down M");
+        static_assert(NIterPerWarp % 2 == 0,
+                      "the fold needs N-adjacent wmma pairs, so NIterPerWarp must be even");
+        static_assert(kWarpSize == kCMLane * (WarpGemm::kN),
+                      "the folded row must be exactly one wave wide");
+
+        // Two P dims, like the C tile it replaces: P0 is the warp id and P1 the
+        // lane id. This is not cosmetic -- get_partition_index() feeds a
+        // single-P distribution get_lane_id() alone, so folding the warp index
+        // into one 128-long P dim would land all four warps on the first 32
+        // columns.
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<MWarp, MIterPerWarp, kCMLane, kMPerLane>,
+                      sequence<NWarp, NIterPerWarp / 2, kWarpSize>>,
+                tuple<sequence<1, 2>, sequence<2>>,
+                tuple<sequence<0, 0>, sequence<2>>,
+                sequence<1, 2, 1, 1>,
+                sequence<1, 1, 2, 3>>{});
+    }
+#endif
+
     // Same encoding the base policy builds for gemm_4's B operand, wrapped so
     // that load_tile_transpose fills it. Identical logical content, different
     // physical arrangement.
@@ -126,6 +263,17 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
         constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
 
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
+        // PackMNIter ordering -- must stay the exact type MakeBBlockDistribution
+        // Encode() returns, the block gemm static_asserts on it.
+        constexpr auto kt_block_outer_dstr_encoding = tile_distribution_encoding<
+            sequence<MWarp>,
+            tuple<sequence<NWarp, NIterPerWarp>, sequence<KIterPerWarp>>, // 4 2, 4
+            tuple<sequence<0, 1>>,
+            tuple<sequence<0, 0>>,
+            sequence<1, 2>,
+            sequence<1, 0>>{};
+#else
         constexpr auto kt_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<MWarp>,
             tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>, // 2 4, 4
@@ -133,6 +281,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
             tuple<sequence<0, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
+#endif
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -429,6 +578,18 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
         constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
 
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_COALESCE
+        // PackMNIter ordering. At MWarp == 1 this addresses the same elements as
+        // the branch below, but the block gemm compares encodings by type, so it
+        // still has to be spelled the packed way.
+        constexpr auto ds_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MWarp, MIterPerWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<0, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{};
+#else
         constexpr auto ds_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<NWarp>,
                                        tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
@@ -436,6 +597,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                                        tuple<sequence<1, 0>>,
                                        sequence<1, 2>,
                                        sequence<0, 0>>{};
+#endif
 
         constexpr auto ds_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             ds_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
