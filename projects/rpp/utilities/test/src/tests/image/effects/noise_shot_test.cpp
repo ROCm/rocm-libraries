@@ -170,23 +170,27 @@ void run_noise_shot_seed_invariant(const TestConfig& cfg) {
     std::vector<T> input(count);
     fill_input<T>(input.data(), count, cfg.dtype);
 
-    auto run_once = [&](Rpp32u seed, std::vector<T>& out) {
+    // The status is returned rather than asserted in here: an ASSERT_* inside a lambda returns from
+    // the lambda, not from the test, which would leave out empty and send the comparisons below
+    // through a zero-length buffer.
+    auto run_once = [&](Rpp32u seed, std::vector<T>& out) -> RppStatus {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
         dst.write(input.data(), bytes);
         RppHandle handle(cfg.backend, cfg.size.n);
-        ASSERT_EQ(rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(), seed,
-                                  roi.data(), XYWH, handle.get(), cfg.backend),
-                  RPP_SUCCESS);
+        const RppStatus status = rppt_shot_noise(src.ptr(), &desc, dst.ptr(), &desc, factor.data(),
+                                                 seed, roi.data(), XYWH, handle.get(), cfg.backend);
+        if (status != RPP_SUCCESS) return status;
         handle.sync();
         out.resize(count);
         dst.read(out.data(), bytes);
+        return status;
     };
 
     std::vector<T> seed42a, seed42b, seed1337;
-    run_once(42u, seed42a);
-    run_once(42u, seed42b);
-    run_once(1337u, seed1337);
+    ASSERT_EQ(run_once(42u, seed42a), RPP_SUCCESS);
+    ASSERT_EQ(run_once(42u, seed42b), RPP_SUCCESS);
+    ASSERT_EQ(run_once(1337u, seed1337), RPP_SUCCESS);
 
     EXPECT_TRUE(compare_roi<T>(seed42b.data(), seed42a.data(), desc, roi.data(), XYWH, 0.0))
         << "same seed produced different output";

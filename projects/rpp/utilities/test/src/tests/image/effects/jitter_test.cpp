@@ -213,23 +213,26 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
     std::vector<T> input(count);
     fill_input<T>(input.data(), count, cfg.dtype);
 
-    auto run = [&](Rpp32u seed) {
+    // The status is returned rather than asserted in here: an ASSERT_* inside a lambda returns from
+    // the lambda, not from the test, so the caller has to be the one that stops.
+    auto run = [&](Rpp32u seed, std::vector<T>& out) -> RppStatus {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
         dst.write(input.data(), bytes);
         RppHandle handle(cfg.backend, cfg.size.n);
-        RppStatus status = rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(), seed,
-                                       roi.data(), XYWH, handle.get(), cfg.backend);
-        EXPECT_EQ(status, RPP_SUCCESS);
+        const RppStatus status = rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(),
+                                             seed, roi.data(), XYWH, handle.get(), cfg.backend);
+        if (status != RPP_SUCCESS) return status;
         handle.sync();
-        std::vector<T> out(count);
+        out.resize(count);
         dst.read(out.data(), bytes);
-        return out;
+        return status;
     };
 
-    const std::vector<T> outA1 = run(42u);
-    const std::vector<T> outA2 = run(42u);
-    const std::vector<T> outB = run(1337u);
+    std::vector<T> outA1, outA2, outB;
+    ASSERT_EQ(run(42u, outA1), RPP_SUCCESS);
+    ASSERT_EQ(run(42u, outA2), RPP_SUCCESS);
+    ASSERT_EQ(run(1337u, outB), RPP_SUCCESS);
 
     // Same seed -> bit-identical over the ROI.
     EXPECT_TRUE(compare_roi<T>(outA1.data(), outA2.data(), desc, roi.data(), XYWH, 0.0));
