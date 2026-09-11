@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .corpus_io import read_corpus_frame
 from .evaluate import regret_of, resolve_grouping
 
 __all__ = [
@@ -483,7 +484,9 @@ def format_author_report(report: dict, ranked: list[dict], engine: str | None = 
 
 
 def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--input", required=True, help="benchmark corpus CSV")
+    parser.add_argument("--input", required=True,
+                        help="benchmark corpus: the published .parquet dataset, a collected "
+                             ".csv, or .json records -- the same three forms train takes")
     parser.add_argument("--target", default="robustMeanMs", help="timing column to rank on")
     parser.add_argument(
         "--objective", default="min", choices=("min", "max"), help="direction of --target"
@@ -515,7 +518,14 @@ def add_knob_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_knobs(args: argparse.Namespace) -> int:
-    df = pd.read_csv(args.input)
+    # The reader train and evaluate use, not a bare read_csv: a corpus is analysed here
+    # and fitted there, and the two must not disagree about what `--input` means or
+    # about the type of a numeric-looking device id they both group by.
+    try:
+        df = read_corpus_frame(Path(args.input))
+    except (OSError, ValueError, ImportError) as error:
+        logger.error("cannot read corpus %s: %s", args.input, error)
+        return 1
     try:
         report = analyse_knobs(df, args.target, args.objective, args.device_column)
     except (KeyError, ValueError) as error:

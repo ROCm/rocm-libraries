@@ -30,8 +30,12 @@ from results_import.derive import derive_metrics
 
 __all__ = ["ValidationError", "load_csvs", "build_dataset", "write_parquet"]
 
-#: Collection bookkeeping, meaningless once the shards are merged (§8.3).
-COLLECTION_ONLY = ["shard_id"]
+#: Collection bookkeeping, meaningless once the shards are merged (§8.3). `is_valid` and
+#: `skip_reason` are the collector's spelling of a failed candidate (see
+#: `_translate_collector_failure`); they are read on the way in and then dropped, because
+#: §8.3's published dataset records a failure once, as `error`, and never as two columns
+#: that can disagree.
+COLLECTION_ONLY = ["shard_id", "is_valid", "skip_reason"]
 
 #: What a producer may omit. A provider publishing tuning results is publishing a sweep, not
 #: hand-tuned partials, so completeness defaults true rather than forcing every external corpus
@@ -39,6 +43,14 @@ COLLECTION_ONLY = ["shard_id"]
 DEFAULTS = {"problem_complete": True, "error": ""}
 
 TIMING_COLUMNS = ["minTimeMs", "avgTimeMs", "stddevMs", "iters"]
+
+#: Identity columns, pinned to text at the read. A device id or a benchmark name that
+#: happens to be all digits is still a name -- nothing computes with it -- and letting the
+#: CSV reader infer it as int64 makes the published dataset's dtype depend on which board
+#: happened to be swept. Consumers group and join on these (`uhd_gen.evaluate`'s problem
+#: identity, `uhd_gen.immediate`'s canonical-string check), so the CSV and Parquet ends of
+#: the pipeline must agree on the type before anything downstream can branch on it.
+IDENTITY_DTYPES = {"benchmark": str, "device": str}
 
 
 class ValidationError(Exception):
@@ -57,7 +69,7 @@ def load_csvs(paths: Iterable[pathlib.Path]) -> pd.DataFrame:
     Appending is the whole reason collection stays CSV, so a merge is a concatenation here and
     nothing more. Empty fields arrive as NaN, which is how §8.3 spells "no measurement".
     """
-    frames = [pd.read_csv(path) for path in paths]
+    frames = [pd.read_csv(path, dtype=IDENTITY_DTYPES) for path in paths]
     if not frames:
         raise ValidationError("no input CSVs")
     return pd.concat(frames, ignore_index=True)
@@ -78,6 +90,33 @@ def _query_columns(frame: pd.DataFrame) -> list[str]:
 
 def _kernel_columns(frame: pd.DataFrame) -> list[str]:
     return [c for c in frame.columns if c.startswith("kernel.")]
+
+
+def _problem_key_columns(frame: pd.DataFrame) -> list[str]:
+    """The columns that identify a problem: the shape AND the machine that measured it.
+
+    A problem is `(graph, device)`. The same shape on two GPUs is two problems with two
+    different best kernels, which is why the runtime keys its winner cache on the pair and why
+    `uhd_gen.evaluate.resolve_grouping` groups on it; `q.*` alone is only the shape half.
+
+    Keyed on that half, a corpus spanning two boards folds each shape's two measurements into
+    one problem, and everything below reads that as a corrupt corpus rather than as two
+    machines: the candidate list repeats every `kernel.*` tuple, so `_validate` refuses it as a
+    merge of two candidate sets, and `_mark_incomplete_where_errored` downgrades a healthy
+    board's problem because the other board faulted on the same shape -- which makes that
+    board's exact regret report as a lower bound.
+
+    The device half is whichever spelling the corpus carries, in the order `resolve_grouping`
+    prefers: the identity column (`device`, or `device_id` from a producer that publishes only
+    the id), and failing that the `device.*` property columns §8.3 requires of every corpus,
+    which are then the only remaining evidence of which machine a row came from. `benchmark`
+    joins the key wherever present -- it is the graph identity the rest of the toolchain groups
+    on, and two graphs that happen to share a shape are still two problems.
+    """
+    identity = [c for c in ("benchmark", "device", "device_id") if c in frame.columns]
+    if "device" not in identity and "device_id" not in identity:
+        identity += sorted(c for c in frame.columns if c.startswith("device."))
+    return _query_columns(frame) + identity
 
 
 def _paired_identities(frame: pd.DataFrame) -> list[tuple[str, str]]:
@@ -121,6 +160,40 @@ def _validate_pair_agrees(frame: pd.DataFrame, name: str, identifier: str) -> No
             )
 
 
+def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rewrites the collector's `is_valid=False` + `skip_reason` as §8.3's `error`.
+
+    `uhd_gen export-benchmarks` writes a failed candidate the way the runtime record spells it
+    at the moment of failure: a boolean plus a reason, no `error` column at all. §8.3's
+    published dataset spells the same fact once -- a null measurement and a non-empty `error` --
+    precisely so that no two columns can disagree about whether a row was measured. Without a
+    translation the documented chain does not compose: every sweep containing a failure is
+    refused below as "neither a measurement nor an error".
+
+    Translated here rather than emitted by the collector because the collector must stay an
+    appendable log of what happened (§8.8), and because this is the one place §8.3's spelling is
+    decided: a foreign corpus that already writes `error` needs no collector change, and a
+    second producer gets the same treatment for free. The two columns then leave with the rest
+    of the collection bookkeeping (COLLECTION_ONLY), so nothing downstream can read a validity
+    flag that the published dataset does not have.
+
+    Only an explicit false translates. A blank flag is not a claim of failure, and a row that
+    carries neither a measurement nor a reason still falls to the check below rather than being
+    given an invented error.
+    """
+    if "is_valid" not in frame.columns:
+        return frame
+    failed = frame["is_valid"].astype(str).str.strip().str.lower().isin({"false", "0"})
+    # An error already recorded is the producer's own words and is never overwritten; a row
+    # marked failed with no reason gets the flag itself, which is all the corpus knows.
+    reason = (frame["skip_reason"].fillna("").astype(str).str.strip()
+              if "skip_reason" in frame.columns else pd.Series("", index=frame.index))
+    reason = reason.where(reason.str.len() > 0, "is_valid=False")
+    blank = frame["error"].astype(str).str.strip().str.len() == 0
+    frame.loc[failed & blank, "error"] = reason[failed & blank]
+    return frame
+
+
 def _validate(frame: pd.DataFrame) -> None:
     """§8.3's checks, applied where they can finally be applied."""
     for group in ("q.", "kernel.", "device."):
@@ -149,9 +222,9 @@ def _validate(frame: pd.DataFrame) -> None:
 
     _validate_identity_is_unambiguous(frame)
 
-    query = _query_columns(frame)
+    key = _problem_key_columns(frame)
     kernels = _kernel_columns(frame)
-    for _, rows in frame.groupby(query, dropna=False):
+    for _, rows in frame.groupby(key, dropna=False):
         if rows["problem_complete"].nunique() > 1:
             raise ValidationError("problem_complete disagrees across rows of one problem")
 
@@ -175,12 +248,12 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
     discard a multi-hour sweep, but the problem must not present as exact either, or regret over
     it silently becomes a lower bound.
     """
-    query = _query_columns(frame)
+    key = _problem_key_columns(frame)
     errored = frame["error"].astype(str).str.len() > 0
-    if not errored.any() or not query:
+    if not errored.any() or not key:
         return frame
-    bad = frame.loc[errored, query].apply(tuple, axis=1)
-    keys = frame[query].apply(tuple, axis=1)
+    bad = frame.loc[errored, key].apply(tuple, axis=1)
+    keys = frame[key].apply(tuple, axis=1)
     frame.loc[keys.isin(set(bad)), "problem_complete"] = False
     return frame
 
@@ -188,6 +261,7 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
 def build_dataset(frame: pd.DataFrame, opmeta: dict) -> pd.DataFrame:
     """Validates, derives the metrics, and drops what was only ever collection bookkeeping."""
     frame = _apply_defaults(frame.copy())
+    frame = _translate_collector_failure(frame)
     _validate(frame)
     frame = _mark_incomplete_where_errored(frame)
 

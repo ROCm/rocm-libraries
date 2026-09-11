@@ -9,8 +9,9 @@ it that board; the others get a model fitted to hardware they are not.
 The runtime already keeps the boards apart. A problem is `(benchmark, device)`, and
 `device` is the hex DeviceKey hash -- a fold over arch, warp size, compute units and the
 memory facts -- so two boards land under two identities and two identical boards land
-under one, which is correct in both directions. Concatenating the CSVs is therefore
-almost the whole job.
+under one, which is correct in both directions. Concatenating the corpora is therefore
+almost the whole job -- collected CSVs or published datasets alike, since `--input` here
+reads what `train` reads and the output keeps the format its name claims.
 
 Almost, because two things go wrong silently and this refuses both:
 
@@ -29,6 +30,8 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+
+from .corpus_io import read_corpus_frame
 
 __all__ = [
     "MergeError",
@@ -52,9 +55,13 @@ class MergeError(Exception):
 
 
 def _load(path: Path) -> pd.DataFrame:
+    # The reader every other command uses. A corpus is merged here and trained on there,
+    # so `--input dataset.parquet` has to mean the same file in both; a bare read_csv
+    # handed a published dataset fails inside pandas with a decode error that names
+    # neither the file's format nor this tool.
     try:
-        frame = pd.read_csv(path)
-    except (OSError, pd.errors.ParserError) as error:
+        frame = read_corpus_frame(path)
+    except (OSError, ValueError, ImportError) as error:
         raise MergeError(f"cannot read corpus {path}: {error}") from error
     if frame.empty:
         raise MergeError(f"{path} has no rows; an empty corpus contributes nothing")
@@ -166,7 +173,14 @@ def run_merge(args: argparse.Namespace) -> int:
         logger.error("%s", error)
         return 1
 
-    merged.to_csv(args.output, index=False)
+    # The output keeps the format its name claims. Merging two published datasets into a
+    # CSV would throw away the column types §8.3 published them with -- the whole reason
+    # the dataset exists -- and a CSV written under a `.parquet` name is a file `train`
+    # hands to read_parquet and fails on.
+    if Path(args.output).suffix == ".parquet":
+        merged.to_parquet(args.output, index=False)
+    else:
+        merged.to_csv(args.output, index=False)
 
     print(f"\nMerged {len(report['corpora'])} corpora -> {args.output}")
     print(f"  {'rows':>10}  {'problems':>9}  {'devices':>7}  corpus")
