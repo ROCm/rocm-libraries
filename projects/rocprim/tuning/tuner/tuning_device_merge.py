@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
+from typing import OrderedDict, Callable, Dict
 import sys
 import os
 
@@ -38,7 +38,7 @@ class Tuner(BaseTuner):
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
+    def _get_tune_params(self, types: Dict[str, str]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
@@ -46,14 +46,10 @@ class Tuner(BaseTuner):
         params["ipt"] = [1, 2] + list(range(4, 33, 4))
         return params
 
-    def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
+    def _get_restrictions(self, types: Dict[str, str]) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
-        size = self.bytes_size // TYPE_CONFIGS[key_type].size
-        element_size = TYPE_CONFIGS[key_type].size
-        if value_type:
-            element_size += TYPE_CONFIGS[value_type].size
+        element_size = sum(TYPE_CONFIGS[t].size for t in types.values() if t in TYPE_CONFIGS)
+        size = self.bytes_size // element_size
 
         def validate(params):
             block_size = params["block_size_x"]
@@ -84,11 +80,11 @@ class Tuner(BaseTuner):
         return validate
 
     def tune_all(self) -> None:
-        """Tune for all key type and value type combinations"""
+        """Tune for all type combinations"""
         for key_type in COMMON_KEY_TYPES:
-            self.tune_type(key_type)
+            self.tune_type({"key_type": key_type, "value_type": "rocprim::empty_type"})
             for value_type in COMMON_VALUE_TYPES:
-                self.tune_type(key_type, value_type)
+                self.tune_type({"key_type": key_type, "value_type": value_type})
 
 
 if __name__ == "__main__":
