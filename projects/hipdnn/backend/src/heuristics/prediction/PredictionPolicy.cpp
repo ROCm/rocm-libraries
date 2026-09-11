@@ -3,6 +3,8 @@
 
 #include "PredictionPolicy.hpp"
 
+#include "heuristics/BuiltInLogging.hpp"
+
 #include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
@@ -15,6 +17,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -29,6 +32,19 @@ using hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME;
 using hipdnn_data_sdk::utilities::policyNameToId;
 
 thread_local char lastError[1024]{};
+
+// File-scope logging callback / level, set through the C-ABI-shaped
+// SetLoggingCallback / SetLogLevel below. registerPlugin() installs a callback
+// that forwards to the backend logger, so lines from this module reach the same
+// sink as the rest of the backend. Same identity contract as the Config
+// built-in: the last writer wins, and that is fine because every callback
+// forwards to one process-wide sink.
+hipdnnCallback_t g_loggingCallback = nullptr; // NOLINT(readability-identifier-naming)
+hipdnnSeverity_t g_logLevel = HIPDNN_SEV_INFO; // NOLINT(readability-identifier-naming)
+
+#define PREDICTION_BUILTIN_LOG(severity, ...) \
+    HIPDNN_BUILTIN_HEURISTIC_LOG(             \
+        g_loggingCallback, g_logLevel, severity, "[BuiltInPrediction] ", __VA_ARGS__)
 
 // The backend built-in adapter (PredictionBuiltIn) dispatches these functions.
 // No engine catalogs, HIP calls, tuning caches, or model loaders belong here.
@@ -200,13 +216,15 @@ hipdnnPluginStatus_t getType(hipdnnPluginType_t* type)
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
-hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t)
+hipdnnPluginStatus_t setLoggingCallback(hipdnnCallback_t callback)
 {
+    g_loggingCallback = callback;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
-hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t)
+hipdnnPluginStatus_t setLogLevel(hipdnnSeverity_t level)
 {
+    g_logLevel = level;
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -496,6 +514,30 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
                                             [target = unscored[i]](const RankedEngine& row) {
                                                 return row.id == target;
                                             }));
+            }
+            // Mode A ranks on the engine-level prediction alone and never asks an
+            // engine for a configuration-level one, so an engine here may hold a
+            // perfectly good `sort_kernel_catalog` model that this policy declined to
+            // pay for. That is the deliberate cost of the quick policy (RFC 0019
+            // §11.2), but it is not visible in the result, so say it out loud: the
+            // ordering these engines received is vendor precedence, not merit, and
+            // Mode B is the policy that would have scored them.
+            if(!desc.modeB)
+            {
+                std::string names;
+                for(const auto id : unscored)
+                {
+                    names += (names.empty() ? "" : ", ") + std::to_string(id);
+                }
+                PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                       "ModeA ranked %zu of %zu engines on their engine-level "
+                                       "prediction; engine(s) %s supplied none and were appended "
+                                       "in static order without being scored. Select "
+                                       "SelectionHeuristic::ModeB to rank on configuration-level "
+                                       "predictions instead.",
+                                       desc.ranked.size() - unscored.size(),
+                                       desc.ranked.size(),
+                                       names.c_str());
             }
         }
         desc.finalized = true;

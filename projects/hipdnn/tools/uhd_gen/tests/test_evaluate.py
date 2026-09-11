@@ -786,3 +786,110 @@ def test_regret_tail_threshold_is_the_five_percent_of_the_spec():
     assert tail["threshold"] == 0.05
     assert tail["problems"] == 1
     assert tail["fraction"] == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------------
+# §11.2 calibration: the absolute value, which ranking metrics cannot see
+# ---------------------------------------------------------------------------------
+
+
+def _calibration_corpus() -> pd.DataFrame:
+    return make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "tflops": 100.0},
+            {"benchmark": "g1", "kernel": "k2", "tflops": 200.0},
+            {"benchmark": "g2", "kernel": "k1", "tflops": 400.0},
+            {"benchmark": "g2", "kernel": "k2", "tflops": 800.0},
+        ]
+    )
+
+
+def _scaled_scorer(factor: float):
+    """Ranks exactly like the oracle, reads `factor` times too high."""
+    return lambda frame: (frame["tflops"] * factor).to_numpy(dtype=float)
+
+
+def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale():
+    # The point of §11.2's calibration block: this model's regret is 0 and its
+    # recall@1 is 1.0, so every ranking metric in the report says it is flawless.
+    # It is also 50% high on every prediction, which is what decides a cross-engine
+    # comparison under RFC 0019 §11.3. Only the calibration figures can see it.
+    result = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"units": "tflops", "calibrated": True},
+    )
+    metrics = result.report["metrics"]
+
+    assert metrics["top1_regret"]["mean"] == pytest.approx(0.0)
+    calibration = metrics["calibration"]
+    assert calibration["status"] == "computed"
+    assert calibration["all_candidates"]["signed_relative_bias"] == pytest.approx(0.5)
+    assert calibration["all_candidates"]["relative_absolute_error"] == pytest.approx(0.5)
+    # The picked candidate is the oracle here, so its absolute error is the oracle's.
+    assert calibration["selected_candidate"]["signed_bias"] == pytest.approx(
+        (200.0 * 0.5 + 800.0 * 0.5) / 2
+    )
+
+
+def test_the_bias_warning_names_the_direction():
+    # "Over" and "under" are not interchangeable: an over-predicting engine wins
+    # arbitrations it should lose, an under-predicting one is passed over for work it
+    # would have done best. A sign inversion here is invisible in every other metric.
+    over = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"units": "tflops", "calibrated": True},
+    ).report["warnings"]
+    under = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(0.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"units": "tflops", "calibrated": True},
+    ).report["warnings"]
+
+    assert any("OVER-predicts by 50.0%" in warning for warning in over)
+    assert not any("UNDER-predicts" in warning for warning in over)
+    assert any("UNDER-predicts by 50.0%" in warning for warning in under)
+
+
+def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
+    result = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.02),
+        target="tflops",
+        objective="max",
+        score_declaration={"units": "tflops", "calibrated": True},
+    ).report
+
+    assert result["metrics"]["calibration"]["all_candidates"][
+        "signed_relative_bias"
+    ] == pytest.approx(0.02)
+    assert not any("CALIBRATED SCORE IS BIASED" in warning for warning in result["warnings"])
+
+
+def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
+    # A `calibrated: false` model's score is an ordering key. Subtracting it from a
+    # measurement produces a number, and that number means nothing -- so the report
+    # must decline rather than print it. §11.2 requires these figures only of a
+    # calibrated score.
+    report = evaluate_all(
+        _calibration_corpus(),
+        _scaled_scorer(1.5),
+        target="tflops",
+        objective="max",
+        score_declaration={"units": "ms", "calibrated": False},
+    ).report
+
+    assert report["metrics"]["calibration"]["status"] == "not applicable"
+    assert "all_candidates" not in report["metrics"]["calibration"]
+    assert not any("CALIBRATED SCORE IS BIASED" in warning for warning in report["warnings"])
+    # And it is no longer declared missing, because a calibrated model does get them.
+    assert not any(
+        "calibration metrics" in entry for entry in report["not_implemented"]
+    ), "§11.2 calibration is implemented; it must not still be listed as a gap"
