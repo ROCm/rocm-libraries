@@ -35,6 +35,7 @@
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ssa/SSADestruction.hpp"
 #include "transforms/asm/ra/allocators/GreedyAllocator.hpp"
+#include "transforms/asm/ra/allocators/GreedyPlacement.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -63,6 +64,18 @@ class GreedyAllocatorTest : public ::testing::Test {
 
     BasicBlock* block(const std::string& label) {
         return func->createBasicBlock(label);
+    }
+
+    /// Colours \p setup with \p allocator and requires a legal result.
+    AllocationResult colourWith(RegisterAllocator& allocator, AllocationSetup& setup) {
+        Expected<AllocationResult> result = allocator.allocate(setup.context());
+        EXPECT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
+        if (!result.hasValue()) return AllocationResult{};
+
+        const AllocationVerificationResult checked =
+            verifyAllocation(*func, *result, setup.context());
+        EXPECT_TRUE(checked.ok()) << checked.toString() << "\n" << result->toString();
+        return std::move(*result);
     }
 
     /// Colours \p setup with greedy and requires a legal result.
@@ -124,6 +137,20 @@ StinkyInstruction* createWmmaScale16(BasicBlock* bb, int dst, int a, int b, int 
     wmma->addSrcReg(StinkyRegister(0));
     wmma->addSrcReg(StinkyRegister("v", scaleA, 2));
     wmma->addSrcReg(StinkyRegister("v", scaleB, 2));
+    return wmma;
+}
+
+/// `v_wmma_f32_16x16x32_bf16 dst, a, b, c` -- three 8-wide sources and an 8-wide
+/// destination, and no field short of an MSB slot, so it is a wide block with no
+/// capped sibling to compete with.
+StinkyInstruction* createWmmaBf16(BasicBlock* bb, int dst, int a, int b, int c) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister("v", c, 8));
     return wmma;
 }
 
@@ -494,23 +521,243 @@ TEST_F(GreedyAllocatorTest, ACappedBlockTakesItsBankBeforeOthersCanFillIt) {
     setup.target().reserve(RegType::V, /*first=*/0, /*count=*/251);
     setup.target().reserve(RegType::V, /*first=*/255, /*count=*/1);
 
-    const AllocationResult coloured = colour(setup);
+    // Both policies, because this is the evidence that folding the capped phase
+    // into the freedom order preserved what the phase was there to protect.
+    GreedyAllocator byWeight;
+    FreedomOrderedGreedyAllocator byFreedom;
+    for (RegisterAllocator* allocator : {static_cast<RegisterAllocator*>(&byWeight),
+                                         static_cast<RegisterAllocator*>(&byFreedom)}) {
+        const AllocationResult coloured = colourWith(*allocator, setup);
 
-    for (size_t operand = 3; operand <= 4; ++operand) {
-        for (const StinkySSAValue* unit : ssaSourceUnits(*wmma, operand)) {
-            ASSERT_NE(unit, nullptr);
-            EXPECT_LT(coloured.assignmentOf(unit->valueId()).idx, kVgprBankSize)
-                << "operand " << operand << '\n'
+        for (size_t operand = 3; operand <= 4; ++operand) {
+            for (const StinkySSAValue* unit : ssaSourceUnits(*wmma, operand)) {
+                ASSERT_NE(unit, nullptr);
+                EXPECT_LT(coloured.assignmentOf(unit->valueId()).idx, kVgprBankSize)
+                    << allocator->name() << ", operand " << operand << '\n'
+                    << coloured.toString();
+            }
+        }
+
+        // And the loads, which outweigh them, were pushed past the bank. Without
+        // this the test would pass on a colouring that simply had room for both.
+        for (const StinkyInstruction* load : {firstLoad, secondLoad}) {
+            const StinkySSAValue* first = ssaDefinedValue(*load, 0);
+            ASSERT_NE(first, nullptr);
+            EXPECT_GE(coloured.assignmentOf(first->valueId()).idx, kVgprBankSize)
+                << allocator->name() << '\n'
                 << coloured.toString();
         }
     }
+}
 
-    // And the loads, which outweigh them, were pushed past the bank. Without
-    // this the test would pass on a colouring that simply had room for both.
-    for (const StinkyInstruction* load : {firstLoad, secondLoad}) {
-        const StinkySSAValue* first = ssaDefinedValue(*load, 0);
-        ASSERT_NE(first, nullptr);
-        EXPECT_GE(coloured.assignmentOf(first->valueId()).idx, kVgprBankSize)
-            << coloured.toString();
+// ---------------------------------------------------------------------------
+// placementFreedom: how many bases a block could legally take
+// ---------------------------------------------------------------------------
+
+TEST_F(GreedyAllocatorTest, FreedomIsTheWholeFileForAnUnconstrainedRegister) {
+    // Nothing narrows a single register with no rules in force, so every index
+    // is a candidate. Read back through the refusal, which is where the count
+    // is reported; withholding the file is just a way to provoke one.
+    BasicBlock* entry = block("entry");
+    defineVgprs(entry, /*base=*/40, /*count=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V));
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/1024);
+
+    EXPECT_TRUE(contains(colourError(setup), "1024 legal base(s)")) << colourError(setup);
+}
+
+TEST_F(GreedyAllocatorTest, AnEvenBaseRuleHalvesTheFreedomOfAWideRange) {
+    // VectorTupleAlignment removes every odd base, and a 4-wide range cannot
+    // start past v1020, which leaves 511 of the 1021 bases it would otherwise
+    // have. The address register is a live-in, so its register is left out of
+    // the reservation or it would fail first with a pin message instead.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* load = createDsReadB128InBlock(entry, kRaTestArch, /*destReg=*/100,
+                                                      /*addrReg=*/500);
+    ASSERT_TRUE(liftForAllocation(*func));
+    ASSERT_NE(ssaDefinedValue(*load, 0), nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/500);
+    setup.target().reserve(RegType::V, /*first=*/501, /*count=*/523);
+
+    EXPECT_TRUE(contains(colourError(setup), "511 legal base(s)")) << colourError(setup);
+}
+
+TEST_F(GreedyAllocatorTest, AnIndexCeilingCutsFreedomToTheBankItCanReach) {
+    // A scale operand reaches v0-v255 only, and on even bases that is 128 of the
+    // 1022 a free 2-wide range would have. Its own phase reports the count too,
+    // because that is the refusal a capped block reaches.
+    BasicBlock* entry = block("entry");
+    // Both scale operands are defined here, so neither arrives as a live-in
+    // pinned inside the bank the reservation withholds. Only the matrix
+    // operands are live-ins, and they sit above it.
+    defineVgprs(entry, /*base=*/130, /*count=*/2);
+    defineVgprs(entry, /*base=*/140, /*count=*/2);
+    createWmmaScale16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*scaleA=*/130, /*scaleB=*/140);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/kVgprBankSize);
+
+    EXPECT_TRUE(contains(colourError(setup), "128 legal base(s)")) << colourError(setup);
+}
+
+TEST_F(GreedyAllocatorTest, FreedomOrderGivesAWideRangeTheLowBasesFirst) {
+    // What ordering by constrainedness buys. The wide block has one use per
+    // member over a long range, so it is the lightest thing here and weight
+    // order reaches it last, by which point the singles have taken the bottom
+    // of the file and it has to start above them. Freedom order sees that it
+    // has the fewest places to go and takes it first.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    // Short ranges and a use each, so these outweigh the wide block.
+    for (int i = 0; i < 8; ++i) {
+        defineVgprs(entry, /*base=*/200 + i, /*count=*/1);
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/400 + i, /*src0=*/200 + i, /*src1=*/200 + i);
     }
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/100, /*src1=*/101);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* tile = ssaDefinedValue(*wmma, 0);
+    ASSERT_NE(tile, nullptr);
+    const SSAValueID tileBase = tile->valueId();
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+
+    CompactingGreedyAllocator byWeight;
+    const uint32_t weightBase = colourWith(byWeight, setup).assignmentOf(tileBase).idx;
+
+    FreedomOrderedGreedyAllocator byFreedom;
+    const uint32_t freedomBase = colourWith(byFreedom, setup).assignmentOf(tileBase).idx;
+
+    EXPECT_EQ(freedomBase, 0u) << "the least free block should get the lowest legal base";
+    EXPECT_GT(weightBase, freedomBase) << "weight order should have placed it after the singles";
+}
+
+TEST_F(GreedyAllocatorTest, FreedomOrderKeepsACappedBlockAheadOfEveryWiderOne) {
+    // The property that lets the capped phase be folded away rather than kept
+    // beside the new order, asserted on the comparator because the colouring
+    // cannot show it: a scale operand dies at the instruction that defines the
+    // tile, so the tile reuses its registers and the two indices say nothing
+    // about which was placed first.
+    //
+    // A ceiling of 255 holds a 2-wide block to 128 even bases. The widest
+    // uncapped block on this target still has over 500, so no width can push a
+    // capped block behind an uncapped one.
+    Block capped;
+    capped.width = 2;
+    capped.maxIndex = kVgprBankSize - 1;
+    capped.placementFreedom = 128;
+    capped.weight = 0.0;  // and it still wins, because freedom outranks weight
+    capped.leader = 100;
+
+    Block tile;
+    tile.width = 8;
+    tile.placementFreedom = 509;
+    tile.weight = 1000.0;
+    tile.leader = 1;
+
+    const PlacementPolicy& policy = freedomPolicy();
+    EXPECT_TRUE(policy.placesBefore(capped, tile));
+    EXPECT_FALSE(policy.placesBefore(tile, capped));
+
+    // And neither needs a phase ahead of the queue, which is what the capped
+    // blocks used to get.
+    EXPECT_FALSE(policy.placesEarly(capped));
+    EXPECT_FALSE(policy.placesEarly(tile));
+
+    // Weight still separates blocks the count cannot tell apart.
+    Block hotSingle;
+    hotSingle.placementFreedom = 1024;
+    hotSingle.weight = 5.0;
+    hotSingle.leader = 2;
+    Block coldSingle;
+    coldSingle.placementFreedom = 1024;
+    coldSingle.weight = 1.0;
+    coldSingle.leader = 3;
+    EXPECT_TRUE(policy.placesBefore(hotSingle, coldSingle));
+    EXPECT_FALSE(policy.placesBefore(coldSingle, hotSingle));
+}
+
+TEST_F(GreedyAllocatorTest, FreedomEvictionDisplacesAHotterBlockThatHasSomewhereElseToGo) {
+    // The recovery rule agreeing with the ordering rule. A hot single sitting
+    // inside an otherwise-free run is what keeps a wide range out of it, and
+    // weight says the single stays because it is worth more. Freedom asks the
+    // question the situation poses instead: which of the two has anywhere else
+    // to be.
+    Block tile;
+    tile.width = 8;
+    tile.placementFreedom = 509;
+    tile.weight = 0.1;
+    tile.leader = 1;
+
+    Block hotSingle;
+    hotSingle.placementFreedom = 1024;
+    hotSingle.weight = 100.0;
+    hotSingle.leader = 2;
+
+    EXPECT_TRUE(freedomPolicy().mayEvict(tile, hotSingle));
+    EXPECT_FALSE(weightPolicy().mayEvict(tile, hotSingle));
+
+    // Not a licence to shuffle: the freer block still cannot displace the one
+    // with fewer places to go, which is what keeps eviction chains finite.
+    EXPECT_FALSE(freedomPolicy().mayEvict(hotSingle, tile));
+
+    // Among equally free blocks it is the weight rule, unchanged.
+    Block otherSingle;
+    otherSingle.placementFreedom = 1024;
+    otherSingle.weight = 1.0;
+    otherSingle.leader = 3;
+    EXPECT_TRUE(freedomPolicy().mayEvict(hotSingle, otherSingle));
+    EXPECT_FALSE(freedomPolicy().mayEvict(otherSingle, hotSingle));
+
+    // And the weight policy keeps its own protection for capped blocks, which
+    // it still needs while it still has a phase for them.
+    Block capped;
+    capped.width = 2;
+    capped.maxIndex = kVgprBankSize - 1;
+    capped.placementFreedom = 128;
+    capped.weight = 0.1;
+    capped.leader = 4;
+    EXPECT_FALSE(weightPolicy().mayEvict(hotSingle, capped));
+}
+
+TEST_F(GreedyAllocatorTest, ARefusalSaysWhetherTheBlockersCouldHaveMoved) {
+    // The question recoloring turns on, answered in the refusal itself. A wide
+    // block that cannot be placed is worth reshuffling for only if the blocks in
+    // its way have somewhere else to go, so the refusal reports how many of them
+    // are freer than it and how many are pinned where they are.
+    //
+    // Two free regions remain: v240-v247, which is the only run the tile could
+    // use, and v300-v307, which holds a live-in kept alive to the end so the
+    // tile cannot reuse it. The singles are placed first under weight order,
+    // take v240, and leave the tile nowhere.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/300, /*c=*/300);
+    for (int i = 0; i < 4; ++i) {
+        defineVgprs(entry, /*base=*/200 + i, /*count=*/1);
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/500 + i, /*src0=*/200 + i, /*src1=*/200 + i);
+    }
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/100, /*src1=*/101);
+    // Keeps the live-in occupying v300-v307 past the tile's definition, so the
+    // tile cannot take the registers it vacates.
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/41, /*src0=*/300, /*src1=*/301);
+    ASSERT_TRUE(liftForAllocation(*func));
+    ASSERT_NE(ssaDefinedValue(*wmma, 0), nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/240);
+    setup.target().reserve(RegType::V, /*first=*/248, /*count=*/52);
+    setup.target().reserve(RegType::V, /*first=*/308, /*count=*/716);
+
+    const std::string error = colourError(setup);
+    EXPECT_TRUE(contains(error, "freer than this one")) << error;
+    EXPECT_TRUE(contains(error, "occupied by")) << error;
+    // And the shape histogram comes with it, so a reader can see how coarse the
+    // ordering had to be.
+    EXPECT_TRUE(contains(error, "v blocks by width")) << error;
+    EXPECT_TRUE(contains(error, "by freedom")) << error;
 }
