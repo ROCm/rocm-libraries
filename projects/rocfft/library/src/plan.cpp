@@ -2694,8 +2694,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         = "rccl_transpose_from_" + input.group_name + "_into_" + output.group_name;
     std::vector<size_t> ret;
 
-    const size_t nbricks_in  = input.field.bricks.size();
-    const size_t nbricks_out = output.field.bricks.size();
+    const size_t nbricks_in  = input.field.num_bricks();
+    const size_t nbricks_out = output.field.num_bricks();
 
     // dependencies of an op that reads input brick i: the subset of
     // antecedents that write to that brick's buffer.  matches the
@@ -2726,9 +2726,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     std::vector<IntersectionInfo> intersections;
 
     std::set<int> in_devices, out_devices;
-    for(const auto& brick : input.field.bricks)
+    for(const auto& brick : input.field.get_bricks())
         in_devices.insert(brick.location.device);
-    for(const auto& brick : output.field.bricks)
+    for(const auto& brick : output.field.get_bricks())
         out_devices.insert(brick.location.device);
 
     const auto          rccl_devs_vec = rccl.get_devices();
@@ -2744,10 +2744,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
 
     for(size_t inBrickIdx = 0; inBrickIdx < nbricks_in; ++inBrickIdx)
     {
-        const auto& inBrick = input.field.bricks[inBrickIdx];
+        const auto& inBrick = input.field.get_brick(inBrickIdx);
         for(size_t outBrickIdx = 0; outBrickIdx < nbricks_out; ++outBrickIdx)
         {
-            const auto& outBrick = output.field.bricks[outBrickIdx];
+            const auto& outBrick = output.field.get_brick(outBrickIdx);
 
             auto xsect
                 = data_layout_t::make_contiguous_intersection_of(inBrick.layout, outBrick.layout);
@@ -2822,8 +2822,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     // same-device intersections are handled identically by both paths.
     for(const auto& info : intersections)
     {
-        const auto& inBrick  = input.field.bricks[info.inBrickIdx];
-        const auto& outBrick = output.field.bricks[info.outBrickIdx];
+        const auto& inBrick  = input.field.get_brick(info.inBrickIdx);
+        const auto& outBrick = output.field.get_brick(info.outBrickIdx);
         if(!(inBrick.location == outBrick.location))
             continue;
 
@@ -2871,8 +2871,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
 
         for(const auto& info : intersections)
         {
-            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
-            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            const auto& inBrick  = input.field.get_brick(info.inBrickIdx);
+            const auto& outBrick = output.field.get_brick(info.outBrickIdx);
             if(inBrick.location == outBrick.location)
                 continue;
 
@@ -2916,8 +2916,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
 
         for(const auto& info : intersections)
         {
-            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
-            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            const auto& inBrick  = input.field.get_brick(info.inBrickIdx);
+            const auto& outBrick = output.field.get_brick(info.outBrickIdx);
             if(inBrick.location == outBrick.location)
                 continue;
 
@@ -2955,9 +2955,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                          + " brick device " + std::to_string(brick.location.device)
                                          + " is not in the RCCL communicator");
         };
-        for(const auto& brick : input.field.bricks)
+        for(const auto& brick : input.field.get_bricks())
             validate_brick_device(brick, "input");
-        for(const auto& brick : output.field.bricks)
+        for(const auto& brick : output.field.get_bricks())
             validate_brick_device(brick, "output");
 
         auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
@@ -2978,8 +2978,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
 
         for(const auto& info : intersections)
         {
-            const auto& inBrick  = input.field.bricks[info.inBrickIdx];
-            const auto& outBrick = output.field.bricks[info.outBrickIdx];
+            const auto& inBrick  = input.field.get_brick(info.inBrickIdx);
+            const auto& outBrick = output.field.get_brick(info.outBrickIdx);
             if(inBrick.location == outBrick.location)
                 continue;
             const size_t count = info.intersection.logical_count();
@@ -3907,12 +3907,12 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
         const auto local_comm_rank = desc.get_local_comm_rank();
 
         std::set<int> device_set;
-        for(const auto& brick : desc.inFields.front().bricks)
+        for(const auto& brick : desc.inFields.front().get_bricks())
         {
             if(brick.location.comm_rank == local_comm_rank)
                 device_set.insert(brick.location.device);
         }
-        for(const auto& brick : desc.outFields.front().bricks)
+        for(const auto& brick : desc.outFields.front().get_bricks())
         {
             if(brick.location.comm_rank == local_comm_rank)
                 device_set.insert(brick.location.device);
