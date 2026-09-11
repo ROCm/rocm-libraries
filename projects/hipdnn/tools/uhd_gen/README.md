@@ -396,9 +396,47 @@ sanity floor does not move between runs.
 
 ## Input Format
 
-The input file should be a CSV or JSON with:
+`--input` takes three forms and the suffix decides, for `train` and `evaluate` alike:
+
+| Suffix | What it is | When |
+|--------|------------|------|
+| `.parquet` | The dataset `tools/results_import` publishes from collected shards (§8.3) | The route a model anyone ships should come by |
+| `.csv` | A collected corpus, read directly | A quick local run |
+| `.json` | The same rows as records | Hand-written corpora and fixtures |
+
+**Collection stays CSV; publication is Parquet.** The format that has to survive a
+two-day sweep and the format a trainer wants are not the same format. Parquet writes
+its footer last, so a run killed mid-flight leaves a file that cannot be read at all,
+against §8's requirement that the benchmark step be resumable from a partial result;
+and a Parquet file cannot be appended to, so §8.8's "shard outputs merge by appending"
+would become a full rewrite. CSV has both properties. So `hipdnn_bench` and
+`export-benchmarks` keep writing CSV, and `results_import` reads the merged shards
+once, derives `tflops` and `gbs` from the operation's declaration, and writes the
+typed dataset:
+
+```bash
+python -m results_import.importer \
+    --csv shards/*.csv \
+    --opmeta ../corpus_gen/operations/matmul.opmeta.json \
+    --out dataset.parquet
+
+python -m uhd_gen train --input dataset.parquet ...
+```
+
+Prefer the dataset for the reason that argued for Parquet in the first place: it
+carries its own column types, so a column that is empty in one shard and populated in
+another cannot concatenate to `object` and quietly change what the trainer sees. The
+CSV branch is the escape hatch, not the route -- nothing §8.3 specifies is checked on
+it (no measurement-or-error rule, no completeness agreement, no candidate-set
+comparison across a merge), which is what the importer exists for.
+
+Whichever form it arrives in, the corpus must carry:
 - Feature columns (problem dimensions, kernel config, device properties)
 - Target column (typically TFLOPS or time)
+
+The §11.2 label rule is applied to all three alike: a `--calibrated` model must be
+trained with `--timing-statistic avgTimeMs`, and the published dataset earns no
+exemption from it.
 
 Example CSV:
 ```csv
@@ -471,6 +509,13 @@ gives the role the cross-engine standing RFC 0019 §11.1 describes, and with it 
 `robustMeanMs`/`min`/uncalibrated, which is legal (§2.5, §15.1) and ranks this engine's
 own catalog just as well, and warns that the score is no longer comparable with another
 engine's — Mode B then falls back to the engine's L1 prediction.
+
+`generate` takes the work count from the engine's own published `graph.flops`, which is
+the effective count the runtime computed for the graph it just ran. A corpus that was
+collected as CSV and published by `results_import` instead carries `tflops` and `gbs`
+derived from the operation's `.opmeta.json` declaration and the same `avgTimeMs`. The
+two paths agree on the arithmetic and differ only in where the count comes from: a
+measured graph knows its own, a CSV row needs its operation to declare one.
 
 ### Engine-level immediate predictions
 

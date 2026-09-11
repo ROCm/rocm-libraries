@@ -50,6 +50,13 @@ TEST(TestFeatureExtractor, ChangingAnInlineComputationChangesTheContract)
     EXPECT_NE(multiply.getSignatureHash(), add.getSignatureHash());
     EXPECT_NE(FeatureExtractor::computeHash({"$q.batch", "$kernel.tile_m"}),
               FeatureExtractor::computeHash({"$kernel.tile_m", "$q.batch"}));
+
+    // Same operator, same operands, permuted -- the case a canonicalization that sorted
+    // operand arrays would let through while the two expressions compute reciprocals of
+    // each other. §6.5's reason for folding the encoding into the hash is this one: what
+    // the model consumes must not be able to change while the fingerprint reads the same.
+    EXPECT_NE(FeatureExtractor::computeHash({json::parse(R"({"/":["$q.flops","$q.bytes"]})")}),
+              FeatureExtractor::computeHash({json::parse(R"({"/":["$q.bytes","$q.flops"]})")}));
 }
 
 TEST(TestFeatureExtractor, EncodedContractChangesWhenCodesChange)

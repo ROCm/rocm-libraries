@@ -64,3 +64,17 @@ def test_reference_collection_preserves_generic_and_categorical_dependencies():
     signature = ["$kernel.tile", {"if": [{"==": ["$attention.dtype", "fp16"]},
                                         {"/": ["$attention.dims[2]", "$device.cu_count"]}, 0]}]
     assert signature_references(signature) == ["$kernel.tile", "$attention.dtype", "$attention.dims[2]", "$device.cu_count"]
+
+
+def test_changing_only_an_expression_changes_the_fingerprint():
+    """Why an expression has to be *in* the signature rather than named beside it.
+
+    Two signatures that compute reciprocal quantities from the same two fields read
+    alike to anything that inspects references only, so a model would consume something
+    other than what it was trained on. Here the expression is the entry, so the change
+    is in the canonical form and the hash moves with it -- the same hole §6.5 describes
+    for the categorical encoding, closed by the same mechanism.
+    """
+    intensity = [{"/": ["$q.flops", "$q.bytes"]}]
+    flipped = [{"/": ["$q.bytes", "$q.flops"]}]
+    assert compute_features_hash(intensity) != compute_features_hash(flipped)

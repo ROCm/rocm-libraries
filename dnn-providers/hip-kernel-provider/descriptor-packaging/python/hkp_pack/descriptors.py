@@ -445,7 +445,13 @@ def _validate_provenance(value, where):
 
 
 def _validate_uhd(desc, source_root):
-    """Mirror the canonical Draft7 header, then resolve artifact sidecars safely."""
+    """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
+
+    A missing model artifact is a hard error. The runtime drops an engine whose
+    artifact is absent rather than shipping one that silently stops using its
+    model, so a UHD packed without its artifact costs the whole engine. Catching
+    it here reports it against the source tree, where the fix is.
+    """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
     _known_keys(doc, ("version", "id", "name", "adapter", "features_signature",

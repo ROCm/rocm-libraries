@@ -319,6 +319,62 @@ Catalog catalogAgainstPriority(int64_t seqlen)
 
 } // namespace
 
+/// The signature the pair below is built around. Slot 0 is an inline expression and slot 1
+/// the bare kernel axis: §6.3 check 2 requires the model's `$kernel.*` axes to equal the
+/// engine's knobs, and both spellings read `tile_m`, so the pair stays conformant while only
+/// the expression varies.
+///
+/// The named `derived` block RFC 0019 §6.4 once carried is gone -- an expression is a
+/// signature entry now, so it is hashed verbatim rather than hidden behind a `$derived.*`
+/// reference that reads the same whatever stands behind it.
+const std::vector<nlohmann::json> EXPRESSION_SIGNATURE
+    = {nlohmann::json::parse(R"({"ceil_div":["$attention.seqlen","$kernel.tile_m"]})"),
+       "$kernel.tile_m"};
+/// The same two slots with slot 0 computing something else. Same references, same arity:
+/// only the operator differs, which is the whole point.
+const std::vector<nlohmann::json> RESPELLED_SIGNATURE
+    = {nlohmann::json::parse(R"({"*":["$attention.seqlen","$kernel.tile_m"]})"),
+       "$kernel.tile_m"};
+
+TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRefused)
+{
+    // §6.3 check 1 catches the swap only because the expression bodies are in the hash: a
+    // canonicalisation that folded them away would leave the model consuming a different
+    // computation from the one it was fitted on, with the fingerprint reading the same.
+    //
+    // The artifact carries the trained hash and the descriptor declares it, so the model
+    // file agrees with the descriptor and the only disagreement left is the one under test.
+    // tryCreate, not makeKernelHeuristic: the factory degrades a failed model to declared
+    // order rather than returning null (§5), so asking it for null would test nothing.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_changed");
+    const auto fixture = writeFixture(
+        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity",
+        EXPRESSION_SIGNATURE);
+
+    const auto descriptor = modelDescriptor(dir.path(),
+                                            fixture.modelFileName,
+                                            fixture.objective,
+                                            fixture.calibrated,
+                                            fixture.scoreTransform,
+                                            fixture.featuresHash,
+                                            RESPELLED_SIGNATURE);
+
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS), nullptr);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsHashAgrees)
+{
+    // The other half: with the expression agreeing end to end the descriptor comes up, so
+    // the test above is refusing the swap rather than refusing inline expressions as such.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_agrees");
+    const auto fixture = writeFixture(
+        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity",
+        EXPRESSION_SIGNATURE);
+
+    EXPECT_NE(UhdKernelHeuristic::tryCreate(modelDescriptor(dir.path(), fixture), "test", KNOBS),
+              nullptr);
+}
+
 TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");

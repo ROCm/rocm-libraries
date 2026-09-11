@@ -207,3 +207,28 @@ def test_a_wholly_positive_model_reports_nothing(caplog):
 
     assert count == 0
     assert caplog.text == ""
+
+
+def test_regret_measures_a_corpus_with_a_categorical_feature():
+    """A string feature must reach the regressor encoded, as training encodes it.
+
+    Raw values hand LightGBM the string and it refuses the column, so a corpus carrying a
+    data type trained and then died here -- reading as a bad corpus, not a tooling defect.
+    """
+    corpus = _corpus()
+    # Two dtypes, the wider one uniformly slower: a signal the encoding must preserve.
+    corpus = pd.concat([corpus.assign(**{"q.dtype": "fp16"}),
+                        corpus.assign(**{"q.dtype": "fp32"},
+                                      tflops=corpus["tflops"] * 0.5)], ignore_index=True)
+
+    metrics = evaluate_regret(
+        corpus,
+        feature_cols=["q.M", "q.N", "q.dtype", "kernel.tile_m"],
+        target_col="tflops",
+        problem_cols=["q.M", "q.N", "q.dtype"],
+        num_boost_round=40,
+        n_splits=4,
+    )
+
+    assert metrics["problems_scored"] > 0
+    assert 0.0 <= metrics["mean_regret"] <= 1.0

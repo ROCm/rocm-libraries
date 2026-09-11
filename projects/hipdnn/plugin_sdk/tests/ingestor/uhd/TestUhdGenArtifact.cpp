@@ -141,6 +141,29 @@ protected:
 
 } // namespace
 
+TEST_F(TestUhdGenArtifact, WritesTheArtifactsTheRuntimeLooksFor)
+{
+    // The names are a contract, not an implementation detail: the artifact path is written
+    // relative to the descriptor, so the loader resolves model.bin beside it. The `.uhd.json`
+    // suffix is what descriptor discovery looks for -- a bare `uhd.json` is invisible to it.
+    EXPECT_TRUE(std::filesystem::exists(_outputDir / "heuristic.uhd.json"));
+    EXPECT_TRUE(std::filesystem::exists(_outputDir / "model.bin"));
+}
+
+TEST_F(TestUhdGenArtifact, TheRuntimeLoadsWhatTheToolWrote)
+{
+    uhd::UhdConfig config;
+    ASSERT_NO_THROW(config = configFromTool())
+        << "the descriptor loader rejected a descriptor uhd_gen produced";
+
+    EXPECT_EQ(config.adapterType, "tree_data");
+    EXPECT_EQ(config.objective, "max");
+    // uhd_gen trains on log1p(target) and says so, which is what lets a consumer recover
+    // the declared units.
+    EXPECT_EQ(config.scoreTransform, "log1p");
+    EXPECT_EQ(config.featuresSignature.size(), 2U);
+}
+
 TEST_F(TestUhdGenArtifact, TheSignatureHashAgreesAcrossLanguages)
 {
     // The assertion this file exists for. Python canonicalises the signature and hashes it;

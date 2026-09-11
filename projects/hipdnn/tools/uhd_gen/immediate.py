@@ -194,7 +194,12 @@ def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_corpus(path: Path) -> pd.DataFrame:
-    if path.suffix == ".json":
+    # The trainer's suffix rule, applied here too: --input decides the reader by its
+    # suffix whichever role is being trained, so a published .parquet dataset is never
+    # handed to the CSV reader.
+    if path.suffix == ".parquet":
+        frame = pd.read_parquet(path)
+    elif path.suffix == ".json":
         content = json.loads(path.read_text(encoding="utf-8"))
         frame = pd.DataFrame([content] if isinstance(content, dict) else content)
     else:

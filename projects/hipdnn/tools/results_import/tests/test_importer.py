@@ -160,3 +160,53 @@ def test_an_empty_csv_field_reads_back_as_a_null_metric(tmp_path, matmul):
     out = build_dataset(load_csvs([path]), matmul)
     assert pd.isna(out["tflops"].iloc[0])
     assert out["error"].iloc[0] == "HIP error 700"
+
+
+def test_a_solver_name_bound_to_two_ids_is_refused(matmul):
+    """The signature of a corpus merged across engine versions.
+
+    Nothing else in the file records which version a row came from, so a rename or a reused slot
+    is invisible except here. Left alone it inflates every problem's candidate count -- one
+    solver wearing two names is two candidates -- and regret is then computed over a catalog that
+    existed on no machine.
+    """
+    frame = rows(**{"kernel.solver": ["ConvBinWinoRxS", "ConvBinWinoRxS"],
+                    "kernel.solver_id": [37, 53]})
+    with pytest.raises(ValidationError, match="ambiguous"):
+        build_dataset(frame, matmul)
+
+
+def test_a_solver_id_bound_to_two_names_is_refused(matmul):
+    """The other direction: a reused id, which the registrar's policy exists to prevent."""
+    frame = rows(**{"kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinoRxS<3-2>"],
+                    "kernel.solver_id": [37, 37]})
+    with pytest.raises(ValidationError, match="ambiguous"):
+        build_dataset(frame, matmul)
+
+
+def test_the_agreeing_case_passes(matmul):
+    frame = rows(**{"kernel.solver": ["ConvBinWinogradRxSf3x2", "ConvBinWinogradRxSf2x3"],
+                    "kernel.solver_id": [37, 53]})
+    assert len(build_dataset(frame, matmul)) == 2
+
+
+def test_a_corpus_without_ids_is_left_alone(matmul):
+    """Producers other than the MIOpen adapter carry no id, and must not be made to."""
+    frame = rows(**{"kernel.solver": ["SomeEngineKernel", "SomeEngineKernel"]})
+    assert len(build_dataset(frame, matmul)) == 2
+
+
+def test_the_pairing_is_a_convention_not_a_column_list(matmul):
+    """`X`/`X_id` from any producer, not one engine's spelling.
+
+    The rule has to read a corpus whose candidates are not MIOpen solvers, since the
+    producer of a training CSV is whoever wrote the kernel.
+    """
+    frame = rows(**{"kernel.variant": ["fast", "fast"], "kernel.variant_id": [7, 9]})
+    with pytest.raises(ValidationError, match="ambiguous"):
+        build_dataset(frame, matmul)
+
+
+def test_an_unpaired_column_is_not_checked(matmul):
+    """`kernel.tile_m` has no `kernel.tile_m_id`, so there is nothing to agree with."""
+    assert len(build_dataset(rows(), matmul)) == 2

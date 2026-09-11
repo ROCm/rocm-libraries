@@ -531,10 +531,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endforeach()
 
     # The pointwise_model pack's heuristic is a trained artifact rather than a symbol. The
-    # model is binary and cannot be staged by copying from the source tree; the descriptor
-    # could be, but is generated with it so `features_hash` cannot drift -- see
+    # artifact is binary and cannot be staged by copying from the source tree; the
+    # descriptor naming it is text and could be, but is generated beside it so that
+    # `features_hash` is computed by the same code the runtime validates with -- see
     # tools/uhd_model_gen. A committed descriptor would be free to disagree with the
-    # signature the model was built from.
+    # signature it declares, and the runtime would then refuse the model at load.
     # Listed as outputs of one command because a single run writes both, and both are
     # inputs to the staging target below, so a test target that pulls the descriptors in
     # gets them too. Not installed, for the same reason the pack's JSON is not.

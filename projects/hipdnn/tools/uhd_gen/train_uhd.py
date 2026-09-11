@@ -18,7 +18,12 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
-from .features import encode_feature_value, evaluate_feature_rows, feature_reference
+from .features import (
+    derive_categorical_encoding,
+    encode_feature_value,
+    evaluate_feature_rows,
+    feature_reference,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -281,7 +286,16 @@ def evaluate_regret(
     if params is None:
         params = dict(_DEFAULT_PARAMS)
 
-    features = build_feature_matrix(df, feature_cols, categorical_encoding) if feature_matrix is None else feature_matrix
+    # Encoded, as train_model fits it. Raw values measure a different model, and for a
+    # string feature measure nothing: LightGBM rejects the column. Regret is measured
+    # over the corpus it is fitted on and publishes no descriptor, so when the caller
+    # passes no encoding the corpus's own map is exactly the one training would ship.
+    if feature_matrix is not None:
+        features = feature_matrix
+    else:
+        if categorical_encoding is None:
+            categorical_encoding = derive_categorical_encoding(df, feature_cols)
+        features = build_feature_matrix(df, feature_cols, categorical_encoding)
     measured = df[target_col].values
     groups = _problem_groups(df, problem_cols)
 

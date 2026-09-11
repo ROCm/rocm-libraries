@@ -1526,6 +1526,106 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_TRUE(sets.front().heuristic.has_value());
     EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+    // The path the descriptor named, resolved. Asserted by filename rather than by the
+    // literal "model.bin": UhdParser resolves the artifact against the `.uhd.json` that
+    // declared it, so what survives here is an absolute path, deliberately.
+    EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+              "model.bin");
+}
+
+/// The whole RFC 0019 §4 header survives the parse.
+///
+/// These fields used to live in a FlatBuffer the loader never opened, so nothing here could
+/// be wrong. They are the descriptor's own now, and every one of them changes what the
+/// heuristic computes: a dropped inline expression silently removes a feature the model was
+/// trained on, a dropped `categorical_encoding` entry silently renumbers a category, and a
+/// dropped `score` block silently relabels the units a caller compares across engines.
+///
+/// The §6.4 `derived` block this case once also covered is gone: an expression is a
+/// signature entry now (slot 1 below), so it is carried and hashed as itself.
+TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_header"));
+
+    const std::vector<nlohmann::json> signature
+        = {"$kernel.block_size",
+           nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"),
+           "$q.dtype"};
+    // Keyed by the whole reference, and on a `$q.*` token deliberately: the encoding must
+    // survive the parse without adding a `$kernel.*` axis, which is what RFC 0019 §6.3
+    // check 2 measures the UED's knobs against.
+    const hipdnn_plugin_sdk::uhd::expression::CategoricalEncoding encoding
+        = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+
+    auto documents = makeSetDocuments('1', "test:model_header");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = signature;
+    heuristic["categorical_encoding"] = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding);
+    heuristic["trained_against"] = provenanceOf(documents);
+    // max with a calibrated score: the pair a cross-engine consumer may act on, and the
+    // one combination where `calibrated` is not its default, so the boolean parse is real.
+    heuristic["objective"] = "max";
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    const auto& parsed = *sets.front().heuristic;
+
+    EXPECT_EQ(parsed.objective, "max");
+    ASSERT_EQ(parsed.featuresSignature.size(), 3u);
+    EXPECT_EQ(parsed.featuresSignature[1],
+              nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"));
+    EXPECT_EQ(parsed.featuresHash,
+              hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding));
+    EXPECT_EQ(parsed.score.units, "tflops");
+    EXPECT_TRUE(parsed.score.calibrated);
+    EXPECT_EQ(parsed.score.transform, "log1p");
+    EXPECT_EQ(parsed.modelHash, "sha256:model");
+    ASSERT_EQ(parsed.categoricalEncoding.count("$q.dtype"), 1u);
+    EXPECT_EQ(parsed.categoricalEncoding.at("$q.dtype").at("bf16"), 1);
+}
+
+/// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
+///
+/// The direction is the author's to choose, because only they know what their model
+/// predicts -- a model fitted on TFLOPS ranks descending, one fitted on latency ascending.
+/// Neither is a fallback for the other, and dropping `min` on the floor would silently
+/// invert every ranking a latency model produces.
+TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_min"));
+
+    auto documents = makeSetDocuments('1', "test:objective_min");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    heuristic["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    heuristic["trained_against"] = provenanceOf(documents);
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->objective, "min");
+    EXPECT_FALSE(sets.front().heuristic->score.calibrated);
 }
 
 /// `min` with a calibrated score is a load error, not a preference.

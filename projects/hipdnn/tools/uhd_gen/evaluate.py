@@ -1381,7 +1381,8 @@ def _holdout_integrity(corpus: Path, bundle: ModelBundle) -> dict[str, str]:
 
 
 def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--input", required=True, help="Benchmark CSV/JSON to evaluate on")
+    parser.add_argument("--input", required=True,
+                        help="Corpus to evaluate on: the published .parquet dataset, or a collected .csv/.json corpus")
     parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
     parser.add_argument("--additional-model-dir", action="append", default=[],
                         help="Another engine's L1 model; repeat for cross-engine immediate comparison")
@@ -1485,6 +1486,11 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _read_corpus(path: Path) -> pd.DataFrame:
+    # Same suffix rule the trainer applies, so a model trained from the published
+    # .parquet dataset is scored against that dataset rather than a re-exported CSV
+    # whose column types were decided by concatenation.
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
     if path.suffix == ".json":
         return pd.DataFrame(json.loads(path.read_text(encoding="utf-8")))
     return pd.read_csv(path, dtype={"benchmark": str, "device": str})

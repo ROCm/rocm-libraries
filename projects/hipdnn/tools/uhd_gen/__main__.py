@@ -221,7 +221,8 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--input",
         required=True,
-        help="Benchmark CSV/JSON with feature columns and target",
+        help="Training corpus with feature columns and target: the .parquet dataset "
+        "tools/results_import publishes, or a collected .csv/.json corpus",
     )
     feature_source = parser.add_mutually_exclusive_group(required=True)
     feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
@@ -442,8 +443,20 @@ def _run_train(args: argparse.Namespace) -> int:
                 trained_against = snapshot_provenance(Path(args.descriptor_tree), args.engine, arch)
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
-            df = (pd.DataFrame(json.loads(input_path.read_text(encoding="utf-8")))
-                  if input_path.suffix == ".json" else pd.read_csv(input_path, dtype={"benchmark": str, "device": str}))
+            # The suffix decides. `.parquet` is what tools/results_import publishes (RFC
+            # 0019.13 §8.3) and is the route a model anyone ships should come by: the
+            # dataset carries its own types, so a column empty in one shard and populated
+            # in another cannot concatenate to `object` and quietly change what the
+            # trainer sees. A collected CSV is read directly, and nothing §8.3 specifies
+            # is checked on it -- that is what the importer exists for -- so it is the
+            # escape hatch for a quick local run. The §11.2 label rule below is applied
+            # to all three alike: the published dataset earns no exemption from it.
+            if input_path.suffix == ".parquet":
+                df = pd.read_parquet(input_path)
+            elif input_path.suffix == ".json":
+                df = pd.DataFrame(json.loads(input_path.read_text(encoding="utf-8")))
+            else:
+                df = pd.read_csv(input_path, dtype={"benchmark": str, "device": str})
             if "is_valid" in df.columns:
                 before = len(df)
                 df = df[df["is_valid"].astype(str).str.lower() == "true"]
@@ -541,6 +554,7 @@ def _run_train(args: argparse.Namespace) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     lgbm_path = output_dir / "model.lgbm"
     model.save_model(str(lgbm_path))
+
     fb_path = output_dir / "model.bin"
     convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
             training_arches=args.training_arches, model_version=args.model_version)
