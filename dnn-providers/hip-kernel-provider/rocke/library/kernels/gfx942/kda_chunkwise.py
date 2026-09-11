@@ -268,13 +268,15 @@ class KdaTileSpec:
     # solve_block: row-block size of the triangular solve. The solve's arithmetic
     # splits into per-block substitution (serial, scalar VALU) and the rank
     # update against already-solved blocks (a matmul, so MFMA). Only the
-    # substitution part is irreducibly scalar, and it shrinks as the square of
-    # the block size, so smaller blocks move more of the O(C^3) work onto the
-    # MFMA pipe -- at the cost of one more block step. ``solve_block == chunk``
-    # is the degenerate single-block case: one unblocked scalar substitution and
-    # no MFMA. Must be a multiple of 8 (the accumulator holds a contiguous run
-    # of 8 output rows per group of 4 slots, which is what lets a block step
-    # write back only its own rows) and must divide ``chunk``.
+    # substitution part is irreducibly scalar. One block of size b costs O(b^2),
+    # but there are C/b of them, so the total scalar work is ~C*b/2 -- linear in
+    # solve_block, not quadratic: halving it halves the scalar work and moves
+    # more of the O(C^3) work onto the MFMA pipe, at the cost of one more block
+    # step. ``solve_block == chunk`` is the degenerate single-block case: one
+    # unblocked scalar substitution and no MFMA. Must be a multiple of 8 (the
+    # accumulator holds a contiguous run of 8 output rows per group of 4 slots,
+    # which is what lets a block step write back only its own rows) and must
+    # divide ``chunk``.
     solve_block: int = 8
     # M/N extent of the atom the *state scan* uses, which need not be the tile
     # phase's. The C x C tile products want an atom as wide as the chunk, but the
