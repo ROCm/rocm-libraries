@@ -1,0 +1,8 @@
+## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt:4-11
+## Append these lines to the existing target_sources(hip_kernel_provider_tests PRIVATE
+## ...) block. Do not replace the block -- append inside it. This tool's own output
+## tree places both files under tests/ (see fragments header); the provider's test
+## tree convention nests pack-scoped test files under packs/ instead (see
+## TestConvFwdPack.cpp/TestPointwisePacks.cpp) -- move both files there when splicing.
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Packs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp

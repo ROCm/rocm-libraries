@@ -1,0 +1,102 @@
+# Worked example: a real rocKE kernel packaged for gfx950.
+#
+# The dense flash-attention prefill kernel from
+# rocke/library/kernels/gfx950/attention_dense.py, authored in the PACKAGED
+# dialect: hkp_pack lowers the named builder through comgr at build time and
+# rewrites the shipped descriptor to `kind: kpack` before the runtime loader
+# ever sees it. Nothing dispatches `rocke` at runtime, and nothing needs to.
+#
+# Why gfx950 and not gfx942: history only. gfx942's builder used to take an
+# extra keyword-only `tuning` object that no descriptor could supply, so the
+# packer refused it by design. PR #11237 folded that parameter into the spec
+# dataclass, and both builders now satisfy hkp_pack's
+# `_require_spec_arch_signature` `(spec, *, arch)` contract -- introspect
+# reports an empty `signature_error` for gfx942 as well as gfx950. This file
+# stays the worked example because it is the one that shipped, not because
+# gfx942 is blocked. Do not conclude from this comment that it is.
+#
+# Every `spec` value below is a field of AttentionDenseSpec. The six without
+# defaults (batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads,
+# head_size) are MANDATORY: hkp_pack hydrates with Spec(**fields), so a missing
+# one is a TypeError at pack time.
+#
+# Verify the builder before packing:
+#     python3 -c "from codegen.sources import introspect; \
+#         print(introspect('kernels/gfx950/attention_dense.py', \
+#                          'build_attention_dense').signature_error or 'OK')"
+
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+
+engine:
+  name: hkp_example:gfx950_attention_dense
+  sdk_version: "1.0.0"
+  knobs: [block_n]
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: head_size
+    type: int
+    default_value: 128
+  - name: num_query_heads
+    type: int
+    default_value: 8
+  - name: num_kv_heads
+    type: int
+    default_value: 8
+  - name: seqlen_q
+    type: int
+    default_value: 256
+  - name: seqlen_kv
+    type: int
+    default_value: 256
+  - name: causal
+    type: int
+    default_value: 1
+  - name: block_n
+    type: int
+    default_value: 64
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: attention_dense
+    # Required in the packaged dialect: hkp_pack uses it to pick the shard.
+    arch: [gfx950]
+    kernels:
+      - name: attention_dense.bf16_d128_hq8_kv8_sq256.gfx950
+        kernel_source:
+          kind: rocke
+          # A DOTTED PYTHON MODULE PATH resolved through the importable
+          # `kernels` package -- NOT a file under the descriptor root. The
+          # rocKE folder ships no sources for exactly this reason.
+          source: kernels/gfx950/attention_dense.py
+          builder: build_attention_dense
+          spec:
+            batch: 1
+            seqlen_q: 256
+            seqlen_kv: 256
+            num_query_heads: 8
+            num_kv_heads: 8
+            head_size: 128
+            causal: true
+            dtype: bf16
+            block_n: 64
+        metadata:
+          dtype: BF16
+          head_size: 128
+          num_query_heads: 8
+          num_kv_heads: 8
+          seqlen_q: 256
+          seqlen_kv: 256
+          causal: 1
+          block_n: 64
+        priority: 0

@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+markers = [
+    "round_trip: exercises hipdnn_validate_descriptors; skipped unless HIPDNN_VALIDATE_DESCRIPTORS is set.",
+]
+
+[tool.coverage.run]
+source = ["codegen", "generate"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

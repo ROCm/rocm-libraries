@@ -1,0 +1,51 @@
+{% set slug = config.engine.slug %}
+{% if config.is_packaged %}
+## Splice point 1 (packaged dialect): NOTHING to splice into HIPDNN_DESCRIPTOR_FILES.
+##
+## HIPDNN_DESCRIPTOR_FILES lists descriptors the provider installs for the RUNTIME
+## loader to read directly. A packaged bundle does not take that path: hkp_pack walks
+## its source root recursively, compiles or lowers each UKD, and writes the shipped
+## descriptors into the per-arch tree itself. Adding these files to
+## HIPDNN_DESCRIPTOR_FILES would install a SECOND, unlowered copy carrying
+## `kind: {{ config.kernel_source_kind }}`, which the runtime loader rejects
+## ("no implementation yet") -- dropping the pack, then the engine.
+##
+## What to do instead: place the authored files under the packager's source root, at
+## the authored subpath below, and make sure that root is the one the build points at
+## (HIPKERNELPROVIDER_DESCRIPTOR_SOURCE_ROOT / the `descriptors/` example tree).
+##
+## Authored subpath (preserved verbatim into the staged and installed trees):
+##     {{ config.descriptor_dir }}/
+##
+## Files placed there by this run:
+{% for pack in config.packs %}
+##     {{ config.kdp_stem(pack) }}.kdp.json
+{% if config.is_multi_pack %}
+##     operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}
+##     {{ slug }}.kmd.json
+##     {{ slug }}.ued.json
+##     {{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+##     {{ slug }}.uhd.json
+{% endif %}
+##     kernel_dtype_matches_graph.umd.json
+{% else %}
+## Splice point 1: dnn-providers/hip-kernel-provider/CMakeLists.txt:335
+## Append these lines (one per descriptor file, relative to .../descriptors/) to the
+## existing HIPDNN_DESCRIPTOR_FILES list. Do not replace the list -- append.
+    {{ slug }}/{{ slug }}.kmd.json
+    {{ slug }}/{{ slug }}.ued.json
+    {{ slug }}/{{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+    {{ slug }}/{{ slug }}.uhd.json
+{% endif %}
+    {{ slug }}/kernel_dtype_matches_graph.umd.json
+{% for pack in config.packs %}
+    {{ slug }}/{{ config.kdp_stem(pack) }}.kdp.json
+{% if config.is_multi_pack %}
+    {{ slug }}/operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}
+{% endif %}

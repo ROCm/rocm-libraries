@@ -1,0 +1,32 @@
+{% if config.is_packaged %}
+## Splice point 2 (packaged dialect): NOTHING to splice into
+## HIPDNN_INGESTOR_PACK_KERNELS.
+##
+## That list names kernel SOURCE STEMS the provider embeds and compiles at plan-build
+## time -- the embedded_source path. A packaged kernel is already a compiled code
+## object inside the per-arch .kpack archive by the time the provider loads it, so it
+## has no embedded source to name and nothing to add here.
+{% if config.kernel_source_kind == "rocke" %}
+##
+## The rocKE kernel source is not in this repository's build at all: it is a Python
+## module resolved through the installed rocKE wheel, named by each UKD's `source`:
+{% for pack in config.packs %}
+{% for kernel in pack.kernels %}
+##     {{ kernel.kernel_source.source }} :: {{ kernel.kernel_source.builder }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% else %}
+## Splice point 2: .../kernel_ingestor_engine/IngestorKernels.cmake:14
+## Append these kernel source stems (no extension) to the existing
+## HIPDNN_INGESTOR_PACK_KERNELS list. Do not replace the list -- append.
+{% set stems = [] %}
+{% for pack in config.packs %}
+{% for kernel in pack.kernels %}
+{% if kernel.kernel_source.entry_point not in stems %}
+{% set _ = stems.append(kernel.kernel_source.entry_point) %}
+{{ kernel.kernel_source.entry_point }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
