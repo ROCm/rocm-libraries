@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
+
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
                          const float max_accumulated_value)
@@ -172,36 +174,6 @@ int run_batched_gemm_example_with_layouts(int argc,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-    constexpr bool APacksK      = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
-    constexpr bool BPacksN      = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
-    constexpr bool CPacksN      = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
-    constexpr bool ABDtypeMatch = std::is_same_v<ADataType, BDataType>;
-
-    constexpr bool k_pad_fallback_eligible =
-        ABDtypeMatch && ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
-        ck_tile::numeric_traits<BDataType>::PackedSize == 1;
-
-    constexpr bool mn_pad_fallback_eligible =
-        ABDtypeMatch && ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
-        ck_tile::numeric_traits<BDataType>::PackedSize == 1 &&
-        ck_tile::numeric_traits<CDataType>::PackedSize == 1;
-
-    constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataType);
-    constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
-
-    const bool needsScalarAB =
-        k_pad_fallback_eligible && (((APacksK ? K : M) % ABVectorSize != 0) ||
-                                    ((BPacksN ? N : K) % ABVectorSize != 0));
-    const bool needsScalarC =
-        mn_pad_fallback_eligible && ((CPacksN ? N : M) % CVectorSize != 0);
-
-    // Tile-size alignment is a separate, coarser boundary than the vector-size one
-    // above: a shape can be vector-aligned yet still not be a multiple of the tile size.
-    const bool needsPadM = M % GemmConfig::M_Tile != 0;
-    const bool needsPadN = N % GemmConfig::N_Tile != 0;
-    const bool needsPadK = K % (GemmConfig::K_Tile * kbatch) != 0;
-    const bool needsPad  = needsPadM || needsPadN || needsPadK;
-
     auto invoke = [&]<typename Cfg>() {
         return invoke_batched_gemm<Cfg,
                                    ADataType,
@@ -230,49 +202,24 @@ int run_batched_gemm_example_with_layouts(int argc,
                                             n_repeat);
     };
 
-    float ave_time;
-    if constexpr(k_pad_fallback_eligible && mn_pad_fallback_eligible)
-    {
-        if(needsScalarAB && needsScalarC)
-            ave_time = invoke.template operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>>();
-        else if(needsScalarAB)
-            ave_time = invoke.template
-                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
-        else if(needsScalarC)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
-        else
-            ave_time = invoke.template operator()<GemmConfig>();
-    }
-    else if constexpr(k_pad_fallback_eligible)
-    {
-        if(needsScalarAB)
-            ave_time = invoke.template
-                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
-        else
-            ave_time = invoke.template operator()<GemmConfig>();
-    }
-    else if constexpr(mn_pad_fallback_eligible)
-    {
-        if(needsScalarC)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
-        else if(needsPad)
-            ave_time = invoke.template operator()<
-                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
-        else
-            ave_time = invoke.template operator()<GemmConfig>();
-    }
-    else
-    {
-        ave_time = invoke.template operator()<GemmConfig>();
-    }
+    float ave_time =
+        ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
+                                                        ADataType,
+                                                        BDataType,
+                                                        CDataType,
+                                                        ALayout,
+                                                        BLayout,
+                                                        CLayout>(M,
+                                                                 N,
+                                                                 K,
+                                                                 stride_A,
+                                                                 stride_B,
+                                                                 stride_C,
+                                                                 kbatch,
+                                                                 invoke,
+                                                                 batch_stride_A,
+                                                                 batch_stride_B,
+                                                                 batch_stride_C);
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 

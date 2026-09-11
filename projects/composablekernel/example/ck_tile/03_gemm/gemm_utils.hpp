@@ -8,9 +8,12 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/utility/json_dump.hpp"
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
 
 #include <string>
 #include <variant>
+
+using ck_tile_example::GemmConfigVectorSizeFallback;
 
 struct GemmConfigBase
 {
@@ -48,32 +51,7 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t VectorSizeB = 1;
     static constexpr ck_tile::index_t VectorSizeC = 1;
 
-    // Enable for gfx1250 RCR
-    static constexpr bool EnableKPadFallback = false;
-    static constexpr bool EnableMNPadFallback = false;
-};
-
-// A,B vector sizes must be multiples of K
-template <typename GemmConfig,
-          ck_tile::index_t VectorSizeA_,
-          ck_tile::index_t VectorSizeB_,
-          ck_tile::index_t VectorSizeC_>
-struct GemmConfigFixedVectorSize : public GemmConfig
-{
-    // Split-K partitions are aligned to K_Warp_Tile: preserve split-K remainder
-    static_assert(GemmConfig::K_Warp_Tile % VectorSizeA_ == 0 &&
-                      GemmConfig::K_Warp_Tile % VectorSizeB_ == 0,
-                  "A/B vector width must divide K_Warp_Tile");
-
-    // Enable K/M/N padding
-    static constexpr bool kPadM = true;
-    static constexpr bool kPadN = true;
-    static constexpr bool kPadK = true;
-
-    static constexpr bool FixedVectorSize         = true;
-    static constexpr ck_tile::index_t VectorSizeA = VectorSizeA_;
-    static constexpr ck_tile::index_t VectorSizeB = VectorSizeB_;
-    static constexpr ck_tile::index_t VectorSizeC = VectorSizeC_;
+    static constexpr bool EnableSmallerVectorLoadFallback = false;
 };
 
 template <typename PrecType>
@@ -228,8 +206,7 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 
     static constexpr int kBlockPerCu = 2;
 
-    static constexpr bool EnableKPadFallback  = true;
-    static constexpr bool EnableMNPadFallback = true;
+    static constexpr bool EnableSmallerVectorLoadFallback = true;
 };
 
 template <typename PrecType>

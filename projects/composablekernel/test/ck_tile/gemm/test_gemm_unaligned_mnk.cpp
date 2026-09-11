@@ -19,10 +19,10 @@ template <typename PrecType,
           ck_tile::index_t VectorSizeA,
           ck_tile::index_t VectorSizeB,
           ck_tile::index_t VectorSizeC>
-using PaddingConfig = GemmConfigFixedVectorSize<GemmConfigComputeV3_WMMA<PrecType>,
-                                                VectorSizeA,
-                                                VectorSizeB,
-                                                VectorSizeC>;
+using PaddingConfig = GemmConfigVectorSizeFallback<GemmConfigComputeV3_WMMA<PrecType>,
+                                                   VectorSizeA,
+                                                   VectorSizeB,
+                                                   VectorSizeC>;
 
 template <typename Tuple>
 class TestGemmUnalignedMNK : public ::testing::Test
