@@ -8,6 +8,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - miopen=true/false
   - tensilelite_coverage=true/false
   - tensilelite_unit=true/false
+  - tensilelite_gtest=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -48,6 +49,10 @@ COMPONENTS = {
     "tensilelite_unit": [
         "projects/hipblaslt/tensilelite/**",
         ".github/workflows/component-ci-tensilelite-unit.yml",
+    ],
+    "tensilelite_gtest": [
+        "projects/hipblaslt/tensilelite/**",
+        ".github/workflows/component-ci-tensilelite-gtest.yml",
     ],
 }
 

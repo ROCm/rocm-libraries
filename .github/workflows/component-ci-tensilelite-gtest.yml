@@ -1,0 +1,84 @@
+name: "Component CI: TensileLite gtest"
+
+# Why this lane exists
+#
+# A pre-submit GATE for the TensileLite C++ host-library gtest suite
+# (tensilelite/tests/, target `tensilelite-tests`), built from source and run
+# CPU-only on the lightweight AWS scale pool. It moves the host-only slice of
+# that suite off the TheRock multi-arch GPU runner, where the `standard` tier ran
+# `ctest -L standard -LE ex_gpu` on a gfx942 GPU it never used.
+#
+# Distinct from the `TensileLite unit` lane (pytest: rocisa + Tensile/Tests/unit)
+# and the `TensileLite coverage` lane (pytest coverage only) — neither builds or
+# runs the C++ gtest. GPU-labelled ctest cases (`ex_gpu`) are excluded here and
+# stay covered by the comprehensive/full GPU tiers on TheRock CI.
+#
+# NOTE: ctest category labels (`-L standard`) are applied at INSTALL time by
+# apply_test_category_labels() (tensilelite/tests/CMakeLists.txt), so this lane
+# builds, INSTALLS, then runs ctest against the install tree. A plain build tree
+# falls back to gtest_discover_tests() with no labels, where `-L standard` would
+# match nothing.
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    env:
+      ROCM_PATH: /opt/rocm
+    defaults:
+      run:
+        working-directory: projects/hipblaslt/tensilelite
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # Configure/build the tensilelite host + C++ gtest from source. Mirrors the
+      # `build_coverage` invoke task (tasks.py) minus the coverage flags: the
+      # `tensilelite` preset (projects/hipblaslt/CMakePresets.json, "just
+      # tensilelite host and client") lives one dir up, hence `-S ../`.
+      # HIPBLASLT_ENABLE_YAML=OFF forces msgpack (LLVM headers may be absent).
+      - name: Build tensilelite-tests
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: |
+          cmake --preset tensilelite -S ../ -B build \
+            -DGPU_TARGETS=gfx942 \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DTENSILELITE_BUILD_TESTING=ON \
+            -DHIPBLASLT_ENABLE_YAML=OFF
+          cmake --build build --parallel --target tensilelite-tests
+
+      # Install so apply_test_category_labels() emits the CTest category labels;
+      # ctest then filters `standard` and excludes the GPU-only `ex_gpu` cases.
+      - name: Install tensilelite-tests
+        run: cmake --install build --prefix build/install
+
+      - name: Run tensilelite gtest (standard, host-only)
+        run: |
+          TL_DIR="$(dirname "$(find build/install -name CTestTestfile.cmake -path '*tensilelite*' | head -1)")"
+          echo "ctest dir: ${TL_DIR}"
+          ctest --test-dir "${TL_DIR}" -L '^standard$' -LE ex_gpu --output-on-failure

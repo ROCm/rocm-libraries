@@ -26,6 +26,7 @@ jobs:
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       tensilelite-unit: ${{ steps.configure.outputs.tensilelite_unit }}
+      tensilelite-gtest: ${{ steps.configure.outputs.tensilelite_gtest }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -98,6 +99,15 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  tensilelite-gtest:
+    name: "TensileLite gtest"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-gtest == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-gtest.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -108,6 +118,7 @@ jobs:
       - miopen
       - tensilelite-coverage
       - tensilelite-unit
+      - tensilelite-gtest
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
