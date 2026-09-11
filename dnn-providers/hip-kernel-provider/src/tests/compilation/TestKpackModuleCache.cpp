@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -181,32 +182,51 @@ TEST(TestKpackModuleCacheLoad, ASecondOrdinalDoesNotAnswerFromTheFirstOrdinalsEn
     int devices = 0;
     ASSERT_EQ(hipGetDeviceCount(&devices), hipSuccess);
 
-    if(devices > 1)
+    // `arch` is device 0's, and the archive holds one blob per arch. A peer on a different
+    // ISA would be refused by hipModuleLoadData before the load ever reached the cache
+    // assertions, so the positive case below is only meaningful on a peer that can run
+    // device 0's object -- ordinal 1 is not that peer by construction.
+    int peer = -1;
+    for(int ordinal = 1; ordinal < devices; ++ordinal)
+    {
+        hipDeviceProp_t peerProperties{};
+        ASSERT_EQ(hipGetDeviceProperties(&peerProperties, ordinal), hipSuccess);
+        if(hipdnn_plugin_sdk::stripArchFeatures(peerProperties.gcnArchName) == arch)
+        {
+            peer = ordinal;
+            break;
+        }
+    }
+
+    if(peer >= 0)
     {
         const auto second
-            = cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, 1, packed.sha256);
+            = cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, peer, packed.sha256);
         ASSERT_NE(second, nullptr);
         EXPECT_NE(second, first);
         EXPECT_EQ(cache.size(), 2U);
         return;
     }
 
-    // One device: the miss still loads, and the load throws at its bind because there is no
-    // device 1 to make current. That throw is what makes this case discriminating on the
-    // single-device hosts CI runs -- an ordinal-blind key would hit the entry above and
-    // hand back device 0's module without a sound.
+    // No peer that can run device 0's object -- one device, or a mixed-ISA host. An ordinal
+    // past the last device stands in: the miss still loads, and the load throws at its bind
+    // because there is no such device to make current. That throw is what makes this case
+    // discriminating on the single-device hosts CI runs -- an ordinal-blind key would hit
+    // the entry above and hand back device 0's module without a sound.
+    const int absent = devices;
     try
     {
-        cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, 1, packed.sha256);
-        FAIL() << "expected ordinal 1 to miss the ordinal-0 entry and fail its bind, but a "
-                  "module was returned on a host with one device";
+        cache.getOrLoad(packed.archive.string(), packed.tocKey, arch, absent, packed.sha256);
+        FAIL() << "expected ordinal " << absent
+               << " to miss the ordinal-0 entry and fail its bind, but a module was returned";
     }
     catch(const KpackModuleLoadFailure& failure)
     {
         // MODULE_LOAD: every stage that reads the archive already succeeded for ordinal 0,
         // so the only thing left to refuse is the device.
         EXPECT_EQ(failure.stage(), KpackLoadStage::MODULE_LOAD) << failure.what();
-        EXPECT_NE(std::string(failure.what()).find("cannot make device 1 current"),
+        EXPECT_NE(std::string(failure.what())
+                      .find("cannot make device " + std::to_string(absent) + " current"),
                   std::string::npos)
             << failure.what();
     }
