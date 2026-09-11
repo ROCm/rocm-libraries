@@ -79,11 +79,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # happened to exist, which also means nothing would ever exercise the installed copy.
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         # Container.cpp resolves this relative to the loaded .so first, so a
         # DESTDIR-staged, relocated, or repackaged install still finds its own
-        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # descriptors; HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
     )
 
     # The kpack kernel source adapter. Listed here rather than beside Kernel.cpp above
@@ -315,6 +315,20 @@ endif()
 
 # Process all kernels marked for inlining
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelEmbedding.cmake")
+
+# The plugin embeds production kernels only. A test descriptor set names its sources for
+# the test binary alone, so a test source registered here would ship in the shared
+# library.
+get_target_property(_plugin_kernel_files hip_kernel_provider_impl KERNELEMBEDDING_KERNEL_FILES)
+foreach(_plugin_kernel_file IN LISTS _plugin_kernel_files)
+    if(_plugin_kernel_file MATCHES "(^|/)test_descriptors(/|$)")
+        message(FATAL_ERROR
+                "hip_kernel_provider_impl embeds a test descriptor set's kernel source:\n"
+                "  ${_plugin_kernel_file}\n"
+                "Register it on the test binary instead.")
+    endif()
+endforeach()
+
 # Generate embedded kernel sources and includes at configure time
 embed_kernel_sources(
     TARGET hip_kernel_provider_impl
@@ -331,3 +345,11 @@ set(HIP_KERNEL_PROVIDER_GENERATED_SOURCES
 set_source_files_properties(${HIP_KERNEL_PROVIDER_GENERATED_SOURCES} TARGET_DIRECTORY hip_kernel_provider_impl PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 
 target_sources(hip_kernel_provider_impl PRIVATE "${HIP_KERNEL_PROVIDER_GENERATED_SOURCES}")
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_impl
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}
+        PACK_NAMES product
+    )
+endif()
