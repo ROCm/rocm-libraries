@@ -48,6 +48,9 @@ def conversionKernelNames(solution):
   conversionKernelNames = []
   loadVectorWidth = [1, 2] if solution["ProblemType"]["DataType"].isDouble() else [1, 2, 4]
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if solution.get("_GSUAtomicDestBF16", False):
+    # The GSU slices already produced the final BF16 D in place.
+    return conversionKernelNames
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
     gsuList = [1]
   elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
@@ -90,6 +93,18 @@ def reductionKernelNames(solution):
     for btype in solution["ProblemType"]["BiasDataTypeList"]:
       reductionKernelNames.append(KernelWriterReduction.kernelName(solution, btype))
   return reductionKernelNames
+
+
+def betaOnlyGlobalAccumulation(solution):
+  """_GlobalAccumulation as the beta-only helper should see it.
+
+  _GSUAtomicDestBF16 has the GSU slices accumulate into the real BF16 D, so the
+  pre-pass must write beta*C there in the dest type rather than into the fp32
+  staging workspace.
+  """
+  if solution.get("_GSUAtomicDestBF16", False):
+    return None
+  return solution["_GlobalAccumulation"]
 
 
 def betaOnlyKernelNames(solution):
@@ -140,14 +155,14 @@ def initBetaOnlyKernelObjects(solution):
         state["ProblemType"]["BiasDataTypeList"] = []
         state["ProblemType"]["BiasDataType"] = deepcopy(btype)
         state["KernelLanguage"] = "Source"
-        state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
+        state["_GlobalAccumulation"] = betaOnlyGlobalAccumulation(solution)
         betaOnlyKernelObjects.append(KernelWriterBetaOnly(state))
     else:
       state = {}
       state["ProblemType"] = deepcopy(solution["ProblemType"])
       state["ProblemType"]["GroupedGemm"] = False
       state["KernelLanguage"] = "Source"
-      state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
+      state["_GlobalAccumulation"] = betaOnlyGlobalAccumulation(solution)
       betaOnlyKernelObjects.append(KernelWriterBetaOnly(state))
   return betaOnlyKernelObjects
 
@@ -158,6 +173,9 @@ def initConversionKernelObjects(solution, isaInfoMap):
     [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if solution.get("_GSUAtomicDestBF16", False):
+    # The GSU slices already produced the final BF16 D in place.
+    return conversionKernelObjects
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
     genPGRPostKernels = False
     gsuList = [1]

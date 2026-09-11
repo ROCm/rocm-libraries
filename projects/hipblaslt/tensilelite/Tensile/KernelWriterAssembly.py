@@ -14263,6 +14263,9 @@ class KernelWriterAssembly(KernelWriter):
   def getVectorAtomicWidth(self, kernel):
     if kernel["ProblemType"]["DataType"].isHalf() and (not kernel["_GlobalAccumulation"]):
       return 2
+    if kernel.get("_GSUAtomicDestBF16", False):
+      # buffer_atomic_pk_add_bf16 consumes one dword = two packed BF16 elements.
+      return 2
     return 1
 
   ##############################################################################
@@ -15425,7 +15428,10 @@ class KernelWriterAssembly(KernelWriter):
       if gsuLimit > 1:
         betas = betasBackup
         if gsuLimitIdx == 0:
-          self.states.bpeCexternal = self.states.bpeCinternal
+          # useAtomicPkAddBF16 atomically accumulates into the real BF16 D, so
+          # the GSU>1 store keeps the dest element size rather than the fp32 one.
+          if not self.states.useAtomicPkAddBF16:
+            self.states.bpeCexternal = self.states.bpeCinternal
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":

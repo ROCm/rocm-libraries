@@ -25,6 +25,7 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOB
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
+  BufferAtomicPkAddBF16, \
   GlobalLoadB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
@@ -1256,7 +1257,8 @@ class GlobalWriteBatchWriter:
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
       self._epilogScratchFree(tmpInrSgpr)
-      if self.atomic and (not self.parentWriter.states.useAtomicAdd):
+      if self.atomic and (not self.parentWriter.states.useAtomicAdd) \
+         and (not self.parentWriter.states.useAtomicPkAddBF16):
         # load c into data+1 because of CAS structure
         # TODO - Fix for double here, would need bigger load
         # FIXME
@@ -1522,7 +1524,9 @@ class GlobalWriteBatchWriter:
   def _emitAdd(self, module: Module):
     if self.atomic:
       del self.tmpVgpr # catch bugs
-      if self.parentWriter.states.useAtomicAdd:
+      if self.parentWriter.states.useAtomicPkAddBF16:
+        self._emitAtomicPkAddBF16(module)
+      elif self.parentWriter.states.useAtomicAdd:
         self._emitAtomicAdd(module)
       else:
         self._emitCasAdd(module)
@@ -3924,6 +3928,55 @@ class GlobalWriteBatchWriter:
     if self.edge:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
+  def _emitAtomicPkAddBF16(self, module: Module):
+    # One instruction accumulates atomicW==2 neighbouring free0 elements as a
+    # single packed dword. Solution derivation enforces AF0EM>=2, so a pair
+    # never straddles the end of a column into the next one.
+    assert self.atomicW == 2 and self.gwvw == self.atomicW
+
+    # Pack first, with exec still full: the atomic loop below leaves exec
+    # holding the previous element's mask.
+    module.addComment1("convert accumulators to packed bf16 pairs")
+    for elementIdx in range(len(self.batchElements)):
+      sumIdx     = self.ss.elementSumIdx[elementIdx]
+      packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
+      # Packs in place: the pair at sumIdx/sumIdx+1 becomes one dword at sumIdx.
+      module.add(self.packdata(self.gwvw, sumIdx, sumIdx, bf16CVTVgprStruct=self.cvtVgprStruct,
+                               tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+",
+                               prefixOffset=self.parentWriter.states.c.startVgprValu))
+      self._epilogScratchFree(packTmpS01)
+
+    # The GSU slices accumulating into one D element run on different CUs, so on
+    # architectures whose default atomic scope is CU-local the add has to be
+    # widened to device scope or those slices never observe each other.
+    atomicScope = CacheScope.SCOPE_DEV \
+      if self.parentWriter.states.archCaps["DefaultScopeIsCULocal"] else CacheScope.SCOPE_NONE
+
+    module.addComment1("issue packed bf16 atomic writes")
+    for elementIdx in range(len(self.batchElements)):
+      addrCalc = self.ss.elementAddr[elementIdx]
+      mask     = self.ss.elementMask[elementIdx]
+
+      # apply in-bounds exec mask
+      if self.edge:
+        module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec (before atomic)"))
+
+      newSumIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
+      if self.parentWriter.do["GlobalWrite"]:
+        if self.kernel["BufferStore"]:
+          # No glc/temporal hint: we never read back the pre-add value.
+          module.add(BufferAtomicPkAddBF16(vgpr("ValuC+%u"%newSumIdx), \
+                       vgpr(addrCalc.addrDVgpr,1), \
+                       sgpr("SrdD", 4), \
+                       0,
+                       MUBUFModifiers(offen=True, offset12=addrCalc.globalOffset, scope=atomicScope),
+                       "attempt write"))
+        else:
+          pass # TODO:
+
+    if self.edge:
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
+
   def _emitCasAdd(self, module: Module):
     # TODO for atomic GWVW:
     #  - Use vi to compute addresses, sumIdx.
@@ -4162,6 +4215,10 @@ class GlobalWriteBatchWriter:
       # all kinds of code relies on this assumption:
       if self.atomicW > self.gwvw:
         return False
+
+      if self.parentWriter.states.useAtomicPkAddBF16:
+        # A packed atomic always consumes an exact element pair.
+        return self.atomicW == 2 and self.gwvw == self.atomicW
 
       if (self.kernel["ProblemType"]["DataType"].isHalf() or self.kernel["ProblemType"]["DataType"].isBFloat16()) \
         and not self.kernel["_GlobalAccumulation"]:

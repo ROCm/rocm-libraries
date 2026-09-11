@@ -180,6 +180,10 @@ namespace TensileLite
         bool sourceKernel = false;
 
         int    globalAccumulation       = 0;
+        // SingleBuffer GSU whose slices accumulate straight into the BF16 D with
+        // buffer_atomic_pk_add_bf16. There is no fp32 staging workspace and no
+        // post-GSU conversion kernel; only the beta pre-pass still runs.
+        bool   gsuAtomicDestBF16        = false;
         int    adaptiveGemmGSUA         = 0;
         size_t workspaceSizePerElemC    = 0;
         size_t workspaceSizePerElemBias = 0;

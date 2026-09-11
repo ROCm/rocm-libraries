@@ -874,7 +874,9 @@ namespace TensileLite
         if(internalArgsSupport.version < 3)
         {
             bool singleWSD = false;
-            if(resolvedGlobalAccumulation == 1
+            // gsuAtomicDestBF16 accumulates into D itself, so it must keep the
+            // real d/c pointers rather than the fp32 staging workspace.
+            if(resolvedGlobalAccumulation == 1 && !sizeMapping.gsuAtomicDestBF16
                && (problemType.computeType != problemType.dType
                    || problemType.activationType != ActivationType::None))
                 singleWSD = true;
@@ -1336,7 +1338,9 @@ namespace TensileLite
             }
 
             bool singleWSD = false;
-            if(resolvedGlobalAccumulation == 1
+            // gsuAtomicDestBF16 accumulates into D itself, so it must keep the
+            // real d/c pointers rather than the fp32 staging workspace.
+            if(resolvedGlobalAccumulation == 1 && !sizeMapping.gsuAtomicDestBF16
                && (problemType.computeType != problemType.dType
                    || problemType.activationType != ActivationType::None))
                 singleWSD = true;
@@ -2738,7 +2742,12 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        if(sizeMapping.globalAccumulation)
+        // gsuAtomicDestBF16 seeds D itself with beta*C, because that is what the
+        // GSU slices then atomically accumulate into. Only the output tensor
+        // differs from the staging-workspace case: bias and the scale vectors
+        // stay keyed on globalAccumulation, matching BetaOnlyUseBias (which is
+        // always false here, since compute type differs from dest type).
+        if(sizeMapping.globalAccumulation && !sizeMapping.gsuAtomicDestBF16)
             rv.args.append<void*>("WS", inputs.ws);
         else if(problemType.stridedBatched)
             rv.args.append<void*>("D", inputs.d);
@@ -2776,7 +2785,7 @@ namespace TensileLite
                 enableFactorDim = true;
         }
 
-        if(sizeMapping.globalAccumulation)
+        if(sizeMapping.globalAccumulation && !sizeMapping.gsuAtomicDestBF16)
         {
             size_t stride = d.sizes()[0];
             for(size_t i = 1; i < d.dimensions(); i++)
@@ -2898,7 +2907,9 @@ namespace TensileLite
         else if(factorDim == 3)
             name += "_FDMN";
 
-        if(sizeMapping.globalAccumulation)
+        // Must track KernelWriterBetaOnly.kernelName: gsuAtomicDestBF16 seeds the
+        // real D, so it uses the plain (non-accumulating) beta-only kernel.
+        if(sizeMapping.globalAccumulation && !sizeMapping.gsuAtomicDestBF16)
         {
             name += "_GA";
         }
@@ -3992,8 +4003,11 @@ namespace TensileLite
         else
             rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
 
-        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
-           || sk.reduction == origami::reduction_t::parallel)
+        // gsuAtomicDestBF16 already produced the final BF16 D in place, so there
+        // is nothing for the output conversion kernel to convert.
+        if(((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3
+             && !sizeMapping.gsuAtomicDestBF16)
+            || sk.reduction == origami::reduction_t::parallel))
         {
             if(debug)
                 rv.push_back(generateOutputConversionCall<true>(
@@ -4464,6 +4478,8 @@ namespace TensileLite
         size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
         size_t tileSize
             = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+        // gsuAtomicDestBF16 accumulates into D, so workspaceSizePerElemC (and
+        // therefore tileSize) is 0 for it and nothing is reserved here.
         size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
         size += bufSize;
 

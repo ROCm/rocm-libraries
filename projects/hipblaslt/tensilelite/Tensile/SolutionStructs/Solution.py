@@ -1817,6 +1817,48 @@ class Solution(collections.abc.Mapping):
       state["SynchronizerSizeCheck"] = 1
     #   state["BatchSizeEqual"] = 1
 
+    # SingleBuffer GSU straight into a BF16 D, using buffer_atomic_pk_add_bf16.
+    # Every GSU slice atomically accumulates into the real output tensor, so the
+    # fp32 staging workspace and its post-GSU conversion kernel both disappear.
+    # The hardware performs the add in BF16, so this is deliberately less
+    # accurate than accumulating in fp32 and converting once.
+    # StreamK is excluded because it sizes its partials buffer from
+    # _WorkspaceSizePerElemC, which this mode zeroes out.
+    state["_GSUAtomicDestBF16"] = False
+    if state["_GlobalAccumulation"] == 'SingleBuffer' \
+       and state["StreamK"] == 0 \
+       and (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) \
+       and state["ProblemType"]["DestDataType"].isBFloat16():
+      if not state["ProblemType"]["ComputeDataType"].isSingle():
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D requires fp32 compute (the accumulators are packed with v_cvt_pk_f32_to_bf16)")
+        return
+      if not isaInfoMap[isa].asmCaps["HasAtomicPkAddBF16"]:
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D requires buffer_atomic_pk_add_bf16 (gfx950 / gfx1250+)")
+        return
+      if not isaInfoMap[isa].asmCaps["HasBF16CVT"]:
+        # The software pack fallback needs conversion constants that only the
+        # non-atomic store path initializes.
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D requires v_cvt_pk_f32_to_bf16 (HasBF16CVT)")
+        return
+      if state["AssertFree0ElementMultiple"] < 2:
+        # One packed atomic covers two neighbouring free0 elements, so an
+        # unpaired trailing element would clobber the start of the next column.
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D requires AF0EM>=2 (packed atomics write element pairs)")
+        return
+      if state["ProblemType"]["ActivationType"] != 'none':
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D does not support a fused activation (the epilogue would run per GSU slice)")
+        return
+      if state["ProblemType"]["UseBias"]:
+        reject(state, printRejectionReason,
+               "SingleBuffer GSU to a BF16 D does not support bias (the epilogue would run per GSU slice)")
+        return
+      state["_GSUAtomicDestBF16"] = True
+
     if state["StreamK"] == 0 and state["GlobalSplitU"] == 0:
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
@@ -2040,7 +2082,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
-    state["_WorkspaceSizePerElemC"] = computeBytes
+    # _GSUAtomicDestBF16 reduces into D with packed atomics, so it stages nothing
+    # per element of C. Zero here is what drops the WorkspaceCheck predicate
+    # (Contractions.TaskPredicate only emits it for a non-zero size) and makes
+    # requiredWorkspaceSizeGsu report 0 bytes.
+    state["_WorkspaceSizePerElemC"] = 0 if state["_GSUAtomicDestBF16"] else computeBytes
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
@@ -4505,6 +4551,12 @@ class Solution(collections.abc.Mapping):
             state["StoreVectorWidth"] = state["VectorWidthA"]
         else:
           state["StoreVectorWidth"] = state["VectorWidthA"]
+
+    if state.get("_GSUAtomicDestBF16", False):
+      # buffer_atomic_pk_add_bf16 has no single-element form, so a thread must
+      # own its free0 elements in pairs. The divisibility check below turns an
+      # incompatible VectorWidthA into a rejection.
+      state["StoreVectorWidth"] = max(state["StoreVectorWidth"], 2)
 
     if state["EnableMatrixInstruction"] and not state["UseSubtileImpl"]:
       if state["SourceSwap"]:

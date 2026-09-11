@@ -276,6 +276,7 @@ class StateValues:
   combineLocalAddresses: bool            = False # Debug
   unifiedVgprRegs: bool                  = False
   useAtomicAdd: bool                     = False
+  useAtomicPkAddBF16: bool               = False
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
@@ -7686,9 +7687,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["Sparse"] and not (kernel["DirectToVgprSparseMetadata"] or kernel["DirectToLdsMetadata"]):
       kernel["LocalWriteUseSgprMetadata"] = False
 
+    # SingleBuffer GSU whose atomic target is the BF16 D tensor itself rather
+    # than an fp32 staging workspace. Accumulation is done by
+    # buffer_atomic_pk_add_bf16 on packed element pairs.
+    self.states.useAtomicPkAddBF16 = kernel.get("_GSUAtomicDestBF16", False)
+
     # The inst HasAtomicAdd is using is not compatible with int32.
     self.states.useAtomicAdd = (self.states.asmCaps["HasAtomicAdd"] and kernel["ProblemType"]["ComputeDataType"].isSingle()) and \
-                        (kernel["_GlobalAccumulation"] == 'SingleBuffer')
+                        (kernel["_GlobalAccumulation"] == 'SingleBuffer') and \
+                        (not self.states.useAtomicPkAddBF16)
 
     if self.states.asmCaps["v_fma_mix_f32"]:
       self.states.mixinst = VFmaMixF32
@@ -7710,7 +7717,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.states.bpeCexternalGSU1 = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
     self.states.bpeCexternal = self.states.bpeCexternalGSU1
-    if kernel["GlobalSplitU"] > 0 and kernel["_GlobalAccumulation"] and kernel["_GlobalAccumulation"] != 'PartialsBuffer':
+    # useAtomicPkAddBF16 accumulates into the real D, which is 2 bytes per
+    # element, so it must keep the GSU1 stride instead of the fp32 one.
+    if kernel["GlobalSplitU"] > 0 and kernel["_GlobalAccumulation"] and kernel["_GlobalAccumulation"] != 'PartialsBuffer' \
+       and not self.states.useAtomicPkAddBF16:
       self.states.bpeCexternal = self.states.bpeCinternal
 
 

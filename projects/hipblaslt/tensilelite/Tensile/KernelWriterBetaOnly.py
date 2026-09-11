@@ -247,12 +247,17 @@ class KernelWriterBetaOnly(KernelWriterBase):
 
     ########################################
     # zero
+    # Element type actually stored in D: the compute type when this pre-pass
+    # targets the fp32 accumulation workspace, the dest type when it targets the
+    # real D (as _GSUAtomicDestBF16 does, where the two differ).
+    dstTypeStr = problemType["ComputeDataType"].toDevice(self.language) if globalAccum \
+                 else problemType["DestDataType"].toDevice(self.language)
     if globalAccum:
       ptrStr = problemType["ComputeDataType"].toDevice(self.language)
       if problemType["DataType"].isHalf() and problemType["HighPrecisionAccumulate"]:
         ptrStr = DataType('s').toDevice(self.language)
     else:
-      ptrStr = problemType["DataType"].toDevice(self.language)
+      ptrStr = dstTypeStr
     kStr += "#define SCALAR_ZERO ((%s)(0))%s" % (ptrStr, self.endLine )
 
     biasStr = ""
@@ -271,9 +276,9 @@ class KernelWriterBetaOnly(KernelWriterBase):
     ########################################
     # zero
     kStr += "  if( beta == (%s)0) {%s" % (self.datatype, self.endLine)
-    kStr += "    D[idxD] = SCALAR_ZERO%s;%s" % (biasStr, self.endLine)
+    kStr += "    D[idxD] = (%s)(SCALAR_ZERO%s);%s" % (dstTypeStr, biasStr, self.endLine)
     kStr += "  } else {%s" % self.endLine
-    kStr += "    D[idxD] = ((%s)(C[idxC])) * beta%s;%s" % (self.datatype, biasStr, self.endLine)
+    kStr += "    D[idxD] = (%s)(((%s)(C[idxC])) * beta%s);%s" % (dstTypeStr, self.datatype, biasStr, self.endLine)
     kStr += "  }%s" % self.endLine
 
     ########################################
@@ -308,7 +313,10 @@ class KernelWriterBetaOnly(KernelWriterBase):
       name += "" if state["ProblemType"]["StridedBatched"] else "_GB"
     if state["ProblemType"]["BetaOnlyUseBias"]:
       name += "_Bias%s"%btype.toChar()
-    name += "_GA" if state["_GlobalAccumulation"] else ""
+    # _GSUAtomicDestBF16 seeds the real D rather than an fp32 workspace, so it
+    # needs the plain (non-accumulating) beta-only kernel. initBetaOnlyKernelObjects
+    # clears _GlobalAccumulation to match, which keeps both paths on this name.
+    name += "_GA" if (state["_GlobalAccumulation"] and not state.get("_GSUAtomicDestBF16", False)) else ""
 
     return name
 
