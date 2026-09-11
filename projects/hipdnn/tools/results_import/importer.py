@@ -27,8 +27,16 @@ from typing import Iterable
 import pandas as pd
 
 from results_import.derive import derive_metrics
+from results_import.descriptor import MissingVocabularyEntry, expand
 
-__all__ = ["ValidationError", "load_csvs", "build_dataset", "write_parquet"]
+__all__ = [
+    "ValidationError",
+    "load_csvs",
+    "build_dataset",
+    "write_parquet",
+    "expand_descriptors",
+    "resolve_duplicates",
+]
 
 #: Collection bookkeeping, meaningless once the shards are merged (§8.3).
 COLLECTION_ONLY = ["shard_id"]
@@ -185,6 +193,71 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def expand_descriptors(
+    frame: pd.DataFrame,
+    columns: Iterable[str],
+    vocabularies: dict[str, dict[str, int]] | None = None,
+) -> tuple[pd.DataFrame, dict[str, dict[str, int]]]:
+    """Replace opaque configuration strings with features a grouped model can select on.
+
+    The source column is kept: it is the human-readable identity of a configuration, and every
+    report that names a winner wants it. Returns the frame and the vocabularies used, which the
+    caller must persist -- a corpus scored beside this one has to encode identically, and the
+    codes are assigned here.
+    """
+    frame = frame.copy()
+    produced: dict[str, dict[str, int]] = {}
+    for column in columns:
+        if column not in frame.columns:
+            raise ValidationError(
+                f"--expand-descriptor names {column!r}, which this corpus does not carry "
+                f"(it has {', '.join(_kernel_columns(frame)) or 'no kernel.* columns'})"
+            )
+        supplied = (vocabularies or {}).get(column)
+        rows, codes, vocabulary, slots = expand(frame[column].tolist(), vocabulary=supplied)
+        for index in range(slots):
+            frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
+        frame[f"{column}.variant"] = codes
+        produced[column] = vocabulary
+    return frame, produced
+
+
+def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str) -> pd.DataFrame:
+    """Keep, per problem, only the most recent occasion it was measured.
+
+    `_validate` rejects a complete problem carrying one configuration twice, because that
+    usually means two collections with different candidate sets were merged. A problem that was
+    simply re-measured trips the same check, and the rule for it is: latest deduplicates,
+    fastest breaks ties within one occasion.
+
+    Resolved per problem rather than globally. Taking the newest occasion in the *file* would
+    delete every problem that occasion did not cover -- typically the ones an older, broader
+    sweep measured -- which is a silent loss of exactly the problems with the widest candidate
+    coverage. Per problem, one occasion also means a problem's candidates were all measured
+    against each other, which is what makes their times comparable at all.
+    """
+    query = _query_columns(frame)
+    if not query:
+        return frame
+
+    frame = frame.copy()
+    problem = frame[query].astype(str).agg("|".join, axis=1)
+    occasion = frame[latest_column]
+
+    # The most recent occasion each problem was measured on, then only that occasion's rows.
+    newest = occasion.groupby(problem).transform("max")
+    frame = frame[occasion == newest]
+
+    # Within it, a repeated candidate is a repeated measurement: repeats differ by contention
+    # and clocks, not by anything about the kernel, so the best stands for the candidate.
+    kernels = _kernel_columns(frame)
+    if kernels:
+        keep = frame[query + kernels].astype(str).agg("|".join, axis=1)
+        frame = (frame.sort_values(best_column, kind="mergesort")
+                      .loc[lambda f: ~keep.loc[f.index].duplicated()])
+    return frame.sort_index()
+
+
 def build_dataset(frame: pd.DataFrame, opmeta: dict) -> pd.DataFrame:
     """Validates, derives the metrics, and drops what was only ever collection bookkeeping."""
     frame = _apply_defaults(frame.copy())
@@ -217,19 +290,68 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--opmeta", required=True, type=pathlib.Path,
                         help="the operation's .opmeta.json, whose flops/elements are evaluated")
     parser.add_argument("--out", required=True, type=pathlib.Path)
+    parser.add_argument(
+        "--expand-descriptor", action="append", default=[], dest="expand_descriptor",
+        metavar="COLUMN",
+        help="expand a configuration string column (e.g. kernel.descriptor) into "
+             "COLUMN.cfg0..N and COLUMN.variant, so a grouped model can rank one kernel's "
+             "configurations against each other. Repeatable.",
+    )
+    parser.add_argument(
+        "--vocabulary", type=pathlib.Path, default=None,
+        help="reuse the variant codes from a previous run's <out>.vocabulary.json. Required "
+             "for any corpus scored beside another, which must encode identically.",
+    )
+    parser.add_argument(
+        "--resolve-duplicates", default=None, dest="resolve_duplicates", metavar="COLUMN",
+        help="keep, per problem, only the most recent occasion it was measured, ordered by "
+             "COLUMN (e.g. date_run), breaking ties within it by --best-column. Without this "
+             "a re-measured problem is rejected as two merged collections.",
+    )
+    parser.add_argument(
+        "--best-column", default="minTimeMs", dest="best_column",
+        help="the column a repeat is resolved by, smallest kept (default: minTimeMs)",
+    )
     args = parser.parse_args(argv)
 
     with args.opmeta.open() as handle:
         opmeta = json.load(handle)
 
+    vocabularies = None
+    if args.vocabulary is not None:
+        with args.vocabulary.open() as handle:
+            vocabularies = json.load(handle)
+
+    # The order is the point. Resolution happens first because it settles the very duplicates
+    # validation would reject; expansion happens last so those checks see the producer's own
+    # columns rather than this tool's derived ones.
     try:
-        dataset = build_dataset(load_csvs(args.csv), opmeta)
-    except ValidationError as error:
+        frame = load_csvs(args.csv)
+        if args.resolve_duplicates is not None:
+            if args.resolve_duplicates not in frame.columns:
+                raise ValidationError(
+                    f"--resolve-duplicates needs {args.resolve_duplicates!r} to order "
+                    "occasions by, and this corpus does not carry it"
+                )
+            frame = resolve_duplicates(frame, args.resolve_duplicates, args.best_column)
+        dataset = build_dataset(frame, opmeta)
+        used: dict[str, dict[str, int]] = {}
+        if args.expand_descriptor:
+            dataset, used = expand_descriptors(dataset, args.expand_descriptor, vocabularies)
+    except (ValidationError, MissingVocabularyEntry) as error:
         print(f"results_import: {error}", file=sys.stderr)
         return 1
 
     write_parquet(dataset, args.out)
     print(f"results_import: wrote {len(dataset)} rows to {args.out}")
+
+    # Beside the dataset rather than inside it: the codes are a property of the encoding, and a
+    # corpus scored against this one has to be given them explicitly to encode the same way.
+    if used:
+        vocabulary_path = args.out.with_suffix(".vocabulary.json")
+        with vocabulary_path.open("w", encoding="utf-8") as handle:
+            json.dump(used, handle, indent=2, sort_keys=True)
+        print(f"results_import: wrote vocabulary to {vocabulary_path}")
     return 0
 
 

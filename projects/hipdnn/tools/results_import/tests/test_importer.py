@@ -19,7 +19,9 @@ pd = pytest.importorskip("pandas")
 from results_import.importer import (  # noqa: E402  (deliberately after the skip)
     ValidationError,
     build_dataset,
+    expand_descriptors,
     load_csvs,
+    resolve_duplicates,
     write_parquet,
 )
 
@@ -210,3 +212,92 @@ def test_the_pairing_is_a_convention_not_a_column_list(matmul):
 def test_an_unpaired_column_is_not_checked(matmul):
     """`kernel.tile_m` has no `kernel.tile_m_id`, so there is nothing to agree with."""
     assert len(build_dataset(rows(), matmul)) == 2
+
+
+# ---------------------------------------------------------------------------------------
+# Configuration expansion and duplicate resolution
+# ---------------------------------------------------------------------------------------
+
+
+def test_expansion_makes_two_configurations_of_one_kernel_distinguishable(matmul):
+    """Unexpanded, a model sees one feature row for every configuration of a kernel.
+
+    A grouped model's second layer then ranks without being able to prefer, which produces no
+    error and no warning -- only a heuristic that never picks the tuned configuration.
+    """
+    frame = rows(**{"kernel.descriptor": ["t,64,4", "t,128,4"]})
+    out, vocabulary = expand_descriptors(build_dataset(frame, matmul), ["kernel.descriptor"])
+
+    assert out["kernel.descriptor.cfg0"].tolist() == [64, 128]
+    assert out["kernel.descriptor.cfg1"].tolist() == [4, 4]
+    # The source column survives: it is the readable identity of a configuration, and every
+    # report that names a winner wants it.
+    assert "kernel.descriptor" in out.columns
+    assert vocabulary["kernel.descriptor"] == {"t": 0}
+
+
+def test_expanding_a_column_the_corpus_lacks_is_refused(matmul):
+    """Named but absent is a mistake in the invocation, not an empty result to carry forward."""
+    with pytest.raises(ValidationError, match="does not carry"):
+        expand_descriptors(build_dataset(rows(), matmul), ["kernel.nope"])
+
+
+def test_resolution_keeps_the_latest_occasion_per_problem(matmul):
+    """Per problem, not per file.
+
+    Taking the newest occasion in the file would delete every problem that occasion did not
+    cover -- typically the ones an older, broader sweep measured, which carry the widest
+    candidate coverage. Here one problem is re-measured and another is not; both must survive.
+    """
+    frame = pd.DataFrame({
+        "q.M": [1024, 1024, 2048], "q.N": [1024, 1024, 2048], "q.K": [1024, 1024, 2048],
+        "q.dtype": ["fp32"] * 3,
+        "kernel.tile_m": [64, 64, 64], "device.cu_count": [80, 80, 80],
+        "minTimeMs": [5.0, 1.0, 7.0], "avgTimeMs": [5.1, 1.1, 7.1],
+        "stddevMs": [0.01] * 3, "iters": [10] * 3, "error": [""] * 3,
+        "date_run": ["2026-01-01", "2026-02-01", "2026-01-01"],
+    })
+
+    out = resolve_duplicates(frame, "date_run", "minTimeMs")
+
+    # The re-measured problem keeps only February; the problem only January measured survives.
+    assert sorted(out["q.M"].tolist()) == [1024, 2048]
+    assert out.loc[out["q.M"] == 1024, "minTimeMs"].tolist() == [1.0]
+    assert out.loc[out["q.M"] == 2048, "minTimeMs"].tolist() == [7.0]
+
+
+def test_a_repeat_within_one_occasion_keeps_the_fastest(matmul):
+    """Repeats differ by contention and clocks, not by anything about the kernel."""
+    frame = pd.DataFrame({
+        "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
+        "q.dtype": ["fp32", "fp32"],
+        "kernel.tile_m": [64, 64], "device.cu_count": [80, 80],
+        "minTimeMs": [5.0, 2.0], "avgTimeMs": [5.1, 2.1],
+        "stddevMs": [0.01, 0.01], "iters": [10, 10], "error": ["", ""],
+        "date_run": ["2026-01-01", "2026-01-01"],
+    })
+
+    out = resolve_duplicates(frame, "date_run", "minTimeMs")
+    assert out["minTimeMs"].tolist() == [2.0]
+
+
+def test_resolution_settles_what_validation_would_otherwise_reject(matmul):
+    """The two halves have to agree, or the option resolves nothing.
+
+    A complete problem carrying one configuration twice is rejected as two merged collections.
+    A re-measured problem trips the same check, and this is the rule that distinguishes them.
+    """
+    frame = pd.DataFrame({
+        "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
+        "q.dtype": ["fp32", "fp32"],
+        "kernel.tile_m": [64, 64], "device.cu_count": [80, 80],
+        "minTimeMs": [5.0, 1.0], "avgTimeMs": [5.1, 1.1],
+        "stddevMs": [0.01, 0.01], "iters": [10, 10], "error": ["", ""],
+        "problem_complete": [True, True],
+        "date_run": ["2026-01-01", "2026-02-01"],
+    })
+
+    with pytest.raises(ValidationError, match="same kernel configuration twice"):
+        build_dataset(frame, matmul)
+
+    build_dataset(resolve_duplicates(frame, "date_run", "minTimeMs"), matmul)
