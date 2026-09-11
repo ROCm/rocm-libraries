@@ -13,29 +13,25 @@
 # `exclude_markers` plus GPU-arch `skip-gfxXXXX` markers (registered in
 # pytest.ini), from the installed share/hipblaslt/tensilelite/ tree.
 #
-# Category mapping is derived from the legacy
-# TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
-# which ran two suites unconditionally:
-#   - rocisa_tests/            (rocisa pytest modules)
-#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
-#
-# comprehensive/full reproduce that legacy set exactly (GPU tests included).
-# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
-# the pre-commit / PR tiers stay fast and host-only.
+# The host-only suites — rocisa_tests, and the non-GPU part of Tensile/Tests/unit,
+# plus the C++ tensilelite/tests gtest — run on CPU-only Component CI lanes
+# (component-ci-rocisa.yml + component-ci-tensilelite-{unit,gtest,coverage}.yml),
+# NOT here. So every TheRock tier below runs only the GPU-legit work: the subtile
+# GPU unit tests (marker `gpu`) plus common GEMM. Subtile tests `skip` until a
+# GPU runner for the target arch is available.
 #
 # test_paths are relative to the installed component root
 # (share/hipblaslt/tensilelite/), which is the pytest working directory.
 
 test_categories:
-  # The unit categories run a partial slice of the suite (quick/standard exclude
-  # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
-  # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
+  # These tiers run only the GPU slice of the unit suite, so syrupy would flag the
+  # un-exercised (host-only) snapshots as failures; `--snapshot-warn-unused`
+  # downgrades those to warnings instead of errors.
   quick:
-    description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
+    description: "Subtile GPU smoke (TensileLite unit, GPU only)"
     test_paths:
-      - "rocisa_tests"
       - "Tensile/Tests/unit"
-    exclude_markers:
+    pytest_markers:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
@@ -45,37 +41,52 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
-    test_paths:
-      - "rocisa_tests"
-      - "Tensile/Tests/unit"
-    exclude_markers:
-      - "gpu"
-    pytest_args:
-      - "--snapshot-warn-unused"
+    description: "Pre-checkin (subtile GPU unit + common GEMM)"
     labels:
       - "standard"
       - "pr"
       - "precheckin"
+    runs:
+      - name: "unit"
+        description: "TensileLite subtile GPU unit tests"
+        test_paths:
+          - "Tensile/Tests/unit"
+        pytest_markers:
+          - "gpu"
+        pytest_args:
+          - "--snapshot-warn-unused"
+      - name: "common"
+        description: "Common GEMM tests on GPU via the prebuilt client"
+        test_paths:
+          - "Tensile/Tests/common"
+        pytest_markers:
+          - "{AMDGPU_TARGETS}"
+        parallel_workers: 16
+        pytest_args:
+          - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+          - "--global-parameters=LibraryFormat='msgpack'"
+          - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
 
-  # comprehensive/full mix two suites needing different pytest invocations — unit
-  # (incl. GPU) vs common GEMM (`-m <arch>` + prebuilt-client) — which one `-m`
-  # expression can't express. So they use `runs:` sub-runs: pytest_runner.py runs
-  # each independently and aggregates (run-all, not fail-fast), one JUnit per
-  # sub-run. `{AMDGPU_TARGETS}` is substituted at runtime with the concrete gfx
-  # target (from AMDGPU_TARGETS env, falling back to AMDGPU_FAMILIES).
+  # standard/comprehensive/full mix two suites needing different pytest invocations
+  # — subtile GPU unit (`-m gpu`) vs common GEMM (`-m <arch>` + prebuilt-client) —
+  # which one `-m` expression can't express. So they use `runs:` sub-runs:
+  # pytest_runner.py runs each independently and aggregates (run-all, not
+  # fail-fast), one JUnit per sub-run. `{AMDGPU_TARGETS}` is substituted at runtime
+  # with the concrete gfx target (from AMDGPU_TARGETS env, falling back to
+  # AMDGPU_FAMILIES).
   comprehensive:
-    description: "Nightly comprehensive (rocisa + unit incl. GPU, + common GEMM)"
+    description: "Nightly comprehensive (subtile GPU unit + common GEMM)"
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
     runs:
       - name: "unit"
-        description: "rocisa + TensileLite unit, incl. GPU"
+        description: "TensileLite subtile GPU unit tests"
         test_paths:
-          - "rocisa_tests"
           - "Tensile/Tests/unit"
+        pytest_markers:
+          - "gpu"
         pytest_args:
           - "--snapshot-warn-unused"
       - name: "common"
@@ -91,16 +102,17 @@ test_categories:
           - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
 
   full:
-    description: "Complete suite (rocisa + unit incl. GPU, + common GEMM)"
+    description: "Complete suite (subtile GPU unit + common GEMM)"
     labels:
       - "full"
       - "all"
     runs:
       - name: "unit"
-        description: "rocisa + TensileLite unit, incl. GPU"
+        description: "TensileLite subtile GPU unit tests"
         test_paths:
-          - "rocisa_tests"
           - "Tensile/Tests/unit"
+        pytest_markers:
+          - "gpu"
         pytest_args:
           - "--snapshot-warn-unused"
       - name: "common"
