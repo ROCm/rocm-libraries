@@ -440,3 +440,11 @@ floors listed in ADR 0018. The tolerance remains 1 percentage point.
 config-driven kernel's name and return code. This makes a change in instruction
 kinds observable while ignoring known register, label, count, and order
 variation.
+
+## D33 — Reject zero-width MX local reads before code generation
+
+**ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
+
+**Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
+when an M-major local read is narrower than one scale block. Remove three tests
+that counted code reached only before the previous code-generation exception.
