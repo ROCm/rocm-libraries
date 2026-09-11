@@ -1098,9 +1098,12 @@ class StreamK(Component):
         globalLabel = Label(writer.labels.getNameInc("SK_PeerGlobal"), "")
         doneLabel = Label(writer.labels.getNameInc("SK_PeerDone"), "")
 
-        # Divergence site 2 of 3. This sits inside the fixup peer loop, so the
-        # test costs 1 SALU per peer -- negligible against the SMEM flag spin
-        # that dominates that loop. Deliberately NOT hoisted out of the loop.
+        # Divergence site 2 of 3, and the only one inside a runtime loop: it
+        # runs once per peer of the fixup loop. It is not hoisted out, because
+        # the only way to do that is to duplicate the loop (whose body is the
+        # whole store path) -- an I-cache cost far larger than the test. The
+        # arms below are ordered instead so the USO-off peer falls through to
+        # doneLabel and pays one taken branch rather than two.
         self.emitUsoBranchToGlobal(writer, kernel, module, globalLabel.getLabelName(),
                                    "USO on? (bit 29 of MagicShiftItersPerTile); off -> historical global peer size")
 
@@ -1122,21 +1125,11 @@ class StreamK(Component):
         writer.vgprPool.checkIn(tmpVgpr)
         writer.releaseStreamKConstSgpr(sSkt)
         writer.releaseStreamKConstSgpr(sGrid)
+        # The global (USO-off) arm is emitted LAST so it falls through to
+        # doneLabel: a USO-off peer then pays one taken branch here instead of
+        # two, per peer iteration of the fixup loop.
         module.add(SCmpEQU32(src0=sgpr(sIterCount), src1=0, comment="skGrid % skTiles == 0?"))
-        module.add(SCBranchSCC1(labelName=perTileLabel.getLabelName(), comment="per-tile peer size"))
-        module.add(SBranch(labelName=globalLabel.getLabelName(), comment="ragged -> global peer"))
-        module.add(noTilesLabel)
-        module.add(globalLabel)
-        sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-        module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=1, comment="Add extra iter"))
-        module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters),
-                             comment="Check if next WG had an extra iteration"))
-        module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr(sIpw),
-                               comment="Select correct number of iterations for next WG"))
-        writer.releaseStreamKConstSgpr(sIpw)
-        module.add(SBranch(labelName=doneLabel.getLabelName(), comment="skip per-tile peer"))
+        module.add(SCBranchSCC0(labelName=globalLabel.getLabelName(), comment="ragged -> global peer"))
         module.add(perTileLabel)
         # Recompute F (gate remainder overwrote sIterCount). Named consts on
         # non-gfx1250; temps on gfx1250, released before W/I are acquired.
@@ -1176,6 +1169,21 @@ class StreamK(Component):
         module.add(SCSelectB32(dst=sgpr(sIterCount), src0=1, src1=0, comment="extra iter within tile"))
         module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=sgpr(sIterCount),
                            comment="chunk = W + (s < remI)"))
+        writer.releaseStreamKConstSgpr(sIpw)
+        module.add(SBranch(labelName=doneLabel.getLabelName(), comment="skip global peer"))
+        # Global (historical) peer size. Reached only by branch -- from the USO
+        # test, from skTiles == 0, or from a ragged grid -- so the per-tile arm's
+        # writes to sIterCount / sSkExtraIters never reach it.
+        module.add(noTilesLabel)
+        module.add(globalLabel)
+        sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
+        if skConstsInVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
+        module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr(sIpw), src1=1, comment="Add extra iter"))
+        module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr(sSkExtraIters),
+                             comment="Check if next WG had an extra iteration"))
+        module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr(sIpw),
+                               comment="Select correct number of iterations for next WG"))
         writer.releaseStreamKConstSgpr(sIpw)
         module.add(doneLabel)
 

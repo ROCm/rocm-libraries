@@ -5040,14 +5040,28 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        // Same predicate findTopSolutions uses: problem, task, StreamK
-        // dynamic-queue, and uniform summation order (Synchronizer pointer
-        // skipped at selection; launch still throws if it is missing).
-        if(!TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                           task,
-                                           *hardware,
-                                           *solution,
-                                           tensile_prob))
+        // Under USO, the same predicate findTopSolutions uses: problem, task,
+        // StreamK dynamic-queue, and uniform summation order (Synchronizer
+        // pointer skipped at selection; launch still throws if it is missing).
+        // With USO off this must reproduce the pre-USO check, which was
+        // problemPredicate && taskPredicate as two separate tests.
+        // streamKDynamicQueueSupported() stays unconditional.
+        bool swMatch;
+        if(tensile_prob.getParams().uniformSummationOrder())
+        {
+            swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                                     task,
+                                                     *hardware,
+                                                     *solution,
+                                                     tensile_prob);
+        }
+        else
+        {
+            swMatch = (*solution->problemPredicate)(tensile_prob)
+                      && (*solution->taskPredicate)(task)
+                      && solution->streamKDynamicQueueSupported(tensile_prob, *hardware);
+        }
+        if(!swMatch)
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {

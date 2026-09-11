@@ -115,10 +115,25 @@ namespace TensileLite
                 auto rv = solutions.at(index);
 
                 Task task(hardware, problem, *rv);
-                bool predicateMatch
-                    = (*rv->hardwarePredicate)(hardware)
-                      && softwarePredicate(
-                          SolutionLibrarySearchType::DEFAULT, task, hardware, *rv, problem);
+                // With uniform summation order OFF this must reproduce the
+                // pre-USO check, which was problemPredicate && taskPredicate &&
+                // hardwarePredicate. The softwarePredicate() reshape came in
+                // with the USO stack, so it stays behind the USO check.
+                // streamKDynamicQueueSupported() stays unconditional.
+                bool predicateMatch;
+                if(problem.getParams().uniformSummationOrder())
+                {
+                    predicateMatch
+                        = (*rv->hardwarePredicate)(hardware)
+                          && softwarePredicate(
+                              SolutionLibrarySearchType::DEFAULT, task, hardware, *rv, problem);
+                }
+                else
+                {
+                    predicateMatch = (*rv->problemPredicate)(problem) && (*rv->taskPredicate)(task)
+                                     && (*rv->hardwarePredicate)(hardware)
+                                     && rv->streamKDynamicQueueSupported(problem, hardware);
+                }
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -151,13 +166,28 @@ namespace TensileLite
                 if(myPerformance > bestPerformance)
                 {
                     Task task(hardware, problem, *(row.second));
-                    bool predicateMatch
-                        = (*row.second->hardwarePredicate)(hardware)
-                          && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                               task,
-                                               hardware,
-                                               *(row.second),
-                                               problem);
+                    // See the note in the exact-match path above: the
+                    // softwarePredicate() reshape is a USO-stack addition and
+                    // stays behind the USO check;
+                    // streamKDynamicQueueSupported() stays unconditional.
+                    bool predicateMatch;
+                    if(problem.getParams().uniformSummationOrder())
+                    {
+                        predicateMatch = (*row.second->hardwarePredicate)(hardware)
+                                         && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                              task,
+                                                              hardware,
+                                                              *(row.second),
+                                                              problem);
+                    }
+                    else
+                    {
+                        predicateMatch
+                            = (*row.second->problemPredicate)(problem)
+                              && (*row.second->taskPredicate)(task)
+                              && (*row.second->hardwarePredicate)(hardware)
+                              && row.second->streamKDynamicQueueSupported(problem, hardware);
+                    }
 
                     if(debug)
                     {
