@@ -78,7 +78,7 @@ ProblemType:
   StridedBatched: true
   SupportUserArgs: true
   SwizzleTensorA: false
-  SwizzleTensorB: false
+  SwizzleTensorB: true
   TLUA: false
   TLUB: false
   TLUMXSA: false
