@@ -69,7 +69,7 @@ SupportObservation
         return {};
     }
 
-    if(!session.buildError.empty())
+    if(session.buildFailed)
     {
         // Silent on purpose: runComparison() reports this same build failure as the
         // test's outcome, and one fault deserves one message. NOT_QUERIED rather
@@ -210,7 +210,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
 std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
     const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
-    if(!session.buildError.empty())
+    if(session.buildFailed)
     {
         HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
                                                                              << session.buildError);
@@ -267,7 +267,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
     // A graph that would not load is the engine's problem, at every level, and it is
     // the reason nothing below can run. Checked once, here, so the rungs and the
     // modes can all assume a usable session.
-    if(!session.buildError.empty())
+    if(session.buildFailed)
     {
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::ENGINE,
