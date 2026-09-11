@@ -448,3 +448,11 @@ variation.
 **Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
 when an M-major local read is narrower than one scale block. Remove three tests
 that counted code reached only before the previous code-generation exception.
+
+## D34 — Select config problem groups explicitly
+
+**ADR:** [`adr/0021-select-config-problem-groups.md`](adr/0021-select-config-problem-groups.md)
+
+**Decision:** Include a `BenchmarkProblems` index in every set-cover case and
+pass it through the config-driven harness. This records which problem group is
+measured when a shared YAML contains more than one group.

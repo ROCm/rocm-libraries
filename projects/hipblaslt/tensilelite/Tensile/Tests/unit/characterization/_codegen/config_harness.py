@@ -120,8 +120,10 @@ def _load_config(config_path):
     return LibraryIO.read(str(resolve_tensile_path(config_path)))
 
 
-def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_solutions=None):
-    """Build ``Solution`` objects from a config's first BenchmarkProblems entry.
+def _solutions_from_config_unguarded(
+    config_path, assembler, isaInfoMap, limit_solutions=None, problem_index=0
+):
+    """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
     Walks the real config-driven path: ``BenchmarkProcess`` parses the
     ProblemType + ProblemSizeGroup, ``constructForkPermutations`` enumerates the
@@ -139,9 +141,14 @@ def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_s
     benchmarkProblems = config["BenchmarkProblems"]
     if not benchmarkProblems:
         return []
+    if not 0 <= problem_index < len(benchmarkProblems):
+        raise IndexError(
+            f"BenchmarkProblems index {problem_index} is out of range for "
+            f"{config_path} ({len(benchmarkProblems)} entries)"
+        )
 
     # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig].
-    problemTypeConfig, problemSizeGroupConfig = benchmarkProblems[0][0], benchmarkProblems[0][1]
+    problemTypeConfig, problemSizeGroupConfig = benchmarkProblems[problem_index][:2]
 
     debugConfig = makeDebugConfig(config.get("GlobalParameters", {}))
 
@@ -168,18 +175,22 @@ def _solutions_from_config_unguarded(config_path, assembler, isaInfoMap, limit_s
     return solutions
 
 
-def solutions_from_config(config_path, arch=_DEFAULT_ARCH, limit_solutions=None):
+def solutions_from_config(
+    config_path, arch=_DEFAULT_ARCH, limit_solutions=None, problem_index=0
+):
     """Return fully-derived ``Solution`` objects for ``config_path`` (CPU-only).
 
     Runs under global-state isolation so it does not leak into other tests.
     """
     assembler, iim = _toolchain_for(arch)
     with _isolated_globals_with_isa(iim):
-        return _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions)
+        return _solutions_from_config_unguarded(
+            config_path, assembler, iim, limit_solutions, problem_index
+        )
 
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
-                             splitGSU=False, cluster_dim=None):
+                             splitGSU=False, cluster_dim=None, problem_index=0):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -206,7 +217,13 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     results = []
     with _isolated_globals_with_isa(iim):
-        sols = _solutions_from_config_unguarded(config_path, assembler, iim, limit_solutions=limit)
+        sols = _solutions_from_config_unguarded(
+            config_path,
+            assembler,
+            iim,
+            limit_solutions=limit,
+            problem_index=problem_index,
+        )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:
             want = list(cluster_dim)
@@ -379,9 +396,12 @@ def assert_config_emits_golden(
     limit=8,
     all_ok=True,
     validate_source=False,
+    problem_index=0,
 ):
     """Emit one configuration once and check its shared smoke-test contract."""
-    results = emit_kernels_from_config(config_path, limit=limit, arch=arch)
+    results = emit_kernels_from_config(
+        config_path, limit=limit, arch=arch, problem_index=problem_index
+    )
     assert results, f"expected >=1 kernel, got {len(results)}"
     if all_ok:
         assert all(err == 0 for (_base, _src, err) in results)

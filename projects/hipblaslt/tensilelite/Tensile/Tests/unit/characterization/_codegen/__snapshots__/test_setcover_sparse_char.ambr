@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_setcover_sparse_emits_golden[bf16_activation]
+# name: test_setcover_sparse_emits_golden[bf16_activation-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_BBS_BH_SPAML0_A_S_UserArgs_MT32x3L0dPXbKsLC_Ct9kjoriMWzNIXuDoVkkbso8X89ozoGs=',
@@ -13,7 +13,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[bf16_gate_r]
+# name: test_setcover_sparse_emits_golden[bf16_gate_r-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPBML0_A_S_SAV_GFj0ljWtgm-H1dwJl75KvtQwVPduX2mIB1ghvI8rjZWQ=',
@@ -37,7 +37,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[f8_gate_r]
+# name: test_setcover_sparse_emits_golden[f8_gate_r-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_F8SS_BH_Bias_FDMN_SPBML0_A_S_SAV_6HNO56-4bo60qSC_BlrGmWcHEak6uXLOS4wwJfT8IC8=',
@@ -61,7 +61,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[fp16_gate_r]
+# name: test_setcover_sparse_emits_golden[fp16_gate_r-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_FDMN_SPBML0_A_S_SAV_GEXykNb7gQvWjmns9UG56aaCs1sAGdv_nm9l_s6O8tOw=',
@@ -85,7 +85,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[i8_activation]
+# name: test_setcover_sparse_emits_golden[i8_activation-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_I8I8S_BH_SPAML0_A_S_UserArgs_MT32rfAgKeOePH3X66KIdbHLzRpDxCnq7mRR3sMcPNiJ4Ec=',
@@ -94,7 +94,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_bf8n]
+# name: test_setcover_sparse_emits_golden[spmm_bf8n-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_B8NB8NS_BH_Bias_FDMN_SPAML0_A_S_S9GJViBfvfPTPz3GsrCtnvj73EriBDvB6d2KgPiE4djc=',
@@ -113,7 +113,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_dtl]
+# name: test_setcover_sparse_emits_golden[spmm_dtl-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPAML0_A_S_SAV1mZ38ZI7Tl25ae_NmjRjfRS6PRPe8EH56lgor8gLkCs=',
@@ -142,7 +142,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_fp16_mi16]
+# name: test_setcover_sparse_emits_golden[spmm_fp16_mi16-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_FDMN_SPAML0_A_S_SAV_UtrwP6WM2xKnT8MkMpI65OudFl0BTB0OmhPclCjT3cS8=',
@@ -151,7 +151,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_fp16_ml1]
+# name: test_setcover_sparse_emits_golden[spmm_fp16_ml1-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_SPAML1_UserArgs_MT16x16x64bips_oFULLSAOOy74IpZOWp_eq3hEAtSELtykaK8AmQ=',
@@ -165,7 +165,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_i8_mi16]
+# name: test_setcover_sparse_emits_golden[spmm_i8_mi16-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPAML0_A_S_SAV9R0YJGombcX4cIfZwSiW2vwvprY6YP4tR8UfUsjhowU=',
@@ -179,7 +179,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_i8is]
+# name: test_setcover_sparse_emits_golden[spmm_i8is-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_I8IS_BH_Bias_S_FDMN_SPAML0_A_S_SAUtxX6I-6Na0naMXqvQjFBAClm-TyXF3VSW2RFMEnbqY=',
@@ -198,7 +198,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_ldstr]
+# name: test_setcover_sparse_emits_golden[spmm_ldstr-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_HHS_BH_Bias_FDMN_SPAML0_A_S_SAV_U0Z8yIy6I4c9NUBE2OibHO7l9Kcsq9mElEsbByf6u2sU=',
@@ -242,7 +242,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_tdm_all]
+# name: test_setcover_sparse_emits_golden[spmm_tdm_all-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_HSS_BH_SPAML0_UserArgs_MT32x32x12O4Tje1fAk5juRi0h5aLpEwzAQ96DN2yPG5_TIkuTUac=',
@@ -286,7 +286,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_tdm_gl2prefetch]
+# name: test_setcover_sparse_emits_golden[spmm_tdm_gl2prefetch-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_HSS_BH_SPAML0_UserArgs_MT32x32x1223xZ7eaP_8njJqcybDi6109bFIpScv2WAxkvplM_QGs=',
@@ -330,7 +330,7 @@
     }),
   ])
 # ---
-# name: test_setcover_sparse_emits_golden[spmm_vw_lg_one]
+# name: test_setcover_sparse_emits_golden[spmm_vw_lg_one-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bljk_HHS_BH_SPAML0_A_S_UserArgs_MT256x4YN-Im7yD_FxlqLUu6jb-qGikGcQG7INX2Sj8Ugutr0=',

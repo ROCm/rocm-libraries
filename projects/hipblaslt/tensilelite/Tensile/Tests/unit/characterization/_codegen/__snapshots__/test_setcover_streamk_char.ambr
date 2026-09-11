@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_setcover_streamk_emits_golden[sk_bgemm_tdm_split]
+# name: test_setcover_streamk_emits_golden[sk_bgemm_tdm_split-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x16x128_MI16xuSAG9_I2cC2UfcQCPFI9656aQGCjuIzqG6zShin_MWA=',
@@ -33,7 +33,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_dynamic]
+# name: test_setcover_streamk_emits_golden[sk_dynamic-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x328htLniwjbSahc-UTIpWFlLkSboZ3AQaoWf63uJYDNi4=',
@@ -77,7 +77,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_dynamic_work_stealing]
+# name: test_setcover_streamk_emits_golden[sk_dynamic_work_stealing-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x328htLniwjbSahc-UTIpWFlLkSboZ3AQaoWf63uJYDNi4=',
@@ -101,7 +101,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_halfplr_f8gemm_tdm]
+# name: test_setcover_streamk_emits_golden[sk_halfplr_f8gemm_tdm-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MmKVnxK-u_g1pHSWKL6hapXrBK_eOSoBv9tNgkQ3xv0M=',
@@ -145,7 +145,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_hybrid_work_stealing]
+# name: test_setcover_streamk_emits_golden[sk_hybrid_work_stealing-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32eiPyBJECgdc9hwX_0QH0bTuftc0qyZVlZ77vS-A7V0A=',
@@ -169,7 +169,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_mx32f4_quick]
+# name: test_setcover_streamk_emits_golden[sk_mx32f4_quick-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_Bias_HADnuBCJ8jtRwSM05tGnwgX3QEmd-mkvOtpqNiE1Dem9U=',
@@ -183,7 +183,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap]
+# name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgATVUEfpGlbky548S9SuI9URZn1FskS_YBKsFfbkpaHU=',
@@ -207,7 +207,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap_prefetchgl2]
+# name: test_setcover_streamk_emits_golden[sk_mxf4gemm_pap_prefetchgl2-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArg4BaF4fxPGIqLy7pLojdCIw_zbMGyn3nuwN7-9WKzKYE=',
@@ -251,7 +251,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_mxf8_force_dp_only_halfplr_tdm_pap]
+# name: test_setcover_streamk_emits_golden[sk_mxf8_force_dp_only_halfplr_tdm_pap-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F8F8S_MXAE8B32_MXBE8B32_BH_UserAr2PU1TTKpmCcpZMzNQDUkNWvjAJG0o-x8WlPDgneTUFw=',
@@ -275,7 +275,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_mxf8gemm_tdm_split]
+# name: test_setcover_streamk_emits_golden[sk_mxf8gemm_tdm_split-problem0]
   list([
     dict({
       'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B16_MXBE8B16_BH_UserArgJ38aDc6jHBXCfNd-RprnMgIQ1tTz5PmI4QepRcMAkwA=',
@@ -289,7 +289,7 @@
     }),
   ])
 # ---
-# name: test_setcover_streamk_emits_golden[sk_sgemm_pap]
+# name: test_setcover_streamk_emits_golden[sk_sgemm_pap-problem0]
   list([
     dict({
       'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x163pFwONawYV_jb8GOPnT6Hr_FjbZvP4lRAuaFw1sDdr4=',

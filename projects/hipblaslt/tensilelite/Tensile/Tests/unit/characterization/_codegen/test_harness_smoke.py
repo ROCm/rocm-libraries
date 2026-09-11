@@ -22,7 +22,7 @@ from codegen_harness import (
     canonicalize_asm,
     emit_kernels_from_logic,
 )
-from config_harness import emit_kernels_from_config, golden_digest
+from config_harness import emit_kernels_from_config, golden_digest, solutions_from_config
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -46,6 +46,8 @@ _CONFIG = os.path.join(
     "gfx950",
     "subtile3_gr_variants.yaml",
 )
+
+_MULTI_PROBLEM_CONFIG = "Tensile/Tests/common/gemm/use_beta_false.yaml"
 
 
 def _pin_rocisa(arch, wavefront):
@@ -127,6 +129,19 @@ def test_config_golden_digest_tracks_instructions_but_not_order():
 
     assert golden_digest([("kernel", reordered, 0)], include_source=True) == expected
     assert golden_digest([("kernel", wrong, 0)], include_source=True) != expected
+
+
+def test_config_harness_selects_problem_entry():
+    first = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=0
+    )
+    second = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=1
+    )
+
+    assert first and second
+    assert first[0]["ProblemType"]["UseScaleCD"] is False
+    assert second[0]["ProblemType"]["UseScaleCD"] is True
 
 
 def test_emit_golden_digest(snapshot):
