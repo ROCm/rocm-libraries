@@ -22,6 +22,22 @@ class TheRockMatrixTest(unittest.TestCase):
         )
         self.assertTrue(blas_entry["run_rocjitsu_race_check"])
 
+    def test_collect_projects_to_run_for_nested_tensilelite_subtree(self):
+        # projects/hipblaslt/tensilelite is a registered nested subtree
+        # (repos-config.json), distinct from projects/hipblaslt in change
+        # detection, but must still behave like a hipblaslt change here: same
+        # "blas" bucket, same sparselt activation, same rocjitsu selection.
+        subtrees = ["projects/hipblaslt/tensilelite"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        blas_entry = project_to_run[0]
+        self.assertIn(
+            "hipsparselt",
+            blas_entry["projects_to_test"].split(","),
+        )
+        self.assertTrue(blas_entry["run_rocjitsu_race_check"])
+
     def test_rocjitsu_race_check_does_not_run_for_rocblas_only(self):
         project_to_run = therock_matrix.collect_projects_to_run(["projects/rocblas"])
         self.assertEqual(len(project_to_run), 1)

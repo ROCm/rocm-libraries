@@ -74,34 +74,61 @@ function(hipconv_add_arch_lib name)
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
-    # Position-independent so the objects can link into libMIOpen.so
+    # Position-independent so the objects can link into libMIOpen.so.
+    #
+    # hipconv_set_stand_in_offload sets HIP_ARCHITECTURES, once every architecture has
+    # declared its TARGETS. HIPCONV_ARCH_SERVED_GPUS carries this one's intersection to it.
+    # The source list is the same in every build, so only the offload bundles vary, as
+    # RFC0008 sharding requires. See docs/multi-arch-convergence.md.
     set_target_properties(hipconv_arch_${name} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         HIPCONV_ARCH_NAME ${name}
         HIPCONV_ARCH_TARGETS "${ARG_TARGETS}"
+        HIPCONV_ARCH_NPI "${ARG_NPI}"
+        HIPCONV_ARCH_SERVED_GPUS "${served_gpus}"
     )
-    # Emit device code only for the GPUs this architecture serves.
-    #
-    # Which sources compile never varies, so the host code is the same in every
-    # build and only the offload bundles differ, as RFC0008 sharding requires. An
-    # architecture the build serves no GPU for still needs a non-empty
-    # HIP_ARCHITECTURES; it takes the first GPU in the build and its bundles go
-    # unused. See docs/multi-arch-convergence.md.
-    set(offload_gpus "${served_gpus}")
-    if(NOT offload_gpus AND CMAKE_HIP_ARCHITECTURES)
-        list(GET CMAKE_HIP_ARCHITECTURES 0 offload_gpus)
-    endif()
-    if(offload_gpus)
-        set_target_properties(hipconv_arch_${name} PROPERTIES
-            HIP_ARCHITECTURES "${offload_gpus}"
-        )
-    endif()
     # The shipped kernels' disassembly is what hot_loop_check.py reads, so the collection
     # has to run after this library rather than only after the tests. It already did by
     # accident, since every test links this; saying so keeps a library-only build honest.
     if(TARGET collect-asm)
         add_dependencies(collect-asm hipconv_arch_${name})
     endif()
+endfunction()
+
+# Set each architecture's offload targets: the GPUs it serves, or a stand-in.
+#
+# CMake would otherwise default HIP_ARCHITECTURES to the build's whole GPU list. The
+# stand-in must be a GPU that one of these architectures declares. NPI architectures do
+# not count; their GPUs are bring-up parts. An entry guard folds on
+# __builtin_amdgcn_is_invocable, which can be true on a bring-up GPU whose backend cannot
+# select the intrinsic, and the compile then dies. See docs/architecture-guards.md.
+#
+# Call once, after every hipconv_add_arch_lib.
+function(hipconv_set_stand_in_offload arch_targets)
+    set(declared "")
+    foreach(arch_target IN LISTS arch_targets)
+        get_target_property(npi ${arch_target} HIPCONV_ARCH_NPI)
+        if(npi)
+            continue()
+        endif()
+        get_target_property(gpus ${arch_target} HIPCONV_ARCH_TARGETS)
+        list(APPEND declared ${gpus})
+    endforeach()
+
+    hipconv_intersect_gpus("${declared}" declared_in_build)
+    if(declared_in_build)
+        list(GET declared_in_build 0 stand_in)
+    else()
+        set(stand_in "${HIPCONV_BASELINE_GPU}")
+    endif()
+
+    foreach(arch_target IN LISTS arch_targets)
+        get_target_property(offload_gpus ${arch_target} HIPCONV_ARCH_SERVED_GPUS)
+        if(NOT offload_gpus)
+            set(offload_gpus "${stand_in}")
+        endif()
+        set_target_properties(${arch_target} PROPERTIES HIP_ARCHITECTURES "${offload_gpus}")
+    endforeach()
 endfunction()
 
 function(hipconv_autoshard)
