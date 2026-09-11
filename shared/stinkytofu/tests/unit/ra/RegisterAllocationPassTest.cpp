@@ -26,11 +26,13 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/transforms/asm/ra/LegacyColoring.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
@@ -473,4 +475,73 @@ TEST_F(RegisterAllocationPassTest, ShadowReportIncludesRegionPeak) {
 
     ASSERT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
     EXPECT_TRUE(contains(report, "regionPeak=")) << report;
+}
+
+namespace {
+
+/// `v_wmma_scale16 dst, a, b, 0, scaleA, scaleB`. Its two scale fields select
+/// no s_set_vgpr_msb slot, so they reach the first bank only.
+StinkyInstruction* createWmmaScale16(BasicBlock* bb, int dst, int a, int b, int scaleA,
+                                     int scaleB) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister(0));
+    wmma->addSrcReg(StinkyRegister("v", scaleA, 2));
+    wmma->addSrcReg(StinkyRegister("v", scaleB, 2));
+    return wmma;
+}
+
+/// A scale operand the producer left at v300, which no bank selector can name,
+/// defined in the function so that a policy is free to move it.
+StinkyInstruction* outOfReachScaleOperand(Function& func, BasicBlock* entry) {
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    for (int i = 0; i < 2; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 300 + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
+    return createWmmaScale16(entry, /*dst=*/100, /*a=*/110, /*b=*/120, /*scaleA=*/300,
+                             /*scaleB=*/130);
+}
+
+}  // namespace
+
+TEST_F(RegisterAllocationPassTest, OnlyAllocateBringsAnOutOfReachScaleOperandBackIntoTheBank) {
+    // The case a hold cannot fix, and the reason the Allocate policy exists.
+    //
+    // Hold keeps whatever register the producer chose, which is only right while
+    // the producer chooses reachable ones. Asked to freeze v300, a register no
+    // selector can name, it now refuses instead: the ceiling is collected under
+    // either policy, so the contradiction is caught rather than emitted. That is
+    // as far as holding can get, since it has no other register to offer.
+    //
+    // Allocate owes the producer nothing. It places the value under the ceiling
+    // like any other constrained block, which brings it back into the bank.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = outOfReachScaleOperand(*func, entry);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const std::vector<StinkySSAValue*> scale = ssaSourceUnits(*wmma, 3);
+    ASSERT_EQ(scale.size(), 2u);
+    ASSERT_NE(scale[0], nullptr);
+    const SSAValueID outOfReach = scale[0]->valueId();
+
+    RegisterAllocationOptions options;
+    options.allocator = "greedy-compact";
+    options.allocate = RegClassSet::only(RegType::V);
+
+    GreedyAllocator allocator;
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Hold;
+    Expected<AllocationResult> held = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(held.hasError()) << "holding an unreachable register cannot be honoured";
+    EXPECT_TRUE(contains(held.getError(), "v300")) << held.getError();
+
+    options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+    Expected<AllocationResult> allocated = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(allocated.hasValue()) << allocated.getError();
+    EXPECT_LT(allocated->assignmentOf(outOfReach).idx, kVgprBankSize) << allocated->toString();
 }
