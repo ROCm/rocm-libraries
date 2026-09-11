@@ -31,6 +31,7 @@ namespace stinkytofu {
 // One anchor per allocator TU. Adding an allocator? Add its anchor here.
 void anchorLegacyIdentityAllocator();
 void anchorGreedyAllocator();
+void anchorFreedomOrderedGreedyAllocator();
 
 struct AllocatorRegistry::Registry {
     std::unordered_map<std::string, Factory> factories;
@@ -67,6 +68,7 @@ std::vector<std::string> AllocatorRegistry::registeredAllocatorNames() {
 void AllocatorRegistry::registerAllAllocators() {
     anchorLegacyIdentityAllocator();
     anchorGreedyAllocator();
+    anchorFreedomOrderedGreedyAllocator();
 }
 
 }  // namespace stinkytofu

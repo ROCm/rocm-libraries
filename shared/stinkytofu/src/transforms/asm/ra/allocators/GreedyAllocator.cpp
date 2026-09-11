@@ -24,12 +24,14 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "GreedyPlacement.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -112,32 +114,6 @@ class OffsetUnion {
     std::vector<int64_t> offset_;
 };
 
-struct Member {
-    SSAValueID value = kInvalidSSAValueID;
-    uint32_t offset = 0;
-};
-
-/// One block of values placed as a unit, each at its own fixed offset.
-struct Block {
-    RegType regClass = RegType::UNKNOWN;
-    std::vector<Member> members;
-    uint32_t width = 1;
-    double weight = 0.0;
-    /// Smallest member ID, so ordering is stable when weights tie.
-    SSAValueID leader = kInvalidSSAValueID;
-    /// Base the original registers imply, tried before any first-fit candidate.
-    std::optional<uint32_t> hintBase;
-    /// Must land on hintBase rather than prefer it. Null when free to move;
-    /// otherwise the reason, for the diagnostic if that register is unusable.
-    const char* pinReason = nullptr;
-    /// Tightest index any member may occupy, when an operand field limits one.
-    /// Set makes this a capped block, which is placed before the free queue.
-    std::optional<uint32_t> maxIndex;
-    uint32_t evictions = 0;
-    bool placed = false;
-    uint32_t base = 0;
-};
-
 std::string valueName(SSAValueID id) {
     return "%" + std::to_string(id);
 }
@@ -148,8 +124,8 @@ class Greedy {
     /// from. With hints the colouring reproduces the producer's numbering wherever
     /// there is room; without them placement packs from the bottom, which is the
     /// only way the high-water mark can come down.
-    Greedy(const AllocationContext& context, bool followHints)
-        : context_(context), followHints_(followHints) {}
+    Greedy(const AllocationContext& context, bool followHints, const PlacementPolicy& policy)
+        : context_(context), followHints_(followHints), policy_(policy) {}
 
     Expected<AllocationResult> run() {
         if (context_.function.ssaArena().valueCount() == 0)
@@ -253,6 +229,9 @@ class Greedy {
             for (const Member& member : block.members)
                 block.leader = std::min(block.leader, member.value);
 
+            // Before feasibility, because the ceiling bounds the base scan that
+            // both the check and placementFreedom come out of.
+            block.maxIndex = ceilingOf(block);
             if (!checkFeasible(block)) return false;
         }
         return true;
@@ -265,22 +244,49 @@ class Greedy {
     /// needs to name a rule that narrowed the search rather than blame pressure.
     struct BaseRejection {
         const AllocationRule* first = nullptr;  ///< first rule to forbid any base
-        bool everyBase = false;                 ///< no base survives at all
+        bool everyBase = false;                 ///< no rule-legal base survives
+        uint32_t legalBases = 0;                ///< how many do, before occupancy
     };
 
-    /// Only interesting when a rule is in play, so the common no-rules case does
-    /// not pay for the scan.
+    /// Highest base \p block could take, given the file and any index ceiling.
+    /// Nullopt when even base 0 would put a member out of reach.
+    std::optional<uint32_t> highestBaseFor(const Block& block) const {
+        const uint32_t indexes = context_.target.indexCount(block.regClass);
+        if (block.width == 0 || block.width > indexes) return std::nullopt;
+        uint32_t highest = indexes - block.width;
+        // The ceiling binds on the member sitting furthest from the base, so the
+        // whole range has to end at or below it.
+        if (block.maxIndex.has_value()) {
+            if (*block.maxIndex + 1 < block.width) return std::nullopt;
+            highest = std::min(highest, *block.maxIndex + 1 - block.width);
+        }
+        return highest;
+    }
+
+    /// What the rules and the ceiling leave of \p block's candidate bases.
+    ///
+    /// The count is the block's placementFreedom. It costs nothing extra: this
+    /// scan already runs once per block for checkFeasible, so counting what
+    /// survives is a branch inside a loop that was happening anyway.
     BaseRejection rejectionFor(const Block& block) const {
         BaseRejection found;
-        if (context_.rules.empty()) return found;
+        const std::optional<uint32_t> highest = highestBaseFor(block);
+        if (!highest.has_value()) return found;
 
-        const uint32_t indexes = context_.target.indexCount(block.regClass);
+        // No rule can forbid anything, so every base in range survives and there
+        // is nothing to walk.
+        if (context_.rules.empty()) {
+            found.legalBases = *highest + 1;
+            return found;
+        }
+
         found.everyBase = true;
-        for (uint32_t base = 0; base + block.width <= indexes; ++base) {
+        for (uint32_t base = 0; base <= *highest; ++base) {
             const AllocationRule* rule =
                 context_.rules.forbidsBase(block.regClass, base, block.width);
             if (rule == nullptr) {
                 found.everyBase = false;
+                ++found.legalBases;
             } else if (found.first == nullptr) {
                 found.first = rule;
             }
@@ -288,10 +294,86 @@ class Greedy {
         return found;
     }
 
+    /// What the block builder actually produced, by shape.
+    ///
+    /// Widths say how much of the function needs a run rather than a register,
+    /// and freedoms say how finely the placement order can tell those blocks
+    /// apart: an order can only separate blocks whose counts differ, so a
+    /// histogram with few distinct values is an order with few distinct
+    /// opinions. `merged` counts blocks holding more values than they are wide,
+    /// which is the signature of overlapping runs and affinity sets rather than
+    /// one tuple run.
+    std::string shapeSummary() const {
+        std::map<uint32_t, uint32_t> widths;
+        std::map<uint32_t, uint32_t> freedoms;
+        uint32_t merged = 0;
+        for (const Block& block : blocks_) {
+            if (block.regClass != RegType::V) continue;
+            ++widths[block.width];
+            ++freedoms[block.placementFreedom];
+            if (block.members.size() > block.width) ++merged;
+        }
+
+        auto render = [](const std::map<uint32_t, uint32_t>& counts) {
+            std::string text;
+            for (const auto& [key, count] : counts) {
+                if (!text.empty()) text += " ";
+                text += std::to_string(key) + "x" + std::to_string(count);
+            }
+            return text;
+        };
+        return "; v blocks by width [" + render(widths) + "], by freedom [" + render(freedoms) +
+               "], " + std::to_string(merged) + " holding more values than their width";
+    }
+
+    /// Why every base was refused, and whether the blockers could have moved.
+    ///
+    /// This is the question recoloring turns on. A block that cannot be placed
+    /// is rescuable only if the blocks sitting in its way have somewhere else to
+    /// go, and "somewhere else" is what placementFreedom measures: a blocker
+    /// freer than the block it blocks has more candidate bases to retreat to.
+    /// If the blockers are pinned, or no freer than this block, no amount of
+    /// reshuffling helps and the function needs splitting instead.
+    ///
+    /// Only built on the refusal path, so the scan costs nothing in a run that
+    /// colours.
+    std::string blockerSummary(const Block& block) const {
+        const std::optional<uint32_t> highest = highestBaseFor(block);
+        if (!highest.has_value()) return {};
+
+        uint32_t ruledOut = 0;
+        uint32_t occupied = 0;
+        std::vector<size_t> blockers;
+        for (uint32_t base = 0; base <= *highest; ++base) {
+            if (!reachableAt(block, base)) {
+                ++ruledOut;
+                continue;
+            }
+            if (availableAt(block, base)) continue;
+            ++occupied;
+            for (size_t index : occupantsAt(block, base)) {
+                if (std::find(blockers.begin(), blockers.end(), index) == blockers.end())
+                    blockers.push_back(index);
+            }
+        }
+
+        uint32_t pinned = 0;
+        uint32_t freer = 0;
+        for (size_t index : blockers) {
+            if (blocks_[index].pinReason != nullptr) ++pinned;
+            if (blocks_[index].placementFreedom > block.placementFreedom) ++freer;
+        }
+
+        return "; " + std::to_string(ruledOut) + " base(s) ruled out before occupancy, " +
+               std::to_string(occupied) + " occupied by " + std::to_string(blockers.size()) +
+               " block(s), of which " + std::to_string(pinned) + " pinned and " +
+               std::to_string(freer) + " freer than this one";
+    }
+
     /// Two members can legitimately share an offset: overlapping tuple runs force
     /// a value written before a partial overwrite onto the same register as the
     /// value that replaces it. That is only sound while their ranges are disjoint.
-    bool checkFeasible(const Block& block) {
+    bool checkFeasible(Block& block) {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
         if (indexes == 0) {
             error_ = valueName(block.leader) + " is class " + regTypeToString(block.regClass) +
@@ -305,9 +387,20 @@ class Greedy {
                      " registers this target can encode";
             return false;
         }
+        if (block.maxIndex.has_value() && *block.maxIndex + 1 < block.width) {
+            error_ = "values tied to " + valueName(block.leader) + " span " +
+                     std::to_string(block.width) +
+                     " registers but their operands cannot address "
+                     "past index " +
+                     std::to_string(*block.maxIndex);
+            return false;
+        }
+
+        const BaseRejection rejected = rejectionFor(block);
+        block.placementFreedom = rejected.legalBases;
         // A block no base can ever satisfy should name the rule rather than
         // exhaust every base and report the generic "no register is free".
-        if (const BaseRejection rejected = rejectionFor(block); rejected.everyBase) {
+        if (rejected.everyBase && rejected.first != nullptr) {
             const AllocationRule* rule = rejected.first;
             error_ = "no " + regTypeToString(block.regClass) + " base is legal for " +
                      valueName(block.leader) + ": rule " + std::string(rule->name) + " (" +
@@ -371,7 +464,6 @@ class Greedy {
             }
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
-            block.maxIndex = ceilingOf(block);
         }
     }
 
@@ -519,14 +611,11 @@ class Greedy {
         std::vector<size_t> capped;
         for (size_t index = 0; index < blocks_.size(); ++index) {
             Block& block = blocks_[index];
-            if (block.pinReason != nullptr || !block.maxIndex.has_value()) continue;
+            if (block.pinReason != nullptr || !policy_.placesEarly(block)) continue;
             capped.push_back(index);
         }
         std::sort(capped.begin(), capped.end(), [this](size_t a, size_t b) {
-            const Block& lhs = blocks_[a];
-            const Block& rhs = blocks_[b];
-            if (lhs.weight != rhs.weight) return lhs.weight > rhs.weight;
-            return lhs.leader < rhs.leader;
+            return policy_.placesBefore(blocks_[a], blocks_[b]);
         });
         for (size_t index : capped) {
             Block& block = blocks_[index];
@@ -536,20 +625,19 @@ class Greedy {
             // rather than merely full by the time this block was reached.
             error_ = "no " + regTypeToString(block.regClass) + " register at or below index " +
                      std::to_string(*block.maxIndex) + " is free for " + valueName(block.leader) +
-                     ", which its operands cannot address past";
+                     ", which its operands cannot address past (" +
+                     std::to_string(block.placementFreedom) + " legal base(s) before occupancy)" +
+                     blockerSummary(block) + shapeSummary();
             return false;
         }
 
         std::vector<size_t> queue;
         for (size_t index = 0; index < blocks_.size(); ++index) {
-            if (blocks_[index].pinReason == nullptr && !blocks_[index].maxIndex.has_value())
+            if (blocks_[index].pinReason == nullptr && !policy_.placesEarly(blocks_[index]))
                 queue.push_back(index);
         }
         std::sort(queue.begin(), queue.end(), [this](size_t a, size_t b) {
-            const Block& lhs = blocks_[a];
-            const Block& rhs = blocks_[b];
-            if (lhs.weight != rhs.weight) return lhs.weight > rhs.weight;
-            return lhs.leader < rhs.leader;
+            return policy_.placesBefore(blocks_[a], blocks_[b]);
         });
 
         uint32_t evictionBudget = static_cast<uint32_t>(blocks_.size()) * kMaxEvictionsPerBlock + 1;
@@ -564,12 +652,17 @@ class Greedy {
 
             const std::optional<uint32_t> evictBase = findEvictableBase(block);
             if (!evictBase.has_value() || evictionBudget == 0) {
-                error_ = "no " + regTypeToString(block.regClass) + " register is free for " +
-                         valueName(block.leader) +
-                         (block.width > 1 ? " and the " + std::to_string(block.width - 1) +
-                                                " register(s) tied to it"
-                                          : "") +
-                         "; splitting and spilling are not implemented";
+                error_ =
+                    "no " + regTypeToString(block.regClass) + " register is free for " +
+                    valueName(block.leader) +
+                    (block.width > 1
+                         ? " and the " + std::to_string(block.width - 1) + " register(s) tied to it"
+                         : "") +
+                    "; splitting and spilling are not implemented" +
+                    // How many bases it ever had, so a reader can tell a
+                    // full file from a shape with almost nowhere to go.
+                    " (" + std::to_string(block.placementFreedom) +
+                    " legal base(s) before occupancy)" + blockerSummary(block) + shapeSummary();
                 // A rule narrowing the search is worth naming here: without it
                 // the message blames pressure for a base a rule ruled out.
                 if (const AllocationRule* rule = rejectionFor(block).first; rule != nullptr) {
@@ -622,13 +715,12 @@ class Greedy {
         if (occupants.empty()) return false;  // tryPlace already refused this base
         for (size_t occupant : occupants) {
             const Block& other = blocks_[occupant];
-            // A capped block is as immovable as a pinned one here. Evicting it
-            // returns it to the worklist, where it is re-placed after the free
-            // queue has filled its bank -- the ordering failure, reintroduced
-            // one block at a time.
-            if (other.pinReason != nullptr || other.maxIndex.has_value() ||
-                other.weight >= block.weight || other.evictions >= kMaxEvictionsPerBlock)
+            // Pinning and the eviction cap are invariants rather than policy, so
+            // they are decided here. Whether this block has the stronger claim
+            // is the policy's question.
+            if (other.pinReason != nullptr || other.evictions >= kMaxEvictionsPerBlock)
                 return false;
+            if (!policy_.mayEvict(block, other)) return false;
         }
         return true;
     }
@@ -670,12 +762,46 @@ class Greedy {
     const AllocationContext& context_;
     PhysRegMatrix matrix_{context_.target};
     bool followHints_ = true;
+    const PlacementPolicy& policy_;
     std::vector<Block> blocks_;
     std::vector<size_t> blockIndexOf_;
     std::string error_;
 };
 
+/// Heaviest first, with capped blocks taken ahead of the queue.
+///
+/// The early phase exists because a capped block is confined to one bank that
+/// every low-packing block competes for, and weight order alone reaches it too
+/// late. freedomPolicy dissolves the phase by ordering on that fact directly.
+bool weightPlacesEarly(const Block& block) {
+    return block.maxIndex.has_value();
+}
+
+bool weightPlacesBefore(const Block& lhs, const Block& rhs) {
+    if (lhs.weight != rhs.weight) return lhs.weight > rhs.weight;
+    return lhs.leader < rhs.leader;
+}
+
+bool weightMayEvict(const Block& evictor, const Block& occupant) {
+    // A capped block is as immovable as a pinned one here. Evicting it returns
+    // it to the worklist, where it is re-placed after the queue has filled its
+    // bank -- the ordering failure, reintroduced one block at a time.
+    if (occupant.maxIndex.has_value()) return false;
+    return occupant.weight < evictor.weight;
+}
+
 }  // namespace
+
+Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, bool followHints,
+                                              const PlacementPolicy& policy) {
+    return Greedy(context, followHints, policy).run();
+}
+
+const PlacementPolicy& weightPolicy() {
+    static const PlacementPolicy policy{"weight", weightPlacesEarly, weightPlacesBefore,
+                                        weightMayEvict};
+    return policy;
+}
 
 const char* GreedyAllocator::name() const {
     return "greedy";
@@ -688,7 +814,7 @@ AllocatorCapabilities GreedyAllocator::capabilities() const {
 }
 
 Expected<AllocationResult> GreedyAllocator::allocate(const AllocationContext& context) {
-    return Greedy(context, /*followHints=*/true).run();
+    return runGreedyPlacement(context, /*followHints=*/true, weightPolicy());
 }
 
 const char* CompactingGreedyAllocator::name() const {
@@ -700,7 +826,7 @@ AllocatorCapabilities CompactingGreedyAllocator::capabilities() const {
 }
 
 Expected<AllocationResult> CompactingGreedyAllocator::allocate(const AllocationContext& context) {
-    return Greedy(context, /*followHints=*/false).run();
+    return runGreedyPlacement(context, /*followHints=*/false, weightPolicy());
 }
 
 namespace {
