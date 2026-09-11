@@ -1463,6 +1463,158 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelDoesNotRank
               "declared_order");
 }
 
+// ---- Two-layer selection: the group is half the answer ---------------------------------
+
+namespace
+{
+/// A grouped artifact over SIGNATURE, grouping on slot 0 (`$kernel.tile_m`).
+///
+/// Layer 1 is a stump preferring the large tile, so group 128 wins; layer 2 is a constant per
+/// group, so a score identifies which ensemble ran. The catalog's two kernels therefore sit in
+/// different groups, which is what lets a test tell a per-candidate group from a per-ranking one.
+Fixture writeGroupedFixture(const std::filesystem::path& dir)
+{
+    const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
+
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
+    model.setFeaturesHash(signatureHash)
+        .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()))
+        .setTrainingArches({"gfx942"})
+        .setGroupByFeatureIndex(0);
+
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec layerOne;
+    layerOne.featureIndices = {0, 0, 0};
+    layerOne.thresholds = {96.0, 0.0, 0.0};
+    layerOne.leftChildren = {1, -1, -1};
+    layerOne.rightChildren = {2, -1, -1};
+    layerOne.leafValues = {0.0, 1.0, 9.0};
+    layerOne.defaultLeft = {1, 1, 1};
+    model.addTree(layerOne);
+
+    const auto constantTree = [](double value) {
+        hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+        spec.featureIndices = {0};
+        spec.thresholds = {0.0};
+        spec.leftChildren = {-1};
+        spec.rightChildren = {-1};
+        spec.leafValues = {value};
+        spec.defaultLeft = {1};
+        return spec;
+    };
+    model.addGroup(64.0, {constantTree(3.0)});
+    model.addGroup(128.0, {constantTree(7.0)});
+    model.buildToFile((dir / "model.bin").string());
+
+    return {"model.bin", signatureHash, "max", true, "identity", SIGNATURE};
+}
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, EachCandidateReportsItsOwnGroup)
+{
+    // The property the per-candidate choice exists for. §15.2 returns the sequence so that "a
+    // winner that fails to build should fall to the runner-up", and a runner-up can sit in a
+    // different group -- so a group carried only for the winner would be wrong for exactly the
+    // case the sequence serves. Here the two candidates are in different groups by construction.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_per_candidate");
+    const auto fixture = writeGroupedFixture(dir.path());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    // Layer 1 prefers the large tile, so the 128 kernel wins and reports group 128.
+    EXPECT_EQ(scored.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(scored.front().group, 128.0);
+    // The runner-up reports its own group, not the winner's.
+    EXPECT_EQ(scored.back().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(scored.back().group, 64.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
+{
+    // The group must come from the row the model was handed, not be re-derived from the
+    // candidate's metadata: a derived value or a categorical encoding could make the two
+    // disagree, and the answer would then name a solver the model did not choose.
+    //
+    // Layer 2 emits 7.0 only for group 128, so the winner's score proves which ensemble ran,
+    // and its reported group has to match.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_agrees");
+    const auto fixture = writeGroupedFixture(dir.path());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_FALSE(scored.empty());
+    EXPECT_DOUBLE_EQ(scored.front().score, 7.0);
+    EXPECT_DOUBLE_EQ(scored.front().group, 128.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, TheGroupFeatureIsNamed)
+{
+    // A group value is a feature value: 128 is actionable only once something says it is a
+    // `kernel.tile_m`. The name is read from the adapter's slot, so it names the field the
+    // model reads rather than whatever the descriptor happens to list first.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_named");
+    const auto fixture = writeGroupedFixture(dir.path());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const auto feature = heuristic->groupFeature();
+    ASSERT_TRUE(feature.has_value());
+    EXPECT_EQ(*feature, "kernel.tile_m");
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, ASingleLayerModelReportsNoGroup)
+{
+    // The compatibility claim, and what stops a caller reading an invented group off every
+    // shipped UHD. NaN rather than a number, because every real number is a legal group value.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_ungrouped_no_group");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_FALSE(heuristic->groupFeature().has_value());
+    for(const auto& candidate : scored)
+    {
+        EXPECT_TRUE(std::isnan(candidate.group));
+    }
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
+{
+    // `static_order` decided no group, so reporting one would attribute to the model a choice
+    // it never made. The artifact is missing, which is the fallback §5 step 7 names.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_degraded");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_FALSE(scored.empty());
+    for(const auto& candidate : scored)
+    {
+        EXPECT_TRUE(std::isnan(candidate.group));
+    }
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

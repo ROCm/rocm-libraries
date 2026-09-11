@@ -387,6 +387,35 @@ public:
         return _hasDefaultModel ? "model" : "declared_order";
     }
 
+    /// The signature entry the model groups on, `$` stripped, or nothing when it decides in one
+    /// layer. Taken from the adapter's slot rather than from the descriptor's text, so it names
+    /// the field the model is actually reading.
+    std::optional<std::string> groupFeature() const override
+    {
+        if(_adapter == nullptr)
+        {
+            return std::nullopt;
+        }
+        const int slot = _adapter->groupFeatureIndex();
+        if(slot < 0 || static_cast<size_t>(slot) >= _config.featuresSignature.size())
+        {
+            return std::nullopt;
+        }
+        // A signature entry is the expression's raw JSON text, so a bare field reference
+        // arrives quoted -- `"$kernel.solver_id"` -- while some are written unquoted. Both
+        // spellings name the same field, and a caller wants the field.
+        std::string entry = _config.featuresSignature[static_cast<size_t>(slot)];
+        if(entry.size() >= 2 && entry.front() == '"' && entry.back() == '"')
+        {
+            entry = entry.substr(1, entry.size() - 2);
+        }
+        if(!entry.empty() && entry.front() == '$')
+        {
+            entry.erase(entry.begin());
+        }
+        return entry;
+    }
+
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {
@@ -492,6 +521,8 @@ private:
     {
         CandidateScore score;
         const KernelDefinition* entry;
+        /// The group this candidate belonged to, NaN when the model decides in one layer.
+        double group = std::numeric_limits<double>::quiet_NaN();
     };
 
     std::vector<ScoredKernel> rankWith(const Catalog& catalog,
@@ -533,11 +564,20 @@ private:
 
             const auto raw = _adapter->scoreBatch(rows);
 
+            // Read from the row the model was handed, not re-derived from the candidate's
+            // metadata: the two could disagree -- through a derived value or a categorical
+            // encoding -- and then the reported answer would not be the one that decided.
+            const int groupSlot = _adapter->groupFeatureIndex();
+
             std::vector<Ranked> scored;
             scored.reserve(catalog.entries.size());
             for(size_t index = 0; index < catalog.entries.size(); ++index)
             {
-                scored.push_back({scoreFromRaw(raw[index]), &catalog.entries[index]});
+                const double group
+                    = (groupSlot >= 0 && static_cast<size_t>(groupSlot) < rows[index].size())
+                          ? rows[index][static_cast<size_t>(groupSlot)]
+                          : std::numeric_limits<double>::quiet_NaN();
+                scored.push_back({scoreFromRaw(raw[index]), &catalog.entries[index], group});
             }
 
             const auto outOfRange = static_cast<size_t>(
@@ -569,7 +609,8 @@ private:
             ordered.reserve(scored.size());
             for(const auto& candidate : scored)
             {
-                ordered.push_back({candidate.entry->kernelId, candidate.score.reported});
+                ordered.push_back(
+                    {candidate.entry->kernelId, candidate.score.reported, candidate.group});
             }
 
             traceSelection(scored, context);
@@ -633,16 +674,23 @@ private:
                        << scored[i].score.reported;
         }
 
+        // §12 asks for "whether the model or a fallback decided". Where the model decides in two
+        // layers, half of what it decided is the group, and a trace naming only the winning
+        // kernel would not record it.
+        std::ostringstream group;
+        if(const auto feature = groupFeature())
+        {
+            group << " group=" << *feature << "=" << scored.front().group;
+        }
+
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
                                << _describedBy << " decided_by=" << traceDecidedBy()
                                << " winner=" << toString(scored.front().entry->kernelId)
-                               << " candidates=" << scored.size()
+                               << group.str() << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
-                               << " uhd=" << _config.uhdId
-                               << " adapter=" << _config.adapterType
-                               << " objective=" << _config.objective
-                               << " features_hash=" << _config.featuresHash
-                               << " ranked=[" << candidates.str() << "]");
+                               << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
+                               << " objective=" << _config.objective << " features_hash="
+                               << _config.featuresHash << " ranked=[" << candidates.str() << "]");
     }
 
     explicit UhdKernelHeuristic(std::string describedBy)

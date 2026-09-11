@@ -33,8 +33,21 @@ namespace hipdnn_plugin_sdk::ingestor
 /// that ordered it, winner first.
 struct ScoredKernel
 {
+    /// Which configuration. For a single-layer heuristic this is the complete answer.
     DescriptorId kernelId;
     double score;
+    /// Which group, where the heuristic decides in two layers -- the solver, for MIOpen, whose
+    /// complete answer is a solver *and* a configuration. `groupFeature()` names what the number
+    /// is; NaN means the heuristic made no such decision.
+    ///
+    /// Per candidate rather than once per ranking, because §15.2 returns the sequence so that "a
+    /// winner that fails to build should fall to the runner-up" -- and a runner-up can sit in a
+    /// different group than the winner, so an answer carried only for the winner would be wrong
+    /// for exactly the case the sequence exists to serve.
+    ///
+    /// NaN rather than a sentinel such as -1: this is a feature value, and every real number is
+    /// a legal one, so no in-band number could mean "no group was decided".
+    double group = std::numeric_limits<double>::quiet_NaN();
 };
 
 namespace detail
@@ -150,6 +163,17 @@ public:
     virtual std::string traceDecidedBy() const
     {
         return "native";
+    }
+
+    /// Which field `ScoredKernel::group` holds, or nothing when this heuristic decides in one
+    /// layer. Constant for a heuristic, so it is asked once rather than carried in every element
+    /// of every ranking.
+    ///
+    /// A caller needs it because the group is a feature *value*: the number 107 is actionable
+    /// only once something says it is a `kernel.solver_id`.
+    virtual std::optional<std::string> groupFeature() const
+    {
+        return std::nullopt;
     }
 
     /// The ranking, in §15.2's form. Overriding this rather than rank() keeps one
@@ -300,9 +324,12 @@ public:
 
         std::vector<KernelDefinition> ordered;
         ordered.reserve(scored.size());
-        for(const auto& [kernelId, _] : scored)
+        // Named member, not a structured binding: a binding must decompose every member, so it
+        // would have to be rewritten each time ScoredKernel gains one -- and this loop wants
+        // only the id.
+        for(const auto& candidate : scored)
         {
-            if(const auto found = byId.find(kernelId); found != byId.end())
+            if(const auto found = byId.find(candidate.kernelId); found != byId.end())
             {
                 ordered.push_back(*found->second);
             }

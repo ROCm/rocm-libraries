@@ -1255,3 +1255,30 @@ TEST(TestTreeDataAdapterGrouped, AnUngroupedModelBatchesExactlyAsItScores)
         EXPECT_DOUBLE_EQ(batched[i], adapter->score(rows[i]));
     }
 }
+
+TEST(TestTreeDataAdapterGrouped, TheGroupingSlotIsReadable)
+{
+    // A ranker has to report which group each candidate was in, and it must be the slot the
+    // model actually grouped on. Deriving it anywhere else -- from the descriptor's text, or
+    // from the candidate's metadata -- could disagree with what decided, and the disagreement
+    // would surface as a correct-looking answer naming the wrong solver.
+    const auto buffer = groupedBuilder().build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_EQ(adapter->groupFeatureIndex(), 0);
+}
+
+TEST(TestTreeDataAdapterGrouped, AnUngroupedModelReportsNoGroupingSlot)
+{
+    // -1, so a single-layer model cannot be read as grouping on slot 0.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2).setFeaturesHash("sha256:flat").addTree(makeLeafTree(1.0));
+    const auto buffer = builder.build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:flat");
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_EQ(adapter->groupFeatureIndex(), -1);
+}

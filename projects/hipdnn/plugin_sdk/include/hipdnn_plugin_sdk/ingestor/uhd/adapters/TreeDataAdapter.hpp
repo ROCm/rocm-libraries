@@ -77,6 +77,12 @@ public:
     /// decision across rows, and no per-row call can express it.
     std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override;
 
+    /// The slot `scoreBatch` groups on, so a ranker reports the same group the model used.
+    int groupFeatureIndex() const override
+    {
+        return _model == nullptr ? -1 : _model->group_by_feature_index();
+    }
+
     UhdAdapterType type() const override
     {
         return UhdAdapterType::TREE_DATA;

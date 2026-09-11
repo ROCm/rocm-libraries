@@ -54,6 +54,18 @@ public:
         return results;
     }
 
+    /// Which slot of the feature row identifies a candidate's group, or -1 when this adapter
+    /// does not decide in two layers.
+    ///
+    /// `scoreBatch` already makes the group decision internally; this exposes only *where* the
+    /// group is read from, so a ranker can report which group each candidate belonged to without
+    /// re-deriving it from anywhere else and risking a different answer.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    virtual int groupFeatureIndex() const
+    {
+        return -1;
+    }
+
     /// Get the adapter type.
     virtual UhdAdapterType type() const = 0;
 
