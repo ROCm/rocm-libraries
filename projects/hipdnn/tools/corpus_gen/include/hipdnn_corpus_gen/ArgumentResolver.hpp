@@ -76,9 +76,9 @@ inline std::vector<int64_t> rowMajorStrides(const std::vector<int64_t>& dims)
 }
 
 /// Binds a problem point as `$q.*` variables for the §6.2 evaluator.
-inline hipdnn_plugin_sdk::ingestor::uhd::VariableContext contextFor(const ProblemPoint& point)
+inline hipdnn_plugin_sdk::uhd::expression::VariableContext contextFor(const ProblemPoint& point)
 {
-    hipdnn_plugin_sdk::ingestor::uhd::VariableContext context;
+    hipdnn_plugin_sdk::uhd::expression::VariableContext context;
     for(const auto& entry : point)
     {
         // entry rather than a structured binding: capturing one in a lambda is C++20.
@@ -100,7 +100,6 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
 {
     ArgumentResolution resolution;
 
-    const hipdnn_plugin_sdk::ingestor::uhd::JsonLogicEvaluator evaluator;
     const auto context = detail::contextFor(point);
 
     for(const auto& argument : spec.arguments)
@@ -116,8 +115,8 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             const auto found = point.find(reference.empty() ? argument.source : reference);
             if(found == point.end())
             {
-                resolution.error = "argument '" + argument.name + "': no value for '"
-                                   + argument.source + "'";
+                resolution.error
+                    = "argument '" + argument.name + "': no value for '" + argument.source + "'";
                 return resolution;
             }
             std::visit([&resolved](const auto& value) { resolved.value = value; }, found->second);
@@ -126,25 +125,29 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
 
         case BuilderArgument::Kind::EXPR:
         {
-            // Each element is a §6.2 expression; an array of them is a dims list. Evaluated by
-            // the shared interpreter rather than a local one, so a convolution's output extent
-            // -- (H + 2*pad - dilation*(R-1) - 1)/stride + 1 -- is expressible without this
-            // file growing an arithmetic evaluator of its own.
+            // All dimension expressions share a compiled descriptor program.
             std::vector<int64_t> dims;
-            dims.reserve(argument.value.size());
+            dims.reserve(argument.expressions.size());
             try
             {
-                for(const auto& term : argument.value)
+                auto work = argument.expressions.workspace();
+                for(size_t i = 0; i < argument.expressions.size(); ++i)
                 {
-                    // Floored, not rounded to nearest. §6.2's `/` is double division and the
-                    // set offers `ceil_div` but no floor form, while dimension arithmetic
-                    // almost always needs floor: a convolution's output extent is
-                    // floor((H + 2*pad - dilation*(R-1) - 1)/stride) + 1. Rounding 111.5 up
-                    // invents an output element the kernel will not produce, and the graph
-                    // then disagrees with the shape the engine derives -- so the mismatch
-                    // surfaces as an applicability refusal, far from its cause.
-                    dims.push_back(static_cast<int64_t>(
-                        std::floor(evaluator.evaluateDouble(term, context))));
+                    const auto& value = argument.expressions.evaluate(i, context, work);
+                    if(const auto* integer = std::get_if<int64_t>(&value.raw))
+                    {
+                        dims.push_back(*integer);
+                        continue;
+                    }
+                    const double number
+                        = std::floor(hipdnn_plugin_sdk::uhd::expression::Program::number(value));
+                    if(number < static_cast<double>(std::numeric_limits<int64_t>::min())
+                       || number >= -static_cast<double>(std::numeric_limits<int64_t>::min()))
+                    {
+                        throw hipdnn_plugin_sdk::uhd::expression::Error(
+                            "Dimension exceeds signed 64-bit range");
+                    }
+                    dims.push_back(static_cast<int64_t>(number));
                 }
             }
             catch(const std::exception& error)
@@ -184,8 +187,8 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             const auto found = point.find(reference.empty() ? argument.source : reference);
             if(found == point.end())
             {
-                resolution.error = "argument '" + argument.name + "': no value for '"
-                                   + argument.source + "'";
+                resolution.error
+                    = "argument '" + argument.name + "': no value for '" + argument.source + "'";
                 return resolution;
             }
             const auto* name = std::get_if<std::string>(&found->second);

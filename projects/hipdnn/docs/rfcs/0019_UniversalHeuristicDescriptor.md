@@ -403,7 +403,11 @@ identity, versioning, and the feature contract without understanding the ranking
   "features_hash": "sha256:…",                         // contract guard: signature + encoding
 
   // the descriptor versions this heuristic was generated against (Section 8.1)
-  "trained_against": {"ued": "1.3", "umd": "1.0", "kmd": "2.1"},
+  "trained_against": {
+    "ued": {"id": "5a1c0000-0000-4000-8000-000000000003", "revision": "1.3"},
+    "kmd": {"id": "5a1c0000-0000-4000-8000-000000000001", "revision": "2.1"},
+    "umd": [{"id": "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe", "revision": "1.0"}]
+  },
 
   "objective": "max",                                  // higher predicted score wins
   "score": {"units": "tflops", "calibrated": true, "transform": "log1p"},  // recover TFLOPS → Section 12
@@ -456,7 +460,7 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:…` | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding` ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | `{ued, umd, kmd}` semvers | The descriptor versions this heuristic was generated against ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `trained_against` | if the adapter features | UED/KMD dependencies and a UMD dependency array | Identity and semantic revision of every descriptor used for collection ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score. The UHD's author chooses it, because only they know what their model predicts: a model trained on TFLOPS ranks descending, one trained on latency ranks ascending. Both are ordinary; neither is a fallback. |
 | `score` | no | object | `units`, `calibrated`, `transform` — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. Keys inside it are the adapter's concern, not the loader's. |
@@ -470,125 +474,20 @@ Two header rules govern the split:
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
   failure, so a newer pack landing next to an older provider degrades predictably.
 
-The inline **Draft 7** schema below specifies the `1.0` contract. Publishing it as a canonical provider
-schema and checking parity with this copy remain open work, not existing CI coverage. The publication
-must follow [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)'s single structural
-schema for supported versions; this first schema admits only `1.0`.
-
-```json
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "uhd/1.0.json",
-  "title": "hipdnn.uhd version 1.0",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["version", "id", "name", "adapter"],
-  "properties": {
-    "version":  { "type": "string", "enum": ["1.0"] },
-    "id":       { "type": "string",
-                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
-    "name":     { "type": "string", "minLength": 1 },
-    "adapter":  { "enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"] },
-
-    "features_signature": {
-      "description": "Ordered model inputs. A string is a $-reference; an object is an expression.",
-      "type": "array",
-      "items": { "type": ["string", "object"] },
-      "minItems": 1
-    },
-    "categorical_encoding": {
-      "description": "Per-field value->code maps for string-valued features (section 6.5).",
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": { "type": "integer" },
-        "minProperties": 1
-      }
-    },
-    "features_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]+$" },
-    "trained_against": {
-      "description": "Descriptor versions this heuristic was generated against (section 8.1).",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["ued", "umd", "kmd"],
-      "properties": {
-        "ued": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "umd": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-        "kmd": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
-      }
-    },
-    "objective": { "enum": ["max", "min"] },
-    "score": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "units":      { "type": "string", "minLength": 1 },
-        "calibrated": { "type": "boolean" },
-        "transform":  { "type": "string", "minLength": 1 }
-      }
-    },
-
-    "static_order":   { "type": "object", "additionalProperties": false,
-                        "properties": { "order": { "type": "array", "items": { "type": "string" } } } },
-    "native":         { "type": "object", "additionalProperties": false,
-                        "required": ["symbol"],
-                        "properties": { "symbol": { "type": "string", "minLength": 1 } } },
-    "table":          { "type": "object", "required": ["artifact"],
-                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
-    "tree_data":      { "type": "object", "required": ["artifact"],
-                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
-    "onnx":           { "type": "object", "required": ["artifact"],
-                        "properties": { "artifact": { "type": "string", "minLength": 1 } } },
-    "custom_library": { "type": "object", "required": ["library", "symbol"],
-                        "properties": { "library": { "type": "string", "minLength": 1 },
-                                        "symbol":  { "type": "string", "minLength": 1 },
-                                        "config":  { "type": "object" } } }
-  },
-  "oneOf": [
-    { "required": ["static_order"] },
-    { "required": ["native"] },
-    { "required": ["table"] },
-    { "required": ["tree_data"] },
-    { "required": ["onnx"] },
-    { "required": ["custom_library"] }
-  ],
-
-
-  "allOf": [
-    { "if":   { "properties": { "adapter": { "const": "static_order" } } },
-      "then": { "required": ["static_order"] } },
-    { "if":   { "properties": { "adapter": { "const": "native" } } },
-      "then": { "required": ["native"] } },
-    { "if":   { "properties": { "adapter": { "const": "tree_data" } } },
-      "then": { "required": ["tree_data", "features_signature", "features_hash"] } },
-    { "if":   { "properties": { "adapter": { "const": "table" } } },
-      "then": { "required": ["table", "features_signature", "features_hash"] } },
-    { "if":   { "properties": { "adapter": { "const": "onnx" } } },
-      "then": { "required": ["onnx", "features_signature", "features_hash"] } },
-    { "if":   { "properties": { "adapter": { "const": "custom_library" } } },
-      "then": { "required": ["custom_library"] } },
-    { "if":   { "required": ["features_signature"] },
-      "then": { "required": ["features_hash", "trained_against"] } },
-    { "if":   { "properties": { "adapter": { "enum": ["native", "table", "tree_data", "onnx", "custom_library"] } } },
-      "then": { "required": ["objective"] } }
-  ]
-}
-```
+The canonical **Draft 7** schema for the `1.0` contract is
+[`plugin_sdk/schemas/uhd.schema.json`](../../plugin_sdk/schemas/uhd.schema.json).
+Tooling and packaging consume that file rather than maintaining another schema here.
 
 `additionalProperties: false` rejects unknown members. The `oneOf` requires exactly one adapter body;
 the `allOf` conditionals require that body to match `adapter` and require the feature, provenance, and
 score fields described in the table. Declaring every adapter body as a known property is not itself
 enough to exclude bodies belonging to other adapters.
 
-**Normative target, not a claim that current descriptors conform.** The runtime parses descriptor
-versions and optional `trained_against` metadata, but `uhd_gen train` does not yet emit that metadata.
-Existing models without it do not meet this schema. Other remaining parser differences include optional
-scorer objectives and static-order bodies, and the `custom_library` body's `artifact` spelling instead
-of `library`. Earlier `0.1` packaging fixtures do not meet the `1.0` contract either.
-
-**OPEN — remaining schema work.** Complete that parser/tooling cutover, publish the canonical provider
-schema with the parity check RFC 0020 §4.2 describes, and extend it as adapters evolve.
-*(See [Open Question 13](#operational).)*
+Training emits identity-aware provenance, and promotion checks it before writing.
+The runtime separately checks model compatibility and engine validity: an incompatible
+model does not remove an otherwise valid engine. Native dynamic bindings require
+representative samples for shipping validation; structural schema acceptance alone
+does not prove that those bindings resolve or that native code executes correctly.
 
 ### 4.2 Adapter Summary
 
@@ -1211,6 +1110,14 @@ hsaco-equivalent for heuristics. Its one constraint: the provider must already s
 lowers author friction but requires a bespoke parser to harden. **OPEN:** See
 [Open Question 3](#schema-and-training).
 
+**Runtime preparation:** the artifact's storage layout need not be the scoring layout.
+`TreeDataAdapter` validates required arrays, split-feature and child indices, leaf predictions, and
+acyclicity at load time, then builds contiguous in-memory nodes with optional-field defaults resolved.
+Malformed trees disable the model at load rather than failing during scoring. Traversal allocates
+nothing and preserves `<` versus `<=`, NaN/short-input default directions, tree accumulation order,
+and bias addition after the tree sum. The on-disk format and drop-in deployment remain unchanged;
+preparation generates no executable code.
+
 ### 7.3 Escape Hatch: `custom_library`
 
 For a model the in-tree walker does not cover, the engine ships its own compiled scorer `.so`, `dlopen`'d
@@ -1280,19 +1187,25 @@ others change what a trained model reads:
 | **UED** | Its authored `knobs` must cover the model's `$kernel.*` feature axes ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)); removing an axis breaks that contract, while adding an unused knob does not. It also owns `graph_match`, which **publishes the symbol table** the features read ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)) — so a pattern change can alter what a bound token *means*. Engine identity and op scope changes land here too. |
 | **UMD** | Narrows the catalog. A pack's criteria decide which kernels survive for a graph, so a matcher change alters the candidate set the model was trained to rank — invisible to a feature-name check. The UMD *reads* the binding; it does not produce it ([RFC 0018 §2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)). |
 
-The UHD records all three, as the versions it was generated against
-([Section 4.1](#41-field-reference-normative)):
+The UHD records the resolved UED and KMD plus every relevant UMD, by identity and
+semantic revision. An architecture-specific model records that architecture's
+matcher set; a default model records the union. This is captured before fitting:
 
 ```jsonc
-"trained_against": {"ued": "1.3", "umd": "1.0", "kmd": "2.1"}
+"trained_against": {
+  "ued": {"id": "5a1c0000-0000-4000-8000-000000000003", "revision": "1.3"},
+  "kmd": {"id": "5a1c0000-0000-4000-8000-000000000001", "revision": "2.1"},
+  "umd": [{"id": "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe", "revision": "1.0"}]
+}
 ```
 
-**Enforcement — the concrete rule.** Each of the three descriptors carries a semantic version. At load,
-for every entry in `trained_against`:
+**Enforcement — the concrete rule.** Descriptor `revision` records authored semantics
+and defaults to `1.0`. It is separate from the JSON-format `version` and the graph-schema
+`sdk_version`. Resolve every recorded dependency by kind and UUID, then require:
 
 ```
-compatible  ⇔  trained_against.<d>.major == <d>.version.major
-           &&  trained_against.<d>.minor <= <d>.version.minor
+compatible  ⇔  trained.revision.major == actual.revision.major
+           &&  trained.revision.minor <= actual.revision.minor
 ```
 
 Major bump = breaking, disable the model. Minor bump = additive, still compatible. A UHD newer than the
@@ -1314,12 +1227,10 @@ applies to any `features_signature` reference to a field the KMD no longer decla
 training-coverage warning when the catalog spans a field value outside what the model was trained on
 ([Section 8.3](#83-out-of-distribution-inputs)).
 
-> **Implementation gap.** `DescriptorLoader` records the declared versions and checks supplied
-> `trained_against.ued` and `.kmd`, but `uhd_gen train` does not emit the map. The loader currently
-> skips `.umd` because an engine's matchers belong to multiple packs; the engine-wide provenance must
-> cover that matcher set rather than assume one UMD. It also drops the engine on UED/KMD version skew
-> instead of disabling only the model as required above. `sdk_version` remains the separate graph-schema
-> compatibility axis.
+A missing recorded dependency disables the affected role/architecture model.
+Additional current UMDs warn without invalidating otherwise compatible dependencies.
+All role/architecture references are checked, including models normally loaded lazily.
+An explicitly invalid architecture entry does not silently select a default model.
 
 ### 8.2 Model Updates
 
@@ -1896,11 +1807,15 @@ maximizes the number of knob axes:
 - Nothing expresses *which combinations are valid*, so neither the tool nor a user can ask for "the
   catalog" directly.
 
-This requires an API improvement, tracked outside this RFC: a way to enumerate the applicable catalog, or
-the valid knob-tuple set, directly rather than by probing a cross-product. Until it exists, the generation
-pipeline is practical for engines with small or dense knob spaces and impractical for large sparse ones.
-This is a hipDNN API gap rather than a defect in the UHD design, recorded as
-[Open Question 12](#operational); the pipeline of this section depends on it for the harder cases.
+This is answered by [Open Question 12](#operational): the applicable catalog is enumerated directly off
+the engine descriptor — set `HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT` /
+`HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT` (and optionally the
+`HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT` knob-choice array) before finalizing the engine, then read
+`HIPDNN_ATTR_ENGINE_CANDIDATES_EXT`. Pages carry real knob tuples with `offset`/`total_count`, so the
+generation pipeline no longer probes a cross-product and is practical for large sparse knob spaces.
+It is a generation-tool surface, not a consumer API; an engine that cannot enumerate its catalog
+reports `HIPDNN_STATUS_NOT_SUPPORTED` rather than an empty page, and such engines still fall back to
+the cross-product sweep with its 10,000-combination cap.
 
 ### 13.3 One Source of Truth, Translated Once
 
@@ -2282,7 +2197,7 @@ pipeline built on top of it.
 | 2 | `native` adapter | Scorer compiled into the engine, named by symbol ([Section 7.1](#71-first-native)). Exercises real ranking, `objective`/`score`, and the ranked-catalog output with no new format. Establishes the performance baseline everything later is measured against. |
 | 3 | `tree_data` (escape-hatched) | The tree-table format and the **new in-tree GBDT walker written for this work** — a bounded parser and evaluator with no external dependency — behind a hand-written featurizer rather than the generic extractor. Lands the real FMHA-fwd model. Adds lazy load + per-engine model cache. |
 | 4 | `features_signature` + generic extractor | Replaces the hand-written featurizer: inline signature with computed entries, one extractor over the shared namespaces, subexpression hash-consing, `features_hash` over signature + encoding, training↔runtime parity test. |
-| 5 | Generation tool | Standalone tool wrapping hipDNN: drives autotune over a shape corpus and the knob space, logs results, trains, emits updated UED/UHD + model. Gated on the catalog-enumeration gap ([Open Question 12](#operational)) for sparse knob spaces. |
+| 5 | Generation tool | Standalone tool wrapping hipDNN: drives autotune over a shape corpus and the knob space, logs results, trains, emits updated UED/UHD + model. Sparse knob spaces are paged through the `HIPDNN_ATTR_ENGINE_CANDIDATE_*` engine-descriptor attributes ([Open Question 12](#operational)). |
 | 6 | `table` / CSV | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 7 | Engine-selection integration | Score-only mode, the A/B plugin-query surface, engine-selection policies. Introduces the engine estimate (A) — not needed before competing or opaque engines exist ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
 | 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated ([Open Question 11](#operational)). |
@@ -2303,7 +2218,7 @@ dependency-gated and land only when a concrete need appears.
 | Risk | Description | Mitigation |
 |------|-------------|------------|
 | **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; four-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
-| **Catalog not enumerable** | Knobs are reported independently, so the valid set is a sparse subset of the cross-product; a large knob space cannot be swept, so no training data can be gathered | Generation exposes every KMD field, so every kernel is addressable; **needs an API to enumerate the valid catalog directly** — tracked as [Open Question 12](#operational). Pipeline is viable today only for small/dense knob spaces |
+| **Catalog not enumerable** | Knobs are reported independently, so the valid set is a sparse subset of the cross-product; a large knob space cannot be swept, so no training data can be gathered | Generation exposes every KMD field, so every kernel is addressable; the valid catalog is enumerated directly through the `HIPDNN_ATTR_ENGINE_CANDIDATE_*` engine-descriptor attributes ([Open Question 12](#operational)), so a sparse space is paged rather than swept. An engine that declines enumeration falls back to the capped cross-product |
 | **Knob-set churn** | Automatically pruning a public knob during retraining breaks callers | Preserve authored knobs; require model axes to be a subset at load. Explicit knob removal is a **major** UED version bump ([Open Question 18](#operational)) |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
 | **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit semver rule at load (`major ==`, `minor <=`); additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
@@ -2426,16 +2341,31 @@ dependency-gated and land only when a concrete need appears.
     latter gates the `custom_library` drop-in path.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
-12. **Enumerating the valid catalog — the blocking API gap.** Knob values are reported per knob and
-    independently, so the only way to address candidates today is the Cartesian product of knob ranges,
-    of which a sparse catalog satisfies a vanishing fraction
-    ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). This makes generation slow for moderate
-    knob spaces and **infeasible for large sparse ones** — no data, so no model. Needed: a way to
-    enumerate the applicable catalog (or the set of valid knob tuples) directly. Sub-questions: does
-    the enumeration return knob tuples or opaque candidate handles; is it bounded/paged for large
-    catalogs; is it public API or generation-tool-only; and does `[min, max, step]` live on the KMD
-    field or the UED knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes))? Owned with the
-    hipDNN API, not resolvable inside this RFC.
+12. **Enumerating the valid catalog — RESOLVED.** Knob values are reported per knob and
+    independently, so the Cartesian product of knob ranges addresses a vanishing fraction of a
+    sparse catalog ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)), which made generation
+    slow for moderate knob spaces and infeasible for large sparse ones. The catalog is now
+    enumerated directly, off the **engine descriptor**, which is where per-engine inspection lives
+    ([RFC 0017 §3](0017_UniversalKernelDescriptor.md)): set
+    `HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT`, `HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT` and the
+    optional `HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT` knob-choice array before finalizing the
+    engine, then read `HIPDNN_ATTR_ENGINE_CANDIDATES_EXT` with `hipdnnBackendGetAttribute`.
+    Answers to the sub-questions:
+    - **Knob tuples, plus ids.** Each entry carries its complete enrolled knob tuple, a stable
+      candidate id, and its published `$kernel.*` feature map — not an opaque handle. The tuple is
+      what `add_engine_variants()` enrolls, so enumeration and timing name the same kernel.
+    - **Bounded and paged.** `limit` is in `[1, 10000]`; the page states its `offset` and the
+      catalog's `total_count`, so a walk terminates and identity is checkable across pages. An
+      offset beyond `total_count` is invalid rather than silently truncated.
+    - **Generation-tool-only.** No consumer-facing `Graph` method exists, and none should: a
+      consumer selects engines through the heuristic descriptor, and a kernel-by-kernel consumer
+      surface was rejected in [RFC 0017 §2](0017_UniversalKernelDescriptor.md). The frontend keeps
+      `hipdnn_frontend::detail::getEngineCandidates()` for tools, and `hipdnn_bench enumerate`
+      drives it. An engine that cannot enumerate returns `HIPDNN_STATUS_NOT_SUPPORTED`, which is
+      distinct from an empty catalog.
+    - **`[min, max, step]` placement is still open** — KMD field or UED knob
+      ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Enumeration does not
+      depend on it: the catalog is returned as real tuples, not as ranges the caller must expand.
     *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 15](#15-phased-delivery) phase 5.)*
 
 13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) carries the normative

@@ -13,17 +13,371 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
               FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
+#include "engine_config_generated.h"
 #include "knob_value_generated.h"
 
 namespace hipdnn_flatbuffers_sdk {
 namespace data_objects {
 
+struct EngineCandidate;
+struct EngineCandidateBuilder;
+struct EngineCandidateT;
+
+struct EngineCandidatePage;
+struct EngineCandidatePageBuilder;
+struct EngineCandidatePageT;
+
 struct EngineDetails;
 struct EngineDetailsBuilder;
 struct EngineDetailsT;
 
+bool operator==(const EngineCandidateT &lhs, const EngineCandidateT &rhs);
+bool operator!=(const EngineCandidateT &lhs, const EngineCandidateT &rhs);
+bool operator==(const EngineCandidatePageT &lhs, const EngineCandidatePageT &rhs);
+bool operator!=(const EngineCandidatePageT &lhs, const EngineCandidatePageT &rhs);
 bool operator==(const EngineDetailsT &lhs, const EngineDetailsT &rhs);
 bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs);
+
+struct EngineCandidateT : public ::flatbuffers::NativeTable {
+  typedef EngineCandidate TableType;
+  std::string id{};
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>> knob_settings{};
+  std::string kernel_features{};
+  EngineCandidateT() = default;
+  EngineCandidateT(const EngineCandidateT &o);
+  EngineCandidateT(EngineCandidateT&&) FLATBUFFERS_NOEXCEPT = default;
+  EngineCandidateT &operator=(EngineCandidateT o) FLATBUFFERS_NOEXCEPT;
+};
+
+struct EngineCandidate FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef EngineCandidateT NativeTableType;
+  typedef EngineCandidateBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ID = 4,
+    VT_KNOB_SETTINGS = 6,
+    VT_KERNEL_FEATURES = 8
+  };
+  const ::flatbuffers::String *id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ID);
+  }
+  ::flatbuffers::String *mutable_id() {
+    return GetPointer<::flatbuffers::String *>(VT_ID);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *knob_settings() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *>(VT_KNOB_SETTINGS);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *mutable_knob_settings() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *>(VT_KNOB_SETTINGS);
+  }
+  const ::flatbuffers::String *kernel_features() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_KERNEL_FEATURES);
+  }
+  ::flatbuffers::String *mutable_kernel_features() {
+    return GetPointer<::flatbuffers::String *>(VT_KERNEL_FEATURES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_ID) &&
+           verifier.VerifyString(id()) &&
+           VerifyOffset(verifier, VT_KNOB_SETTINGS) &&
+           verifier.VerifyVector(knob_settings()) &&
+           verifier.VerifyVectorOfTables(knob_settings()) &&
+           VerifyOffsetRequired(verifier, VT_KERNEL_FEATURES) &&
+           verifier.VerifyString(kernel_features()) &&
+           verifier.EndTable();
+  }
+  EngineCandidateT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(EngineCandidateT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<EngineCandidate> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidateT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct EngineCandidateBuilder {
+  typedef EngineCandidate Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_id(::flatbuffers::Offset<::flatbuffers::String> id) {
+    fbb_.AddOffset(EngineCandidate::VT_ID, id);
+  }
+  void add_knob_settings(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>> knob_settings) {
+    fbb_.AddOffset(EngineCandidate::VT_KNOB_SETTINGS, knob_settings);
+  }
+  void add_kernel_features(::flatbuffers::Offset<::flatbuffers::String> kernel_features) {
+    fbb_.AddOffset(EngineCandidate::VT_KERNEL_FEATURES, kernel_features);
+  }
+  explicit EngineCandidateBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<EngineCandidate> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<EngineCandidate>(end);
+    fbb_.Required(o, EngineCandidate::VT_ID);
+    fbb_.Required(o, EngineCandidate::VT_KERNEL_FEATURES);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<EngineCandidate> CreateEngineCandidate(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> id = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>> knob_settings = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> kernel_features = 0) {
+  EngineCandidateBuilder builder_(_fbb);
+  builder_.add_kernel_features(kernel_features);
+  builder_.add_knob_settings(knob_settings);
+  builder_.add_id(id);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<EngineCandidate> CreateEngineCandidateDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *id = nullptr,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> *knob_settings = nullptr,
+    const char *kernel_features = nullptr) {
+  auto id__ = id ? _fbb.CreateString(id) : 0;
+  auto knob_settings__ = knob_settings ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>>(*knob_settings) : 0;
+  auto kernel_features__ = kernel_features ? _fbb.CreateString(kernel_features) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateEngineCandidate(
+      _fbb,
+      id__,
+      knob_settings__,
+      kernel_features__);
+}
+
+::flatbuffers::Offset<EngineCandidate> CreateEngineCandidate(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidateT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct EngineCandidatePageT : public ::flatbuffers::NativeTable {
+  typedef EngineCandidatePage TableType;
+  std::string graph_id{};
+  std::string device_id{};
+  std::string device_arch{};
+  std::string problem_features{};
+  std::string device_features{};
+  uint64_t total_count = 0;
+  uint64_t offset = 0;
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidateT>> candidates{};
+  std::string engine_name{};
+  std::string engine_descriptor_id{};
+  EngineCandidatePageT() = default;
+  EngineCandidatePageT(const EngineCandidatePageT &o);
+  EngineCandidatePageT(EngineCandidatePageT&&) FLATBUFFERS_NOEXCEPT = default;
+  EngineCandidatePageT &operator=(EngineCandidatePageT o) FLATBUFFERS_NOEXCEPT;
+};
+
+struct EngineCandidatePage FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef EngineCandidatePageT NativeTableType;
+  typedef EngineCandidatePageBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_GRAPH_ID = 4,
+    VT_DEVICE_ID = 6,
+    VT_DEVICE_ARCH = 8,
+    VT_PROBLEM_FEATURES = 10,
+    VT_DEVICE_FEATURES = 12,
+    VT_TOTAL_COUNT = 14,
+    VT_OFFSET = 16,
+    VT_CANDIDATES = 18,
+    VT_ENGINE_NAME = 20,
+    VT_ENGINE_DESCRIPTOR_ID = 22
+  };
+  const ::flatbuffers::String *graph_id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_GRAPH_ID);
+  }
+  ::flatbuffers::String *mutable_graph_id() {
+    return GetPointer<::flatbuffers::String *>(VT_GRAPH_ID);
+  }
+  const ::flatbuffers::String *device_id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_DEVICE_ID);
+  }
+  ::flatbuffers::String *mutable_device_id() {
+    return GetPointer<::flatbuffers::String *>(VT_DEVICE_ID);
+  }
+  const ::flatbuffers::String *device_arch() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_DEVICE_ARCH);
+  }
+  ::flatbuffers::String *mutable_device_arch() {
+    return GetPointer<::flatbuffers::String *>(VT_DEVICE_ARCH);
+  }
+  const ::flatbuffers::String *problem_features() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_PROBLEM_FEATURES);
+  }
+  ::flatbuffers::String *mutable_problem_features() {
+    return GetPointer<::flatbuffers::String *>(VT_PROBLEM_FEATURES);
+  }
+  const ::flatbuffers::String *device_features() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_DEVICE_FEATURES);
+  }
+  ::flatbuffers::String *mutable_device_features() {
+    return GetPointer<::flatbuffers::String *>(VT_DEVICE_FEATURES);
+  }
+  uint64_t total_count() const {
+    return GetField<uint64_t>(VT_TOTAL_COUNT, 0);
+  }
+  bool mutate_total_count(uint64_t _total_count = 0) {
+    return SetField<uint64_t>(VT_TOTAL_COUNT, _total_count, 0);
+  }
+  uint64_t offset() const {
+    return GetField<uint64_t>(VT_OFFSET, 0);
+  }
+  bool mutate_offset(uint64_t _offset = 0) {
+    return SetField<uint64_t>(VT_OFFSET, _offset, 0);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> *candidates() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> *>(VT_CANDIDATES);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> *mutable_candidates() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> *>(VT_CANDIDATES);
+  }
+  const ::flatbuffers::String *engine_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ENGINE_NAME);
+  }
+  ::flatbuffers::String *mutable_engine_name() {
+    return GetPointer<::flatbuffers::String *>(VT_ENGINE_NAME);
+  }
+  const ::flatbuffers::String *engine_descriptor_id() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_ENGINE_DESCRIPTOR_ID);
+  }
+  ::flatbuffers::String *mutable_engine_descriptor_id() {
+    return GetPointer<::flatbuffers::String *>(VT_ENGINE_DESCRIPTOR_ID);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_GRAPH_ID) &&
+           verifier.VerifyString(graph_id()) &&
+           VerifyOffsetRequired(verifier, VT_DEVICE_ID) &&
+           verifier.VerifyString(device_id()) &&
+           VerifyOffsetRequired(verifier, VT_DEVICE_ARCH) &&
+           verifier.VerifyString(device_arch()) &&
+           VerifyOffsetRequired(verifier, VT_PROBLEM_FEATURES) &&
+           verifier.VerifyString(problem_features()) &&
+           VerifyOffsetRequired(verifier, VT_DEVICE_FEATURES) &&
+           verifier.VerifyString(device_features()) &&
+           VerifyField<uint64_t>(verifier, VT_TOTAL_COUNT, 8) &&
+           VerifyField<uint64_t>(verifier, VT_OFFSET, 8) &&
+           VerifyOffset(verifier, VT_CANDIDATES) &&
+           verifier.VerifyVector(candidates()) &&
+           verifier.VerifyVectorOfTables(candidates()) &&
+           VerifyOffset(verifier, VT_ENGINE_NAME) &&
+           verifier.VerifyString(engine_name()) &&
+           VerifyOffset(verifier, VT_ENGINE_DESCRIPTOR_ID) &&
+           verifier.VerifyString(engine_descriptor_id()) &&
+           verifier.EndTable();
+  }
+  EngineCandidatePageT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(EngineCandidatePageT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<EngineCandidatePage> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidatePageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct EngineCandidatePageBuilder {
+  typedef EngineCandidatePage Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_graph_id(::flatbuffers::Offset<::flatbuffers::String> graph_id) {
+    fbb_.AddOffset(EngineCandidatePage::VT_GRAPH_ID, graph_id);
+  }
+  void add_device_id(::flatbuffers::Offset<::flatbuffers::String> device_id) {
+    fbb_.AddOffset(EngineCandidatePage::VT_DEVICE_ID, device_id);
+  }
+  void add_device_arch(::flatbuffers::Offset<::flatbuffers::String> device_arch) {
+    fbb_.AddOffset(EngineCandidatePage::VT_DEVICE_ARCH, device_arch);
+  }
+  void add_problem_features(::flatbuffers::Offset<::flatbuffers::String> problem_features) {
+    fbb_.AddOffset(EngineCandidatePage::VT_PROBLEM_FEATURES, problem_features);
+  }
+  void add_device_features(::flatbuffers::Offset<::flatbuffers::String> device_features) {
+    fbb_.AddOffset(EngineCandidatePage::VT_DEVICE_FEATURES, device_features);
+  }
+  void add_total_count(uint64_t total_count) {
+    fbb_.AddElement<uint64_t>(EngineCandidatePage::VT_TOTAL_COUNT, total_count, 0);
+  }
+  void add_offset(uint64_t offset) {
+    fbb_.AddElement<uint64_t>(EngineCandidatePage::VT_OFFSET, offset, 0);
+  }
+  void add_candidates(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>>> candidates) {
+    fbb_.AddOffset(EngineCandidatePage::VT_CANDIDATES, candidates);
+  }
+  void add_engine_name(::flatbuffers::Offset<::flatbuffers::String> engine_name) {
+    fbb_.AddOffset(EngineCandidatePage::VT_ENGINE_NAME, engine_name);
+  }
+  void add_engine_descriptor_id(::flatbuffers::Offset<::flatbuffers::String> engine_descriptor_id) {
+    fbb_.AddOffset(EngineCandidatePage::VT_ENGINE_DESCRIPTOR_ID, engine_descriptor_id);
+  }
+  explicit EngineCandidatePageBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<EngineCandidatePage> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<EngineCandidatePage>(end);
+    fbb_.Required(o, EngineCandidatePage::VT_GRAPH_ID);
+    fbb_.Required(o, EngineCandidatePage::VT_DEVICE_ID);
+    fbb_.Required(o, EngineCandidatePage::VT_DEVICE_ARCH);
+    fbb_.Required(o, EngineCandidatePage::VT_PROBLEM_FEATURES);
+    fbb_.Required(o, EngineCandidatePage::VT_DEVICE_FEATURES);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<EngineCandidatePage> CreateEngineCandidatePage(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> graph_id = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> device_id = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> device_arch = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> problem_features = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> device_features = 0,
+    uint64_t total_count = 0,
+    uint64_t offset = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>>> candidates = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> engine_name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> engine_descriptor_id = 0) {
+  EngineCandidatePageBuilder builder_(_fbb);
+  builder_.add_offset(offset);
+  builder_.add_total_count(total_count);
+  builder_.add_engine_descriptor_id(engine_descriptor_id);
+  builder_.add_engine_name(engine_name);
+  builder_.add_candidates(candidates);
+  builder_.add_device_features(device_features);
+  builder_.add_problem_features(problem_features);
+  builder_.add_device_arch(device_arch);
+  builder_.add_device_id(device_id);
+  builder_.add_graph_id(graph_id);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<EngineCandidatePage> CreateEngineCandidatePageDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *graph_id = nullptr,
+    const char *device_id = nullptr,
+    const char *device_arch = nullptr,
+    const char *problem_features = nullptr,
+    const char *device_features = nullptr,
+    uint64_t total_count = 0,
+    uint64_t offset = 0,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> *candidates = nullptr,
+    const char *engine_name = nullptr,
+    const char *engine_descriptor_id = nullptr) {
+  auto graph_id__ = graph_id ? _fbb.CreateString(graph_id) : 0;
+  auto device_id__ = device_id ? _fbb.CreateString(device_id) : 0;
+  auto device_arch__ = device_arch ? _fbb.CreateString(device_arch) : 0;
+  auto problem_features__ = problem_features ? _fbb.CreateString(problem_features) : 0;
+  auto device_features__ = device_features ? _fbb.CreateString(device_features) : 0;
+  auto candidates__ = candidates ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>>(*candidates) : 0;
+  auto engine_name__ = engine_name ? _fbb.CreateString(engine_name) : 0;
+  auto engine_descriptor_id__ = engine_descriptor_id ? _fbb.CreateString(engine_descriptor_id) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateEngineCandidatePage(
+      _fbb,
+      graph_id__,
+      device_id__,
+      device_arch__,
+      problem_features__,
+      device_features__,
+      total_count,
+      offset,
+      candidates__,
+      engine_name__,
+      engine_descriptor_id__);
+}
+
+::flatbuffers::Offset<EngineCandidatePage> CreateEngineCandidatePage(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidatePageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct EngineDetailsT : public ::flatbuffers::NativeTable {
   typedef EngineDetails TableType;
@@ -31,6 +385,7 @@ struct EngineDetailsT : public ::flatbuffers::NativeTable {
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT>> knobs{};
   std::vector<int32_t> behavior_notes{};
   std::string name{};
+  std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT> candidate_page{};
   EngineDetailsT() = default;
   EngineDetailsT(const EngineDetailsT &o);
   EngineDetailsT(EngineDetailsT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -44,7 +399,8 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_ENGINE_ID = 4,
     VT_KNOBS = 6,
     VT_BEHAVIOR_NOTES = 8,
-    VT_NAME = 10
+    VT_NAME = 10,
+    VT_CANDIDATE_PAGE = 12
   };
   int64_t engine_id() const {
     return GetField<int64_t>(VT_ENGINE_ID, 0);
@@ -70,6 +426,12 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_name() {
     return GetPointer<::flatbuffers::String *>(VT_NAME);
   }
+  const hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *candidate_page() const {
+    return GetPointer<const hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *>(VT_CANDIDATE_PAGE);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *mutable_candidate_page() {
+    return GetPointer<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *>(VT_CANDIDATE_PAGE);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
@@ -80,6 +442,8 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(behavior_notes()) &&
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
+           VerifyOffset(verifier, VT_CANDIDATE_PAGE) &&
+           verifier.VerifyTable(candidate_page()) &&
            verifier.EndTable();
   }
   EngineDetailsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -103,6 +467,9 @@ struct EngineDetailsBuilder {
   void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
     fbb_.AddOffset(EngineDetails::VT_NAME, name);
   }
+  void add_candidate_page(::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page) {
+    fbb_.AddOffset(EngineDetails::VT_CANDIDATE_PAGE, candidate_page);
+  }
   explicit EngineDetailsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -119,9 +486,11 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(
     int64_t engine_id = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>> knobs = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> behavior_notes = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> name = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0) {
   EngineDetailsBuilder builder_(_fbb);
   builder_.add_engine_id(engine_id);
+  builder_.add_candidate_page(candidate_page);
   builder_.add_name(name);
   builder_.add_behavior_notes(behavior_notes);
   builder_.add_knobs(knobs);
@@ -133,7 +502,8 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetailsDirect(
     int64_t engine_id = 0,
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> *knobs = nullptr,
     const std::vector<int32_t> *behavior_notes = nullptr,
-    const char *name = nullptr) {
+    const char *name = nullptr,
+    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0) {
   auto knobs__ = knobs ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>(*knobs) : 0;
   auto behavior_notes__ = behavior_notes ? _fbb.CreateVector<int32_t>(*behavior_notes) : 0;
   auto name__ = name ? _fbb.CreateString(name) : 0;
@@ -142,10 +512,171 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetailsDirect(
       engine_id,
       knobs__,
       behavior_notes__,
-      name__);
+      name__,
+      candidate_page);
 }
 
 ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+
+inline bool operator==(const EngineCandidateT &lhs, const EngineCandidateT &rhs) {
+  return
+      (lhs.id == rhs.id) &&
+      (lhs.knob_settings.size() == rhs.knob_settings.size() && std::equal(lhs.knob_settings.cbegin(), lhs.knob_settings.cend(), rhs.knob_settings.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.kernel_features == rhs.kernel_features);
+}
+
+inline bool operator!=(const EngineCandidateT &lhs, const EngineCandidateT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline EngineCandidateT::EngineCandidateT(const EngineCandidateT &o)
+      : id(o.id),
+        kernel_features(o.kernel_features) {
+  knob_settings.reserve(o.knob_settings.size());
+  for (const auto &knob_settings_ : o.knob_settings) { knob_settings.emplace_back((knob_settings_) ? new hipdnn_flatbuffers_sdk::data_objects::KnobSettingT(*knob_settings_) : nullptr); }
+}
+
+inline EngineCandidateT &EngineCandidateT::operator=(EngineCandidateT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(id, o.id);
+  std::swap(knob_settings, o.knob_settings);
+  std::swap(kernel_features, o.kernel_features);
+  return *this;
+}
+
+inline EngineCandidateT *EngineCandidate::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<EngineCandidateT>(new EngineCandidateT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void EngineCandidate::UnPackTo(EngineCandidateT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = id(); if (_e) _o->id = _e->str(); }
+  { auto _e = knob_settings(); if (_e) { _o->knob_settings.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->knob_settings[_i]) { _e->Get(_i)->UnPackTo(_o->knob_settings[_i].get(), _resolver); } else { _o->knob_settings[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->knob_settings.resize(0); } }
+  { auto _e = kernel_features(); if (_e) _o->kernel_features = _e->str(); }
+}
+
+inline ::flatbuffers::Offset<EngineCandidate> EngineCandidate::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidateT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateEngineCandidate(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<EngineCandidate> CreateEngineCandidate(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidateT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EngineCandidateT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _id = _fbb.CreateString(_o->id);
+  auto _knob_settings = _o->knob_settings.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> (_o->knob_settings.size(), [](size_t i, _VectorArgs *__va) { return CreateKnobSetting(*__va->__fbb, __va->__o->knob_settings[i].get(), __va->__rehasher); }, &_va ) : 0;
+  auto _kernel_features = _fbb.CreateString(_o->kernel_features);
+  return hipdnn_flatbuffers_sdk::data_objects::CreateEngineCandidate(
+      _fbb,
+      _id,
+      _knob_settings,
+      _kernel_features);
+}
+
+
+inline bool operator==(const EngineCandidatePageT &lhs, const EngineCandidatePageT &rhs) {
+  return
+      (lhs.graph_id == rhs.graph_id) &&
+      (lhs.device_id == rhs.device_id) &&
+      (lhs.device_arch == rhs.device_arch) &&
+      (lhs.problem_features == rhs.problem_features) &&
+      (lhs.device_features == rhs.device_features) &&
+      (lhs.total_count == rhs.total_count) &&
+      (lhs.offset == rhs.offset) &&
+      (lhs.candidates.size() == rhs.candidates.size() && std::equal(lhs.candidates.cbegin(), lhs.candidates.cend(), rhs.candidates.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidateT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidateT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.engine_name == rhs.engine_name) &&
+      (lhs.engine_descriptor_id == rhs.engine_descriptor_id);
+}
+
+inline bool operator!=(const EngineCandidatePageT &lhs, const EngineCandidatePageT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline EngineCandidatePageT::EngineCandidatePageT(const EngineCandidatePageT &o)
+      : graph_id(o.graph_id),
+        device_id(o.device_id),
+        device_arch(o.device_arch),
+        problem_features(o.problem_features),
+        device_features(o.device_features),
+        total_count(o.total_count),
+        offset(o.offset),
+        engine_name(o.engine_name),
+        engine_descriptor_id(o.engine_descriptor_id) {
+  candidates.reserve(o.candidates.size());
+  for (const auto &candidates_ : o.candidates) { candidates.emplace_back((candidates_) ? new hipdnn_flatbuffers_sdk::data_objects::EngineCandidateT(*candidates_) : nullptr); }
+}
+
+inline EngineCandidatePageT &EngineCandidatePageT::operator=(EngineCandidatePageT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(graph_id, o.graph_id);
+  std::swap(device_id, o.device_id);
+  std::swap(device_arch, o.device_arch);
+  std::swap(problem_features, o.problem_features);
+  std::swap(device_features, o.device_features);
+  std::swap(total_count, o.total_count);
+  std::swap(offset, o.offset);
+  std::swap(candidates, o.candidates);
+  std::swap(engine_name, o.engine_name);
+  std::swap(engine_descriptor_id, o.engine_descriptor_id);
+  return *this;
+}
+
+inline EngineCandidatePageT *EngineCandidatePage::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<EngineCandidatePageT>(new EngineCandidatePageT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void EngineCandidatePage::UnPackTo(EngineCandidatePageT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = graph_id(); if (_e) _o->graph_id = _e->str(); }
+  { auto _e = device_id(); if (_e) _o->device_id = _e->str(); }
+  { auto _e = device_arch(); if (_e) _o->device_arch = _e->str(); }
+  { auto _e = problem_features(); if (_e) _o->problem_features = _e->str(); }
+  { auto _e = device_features(); if (_e) _o->device_features = _e->str(); }
+  { auto _e = total_count(); _o->total_count = _e; }
+  { auto _e = offset(); _o->offset = _e; }
+  { auto _e = candidates(); if (_e) { _o->candidates.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->candidates[_i]) { _e->Get(_i)->UnPackTo(_o->candidates[_i].get(), _resolver); } else { _o->candidates[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidateT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->candidates.resize(0); } }
+  { auto _e = engine_name(); if (_e) _o->engine_name = _e->str(); }
+  { auto _e = engine_descriptor_id(); if (_e) _o->engine_descriptor_id = _e->str(); }
+}
+
+inline ::flatbuffers::Offset<EngineCandidatePage> EngineCandidatePage::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidatePageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateEngineCandidatePage(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<EngineCandidatePage> CreateEngineCandidatePage(::flatbuffers::FlatBufferBuilder &_fbb, const EngineCandidatePageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EngineCandidatePageT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _graph_id = _fbb.CreateString(_o->graph_id);
+  auto _device_id = _fbb.CreateString(_o->device_id);
+  auto _device_arch = _fbb.CreateString(_o->device_arch);
+  auto _problem_features = _fbb.CreateString(_o->problem_features);
+  auto _device_features = _fbb.CreateString(_o->device_features);
+  auto _total_count = _o->total_count;
+  auto _offset = _o->offset;
+  auto _candidates = _o->candidates.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidate>> (_o->candidates.size(), [](size_t i, _VectorArgs *__va) { return CreateEngineCandidate(*__va->__fbb, __va->__o->candidates[i].get(), __va->__rehasher); }, &_va ) : 0;
+  auto _engine_name = _o->engine_name.empty() ? 0 : _fbb.CreateString(_o->engine_name);
+  auto _engine_descriptor_id = _o->engine_descriptor_id.empty() ? 0 : _fbb.CreateString(_o->engine_descriptor_id);
+  return hipdnn_flatbuffers_sdk::data_objects::CreateEngineCandidatePage(
+      _fbb,
+      _graph_id,
+      _device_id,
+      _device_arch,
+      _problem_features,
+      _device_features,
+      _total_count,
+      _offset,
+      _candidates,
+      _engine_name,
+      _engine_descriptor_id);
+}
 
 
 inline bool operator==(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
@@ -153,7 +684,8 @@ inline bool operator==(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
       (lhs.engine_id == rhs.engine_id) &&
       (lhs.knobs.size() == rhs.knobs.size() && std::equal(lhs.knobs.cbegin(), lhs.knobs.cend(), rhs.knobs.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.behavior_notes == rhs.behavior_notes) &&
-      (lhs.name == rhs.name);
+      (lhs.name == rhs.name) &&
+      ((lhs.candidate_page == rhs.candidate_page) || (lhs.candidate_page && rhs.candidate_page && *lhs.candidate_page == *rhs.candidate_page));
 }
 
 inline bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
@@ -164,7 +696,8 @@ inline bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
 inline EngineDetailsT::EngineDetailsT(const EngineDetailsT &o)
       : engine_id(o.engine_id),
         behavior_notes(o.behavior_notes),
-        name(o.name) {
+        name(o.name),
+        candidate_page((o.candidate_page) ? new hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT(*o.candidate_page) : nullptr) {
   knobs.reserve(o.knobs.size());
   for (const auto &knobs_ : o.knobs) { knobs.emplace_back((knobs_) ? new hipdnn_flatbuffers_sdk::data_objects::KnobT(*knobs_) : nullptr); }
 }
@@ -174,6 +707,7 @@ inline EngineDetailsT &EngineDetailsT::operator=(EngineDetailsT o) FLATBUFFERS_N
   std::swap(knobs, o.knobs);
   std::swap(behavior_notes, o.behavior_notes);
   std::swap(name, o.name);
+  std::swap(candidate_page, o.candidate_page);
   return *this;
 }
 
@@ -190,6 +724,7 @@ inline void EngineDetails::UnPackTo(EngineDetailsT *_o, const ::flatbuffers::res
   { auto _e = knobs(); if (_e) { _o->knobs.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->knobs[_i]) { _e->Get(_i)->UnPackTo(_o->knobs[_i].get(), _resolver); } else { _o->knobs[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->knobs.resize(0); } }
   { auto _e = behavior_notes(); if (_e) { _o->behavior_notes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->behavior_notes[_i] = _e->Get(_i); } } else { _o->behavior_notes.resize(0); } }
   { auto _e = name(); if (_e) _o->name = _e->str(); }
+  { auto _e = candidate_page(); if (_e) { if(_o->candidate_page) { _e->UnPackTo(_o->candidate_page.get(), _resolver); } else { _o->candidate_page = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT>(_e->UnPack(_resolver)); } } else if (_o->candidate_page) { _o->candidate_page.reset(); } }
 }
 
 inline ::flatbuffers::Offset<EngineDetails> EngineDetails::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -204,12 +739,14 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::F
   auto _knobs = _o->knobs.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> (_o->knobs.size(), [](size_t i, _VectorArgs *__va) { return CreateKnob(*__va->__fbb, __va->__o->knobs[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _behavior_notes = _o->behavior_notes.size() ? _fbb.CreateVector(_o->behavior_notes) : 0;
   auto _name = _o->name.empty() ? 0 : _fbb.CreateString(_o->name);
+  auto _candidate_page = _o->candidate_page ? CreateEngineCandidatePage(_fbb, _o->candidate_page.get(), _rehasher) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
       _fbb,
       _engine_id,
       _knobs,
       _behavior_notes,
-      _name);
+      _name,
+      _candidate_page);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::EngineDetails *GetEngineDetails(const void *buf) {

@@ -62,19 +62,22 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestCategoricalEncoding.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestCustomLibraryAdapter.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestDerivedValues.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestFeatureExtractor.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestJsonLogicEvaluator.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestNativeAdapter.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestScoreTransform.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestTableAdapter.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestTreeDataAdapter.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestSha256.cpp>
-    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdAdapters.cpp>
+    heuristics/uhd/TestCategoricalEncoding.cpp
+    heuristics/uhd/TestCustomLibraryAdapter.cpp
+    heuristics/uhd/TestInlineExpressions.cpp
+    heuristics/uhd/TestFeatureExtractor.cpp
+    heuristics/uhd/TestJsonLogicEvaluator.cpp
+    heuristics/uhd/TestNativeAdapter.cpp
+    heuristics/uhd/TestScoreTransform.cpp
+    heuristics/uhd/TestTableAdapter.cpp
+    heuristics/uhd/TestTreeDataAdapter.cpp
+    heuristics/uhd/TestSha256.cpp
+    heuristics/uhd/TestUhdAdapters.cpp
+    heuristics/uhd/TestEnginePredictor.cpp
+    heuristics/TestEngineFeatures.cpp
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdKernelHeuristic.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
+    $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
@@ -103,8 +106,7 @@ target_compile_definitions(
 # TestCustomLibraryAdapter dlopen's this at runtime; it is the only consumer, and it moved here
 # with the adapter it covers. HIPDNN_TEST_PLUGIN_DIR is set by the top-level CMakeLists, so both
 # suites can name the same output directory.
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    add_library(hipdnn_test_scorer_lib SHARED ingestor/uhd/test_scorer_lib.cpp)
+    add_library(hipdnn_test_scorer_lib SHARED heuristics/uhd/test_scorer_lib.cpp)
     set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
     target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
     add_dependencies(hipdnn_plugin_sdk_tests hipdnn_test_scorer_lib)
@@ -124,7 +126,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
         HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}")
-endif()
 
 target_link_libraries(
     hipdnn_plugin_sdk_tests

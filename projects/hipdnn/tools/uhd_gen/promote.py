@@ -1,428 +1,399 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Install a trained UHD into a descriptor tree and point an engine at it.
-
-`train` writes a descriptor/artifact pair into an output directory and prints the id
-it minted. Until something copies that pair next to the engine's UED and writes the id
-into the UED's `heuristic` field, the engine keeps whatever heuristic it named before
--- or none, in which case `KernelIngestorEngine` ranks by priority then descriptor id.
-Either way the model is inert and nothing reports an error, so the only symptom is
-that the numbers did not move. That hand-edit is what this subcommand replaces.
-
-Everything is validated before anything is written. A promote that copies the artifact
-and then fails, or writes a `heuristic` id no descriptor defines, leaves a tree whose
-engine the loader drops entirely -- strictly worse than the stale-model state it was
-called to fix.
-"""
+"""Plan a role/architecture-scoped model installation before writing any files."""
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
+import re
 import shutil
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .provenance import (
+    ROLES, ProvenanceError, compare_provenance, descriptor_id, load_descriptor_tree,
+    provenance_for_engine, revision, select_engine, validate_provenance,
+)
+from .immediate import ROLE, validate_model
+
 logger = logging.getLogger(__name__)
-
-#: Suffixes DescriptorLoader discovers by (DescriptorLoader.hpp SUFFIX_UHD/SUFFIX_UED).
 UHD_SUFFIX = ".uhd.json"
-UED_SUFFIX = ".ued.json"
-
-#: Feature columns are namespace-qualified; a UED names its knobs bare. Only this
-#: namespace can be a knob: `q.*` is the problem and `device.*` is the card.
-_KERNEL_PREFIX = "kernel."
+_ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
+_ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
 
 
-class PromoteError(Exception):
-    """A refusal raised while planning, i.e. before the tree has been touched."""
+class PromoteError(ValueError):
+    """A planning refusal; no installed file has been touched."""
 
 
 @dataclass
 class PromotePlan:
-    """Every file operation promote intends, decided before the first one runs."""
-
     descriptor_path: Path
     descriptor_id: str
-    artifact_path: Path
+    artifact_path: Path | None
     ued_path: Path
     ued_document: dict
     engine_name: str
     old_heuristic: str | None
-    #: (source, destination) pairs; a file already in place is not listed.
+    role: str
+    arch: str
+    destination_descriptor: Path
+    descriptor_document: dict
     copies: list[tuple[Path, Path]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    #: Knobs to remove from the UED because training dropped them as constant. Only
-    #: populated when the author asked for the drop: the knob list is the engine's
-    #: public surface, read by its UMDs and its callers, so a training run never
-    #: reshapes it on its own.
     dropped_knobs: list[str] = field(default_factory=list)
+    write_descriptor: bool = True
 
 
 def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
-    """Declare the `promote` flags."""
-    parser.add_argument(
-        "--model-dir",
-        required=True,
-        dest="model_dir",
-        help="Directory `uhd_gen train --output-dir` wrote: one <stem>.uhd.json plus "
-        "the artifact its adapter body names.",
-    )
-    parser.add_argument(
-        "--descriptor-tree",
-        required=True,
-        dest="descriptor_tree",
-        help="Descriptor tree holding the engine's <name>.ued.json. Searched "
-        "recursively; the pair is installed beside the UED that is updated.",
-    )
-    parser.add_argument(
-        "--engine",
-        default=None,
-        help="UED `name` to update (e.g. hipkernel:pointwise_model). Required when the "
-        "tree holds more than one UED -- promote never picks for you.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        dest="dry_run",
-        help="Report the plan, including every check it had to pass, without writing.",
-    )
+    parser.add_argument("--model-dir", required=True, help="Directory containing one trained *.uhd.json")
+    parser.add_argument("--descriptor-tree", required=True, help="Destination descriptor tree")
+    parser.add_argument("--engine", help="UED name or UUID that owns the role being promoted")
+    parser.add_argument("--role", choices=ROLES, default="sort_kernel_catalog")
+    parser.add_argument("--arch", help="Target gfx architecture or explicit 'default'; otherwise infer a unique training_arches value")
+    parser.add_argument("--remove-knob", action="append", default=[], dest="remove_knobs",
+                        help="Explicitly remove an authored knob; requires a model trained against the prospective major revision")
+    parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing")
 
 
 def run_promote(args: argparse.Namespace) -> int:
-    """Plan, then either report or execute. Returns a process exit code."""
     try:
-        plan = build_plan(
-            Path(args.model_dir),
-            Path(args.descriptor_tree),
-            args.engine,
-        )
-    except PromoteError as error:
+        plan = build_plan(Path(args.model_dir), Path(args.descriptor_tree), args.engine,
+                          role=args.role, arch=args.arch, remove_knobs=args.remove_knobs)
+        for warning in plan.warnings:
+            logger.warning("%s", warning)
+        if not args.dry_run:
+            _apply(plan)
+        _report(plan, dry_run=args.dry_run)
+    except (PromoteError, OSError) as error:
         logger.error("%s", error)
         return 1
-
-    for warning in plan.warnings:
-        logger.warning("%s", warning)
-
-    if not args.dry_run:
-        _apply(plan)
-    _report(plan, dry_run=args.dry_run)
     return 0
 
 
-def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None) -> PromotePlan:
-    """Resolve and check everything. Raises PromoteError; never writes."""
+def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None = None, *,
+               role: str = "sort_kernel_catalog", arch: str | None = None,
+               remove_knobs: tuple[str, ...] | list[str] = ()) -> PromotePlan:
+    """Resolve all dependencies, ownership and destination collisions without writes."""
+    try:
+        return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch, remove_knobs)
+    except ValueError as error:
+        raise PromoteError(str(error)) from error
+
+
+def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
+    if role not in ROLES:
+        raise PromoteError(f"unknown heuristic role {role!r}")
     descriptor_path = _find_descriptor(model_dir)
-    descriptor = _load_json(descriptor_path, "UHD descriptor")
-    descriptor_id = _descriptor_id(descriptor, descriptor_path)
-    artifact_path = _artifact_path(descriptor, descriptor_path)
+    _contained(descriptor_path, model_dir, "source descriptor")
+    descriptor = _load_json(descriptor_path, "UHD")
+    _validate_descriptor(descriptor, descriptor_path)
+    identity = descriptor_id(descriptor.get("id"), str(descriptor_path))
+    manifest_path = model_dir / "train_manifest.json"
+    manifest = _load_json(manifest_path, "training manifest") if manifest_path.is_file() else {}
+    arches = manifest.get("training_arches", [])
+    if not isinstance(arches, list) or any(not isinstance(item, str) or not _ARCH.fullmatch(item) for item in arches):
+        raise PromoteError("training_arches must be an array of bare gfx targets")
+    if arch is None:
+        if len(set(arches)) != 1:
+            raise PromoteError("pass --arch (or explicit --arch default): training_arches does not identify one target")
+        arch = arches[0]
+    if arch != "default" and (not isinstance(arch, str) or not _ARCH.fullmatch(arch)):
+        raise PromoteError(f"invalid target architecture {arch!r}")
+    if arches and arch != "default" and arch not in arches:
+        raise PromoteError(f"target {arch} is not in training_arches {arches}")
+    if "trained_against" in manifest and validate_provenance(manifest["trained_against"]) != validate_provenance(descriptor.get("trained_against")):
+        raise PromoteError("training manifest provenance differs from the UHD's trained_against")
+    recorded_role = manifest.get("role")
+    if recorded_role is not None and recorded_role != role:
+        raise PromoteError("incoming model was trained for another role")
+    provenance = descriptor.get("trained_against", {})
+    if role == ROLE:
+        validate_model(descriptor)
 
-    ueds = _load_ueds(descriptor_tree)
-    ued_path, ued_document = _select_ued(ueds, engine, descriptor_tree)
+    index = load_descriptor_tree(descriptor_tree)
+    if any(identity in entries for entries in index.values()):
+        raise PromoteError(f"incoming UHD identity {identity} conflicts with a dependency descriptor")
+    ued_path, original_ued = select_engine(index, engine)
+    engine_name = str(original_ued.get("name", ""))
+    destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
+    ueds = list(index["ued"].values())
+    references = [ref for path, doc in ueds for ref in _role_references(path, doc)]
+    ued = copy.deepcopy(original_ued)
+    old = ued.get(role, {}).get(arch)
+    artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
+    installed_descriptor = copy.deepcopy(descriptor)
+    destination_descriptor = destination_dir / descriptor_path.name
+    _contained(destination_descriptor, descriptor_tree, "destination descriptor")
+    plan = PromotePlan(descriptor_path, identity, artifact_path, ued_path, ued,
+                       engine_name, old, role, arch,
+                       destination_descriptor, installed_descriptor)
+    if remove_knobs:
+        exposed = ued.get("knobs", [])
+        if not isinstance(exposed, list) or any(not isinstance(item, str) for item in exposed):
+            raise PromoteError("UED knobs must be an array of strings")
+        unknown = set(remove_knobs) - set(exposed)
+        if unknown:
+            raise PromoteError(f"cannot remove unauthored knobs: {sorted(unknown)}")
+        plan.dropped_knobs = sorted(set(remove_knobs))
+        still_used = set(plan.dropped_knobs) & _kernel_references(descriptor.get("features_signature", []))
+        if still_used:
+            raise PromoteError(f"incoming model still consumes removed knobs: {sorted(still_used)}")
+        major, _ = revision(ued.get("revision", "1.0"), "UED")
+        ued["revision"] = f"{major + 1}.0"
+        ued["knobs"] = [knob for knob in exposed if knob not in plan.dropped_knobs]
 
-    destination = ued_path.parent
-    plan = PromotePlan(
-        descriptor_path=descriptor_path,
-        descriptor_id=descriptor_id,
-        artifact_path=artifact_path,
-        ued_path=ued_path,
-        ued_document=ued_document,
-        engine_name=str(ued_document.get("name", "")),
-        old_heuristic=_optional_str(ued_document.get("heuristic")),
-    )
-
-    # The manifest records what training dropped. RFC 0019 §6.3: the model's axes must
-    # all be exposed knobs, and a knob no axis reads is legal but reported -- so a
-    # deliberate drop has to reach the UED, or the engine keeps advertising a dial its
-    # model no longer reads. Absent manifest is fine; older runs wrote none.
-    manifest = model_dir / "train_manifest.json"
-    if manifest.is_file():
+    actual = provenance_for_engine(index, ued, arch)
+    if actual is not None and "trained_against" in descriptor:
         try:
-            recorded = _load_json(manifest, "training manifest").get(
-                "dropped_constant_features"
-            )
-        except PromoteError:
-            recorded = None
-        exposed = ued_document.get("knobs")
-        if recorded and isinstance(exposed, list):
-            # A knob is named bare in the UED (`block_n`) and namespace-qualified in the
-            # corpus (`kernel.block_n`). Only the `kernel.*` namespace can be a knob at
-            # all: `$q.*` describes the problem and `$device.*` the card, and neither is
-            # something a caller sets.
-            dropped_knobs = [
-                name[len(_KERNEL_PREFIX):]
-                for name in recorded
-                if name.startswith(_KERNEL_PREFIX)
-            ]
-            plan.dropped_knobs = [name for name in dropped_knobs if name in exposed]
+            compare_provenance(provenance, actual)
+        except ProvenanceError as error:
+            suffix = "; retrain against the intended revised UED before removing knobs" if remove_knobs else ""
+            raise PromoteError(f"{error}{suffix}") from error
+    elif remove_knobs:
+        raise PromoteError("explicit knob removal requires training provenance for the intended revised UED; retrain first")
 
-    destination_descriptor = destination / descriptor_path.name
-    destination_artifact = destination / artifact_path.name
-    _check_descriptor_collision(plan, destination_descriptor, ueds)
-    _check_artifact_collision(plan, destination_descriptor, destination_artifact)
-
-    for source, target in (
-        (artifact_path, destination_artifact),
-        (descriptor_path, destination_descriptor),
-    ):
-        # Promoting a pair that already lives beside the UED (a retrain straight into
-        # the tree) is a legitimate no-copy case; shutil.copy2 would raise SameFileError.
-        if not _same_file(source, target):
-            plan.copies.append((source, target))
-
+    installed = []
+    installed_ids = {}
+    for path in sorted(descriptor_tree.rglob(f"*{UHD_SUFFIX}")):
+        if path.name == UHD_SUFFIX:
+            continue
+        doc = _load_json(path, "installed UHD")
+        current_id = descriptor_id(doc.get("id"), str(path))
+        if current_id in installed_ids:
+            raise PromoteError(f"duplicate installed UHD identity {current_id}: {installed_ids[current_id]} and {path}")
+        installed_ids[current_id] = path
+        installed.append((path, doc, current_id))
+    target = (ued_path.resolve(), role, arch)
+    others = [(path, slot, target_arch, ref) for path, slot, target_arch, ref in references
+              if (path.resolve(), slot, target_arch) != target]
+    # A UUID shared by another role or architecture is immutable for this promotion,
+    # even if the destination filename happens to be the model it already references.
+    descriptor_changes = not _same_file(descriptor_path, destination_descriptor)
+    destination_artifact = None
+    if artifact_path is not None:
+        destination_artifact = destination_dir / artifact_path.name
+        _contained(destination_artifact, descriptor_tree, "destination artifact")
+        installed_descriptor[descriptor["adapter"]][artifact_key] = artifact_path.name
+        if destination_artifact.name.endswith(tuple(
+            f".{kind}.json" for kind in ("ued", "umd", "kmd", "kdp", "ukd", "udd", "uhd")
+        )):
+            raise PromoteError("artifact would overwrite or masquerade as a descriptor")
+        if destination_artifact.exists() and not destination_artifact.is_file():
+            raise PromoteError(f"destination artifact is not a regular file: {destination_artifact}")
+        if not _same_file(artifact_path, destination_artifact):
+            plan.copies.append((artifact_path, destination_artifact))
+    descriptor_changes = descriptor_changes or installed_descriptor != descriptor
+    for path, doc, current_id in installed:
+        same_destination = _same_file(path, destination_descriptor)
+        if current_id == identity and not same_destination:
+            raise PromoteError(f"incoming UHD id {identity} is already installed at {path}; refusing duplicate identity")
+        if not same_destination:
+            continue
+        holders = [(p, r, a) for p, r, a, ref in others if ref in (current_id, identity)]
+        if holders and (descriptor_changes or plan.copies):
+            raise PromoteError(f"would clobber UHD {current_id} used by other role/arch entries: {holders}")
+        if current_id != identity and current_id != old:
+            plan.warnings.append(f"OVERWRITING unreferenced UHD {current_id} at {path}")
+    if any(ref == identity for _, _, _, ref in others) and (descriptor_changes or plan.copies):
+        raise PromoteError(f"incoming UHD id {identity} is owned by another role/arch entry")
+    if destination_artifact is not None and plan.copies:
+        for path, doc, current_id in installed:
+            if _same_file(path, destination_descriptor):
+                continue
+            adapter = doc.get("adapter")
+            body = doc.get(adapter) if isinstance(adapter, str) else None
+            key = "library" if adapter == "custom_library" else "artifact"
+            payload = body.get(key) if isinstance(body, dict) else None
+            if isinstance(payload, str) and _same_file(path.parent / payload, destination_artifact):
+                raise PromoteError(f"artifact collision: {destination_artifact} belongs to {path} ({current_id})")
+        if destination_artifact.exists() and not destination_descriptor.exists():
+            raise PromoteError(f"unowned destination artifact already exists: {destination_artifact}")
+    if remove_knobs:
+        for path, other_role, other_arch, ref in others:
+            if path.resolve() != ued_path.resolve():
+                continue
+            model_path = installed_ids.get(ref)
+            if model_path is None:
+                raise PromoteError(f"cannot prove knob removal safe: missing model {ref} for {other_role}/{other_arch}")
+            model = _load_json(model_path, "other role UHD")
+            if model.get("features_signature"):
+                try:
+                    compare_provenance(model.get("trained_against", {}), provenance_for_engine(index, ued, other_arch))
+                except ProvenanceError as error:
+                    raise PromoteError(f"knob removal would invalidate {other_role}/{other_arch}: {error}") from error
+            if set(plan.dropped_knobs) & _kernel_references(model.get("features_signature", [])):
+                raise PromoteError(f"knob removal would affect {other_role}/{other_arch}")
+    ued.setdefault(role, {})[arch] = identity
+    plan.write_descriptor = descriptor_changes
     return plan
 
 
-def _find_descriptor(model_dir: Path) -> Path:
+def _role_references(path: Path, document: dict):
+    if "heuristic" in document:
+        raise PromoteError(f"{path}: legacy heuristic field is not supported; use role/arch maps")
+    for role in ROLES:
+        if role not in document:
+            continue
+        entries = document[role]
+        if not isinstance(entries, dict) or not entries:
+            raise PromoteError(f"{path}.{role} must be a nonempty arch-to-UUID map")
+        for arch, identity in entries.items():
+            if arch != "default" and not _ARCH.fullmatch(arch):
+                raise PromoteError(f"{path}.{role}: invalid architecture {arch!r}")
+            yield path, role, arch, descriptor_id(identity, f"{path}.{role}.{arch}")
+
+
+def _validate_descriptor(document: dict, path: Path) -> None:
+    descriptor_id(document.get("id"), str(path))
+    known = {"version", "id", "name", "adapter", "objective", "score",
+             "features_signature", "features_hash", "categorical_encoding",
+             "trained_against", *_ADAPTERS}
+    if set(document) - known:
+        raise PromoteError(f"{path}: unknown UHD fields {sorted(set(document) - known)}")
+    if document.get("version") != "1.0":
+        raise PromoteError(f"{path}: unsupported UHD file-format version {document.get('version')!r}")
+    if not isinstance(document.get("name"), str) or not document["name"]:
+        raise PromoteError(f"{path}: missing required name")
+    adapter = document.get("adapter")
+    if adapter not in _ADAPTERS:
+        raise PromoteError(f"{path}: unsupported adapter {adapter!r}")
+    bodies = [key for key in _ADAPTERS if key in document]
+    if bodies != [adapter] or not isinstance(document[adapter], dict):
+        raise PromoteError(f"{path}: requires exactly one body matching adapter {adapter}")
+    if (adapter != "static_order" or "objective" in document) and document.get("objective") not in ("min", "max"):
+        raise PromoteError(f"{path}: scorer requires objective min or max")
+    signature = document.get("features_signature")
+    if "features_signature" in document or adapter in ("tree_data", "table", "onnx"):
+        if not isinstance(signature, list) or not signature:
+            raise PromoteError(f"{path}: requires nonempty features_signature")
+        for entry in signature:
+            if not ((isinstance(entry, str) and entry.startswith("$") and len(entry) > 1)
+                    or (isinstance(entry, dict) and len(entry) == 1)):
+                raise PromoteError(f"{path}: features_signature requires bare references or inline expressions")
+        if "features_hash" not in document:
+            raise PromoteError(f"{path}: missing features_hash")
+        validate_provenance(document.get("trained_against"))
+    elif "trained_against" in document:
+        validate_provenance(document["trained_against"])
+    if adapter in ("native", "custom_library"):
+        symbol = document[adapter].get("symbol")
+        if not isinstance(symbol, str) or not symbol:
+            raise PromoteError(f"{path}: {adapter}.symbol is required")
+    if "features_hash" in document and (
+        not isinstance(document["features_hash"], str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{16}", document["features_hash"])
+    ):
+        raise PromoteError(f"{path}: invalid features_hash")
+    if "categorical_encoding" in document:
+        encoding = document["categorical_encoding"]
+        if not isinstance(encoding, dict) or any(
+            not isinstance(codes, dict) or not codes
+            or any(type(code) is not int for code in codes.values())
+            for codes in encoding.values()
+        ):
+            raise PromoteError(f"{path}: categorical_encoding requires value-to-integer maps")
+    if "score" in document:
+        score = document["score"]
+        if not isinstance(score, dict) or set(score) - {"units", "calibrated", "transform"}:
+            raise PromoteError(f"{path}: invalid score header")
+        if any(key in score and (not isinstance(score[key], str) or not score[key])
+               for key in ("units", "transform")):
+            raise PromoteError(f"{path}: score units/transform must be nonempty strings")
+        if "calibrated" in score and not isinstance(score["calibrated"], bool):
+            raise PromoteError(f"{path}: score.calibrated must be a boolean")
+    body = document[adapter]
+    allowed = ({"order"} if adapter == "static_order" else {"symbol"} if adapter == "native"
+               else {"library", "symbol", "hash", "config"} if adapter == "custom_library"
+               else {"artifact", "hash"})
+    if set(body) - allowed:
+        raise PromoteError(f"{path}: unknown {adapter} body fields")
+    if "hash" in body and (not isinstance(body["hash"], str) or not body["hash"]):
+        raise PromoteError(f"{path}: model hash must be a nonempty string")
+    if adapter == "static_order" and "order" in body and (
+        not isinstance(body["order"], list) or any(not isinstance(item, str) for item in body["order"])
+    ):
+        raise PromoteError(f"{path}: static_order.order must be an array of strings")
+    if adapter == "custom_library" and "config" in body and not isinstance(body["config"], dict):
+        raise PromoteError(f"{path}: custom_library.config must be an object")
+
+
+def _artifact_path(descriptor, descriptor_path, model_dir):
+    adapter = descriptor["adapter"]
+    if adapter in ("static_order", "native"):
+        return None, None
+    key = "library" if adapter == "custom_library" else "artifact"
+    payload = descriptor[adapter].get(key)
+    if not isinstance(payload, str) or not payload:
+        raise PromoteError(f"{descriptor_path}: missing {adapter}.{key}")
+    resolved = (descriptor_path.parent / payload).resolve()
+    _contained(resolved, model_dir, "model artifact")
+    if not resolved.is_file():
+        raise PromoteError(f"model artifact does not exist: {resolved}")
+    return resolved, key
+
+
+def _contained(path, root, what):
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise PromoteError(f"{what} escapes root {root}: {path}")
+
+
+def _kernel_references(value):
+    if isinstance(value, str):
+        return {value[len("$kernel."):]} if value.startswith("$kernel.") else set()
+    if isinstance(value, (dict, list, tuple)):
+        children = value.values() if isinstance(value, dict) else value
+        return set().union(*(_kernel_references(item) for item in children))
+    return set()
+
+
+def _find_descriptor(model_dir):
     if not model_dir.is_dir():
         raise PromoteError(f"--model-dir {model_dir} is not a directory")
-    # A bare `.uhd.json` has an empty stem, which DescriptorLoader::findFileType rejects;
-    # treating one as the model here would install a file the runtime then ignores.
-    candidates = sorted(
-        path for path in model_dir.glob(f"*{UHD_SUFFIX}") if path.name != UHD_SUFFIX
-    )
-    if not candidates:
-        raise PromoteError(
-            f"no *{UHD_SUFFIX} in {model_dir}; that directory is not a `uhd_gen train "
-            "--output-dir` result"
-        )
-    if len(candidates) > 1:
-        names = ", ".join(path.name for path in candidates)
-        raise PromoteError(
-            f"{model_dir} holds {len(candidates)} descriptors ({names}); promote "
-            "installs exactly one pair and will not choose between them"
-        )
-    return candidates[0]
+    paths = sorted(path for path in model_dir.glob(f"*{UHD_SUFFIX}") if path.name != UHD_SUFFIX)
+    if len(paths) != 1:
+        raise PromoteError(f"{model_dir} must contain exactly one *{UHD_SUFFIX}; found {len(paths)}")
+    return paths[0]
 
 
-def _descriptor_id(descriptor: dict, descriptor_path: Path) -> str:
-    """The id the UED will name. Must be a UUID: the loader indexes descriptors by it,
-    and an id it cannot parse resolves to nothing, dropping the engine."""
-    raw = descriptor.get("id")
-    if not isinstance(raw, str) or not raw:
-        raise PromoteError(f"{descriptor_path} has no `id`; nothing for a UED to reference")
+def _load_json(path, what):
     try:
-        uuid.UUID(raw)
-    except ValueError as error:
-        raise PromoteError(
-            f"{descriptor_path} has id {raw!r}, which is not a UUID ({error}); a UED "
-            "naming it would resolve to nothing and the engine would load without a "
-            "heuristic"
-        ) from error
-    return raw
-
-
-def _artifact_path(descriptor: dict, descriptor_path: Path) -> Path:
-    """The model file the descriptor's adapter body names, resolved as the runtime does:
-    relative to the descriptor itself."""
-    adapter = descriptor.get("adapter")
-    if not isinstance(adapter, str) or not adapter:
-        raise PromoteError(f"{descriptor_path} has no `adapter`; cannot locate its body")
-    body = descriptor.get(adapter)
-    if not isinstance(body, dict):
-        raise PromoteError(
-            f"{descriptor_path} declares adapter {adapter!r} but has no {adapter!r} body"
-        )
-    artifact = body.get("artifact")
-    if not isinstance(artifact, str) or not artifact:
-        raise PromoteError(f"{descriptor_path} has no `{adapter}.artifact`")
-    # The pair is installed flat next to the UED, so a nested or absolute artifact would
-    # arrive under a name the copied descriptor no longer points at.
-    if Path(artifact).name != artifact or artifact in (".", ".."):
-        raise PromoteError(
-            f"{descriptor_path} names artifact {artifact!r}; promote installs the pair "
-            "side by side and only handles an artifact in the descriptor's own directory"
-        )
-    resolved = descriptor_path.parent / artifact
-    if not resolved.is_file():
-        raise PromoteError(
-            f"{descriptor_path} names artifact {artifact!r}, which does not exist at "
-            f"{resolved}; installing the descriptor without it would make the engine "
-            "fail to build its heuristic"
-        )
-    return resolved
-
-
-def _load_ueds(descriptor_tree: Path) -> list[tuple[Path, dict]]:
-    if not descriptor_tree.is_dir():
-        raise PromoteError(f"--descriptor-tree {descriptor_tree} is not a directory")
-    paths = sorted(
-        path for path in descriptor_tree.rglob(f"*{UED_SUFFIX}") if path.name != UED_SUFFIX
-    )
-    if not paths:
-        raise PromoteError(f"no *{UED_SUFFIX} under {descriptor_tree}; nothing to promote into")
-    return [(path, _load_json(path, "UED")) for path in paths]
-
-
-def _select_ued(
-    ueds: list[tuple[Path, dict]], engine: str | None, descriptor_tree: Path
-) -> tuple[Path, dict]:
-    """Pick the UED to update, or refuse.
-
-    Guessing is the one thing this must never do. Promoting into the wrong engine is a
-    double failure: the engine you meant to retrain keeps its old model, and one you
-    never touched starts ranking with a model trained on a different kernel set --
-    both of which load cleanly and report nothing.
-    """
-    if engine is None:
-        if len(ueds) == 1:
-            return ueds[0]
-        listing = "\n".join(f"  {_engine_label(document)}  ({path})" for path, document in ueds)
-        raise PromoteError(
-            f"{descriptor_tree} holds {len(ueds)} UEDs; pass --engine NAME to say which "
-            f"one this model ranks for:\n{listing}"
-        )
-
-    matches = [(path, document) for path, document in ueds if document.get("name") == engine]
-    if not matches:
-        listing = "\n".join(f"  {_engine_label(document)}  ({path})" for path, document in ueds)
-        raise PromoteError(f"no UED named {engine!r} under {descriptor_tree}; found:\n{listing}")
-    if len(matches) > 1:
-        listing = "\n".join(f"  {path}" for path, _ in matches)
-        raise PromoteError(
-            f"{len(matches)} UEDs under {descriptor_tree} are named {engine!r}; the tree "
-            f"is ambiguous and promote will not choose:\n{listing}"
-        )
-    return matches[0]
-
-
-def _check_descriptor_collision(
-    plan: PromotePlan, destination_descriptor: Path, ueds: list[tuple[Path, dict]]
-) -> None:
-    """Refuse or warn when the destination filename already holds a different UHD."""
-    if _same_file(plan.descriptor_path, destination_descriptor):
-        return
-    if not destination_descriptor.is_file():
-        return
-    existing = _load_json(destination_descriptor, "installed UHD descriptor")
-    existing_id = _optional_str(existing.get("id"))
-    if existing_id == plan.descriptor_id:
-        # A newer build of the same heuristic. The ordinary retrain.
-        return
-    if existing_id is not None and existing_id == plan.old_heuristic:
-        # The descriptor this very engine currently ranks by, being replaced by the
-        # model trained to succeed it. Also ordinary -- and the report prints both ids,
-        # so warning here would only teach readers to ignore the warning that matters
-        # below.
-        return
-
-    # Some *other* engine ranks by the descriptor about to be overwritten. Replacing it
-    # silently repoints that engine's `heuristic` at nothing, and the loader drops it.
-    holders = [
-        path
-        for path, document in ueds
-        if path != plan.ued_path and _optional_str(document.get("heuristic")) == existing_id
-    ]
-    if holders:
-        listing = "\n".join(f"  {path}" for path in holders)
-        raise PromoteError(
-            f"{destination_descriptor} is a different UHD (id {existing_id}) and is "
-            f"still referenced by:\n{listing}\nOverwriting it would strand those "
-            "engines. Rename this model's descriptor with `train --descriptor-name` "
-            "and promote again."
-        )
-    plan.warnings.append(
-        f"OVERWRITING a different UHD: {destination_descriptor} currently has id "
-        f"{existing_id}, the incoming descriptor has {plan.descriptor_id}. No UED "
-        "references the old id, so nothing is stranded, but the file is not a newer "
-        "build of the same heuristic -- it is a different one that happens to share a "
-        "filename."
-    )
-
-
-def _check_artifact_collision(
-    plan: PromotePlan, destination_descriptor: Path, destination_artifact: Path
-) -> None:
-    """Refuse when the artifact would clobber a model another installed UHD points at.
-
-    `train` names every artifact `model.bin`, so two differently-stemmed descriptors in
-    one directory collide by default. The victim descriptor keeps loading and keeps its
-    features_hash, so the mismatch surfaces as a refused pair or, worse, as silently
-    different rankings.
-    """
-    if not destination_artifact.exists() or _same_file(plan.artifact_path, destination_artifact):
-        return
-    for neighbour in sorted(destination_artifact.parent.glob(f"*{UHD_SUFFIX}")):
-        if neighbour.name == UHD_SUFFIX or _same_file(neighbour, destination_descriptor):
-            continue
-        document = _load_json(neighbour, "installed UHD descriptor")
-        adapter = document.get("adapter")
-        body = document.get(adapter) if isinstance(adapter, str) else None
-        artifact = body.get("artifact") if isinstance(body, dict) else None
-        if not isinstance(artifact, str):
-            continue
-        if _same_file(neighbour.parent / artifact, destination_artifact):
-            raise PromoteError(
-                f"{destination_artifact} is the artifact of {neighbour.name} (id "
-                f"{_optional_str(document.get('id'))}); installing this model there "
-                "would replace that heuristic's trees while leaving its features_hash "
-                "untouched. Give this model a distinct `train --descriptor-name`."
-            )
-
-
-def _apply(plan: PromotePlan) -> None:
-    """Perform the planned writes. Only reached once build_plan has approved them all."""
-    for source, destination in plan.copies:
-        shutil.copy2(source, destination)
-
-    plan.ued_document["heuristic"] = plan.descriptor_id
-    if plan.dropped_knobs:
-        removed = set(plan.dropped_knobs)
-        plan.ued_document["knobs"] = [
-            knob for knob in plan.ued_document.get("knobs", []) if knob not in removed
-        ]
-    with open(plan.ued_path, "w", encoding="utf-8") as handle:
-        # indent=2 + trailing newline + ensure_ascii=False reproduces how every
-        # descriptor in the tree is written, so the diff is the one changed line rather
-        # than a whole-file reformat nobody can review.
-        json.dump(plan.ued_document, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
-
-
-def _report(plan: PromotePlan, dry_run: bool) -> None:
-    label = "would copy:" if dry_run else "copy:"
-    print("\nUHD promotion plan (dry run, nothing written)" if dry_run else "\nUHD promoted")
-    print(f"  {'engine:':<16}{plan.engine_name or '(unnamed)'}")
-    print(f"  {'UED:':<16}{plan.ued_path}")
-    print(f"  {'heuristic was:':<16}{plan.old_heuristic or '(none)'}")
-    print(f"  {'heuristic now:':<16}{plan.descriptor_id}")
-    if plan.dropped_knobs:
-        verb = "would remove:" if dry_run else "removed knob:"
-        for knob in plan.dropped_knobs:
-            print(f"  {verb:<16}{knob} (constant; training dropped it)")
-    if plan.copies:
-        for source, destination in plan.copies:
-            print(f"  {label:<16}{source} -> {destination}")
-    else:
-        print(f"  {label:<16}(descriptor and artifact already in place)")
-
-
-def _load_json(path: Path, what: str) -> dict:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as error:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
         raise PromoteError(f"cannot read {what} {path}: {error}") from error
-    try:
-        document = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise PromoteError(f"{what} {path} is not valid JSON: {error}") from error
     if not isinstance(document, dict):
-        raise PromoteError(f"{what} {path} is not a JSON object")
+        raise PromoteError(f"{what} {path} is not an object")
     return document
 
 
-def _optional_str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
+def _same_file(left, right):
+    return left.resolve() == right.resolve() or (left.exists() and right.exists() and left.samefile(right))
 
 
-def _engine_label(document: dict) -> str:
-    return _optional_str(document.get("name")) or "(unnamed)"
+def _write_json(path, document):
+    path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _same_file(left: Path, right: Path) -> bool:
-    """Same path on disk, tolerating one side not existing yet."""
-    if left.exists() and right.exists():
-        return left.samefile(right)
-    return left.resolve() == right.resolve()
+def _apply(plan: PromotePlan) -> None:
+    """Execute only the operations approved by build_plan; never restamp provenance."""
+    plan.destination_descriptor.parent.mkdir(parents=True, exist_ok=True)
+    for source, destination in plan.copies:
+        shutil.copy2(source, destination)
+    if plan.write_descriptor:
+        _write_json(plan.destination_descriptor, plan.descriptor_document)
+    _write_json(plan.ued_path, plan.ued_document)
+
+
+def _report(plan: PromotePlan, dry_run: bool) -> None:
+    print("UHD promotion plan (dry run, nothing written)" if dry_run else "UHD promoted")
+    print(f"  engine: {plan.engine_name}\n  binding: {plan.ued_path}\n  role/arch: {plan.role}/{plan.arch}")
+    print(f"  heuristic was: {plan.old_heuristic or '(none)'}\n  heuristic now: {plan.descriptor_id}")
+    for source, destination in plan.copies:
+        print(f"  {'would copy' if dry_run else 'copy'}: {source} -> {destination}")
+    if plan.write_descriptor:
+        print(f"  descriptor: {plan.destination_descriptor}")
+    for knob in plan.dropped_knobs:
+        print(f"  removed knob: {knob}; UED revision {plan.ued_document['revision']}")

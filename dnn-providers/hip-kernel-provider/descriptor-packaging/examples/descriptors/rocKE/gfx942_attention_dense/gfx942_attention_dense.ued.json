@@ -6,7 +6,7 @@
     "native": "hipkernel.gfx942_attention_dense.graph_match"
   },
   "metadata": "28fe7e39-e7a2-44d5-a07a-9779aba34ef3",
-  "heuristic": "c208c4cd-d4d8-4f3f-b38f-3e4dc57befb8",
+  "sort_kernel_catalog": {"gfx942": "c208c4cd-d4d8-4f3f-b38f-3e4dc57befb8"},
   "knobs": [
     "head_size",
     "num_query_heads",

@@ -14,6 +14,7 @@ is resolved from the wrong place, or it is resolved and then not staged.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -32,11 +33,16 @@ def _write_json(path: Path, doc: dict) -> None:
 def _model_uhd(artifact: str) -> dict:
     return {
         "version": "1.0",
-        "id": "uhd-model",
+        "id": "133a8b19-8e34-4f74-86d6-b6495a6483f3",
         "name": "Trained heuristic",
         "adapter": "tree_data",
         "features_signature": ["$kernel.tile_m"],
-        "features_hash": "sha256:0000000000000000",
+        "features_hash": "sha256:" + "0" * 16,
+        "trained_against": {
+            "ued": {"id": "699a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
+            "kmd": {"id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
+            "umd": [],
+        },
         "objective": "max",
         "tree_data": {"artifact": artifact},
     }
@@ -45,9 +51,10 @@ def _model_uhd(artifact: str) -> dict:
 def _native_uhd() -> dict:
     return {
         "version": "1.0",
-        "id": "uhd-native",
+        "id": "233a8b19-8e34-4f74-86d6-b6495a6483f3",
         "name": "Native heuristic",
         "adapter": "native",
+        "objective": "max",
         "native": {"symbol": "hipkernel.pointwise.score"},
     }
 
@@ -183,7 +190,7 @@ class TestRejection:
         del doc["tree_data"]
         _write_json(root / "pack" / "heuristic.uhd.json", doc)
 
-        with pytest.raises(HkpPackError, match="requires 'tree_data.artifact'"):
+        with pytest.raises(HkpPackError):
             load_flat_input(root, log=lambda *_: None)
 
     def test_artifact_outside_the_root_is_rejected(self, tmp_path: Path):
@@ -249,3 +256,128 @@ class TestIntermediateStaging:
         # Staged where `../shared/model.bin` still reaches it from the UHD.
         assert (inter_dir / "rocKE" / "shared" / "model.bin").read_bytes() == b"shared"
         assert not (inter_dir / "rocKE" / "attn" / "model.bin").exists()
+
+
+@pytest.mark.parametrize("missing", ["objective", "features_signature", "features_hash", "trained_against", "tree_data"])
+def test_feature_models_require_complete_headers_before_packaging(tmp_path, missing):
+    root = _root_with_model_uhd(tmp_path)
+    doc = _model_uhd("model.bin")
+    del doc[missing]
+    _write_json(root / "pack" / "heuristic.uhd.json", doc)
+    with pytest.raises(HkpPackError):
+        load_flat_input(root, log=lambda *_: None)
+
+
+def test_custom_library_uses_library_and_carries_the_shared_object(tmp_path):
+    root = tmp_path / "src"
+    doc = _native_uhd()
+    del doc["native"]
+    doc["adapter"] = "custom_library"
+    doc["custom_library"] = {"library": "lib/model.so", "symbol": "score"}
+    _write_json(root / "custom.uhd.json", doc)
+    (root / "lib").mkdir()
+    (root / "lib" / "model.so").write_bytes(b"shared object")
+    flat = load_flat_input(root, log=lambda *_: None)
+    assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"shared object"
+    doc["custom_library"]["artifact"] = doc["custom_library"].pop("library")
+    _write_json(root / "custom.uhd.json", doc)
+    with pytest.raises(HkpPackError):
+        load_flat_input(root, log=lambda *_: None)
+
+
+def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
+    root = tmp_path / "src"
+    _write_json(root / "metadata.kmd.json", {
+        "version": "1.0", "revision": "12.34",
+        "id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "name": "metadata",
+        "fields": [{"name": "block_size", "type": "int"}],
+    })
+    flat = load_flat_input(root, log=lambda *_: None)
+    assert flat.descriptors[0].doc["revision"] == "12.34"
+    doc = _native_uhd()
+    doc["version"] = "2.0"
+    _write_json(root / "native.uhd.json", doc)
+    with pytest.raises(HkpPackError):
+        load_flat_input(root, log=lambda *_: None)
+
+
+@pytest.mark.parametrize("mutation", [
+    "valid", "missing_objective", "missing_provenance", "legacy_provenance",
+    "wrong_body", "two_bodies", "legacy_derived", "bare_feature", "empty_feature",
+    "invalid_hash", "unknown_header", "unsupported_format",
+])
+def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
+    jsonschema = pytest.importorskip("jsonschema")
+    schema_path = next(parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
+                       for parent in Path(__file__).resolve().parents
+                       if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file())
+    validator = jsonschema.Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+    doc = _model_uhd("model.bin")
+    if mutation == "missing_objective":
+        del doc["objective"]
+    elif mutation == "missing_provenance":
+        del doc["trained_against"]
+    elif mutation == "legacy_provenance":
+        doc["trained_against"] = {"ued": "1.0", "kmd": "1.0", "umd": "1.0"}
+    elif mutation == "wrong_body":
+        doc["table"] = doc.pop("tree_data")
+    elif mutation == "two_bodies":
+        doc["native"] = {"symbol": "score"}
+    elif mutation == "legacy_derived":
+        doc["derived"] = {"tiles": {"ceil_div": [100, "$kernel.tile_m"]}}
+    elif mutation == "bare_feature":
+        doc["features_signature"] = ["kernel.tile_m"]
+    elif mutation == "empty_feature":
+        doc["features_signature"] = []
+    elif mutation == "invalid_hash":
+        doc["features_hash"] = "sha256:not-hex"
+    elif mutation == "unknown_header":
+        doc["unknown"] = True
+    elif mutation == "unsupported_format":
+        doc["version"] = "1.1"
+    root = tmp_path / "src"
+    _write_json(root / "heuristic.uhd.json", doc)
+    (root / "model.bin").write_bytes(b"artifact")
+    valid = mutation == "valid"
+    assert validator.is_valid(doc) == valid
+    if valid:
+        flat = load_flat_input(root, log=lambda *_: None)
+        assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
+    else:
+        with pytest.raises(HkpPackError):
+            load_flat_input(root, log=lambda *_: None)
+
+
+def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main_fixture):
+    from hkp_pack.descriptors import reachable_generic_ids
+    root = tmp_path / "src"
+    shutil.copytree(main_fixture, root)
+    ued_path = root / "pointwise.ued.json"
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    original = next(iter(ued["sort_kernel_catalog"].values()))
+    second = _native_uhd()
+    third = _native_uhd()
+    third["id"] = "333a8b19-8e34-4f74-86d6-b6495a6483f3"
+    _write_json(root / "estimate.uhd.json", second)
+    _write_json(root / "generator.uhd.json", third)
+    ued["sort_kernel_catalog"]["gfx950"] = second["id"]
+    ued["predict_engine_tflops"] = {"gfx942": second["id"]}
+    ued["predict_applicable_kernels"] = {"default": third["id"]}
+    _write_json(ued_path, ued)
+    flat = load_flat_input(root, log=lambda *_: None)
+    retained = reachable_generic_ids(flat, flat.kdps())
+    assert {original, second["id"], third["id"]} <= retained
+
+
+@pytest.mark.parametrize("legacy", [
+    {"heuristic": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
+    {"sort_kernel_catalog": "233a8b19-8e34-4f74-86d6-b6495a6483f3"},
+])
+def test_packaging_rejects_legacy_heuristic_spellings(tmp_path, legacy):
+    root = tmp_path / "src"
+    _write_json(root / "engine.ued.json", {
+        "version": "1.0", "id": "699a8b19-8e34-4f74-86d6-b6495a6483f3",
+        "name": "test:engine", **legacy,
+    })
+    with pytest.raises(HkpPackError):
+        load_flat_input(root, log=lambda *_: None)

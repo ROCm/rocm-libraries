@@ -10,6 +10,11 @@
 namespace hipdnn_data_sdk::utilities
 {
 
+/// Engine-level TFLOPS policy; no configuration prediction during ranking.
+inline constexpr const char* MODE_A_POLICY_NAME = "SelectionHeuristic::ModeA";
+/// Best available configuration-level TFLOPS, with engine-level fallback.
+inline constexpr const char* MODE_B_POLICY_NAME = "SelectionHeuristic::ModeB";
+
 /**
  * @brief Converts a heuristic policy name string to a deterministic int64_t ID
  *

@@ -1,8 +1,9 @@
 # The harvest end of corpus generation (RFC 0019.13 §5.3).
 #
-# Two targets on the same seam corpus_gen uses. hipdnn_bench_lib is header-only sizing and
-# enumeration logic that needs no device, so it can be tested against tensors and constraints
-# the test constructs. The executable adds the device and the engine.
+# The helper library contains host-side tensor sizing and initialization. The
+# executable is a generation tool: it discovers matched candidates and calibrated
+# predictions by driving the ENGINE/ENGINECFG backend descriptor attributes through
+# the hipdnn_frontend::detail engine-query helpers, not through the consumer Graph API.
 add_library(hipdnn_bench_lib INTERFACE)
 
 target_include_directories(hipdnn_bench_lib

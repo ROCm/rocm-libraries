@@ -103,6 +103,7 @@ def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
         # A generated `kind`/`payload` pair parses as an unknown key and drops the
         # heuristic, leaving the engine ranking by priority with nothing to say why.
         "adapter": "native",
+        "objective": "max",
         "native": {"symbol": config.score_symbol},
     }
 
@@ -116,7 +117,7 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "metadata": ids["kmd"],
     }
     if config.engine.has_heuristic:
-        ued["heuristic"] = ids["uhd"]
+        ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:

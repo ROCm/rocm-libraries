@@ -3,6 +3,8 @@
 
 #include "SelectionHeuristic.hpp"
 
+#include <algorithm>
+#include <flatbuffers/flatbuffers.h>
 #include <string>
 #include <unordered_set>
 
@@ -172,6 +174,72 @@ bool SelectionHeuristic::finalize()
     // Returns true if policy succeeded (won the outer loop)
     // Returns false if not applicable or declined
     return plugin->finalize(_descriptor);
+}
+
+bool SelectionHeuristic::finalize(const PredictionProvider& predict)
+{
+    THROW_IF_FALSE(
+        _descriptor != nullptr, HIPDNN_STATUS_NOT_INITIALIZED, "Policy descriptor not initialized");
+    auto plugin = lookupPlugin();
+    THROW_IF_NULL(plugin, HIPDNN_STATUS_NOT_INITIALIZED, "Heuristic plugin is not registered");
+    struct Context
+    {
+        const PredictionProvider& predict;
+        const std::vector<int64_t>& engineIds;
+        std::vector<flatbuffers::DetachedBuffer> buffers;
+    } context{predict, _inputEngineIds, {}};
+    const hipdnnHeuristicHostCallbacks_t host{
+        1,
+        sizeof(hipdnnHeuristicHostCallbacks_t),
+        &context,
+        [](void* opaque,
+           int64_t engineId,
+           hipdnnEnginePredictionKind_t kind,
+           hipdnnPluginConstData_t* result) -> hipdnnPluginStatus_t {
+            if(opaque == nullptr || result == nullptr)
+            {
+                return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+            }
+            *result = {};
+            auto& ctx = *static_cast<Context*>(opaque);
+            if((kind != HIPDNN_ENGINE_PREDICTION_ENGINE
+                && kind != HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
+               || std::find(ctx.engineIds.begin(), ctx.engineIds.end(), engineId)
+                      == ctx.engineIds.end())
+            {
+                return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+            }
+            try
+            {
+                const auto prediction = ctx.predict(engineId, kind);
+                flatbuffers::FlatBufferBuilder builder;
+                builder.Finish(hipdnn_flatbuffers_sdk::data_objects::EnginePrediction::Pack(
+                    builder, &prediction));
+                ctx.buffers.push_back(builder.Release());
+                const auto& bytes = ctx.buffers.back();
+                *result = {bytes.data(), bytes.size()};
+                return HIPDNN_PLUGIN_STATUS_SUCCESS;
+            }
+            catch(...)
+            {
+                return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
+            }
+        }};
+    return plugin->finalizeWithHost(_descriptor, &host);
+}
+
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
+    SelectionHeuristic::getEngineConfig(int64_t engineId)
+{
+    THROW_IF_FALSE(
+        _descriptor != nullptr, HIPDNN_STATUS_NOT_INITIALIZED, "Policy descriptor not initialized");
+    THROW_IF_TRUE(std::find(_inputEngineIds.begin(), _inputEngineIds.end(), engineId)
+                      == _inputEngineIds.end(),
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Config engine was not an input candidate");
+    auto plugin = lookupPlugin();
+    THROW_IF_NULL(plugin, HIPDNN_STATUS_NOT_INITIALIZED, "Heuristic plugin is not registered");
+    return plugin->getEngineConfig(_descriptor, engineId);
 }
 
 std::vector<int64_t> SelectionHeuristic::getSortedEngineIds()

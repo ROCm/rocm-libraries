@@ -21,7 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
 {
@@ -48,15 +48,14 @@ namespace detail
 inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefinition>& entries)
 {
     std::vector<KernelDefinition> ordered(entries);
-    std::stable_sort(ordered.begin(),
-                     ordered.end(),
-                     [](const KernelDefinition& a, const KernelDefinition& b) {
-                         if(a.priority != b.priority)
-                         {
-                             return a.priority > b.priority;
-                         }
-                         return a.kernelId < b.kernelId;
-                     });
+    std::stable_sort(
+        ordered.begin(), ordered.end(), [](const KernelDefinition& a, const KernelDefinition& b) {
+            if(a.priority != b.priority)
+            {
+                return a.priority > b.priority;
+            }
+            return a.kernelId < b.kernelId;
+        });
     return ordered;
 }
 
@@ -65,8 +64,7 @@ inline std::vector<KernelDefinition> declaredOrder(const std::vector<KernelDefin
 ///
 /// Shared by every path that degrades, so a fallback cannot come to describe itself one way in
 /// one place and another way elsewhere.
-inline std::vector<ScoredKernel>
-    asScored(const std::vector<KernelDefinition>& ordered)
+inline std::vector<ScoredKernel> asScored(const std::vector<KernelDefinition>& ordered)
 {
     std::vector<ScoredKernel> scored;
     scored.reserve(ordered.size());
@@ -90,7 +88,6 @@ private:
     mutable std::atomic<bool> _reportedScorerFailure{false};
 
 public:
-
     /// Operands in the pipeline order every stage shares; see NativeRegistry.hpp.
     virtual double score(const MatchContext& context,
                          const BoundTokens& bound,
@@ -159,8 +156,8 @@ public:
     {
         struct Ranked
         {
-            double ordering;   ///< NaN-free, so the comparator stays a strict weak ordering
-            double reported;   ///< exactly what score() returned, NaN included
+            double ordering; ///< NaN-free, so the comparator stays a strict weak ordering
+            double reported; ///< exactly what score() returned, NaN included
             const KernelDefinition* entry;
         };
 
@@ -170,11 +167,11 @@ public:
         {
             for(const auto& entry : catalog.entries)
             {
-            // A non-finite score sorts last and is reported as 0, the value §5 step 7 gives
-            // "no measurement". Keeping the two keys separate is still necessary: NaN in the
-            // comparator is undefined behaviour, not merely a wrong order, because it compares
-            // false both ways and so is "equivalent" to everything while real scores stay
-            // ordered among themselves.
+                // A non-finite score sorts last and is reported as 0, the value §5 step 7 gives
+                // "no measurement". Keeping the two keys separate is still necessary: NaN in the
+                // comparator is undefined behaviour, not merely a wrong order, because it compares
+                // false both ways and so is "equivalent" to everything while real scores stay
+                // ordered among themselves.
                 const double raw = score(context, catalog.bound, entry);
                 const bool usable = std::isfinite(raw);
                 scored.push_back({usable ? raw : -std::numeric_limits<double>::infinity(),
@@ -224,7 +221,8 @@ public:
                 candidates << (i == 0 ? "" : " ") << toString(scored[i].entry->kernelId) << "="
                            << scored[i].reported;
             }
-            HIPDNN_PLUGIN_LOG_INFO("uhd trace: decided_by=" << traceDecidedBy()
+            HIPDNN_PLUGIN_LOG_INFO("uhd trace: decided_by="
+                                   << traceDecidedBy()
                                    << " winner=" << toString(scored.front().entry->kernelId)
                                    << " candidates=" << scored.size()
                                    << " arch=" << context.deviceProperties.gcnArchName
@@ -245,7 +243,17 @@ public:
     /// RFC 0019 §11.3: a cross-engine score must be an absolute metric on a scale that means
     /// the same thing everywhere -- calibrated TFLOPS. Defaults to false, so a heuristic that
     /// has not said otherwise is never compared against another engine by accident.
-    virtual bool scoreIsCalibrated() const { return false; }
+    virtual bool scoreIsCalibrated() const
+    {
+        return false;
+    }
+
+    /// @brief Exact physical-throughput estimates; empty when this ranker cannot calibrate.
+    virtual std::vector<ScoredKernel>
+        calibratedRanking(const Catalog&, const MatchContext&, std::string& /*modelId*/) const
+    {
+        return {};
+    }
 
     /// @brief This engine's predicted TFLOPS for @p catalog, or 0 when it cannot say.
     ///

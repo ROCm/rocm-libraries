@@ -1,582 +1,370 @@
-#!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""The last manual step in the pipeline, and the ways it used to go wrong.
-
-A trained UHD only takes effect once the engine's UED names its id in `heuristic`.
-When that hand-edit was skipped, wrong, or half-applied, nothing failed loudly: the
-engine either kept ranking by priority or was dropped by the loader, and the only
-symptom was that the model "did nothing". Every test here pins one of those silences
-shut -- an id that is not the model's, a guessed engine, a descriptor installed
-without its artifact, a dry run that wrote anyway.
-"""
+"""Promotion preserves every untargeted model and refuses unsafe writes."""
 from __future__ import annotations
 
+import argparse
+import copy
 import json
 import uuid
 from pathlib import Path
 
 import pytest
 
-# Optional heavyweight training dependencies. Imported before uhd_gen.__main__, which
-# pulls them in transitively, so a missing dep is a skip rather than a collection error.
-pytest.importorskip("lightgbm")
-pytest.importorskip("pandas")
-pytest.importorskip("flatbuffers")
+from uhd_gen.promote import PromoteError, _apply, add_promote_arguments, build_plan, run_promote
+from uhd_gen.provenance import snapshot_provenance
 
-import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
-from uhd_gen.__main__ import main  # noqa: E402
-
-#: A UED as the loader expects one (RFC 0020 §4.2, mirrored by the packaged
-#: pointwise_model fixture): schema-less, version-gated, heuristic by id.
-UED_ID_A = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
-UED_ID_B = "1a4f7c30-0d92-4c1b-8a6e-2f5b9d3e7c08"
-STALE_HEURISTIC = "727e5401-3b99-49ff-a2fc-68fd4eedbb54"
-METADATA_ID = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
+KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+OLD = "727e5401-3b99-49ff-a2fc-68fd4eedbb54"
+NEW = "cf37fa30-32dc-4a21-a008-68ef5e0d30a6"
+OTHER = "edc1d5b4-6f12-4a40-a749-403966474bc9"
 
 
-def _write_json(path: Path, document: dict) -> None:
+def _write(path, document):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2)
-        handle.write("\n")
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
-def _make_model_dir(
-    root: Path,
-    uhd_id: str,
-    *,
-    stem: str = "heuristic",
-    artifact: str = "model.bin",
-    write_artifact: bool = True,
-) -> Path:
-    """A stand-in for a `uhd_gen train --output-dir` result.
+def _read(path):
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    Hand-built rather than trained: promote only reads the descriptor and copies the
-    artifact bytes, so training here would test LightGBM, slowly.
-    """
-    root.mkdir(parents=True, exist_ok=True)
-    _write_json(
-        root / f"{stem}.uhd.json",
-        {
-            "version": "1.0",
-            "id": uhd_id,
-            "name": "test selector",
-            "adapter": "tree_data",
-            "features_signature": ["$kernel.block_size"],
-            "features_hash": "sha256:bc673de29ad2cc2c",
-            "objective": "max",
-            "score": {"units": "tflops", "calibrated": False, "transform": "log1p"},
-            "tree_data": {"artifact": artifact},
-        },
-    )
-    if write_artifact:
-        (root / artifact).write_bytes(b"HDNN-model-bytes-" + uhd_id.encode("ascii"))
+
+def _tree(root):
+    _write(root / "engine.ued.json", {"version": "1.0", "id": UED, "name": "test:engine",
+           "metadata": KMD, "knobs": ["block_size", "tile_m"],
+           "sort_kernel_catalog": {"gfx942": OLD, "gfx950": OTHER, "default": OTHER},
+           "predict_engine_tflops": {"gfx942": OTHER}})
+    _write(root / "metadata.kmd.json", {"version": "1.0", "id": KMD, "fields": []})
     return root
 
 
-def _make_ued(
-    path: Path, name: str, ued_id: str, heuristic: str | None = STALE_HEURISTIC
-) -> Path:
-    document = {"version": "1.0", "id": ued_id, "name": name}
-    if heuristic is not None:
-        # Placed before `metadata`, not last: an updater that appends the key instead
-        # of replacing it in place would move it, and the diff would stop being one
-        # reviewable line.
-        document["heuristic"] = heuristic
-    document["metadata"] = METADATA_ID
-    document["knobs"] = ["block_size"]
-    _write_json(path, document)
-    return path
+def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None):
+    provenance = provenance if provenance is not None else snapshot_provenance(tree, arch="gfx942")
+    doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
+           "objective": "max", "features_signature": ["$kernel.block_size"],
+           "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
+           "tree_data": {"artifact": artifact}}
+    _write(root / "heuristic.uhd.json", doc)
+    _write(root / "train_manifest.json", {"training_arches": ["gfx942"], "trained_against": provenance})
+    payload = root / artifact
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    payload.write_bytes(b"incoming model")
+    return root
 
 
-def _heuristic_of(path: Path) -> str | None:
-    return json.loads(path.read_text(encoding="utf-8")).get("heuristic")
+def _files(root):
+    return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
-def _training_csv(path: Path) -> Path:
-    """The smallest CSV that trains: one kernel knob, a target that varies with it.
+def test_promotion_updates_only_the_requested_arch_and_role(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    original = _read(tree / "engine.ued.json")
+    model = _model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree))
+    expected = copy.deepcopy(original)
+    expected["sort_kernel_catalog"]["gfx942"] = NEW
+    assert _read(tree / "engine.ued.json") == expected
 
-    Shaped like the packaged pointwise fixture (kernel.block_size -> tflops); enough
-    rows for the 5-fold CV in train_model.
-    """
+
+def test_role_and_explicit_default_target_preserve_other_maps(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    original = _read(tree / "engine.ued.json")
+    model = _model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree, role="predict_applicable_kernels", arch="default"))
+    expected = copy.deepcopy(original)
+    expected["predict_applicable_kernels"] = {"default": NEW}
+    assert _read(tree / "engine.ued.json") == expected
+
+
+def test_install_rewrites_nested_artifact_path_portably(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree, artifact="nested/model.bin")
+    plan = build_plan(model, tree)
+    _apply(plan)
+    installed = _read(plan.destination_descriptor)
+    artifact = plan.destination_descriptor.parent / installed["tree_data"]["artifact"]
+    assert artifact.read_bytes() == b"incoming model"
+
+
+@pytest.mark.parametrize("binding", ["role", "architecture", "engine"])
+def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
+    tree = _tree(tmp_path / "tree")
+    ued = _read(tree / "engine.ued.json")
+    ued["sort_kernel_catalog"] = {"gfx942": OLD}
+    ued.pop("predict_engine_tflops")
+    _write(tree / "engine.ued.json", ued)
+    first = _model(tmp_path / "first", tree)
+    (first / "model.bin").write_bytes(b"first model weights")
+    first_plan = build_plan(first, tree)
+    _apply(first_plan)
+    first_descriptor = first_plan.destination_descriptor.read_bytes()
+    first_document = _read(first_plan.destination_descriptor)
+    first_artifact = first_plan.destination_descriptor.parent / first_document["tree_data"]["artifact"]
+
+    engine, role, arch = "test:engine", "sort_kernel_catalog", "gfx942"
+    if binding == "engine":
+        engine = "test:second"
+        second_ued = copy.deepcopy(ued)
+        second_ued.update(id=UED[:-1] + "3", name=engine)
+        _write(tree / "second.ued.json", second_ued)
+    elif binding == "architecture":
+        arch = "gfx950"
+    else:
+        role = "predict_engine_tflops"
+    provenance = snapshot_provenance(tree, engine=engine, arch=arch)
+    second = _model(tmp_path / "second", tree, identity=OTHER, provenance=provenance)
+    document = _read(second / "heuristic.uhd.json")
+    if binding == "role":
+        document.update(features_signature=["$graph.flops"],
+                        score={"units": "tflops", "calibrated": True, "transform": "identity"})
+    _write(second / "heuristic.uhd.json", document)
+    _write(second / "train_manifest.json", {"training_arches": [arch], "trained_against": provenance})
+    (second / "model.bin").write_bytes(b"second model weights")
+    second_plan = build_plan(second, tree, engine=engine, role=role, arch=arch)
+    _apply(second_plan)
+
+    assert first_plan.destination_descriptor.read_bytes() == first_descriptor
+    assert first_artifact.read_bytes() == b"first model weights"
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == NEW
+    installed = {
+        _read(path)["id"]: (path, _read(path))
+        for path in tree.rglob("*.uhd.json")
+    }
+    selected = _read(second_plan.ued_path)[role][arch]
+    path, document = installed[selected]
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == b"second model weights"
+
+    (second / "model.bin").write_bytes(b"replacement weights")
+    _apply(build_plan(second, tree, engine=engine, role=role, arch=arch))
+    assert first_artifact.read_bytes() == b"first model weights"
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == b"replacement weights"
+
+def test_dry_run_makes_no_writes(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    before = _files(tmp_path)
+    parser = argparse.ArgumentParser()
+    add_promote_arguments(parser)
+    args = parser.parse_args(["--model-dir", str(model), "--descriptor-tree", str(tree), "--dry-run"])
+    assert run_promote(args) == 0
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("role,arch", [("sort_kernel_catalog", "gfx950"), ("predict_engine_tflops", "gfx942")])
+def test_shared_identity_cannot_be_rewritten_from_another_binding(tmp_path, role, arch):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree, identity=OTHER)
+    incumbent = _read(model / "heuristic.uhd.json")
+    incumbent["id"] = OTHER
+    _write(tree / "heuristic.uhd.json", incumbent)
+    (tree / "model.bin").write_bytes(b"untargeted model")
+    ued = _read(tree / "engine.ued.json")
+    ued["sort_kernel_catalog"] = {"gfx942": OLD}
+    ued.pop("predict_engine_tflops")
+    ued.setdefault(role, {})[arch] = OTHER
+    _write(tree / "engine.ued.json", ued)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def test_same_id_in_another_directory_is_not_installed_twice(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _write(tree / "sub" / "different.uhd.json", _read(model / "heuristic.uhd.json"))
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def test_shared_artifact_collision_is_found_outside_destination_directory(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    destination = build_plan(model, tree).destination_descriptor.parent
+    incumbent = _read(model / "heuristic.uhd.json")
+    incumbent["id"] = OTHER
+    incumbent["tree_data"]["artifact"] = "../model.bin"
+    _write(destination / "other" / "other.uhd.json", incumbent)
+    (destination / "model.bin").write_bytes(b"untargeted model")
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("missing", ["trained_against", "features_hash", "features_signature", "objective", "tree_data", "name", "version"])
+def test_absent_required_headers_fail_before_writes(tmp_path, missing):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    del doc[missing]
+    _write(model / "heuristic.uhd.json", doc)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("mutation", ["identity", "major", "minor", "manifest"])
+def test_incompatible_training_provenance_is_never_restamped(tmp_path, mutation):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    if mutation == "identity":
+        doc["trained_against"]["ued"]["id"] = OTHER
+    elif mutation == "major":
+        doc["trained_against"]["kmd"]["revision"] = "2.0"
+    elif mutation == "minor":
+        doc["trained_against"]["ued"]["revision"] = "1.1"
+    else:
+        manifest = _read(model / "train_manifest.json")
+        manifest["trained_against"]["ued"]["revision"] = "1.1"
+        _write(model / "train_manifest.json", manifest)
+    _write(model / "heuristic.uhd.json", doc)
+    if mutation != "manifest":
+        (model / "train_manifest.json").unlink()
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree, arch="gfx942")
+    assert _files(tmp_path) == before
+
+
+def test_training_feature_pruning_never_removes_authored_knobs(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    manifest = _read(model / "train_manifest.json")
+    manifest["dropped_constant_features"] = ["kernel.tile_m"]
+    _write(model / "train_manifest.json", manifest)
+    _apply(build_plan(model, tree))
+    ued = _read(tree / "engine.ued.json")
+    assert ued["knobs"] == ["block_size", "tile_m"]
+    assert "revision" not in ued
+
+
+def test_explicit_knob_removal_requires_retraining_for_prospective_revision(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree, remove_knobs=["tile_m"])
+    assert _files(tmp_path) == before
+
+
+def test_explicit_knob_removal_bumps_semantic_not_file_revision(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    ued = _read(tree / "engine.ued.json")
+    ued.pop("predict_engine_tflops")
+    ued["sort_kernel_catalog"] = {"gfx942": OLD}
+    _write(tree / "engine.ued.json", ued)
+    provenance = snapshot_provenance(tree)
+    provenance["ued"]["revision"] = "2.0"
+    model = _model(tmp_path / "model", tree, provenance=provenance)
+    plan = build_plan(model, tree, remove_knobs=["tile_m"])
+    _apply(plan)
+    revised = _read(tree / "engine.ued.json")
+    assert revised["knobs"] == ["block_size"]
+    assert revised["version"] == "1.0"
+    assert revised["revision"] == "2.0"
+    assert _read(plan.destination_descriptor)["trained_against"] == provenance
+
+
+def test_explicit_knob_removal_cannot_invalidate_other_role_models(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    incumbent_provenance = snapshot_provenance(tree)
+    provenance = copy.deepcopy(incumbent_provenance)
+    provenance["ued"]["revision"] = "2.0"
+    model = _model(tmp_path / "model", tree, provenance=provenance)
+    other = _read(model / "heuristic.uhd.json")
+    other["id"] = OTHER
+    other["tree_data"]["artifact"] = "other.bin"
+    other["trained_against"] = incumbent_provenance
+    _write(tree / "other.uhd.json", other)
+    (tree / "other.bin").write_bytes(b"other")
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree, remove_knobs=["tile_m"])
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("arches", [[], ["gfx942", "gfx950"]])
+def test_ambiguous_architecture_requires_an_explicit_target(tmp_path, arches):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _write(model / "train_manifest.json", {"training_arches": arches})
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    _apply(build_plan(model, tree, arch="default"))
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["default"] == NEW
+
+
+def test_training_architecture_cannot_be_silently_retargeted(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree, arch="gfx950")
+
+
+def test_additive_semantic_revision_accepts_without_rewriting_training_snapshot(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    trained = _read(model / "heuristic.uhd.json")["trained_against"]
+    ued = _read(tree / "engine.ued.json")
+    ued["revision"] = "1.12"
+    _write(tree / "engine.ued.json", ued)
+    plan = build_plan(model, tree)
+    _apply(plan)
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == NEW
+    assert _read(plan.destination_descriptor)["trained_against"] == trained
+
+
+@pytest.mark.parametrize("payload", ["missing.bin", "../outside.bin", "metadata.kmd.json"])
+def test_invalid_artifact_destination_or_source_never_writes(tmp_path, payload):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc["tree_data"]["artifact"] = payload
+    _write(model / "heuristic.uhd.json", doc)
+    if payload != "missing.bin":
+        (model / payload).write_bytes(b"unsafe payload")
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def _train(tmp_path, *extra):
+    for dependency in ("lightgbm", "pandas", "flatbuffers"):
+        pytest.importorskip(dependency)
+    from uhd_gen.__main__ import main
+    tree = _tree(tmp_path / "tree")
+    provenance = _write(tmp_path / "provenance.json", snapshot_provenance(tree))
+    csv = tmp_path / "bench.csv"
     rows = ["kernel.block_size,tflops"]
     for index in range(40):
-        rows.append(f"64,{90.0 + index * 0.01:.2f}")
-        rows.append(f"256,{50.0 + index * 0.01:.2f}")
-    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
-    return path
+        rows.extend((f"64,{90 + index * .01}", f"256,{50 + index * .01}"))
+    csv.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return main(["train", "--input", str(csv), "--features", "kernel.block_size", "--target", "tflops",
+                 "--output-dir", str(tmp_path / "model"), "--provenance", str(provenance),
+                 "--num-boost-round", "10", "--early-stopping", "5", *extra])
 
 
-def _train(output_dir: Path, csv: Path, *extra: str) -> int:
-    return main(
-        [
-            "train",
-            "--input",
-            str(csv),
-            "--features",
-            "kernel.block_size",
-            "--target",
-            "tflops",
-            "--output-dir",
-            str(output_dir),
-            "--num-boost-round",
-            "10",
-            "--early-stopping",
-            "5",
-            *extra,
-        ]
-    )
+def test_train_retains_explicit_model_identity(tmp_path):
+    assert _train(tmp_path, "--uhd-id", NEW) == 0
+    assert _read(tmp_path / "model" / "heuristic.uhd.json")["id"] == NEW
+    assert _read(tmp_path / "model" / "train_manifest.json")["uhd_id"] == NEW
 
 
-# --------------------------------------------------------------------------------
-# Piece 1: train --uhd-id
-# --------------------------------------------------------------------------------
+def test_train_mints_identity_when_omitted(tmp_path):
+    assert _train(tmp_path) == 0
+    identity = _read(tmp_path / "model" / "heuristic.uhd.json")["id"]
+    assert str(uuid.UUID(identity)) == identity
 
 
-def test_train_uhd_id_is_the_descriptor_identity(tmp_path):
-    """The point of --uhd-id: retraining keeps the id the UED already names.
-
-    If train minted a fresh id anyway, the UED would still point at the previous
-    descriptor -- which no longer exists -- and the engine would load with no
-    heuristic at all.
-    """
-    requested = str(uuid.uuid4())
-    output_dir = tmp_path / "model"
-
-    assert _train(output_dir, _training_csv(tmp_path / "bench.csv"), "--uhd-id", requested) == 0
-
-    descriptor = json.loads((output_dir / "heuristic.uhd.json").read_text(encoding="utf-8"))
-    assert descriptor["id"] == requested
-    manifest = json.loads((output_dir / "train_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["uhd_id"] == requested
-
-
-def test_train_without_uhd_id_still_mints_one(tmp_path):
-    """The flag is optional; omitting it must keep the previous behaviour."""
-    output_dir = tmp_path / "model"
-
-    assert _train(output_dir, _training_csv(tmp_path / "bench.csv")) == 0
-
-    descriptor = json.loads((output_dir / "heuristic.uhd.json").read_text(encoding="utf-8"))
-    uuid.UUID(descriptor["id"])  # raises if it is not a UUID
-
-
-@pytest.mark.parametrize(
-    "malformed",
-    [
-        "not-a-uuid",
-        "",
-        # One hex digit short: the kind of typo a copy-paste produces, and the kind the
-        # loader answers with a silently heuristic-less engine.
-        "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d6",
-    ],
-)
-def test_train_rejects_a_malformed_uhd_id(tmp_path, malformed):
-    """A bad id must fail the run, not become the descriptor's identity."""
-    output_dir = tmp_path / "model"
-
-    assert _train(output_dir, _training_csv(tmp_path / "bench.csv"), "--uhd-id", malformed) == 1
-    # Rejected before any output exists: the check runs ahead of training, so a typo
-    # costs an error message rather than a training run.
-    assert not (output_dir / "heuristic.uhd.json").exists()
-
-
-# --------------------------------------------------------------------------------
-# Piece 2: promote
-# --------------------------------------------------------------------------------
-
-
-def test_promote_points_the_ued_at_the_model_and_installs_the_pair(tmp_path, capsys):
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert _heuristic_of(ued) == uhd_id
-    assert (tree / "heuristic.uhd.json").is_file()
-    assert (tree / "model.bin").read_bytes() == (model_dir / "model.bin").read_bytes()
-    # The installed descriptor is the model's, not a copy carrying some other id.
-    installed = json.loads((tree / "heuristic.uhd.json").read_text(encoding="utf-8"))
-    assert installed["id"] == uhd_id
-
-    report = capsys.readouterr().out
-    assert STALE_HEURISTIC in report and uhd_id in report
-
-
-def test_promote_preserves_ued_formatting_and_key_order(tmp_path):
-    """One changed line, not a reformat: a promote nobody can review is a promote
-    nobody applies."""
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-    before = ued.read_text(encoding="utf-8").splitlines()
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    after = ued.read_text(encoding="utf-8").splitlines()
-    assert len(before) == len(after)
-    differing = [index for index, (a, b) in enumerate(zip(before, after)) if a != b]
-    assert differing == [4], f"expected only the heuristic line to change, got {differing}"
-    assert ued.read_text(encoding="utf-8").endswith("}\n")
-
-
-def test_promote_adds_heuristic_to_a_ued_that_had_none(tmp_path, capsys):
-    """An engine that ranked by priority is the common starting state."""
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A, heuristic=None)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert _heuristic_of(ued) == uhd_id
-    assert "(none)" in capsys.readouterr().out
-
-
-def test_promote_refuses_to_guess_between_two_ueds(tmp_path):
-    """Refusing beats choosing.
-
-    Promoting into the wrong engine fails twice over: the engine that was retrained
-    keeps its old model, and an unrelated engine starts ranking with a model trained
-    for a different kernel set. Both load cleanly and report nothing.
-    """
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    first = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-    second = _make_ued(tree / "b.ued.json", "hipkernel:reduction", UED_ID_B)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-
-    assert _heuristic_of(first) == STALE_HEURISTIC
-    assert _heuristic_of(second) == STALE_HEURISTIC
-    assert not (tree / "heuristic.uhd.json").exists()
-    assert not (tree / "model.bin").exists()
-
-
-def test_promote_engine_selects_the_named_ued_only(tmp_path):
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    first = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-    second = _make_ued(tree / "nested" / "b.ued.json", "hipkernel:reduction", UED_ID_B)
-
-    assert (
-        main(
-            [
-                "promote",
-                "--model-dir",
-                str(model_dir),
-                "--descriptor-tree",
-                str(tree),
-                "--engine",
-                "hipkernel:reduction",
-            ]
-        )
-        == 0
-    )
-
-    assert _heuristic_of(second) == uhd_id
-    assert _heuristic_of(first) == STALE_HEURISTIC
-    # The pair lands beside the UED that was updated, which is where the loader
-    # resolves `tree_data.artifact` from.
-    assert (second.parent / "heuristic.uhd.json").is_file()
-    assert (second.parent / "model.bin").is_file()
-    assert not (first.parent / "model.bin").exists()
-
-
-def test_promote_rejects_an_unknown_engine_name(tmp_path):
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert (
-        main(
-            [
-                "promote",
-                "--model-dir",
-                str(model_dir),
-                "--descriptor-tree",
-                str(tree),
-                "--engine",
-                "hipkernel:typo",
-            ]
-        )
-        == 1
-    )
-    assert _heuristic_of(ued) == STALE_HEURISTIC
-
-
-def test_promote_dry_run_writes_nothing(tmp_path, capsys):
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-    before = ued.read_text(encoding="utf-8")
-
-    assert (
-        main(
-            [
-                "promote",
-                "--model-dir",
-                str(model_dir),
-                "--descriptor-tree",
-                str(tree),
-                "--dry-run",
-            ]
-        )
-        == 0
-    )
-
-    assert ued.read_text(encoding="utf-8") == before
-    assert sorted(path.name for path in tree.iterdir()) == ["engine.ued.json"]
-    output = capsys.readouterr().out
-    assert "dry run" in output and uhd_id in output
-
-
-def test_promote_refuses_a_model_dir_missing_its_artifact(tmp_path):
-    """Installing a descriptor whose artifact is absent is the worst outcome available:
-    the loader finds the UHD, fails to build the adapter, and drops the engine."""
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id, write_artifact=False)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-
-    assert _heuristic_of(ued) == STALE_HEURISTIC
-    assert not (tree / "heuristic.uhd.json").exists()
-
-
-def test_promote_refuses_a_descriptor_with_a_non_uuid_id(tmp_path):
-    model_dir = _make_model_dir(tmp_path / "model", "definitely-not-a-uuid")
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-
-    assert _heuristic_of(ued) == STALE_HEURISTIC
-    assert not (tree / "model.bin").exists()
-
-
-def test_promote_refuses_an_empty_model_dir(tmp_path):
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-    assert _heuristic_of(ued) == STALE_HEURISTIC
-
-
-def test_promote_refuses_a_tree_with_no_ued(tmp_path):
-    model_dir = _make_model_dir(tmp_path / "model", str(uuid.uuid4()))
-    tree = tmp_path / "tree"
-    tree.mkdir()
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-    assert not (tree / "model.bin").exists()
-
-
-def test_promote_refuses_to_strand_another_engines_heuristic(tmp_path):
-    """Same filename, different id, and someone else points at the old one.
-
-    Overwriting would leave the other UED naming an id nothing defines, which the
-    loader answers by dropping that engine entirely.
-    """
-    tree = tmp_path / "tree"
-    incumbent = _make_model_dir(tree, str(uuid.uuid4()))
-    incumbent_id = json.loads(
-        (tree / "heuristic.uhd.json").read_text(encoding="utf-8")
-    )["id"]
-    target = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-    other = _make_ued(tree / "b.ued.json", "hipkernel:reduction", UED_ID_B, incumbent_id)
-
-    model_dir = _make_model_dir(tmp_path / "model", str(uuid.uuid4()))
-
-    assert (
-        main(
-            [
-                "promote",
-                "--model-dir",
-                str(model_dir),
-                "--descriptor-tree",
-                str(tree),
-                "--engine",
-                "hipkernel:pointwise",
-            ]
-        )
-        == 1
-    )
-
-    assert _heuristic_of(target) == STALE_HEURISTIC
-    assert _heuristic_of(other) == incumbent_id
-    assert json.loads((tree / "heuristic.uhd.json").read_text(encoding="utf-8"))[
-        "id"
-    ] == incumbent_id
-
-
-def test_promote_refuses_to_clobber_a_neighbours_artifact(tmp_path):
-    """`train` calls every artifact `model.bin`, so two stems collide by default.
-
-    The victim descriptor keeps its features_hash and its filename, and only its trees
-    change -- a mismatch that shows up as different rankings, not as an error.
-    """
-    tree = tmp_path / "tree"
-    _make_model_dir(tree, str(uuid.uuid4()), stem="packed_pointwise_model")
-    ued = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-    model_dir = _make_model_dir(tmp_path / "model", str(uuid.uuid4()), stem="heuristic")
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 1
-
-    assert _heuristic_of(ued) == STALE_HEURISTIC
-    assert (tree / "model.bin").read_bytes() != (model_dir / "model.bin").read_bytes()
-
-
-def test_promote_warns_when_replacing_an_unreferenced_descriptor(tmp_path, caplog):
-    """Nothing is stranded, so this proceeds -- but silently swapping a file that is a
-    different heuristic, not a newer build of the same one, is worth saying out loud."""
-    tree = tmp_path / "tree"
-    _make_model_dir(tree, str(uuid.uuid4()))
-    ued = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-
-    with caplog.at_level("WARNING"):
-        assert (
-            main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-        )
-
-    assert "OVERWRITING" in caplog.text
-    assert _heuristic_of(ued) == uhd_id
-
-
-def test_promote_does_not_warn_when_superseding_the_engines_own_heuristic(tmp_path, caplog):
-    """The ordinary retrain must stay quiet.
-
-    The descriptor being replaced is the one this engine already ranks by, so the
-    replacement is the whole point. Warning here would train readers to scroll past the
-    warning that means something -- an unrelated heuristic being clobbered.
-    """
-    tree = tmp_path / "tree"
-    incumbent_id = str(uuid.uuid4())
-    _make_model_dir(tree, incumbent_id)
-    ued = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A, incumbent_id)
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-
-    with caplog.at_level("WARNING"):
-        assert (
-            main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-        )
-
-    assert "OVERWRITING" not in caplog.text
-    assert _heuristic_of(ued) == uhd_id
-
-
-def test_promote_is_idempotent_when_the_pair_is_already_in_place(tmp_path):
-    """Retraining straight into the tree: nothing to copy, but the id still has to be
-    written, and copying a file onto itself must not raise."""
-    tree = tmp_path / "tree"
-    uhd_id = str(uuid.uuid4())
-    _make_model_dir(tree, uhd_id)
-    ued = _make_ued(tree / "a.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(tree), "--descriptor-tree", str(tree)]) == 0
-
-    assert _heuristic_of(ued) == uhd_id
-    assert (tree / "model.bin").is_file()
-
-
-# --------------------------------------------------------------------------------
-# The loop the two pieces close
-# --------------------------------------------------------------------------------
-
-
-def test_retraining_with_the_promoted_id_needs_no_second_promote(tmp_path):
-    """train -> promote -> train --uhd-id <same>: the UED never has to change again."""
-    csv = _training_csv(tmp_path / "bench.csv")
-    output_dir = tmp_path / "model"
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert _train(output_dir, csv) == 0
-    assert main(["promote", "--model-dir", str(output_dir), "--descriptor-tree", str(tree)]) == 0
-    promoted_id = _heuristic_of(ued)
-    after_promote = ued.read_text(encoding="utf-8")
-
-    assert _train(output_dir, csv, "--uhd-id", promoted_id) == 0
-    assert main(["promote", "--model-dir", str(output_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert ued.read_text(encoding="utf-8") == after_promote
-    assert _heuristic_of(ued) == promoted_id
-    installed = json.loads((tree / "heuristic.uhd.json").read_text(encoding="utf-8"))
-    assert installed["id"] == promoted_id
-
-
-# --------------------------------------------------------------------------------
-# Carrying an explicit constant-drop through to the engine's knob list
-# --------------------------------------------------------------------------------
-
-
-def _manifest_dropping(model_dir: Path, dropped: list[str]) -> Path:
-    _write_json(
-        model_dir / "train_manifest.json",
-        {"drop_constant_features": True,
-         "dropped_constant_features": [f"kernel.{name}" for name in dropped]},
-    )
-    return model_dir
-
-
-def test_promote_removes_knobs_the_author_asked_training_to_drop(tmp_path, capsys):
-    """`--drop-constant-features` is a decision about the engine, not just the model.
-
-    RFC 0019 §6.3 permits a knob no axis reads, so leaving it would load cleanly and
-    silently -- the caller keeps a dial the heuristic cannot react to. The drop has to
-    reach the UED for the two to mean the same thing.
-    """
-    uhd_id = str(uuid.uuid4())
-    model_dir = _manifest_dropping(_make_model_dir(tmp_path / "model", uhd_id), ["tile_m"])
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-    _write_json(ued, {**json.loads(ued.read_text(encoding="utf-8")),
-                      "knobs": ["block_size", "tile_m"]})
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
-    assert "tile_m" in capsys.readouterr().out
-
-
-def test_promote_leaves_knobs_alone_when_training_kept_the_constants(tmp_path):
-    """The default. A knob list reshaped by a training run would let a UMD's binding
-    disappear because a sweep happened to be narrow."""
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    _write_json(
-        model_dir / "train_manifest.json",
-        {"drop_constant_features": False, "dropped_constant_features": []},
-    )
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
-
-
-def test_promote_without_a_manifest_touches_no_knobs(tmp_path):
-    """Older runs wrote none, and an absent manifest must not be read as "drop everything"."""
-    uhd_id = str(uuid.uuid4())
-    model_dir = _make_model_dir(tmp_path / "model", uhd_id)
-    tree = tmp_path / "tree"
-    ued = _make_ued(tree / "engine.ued.json", "hipkernel:pointwise", UED_ID_A)
-
-    assert main(["promote", "--model-dir", str(model_dir), "--descriptor-tree", str(tree)]) == 0
-
-    assert json.loads(ued.read_text(encoding="utf-8"))["knobs"] == ["block_size"]
+@pytest.mark.parametrize("malformed", ["not-a-uuid", "", "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d6"])
+def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
+    assert _train(tmp_path, "--uhd-id", malformed) == 1
+    assert not (tmp_path / "model" / "heuristic.uhd.json").exists()

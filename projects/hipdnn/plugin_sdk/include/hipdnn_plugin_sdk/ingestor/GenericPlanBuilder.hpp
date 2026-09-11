@@ -12,21 +12,26 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -52,6 +57,22 @@ inline nlohmann::json metadataValueToJson(const MetadataValue& value)
     return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
 }
 
+inline void addMetadataFeature(nlohmann::json& features,
+                               const std::string& name,
+                               const MetadataValue& value)
+{
+    features[name] = metadataValueToJson(value);
+    if(const auto* values = std::get_if<std::vector<int64_t>>(&value))
+    {
+        for(size_t i = 0; i < values->size(); ++i)
+        {
+            // Direct published scalars win over synthesized indexed references,
+            // independently of unordered BoundTokens traversal order.
+            features.emplace(name + "[" + std::to_string(i) + "]", (*values)[i]);
+        }
+    }
+}
+
 } // namespace detail
 
 /// What a `TSettings` used with GenericPlanBuilder must carry, grouped so a second
@@ -60,6 +81,7 @@ struct IngestorSettings
 {
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
+    std::optional<int64_t> workspaceLimit;
 };
 
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
@@ -148,7 +170,7 @@ public:
         }
 
         const auto filtered
-            = applyKnobFilter(catalog.entries, executionSettings.ingestorSettings.knobFilter);
+            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(executionSettings.ingestorSettings.knobFilter,
@@ -174,8 +196,10 @@ public:
                                      const IEngineConfig& engineConfig,
                                      TSettings& executionSettings) const override
     {
-        executionSettings.ingestorSettings.knobFilter = readKnobFilter(engineConfig);
-        executionSettings.ingestorSettings.benchmarkingEnabled
+        auto& settings = executionSettings.ingestorSettings;
+        settings.knobFilter = readKnobFilter(engineConfig);
+        settings.workspaceLimit = heuristics::workspaceLimit(engineConfig);
+        settings.benchmarkingEnabled
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
     }
 
@@ -185,17 +209,14 @@ public:
                    TContext& executionContext) const override
     {
         const auto context = contextFor(handle, opGraph);
+        const auto& settings = executionContext.executionSettings().ingestorSettings;
         const auto catalog = _stateManager.sortedCatalog(context);
         if(catalog.entries.empty())
         {
             throwNoApplicableKernel();
         }
 
-        // The settings this context already carries, not a second parse of engineConfig:
-        // initializeExecutionSettings() ran against this same config immediately before
-        // and the engine stored the result.
-        const auto& settings = executionContext.executionSettings().ingestorSettings;
-        const auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
+        const auto filtered = applyConstraints(catalog, settings, context);
         if(filtered.empty())
         {
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
@@ -428,7 +449,320 @@ public:
         return knobs;
     }
 
+    /// Enumerates the actual matched catalog, never the Cartesian product of knob
+    /// domains. Defaults do not narrow the catalog; only explicitly pinned knobs do.
+    hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT
+        enumerateCandidates(const THandle& handle,
+                            const IGraph& opGraph,
+                            const IEngineConfig& config,
+                            uint64_t offset,
+                            uint64_t limit) const
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        if(limit == 0 || limit > 10000 || !understandsGraph(opGraph))
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                        "Invalid candidate page limit or unsupported graph schema");
+        }
+        // Unknown/duplicate knobs must not silently broaden the requested scope.
+        std::unordered_set<std::string> seen;
+        for(const auto& setting : config.knobSettingWrappers())
+        {
+            const auto name = setting->knobId();
+            if(!seen.insert(name).second
+               || std::find(_engine.knobs.begin(), _engine.knobs.end(), name)
+                      == _engine.knobs.end())
+            {
+                throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                            "Unknown or duplicate enumeration knob '" + name + "'");
+            }
+        }
+        const auto context = contextFor(handle, opGraph);
+        const auto catalog = _stateManager.enumerableCatalog(context);
+        const auto filtered = applyKnobFilter(catalog.entries, readKnobFilter(config));
+        if(offset > filtered.size())
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                        "Candidate offset exceeds scoped catalog size");
+        }
+
+        // Check the entire scoped snapshot, not just this page: a collision across a
+        // page boundary is still unaddressable by EngineVariant enrollment.
+        std::map<KnobFilter, DescriptorId> identities;
+        for(const auto& kernel : filtered)
+        {
+            const auto tuple = candidateKnobs(kernel);
+            const auto inserted = identities.emplace(tuple, kernel.kernelId);
+            if(!inserted.second)
+            {
+                throw HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                    "Ambiguous enrolled knob tuple for candidates '"
+                        + toString(inserted.first->second) + "' and '" + toString(kernel.kernelId)
+                        + "'; expose enough KMD integer fields in the collection UED knobs");
+            }
+        }
+
+        EngineCandidatePageT page;
+        page.engine_name = _engine.name;
+        page.engine_descriptor_id = toString(_engine.id);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graphKey{opGraph};
+        if(!graphKey.isUsable())
+        {
+            throw HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "Cannot enumerate a graph without stable serialized content");
+        }
+        page.graph_id = std::to_string(graphKey.hash());
+        page.device_id = std::to_string(DeviceKey{context.deviceProperties}.hash());
+        page.device_arch = context.deviceProperties.gcnArchName;
+        page.total_count = filtered.size();
+        page.offset = offset;
+        nlohmann::json problem = nlohmann::json::object();
+        for(const auto& [token, value] : catalog.bound)
+        {
+            detail::addMetadataFeature(
+                problem, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
+        }
+        page.problem_features = problem.dump();
+        nlohmann::json device = nlohmann::json::object();
+        for(const auto& entry : deviceFeatureValues(context.deviceProperties))
+        {
+            std::visit([&device, &entry](auto held) { device["device." + entry.first] = held; },
+                       entry.second);
+        }
+        page.device_features = device.dump();
+        const auto end = offset + std::min<uint64_t>(limit, filtered.size() - offset);
+        page.candidates.reserve(static_cast<size_t>(end - offset));
+        for(auto i = offset; i < end; ++i)
+        {
+            const auto& kernel = filtered[static_cast<size_t>(i)];
+            auto candidate = std::make_unique<EngineCandidateT>();
+            candidate->id = toString(kernel.kernelId);
+            for(const auto& [name, value] : candidateKnobs(kernel))
+            {
+                auto setting = std::make_unique<KnobSettingT>();
+                setting->knob_id = name;
+                IntValueT integer;
+                integer.value = value;
+                setting->value.Set(integer);
+                candidate->knob_settings.push_back(std::move(setting));
+            }
+            nlohmann::json features = nlohmann::json::object();
+            for(const auto& [name, value] : kernel.metadata)
+            {
+                detail::addMetadataFeature(features, "kernel." + name, value);
+            }
+            candidate->kernel_features = features.dump();
+            page.candidates.push_back(std::move(candidate));
+        }
+        return page;
+    }
+
+    /// @brief Canonical features plus existing graph-match bindings, without touching a catalog.
+    uhd::FeatureExtractionContext predictionFeatures(const THandle& handle,
+                                                     const IGraph& graph,
+                                                     const IEngineConfig& config,
+                                                     std::string& arch) const
+    {
+        const auto context = contextFor(handle, graph);
+        arch = context.deviceProperties.gcnArchName;
+        auto features = heuristics::engineFeatures(graph, config, context.deviceProperties);
+        try
+        {
+            if(const auto bound = _stateManager.graphBindings(context))
+            {
+                // Matchers may add published names but never overwrite common facts.
+                for(const auto& entry : detail::queryVarsFrom(*bound))
+                {
+                    const auto& name = entry.first;
+                    const auto bare = !name.empty() && name.front() == '$' ? name.substr(1) : name;
+                    if(bare.rfind("graph.", 0) != 0 && bare.rfind("device.", 0) != 0
+                       && bare.rfind("constraint.", 0) != 0 && bare.rfind("kernel.", 0) != 0)
+                    {
+                        features.bind(name, entry.second);
+                    }
+                }
+            }
+        }
+        catch(const std::exception& error)
+        {
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: optional prediction bindings unavailable: " << error.what());
+        }
+        return features;
+    }
+
+    /// @brief Predicts an executable configuration identified by its exposed knobs.
+    void predictConfiguration(const THandle& handle,
+                              const IGraph& graph,
+                              const IEngineConfig& config,
+                              hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& result) const
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        validateKnobConstraints(config);
+        if(readBenchmarkingEnabled(config))
+        {
+            throw HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "An exact configuration prediction cannot preserve a benchmarking request");
+        }
+        TSettings executionSettings;
+        initializeExecutionSettings(handle, graph, config, executionSettings);
+        const auto context = contextFor(handle, graph);
+        auto catalog = _stateManager.unsortedCatalog(context);
+        catalog.entries = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        std::string modelId;
+        const auto ranking = _stateManager.calibratedRanking(catalog, context, modelId);
+        result.reason = "No calibrated configuration prediction is available";
+        for(const auto& scored : ranking)
+        {
+            if(!std::isfinite(scored.score) || scored.score <= 0.0)
+            {
+                continue;
+            }
+            const auto selected = std::find_if(
+                catalog.entries.begin(), catalog.entries.end(), [&](const auto& kernel) {
+                    return kernel.kernelId == scored.kernelId;
+                });
+            if(selected == catalog.entries.end())
+            {
+                throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                            "Ranker returned an unknown candidate");
+            }
+            const auto knobs = candidateKnobs(*selected);
+            const auto matching = std::count_if(
+                catalog.entries.begin(), catalog.entries.end(), [&knobs](const auto& kernel) {
+                    return std::all_of(knobs.begin(), knobs.end(), [&kernel](const auto& setting) {
+                        const auto field = kernel.metadata.find(setting.first);
+                        const auto* value = field == kernel.metadata.end()
+                                                ? nullptr
+                                                : std::get_if<int64_t>(&field->second);
+                        return value != nullptr && *value == setting.second;
+                    });
+                });
+            if(matching != 1)
+            {
+                result.reason = "The scored candidate cannot be identified by its exposed knobs";
+                continue;
+            }
+            try
+            {
+                // Normal selection walks past candidates that cannot prepare. The
+                // prediction must refer to a candidate that can actually be built.
+                GenericPlan<THandle> prepared(
+                    _stateManager.getDispatchDetails(*selected), context, catalog.bound);
+                auto exact = config.isValid()
+                                 ? std::unique_ptr<EngineConfigT>(config.getEngineConfig().UnPack())
+                                 : std::make_unique<EngineConfigT>();
+                exact->engine_id = result.engine_id;
+                for(const auto& field : knobs)
+                {
+                    const auto& name = field.first;
+                    const auto value = field.second;
+                    auto existing = std::find_if(
+                        exact->knobs.begin(), exact->knobs.end(), [&](const auto& setting) {
+                            return setting->knob_id == name;
+                        });
+                    if(existing == exact->knobs.end())
+                    {
+                        auto setting = std::make_unique<KnobSettingT>();
+                        setting->knob_id = name;
+                        IntValueT integer;
+                        integer.value = value;
+                        setting->value.Set(integer);
+                        exact->knobs.push_back(std::move(setting));
+                    }
+                }
+                result.engine_config = std::move(exact);
+                result.tflops = scored.score;
+                result.uhd_id = modelId;
+                result.status = PredictionStatus::AVAILABLE;
+                result.reason.clear();
+                if(!result.binding_json.empty())
+                {
+                    auto binding = nlohmann::json::parse(result.binding_json);
+                    binding["role"] = "sort_kernel_catalog";
+                    binding["uhd_id"] = modelId;
+                    result.binding_json = binding.dump();
+                }
+                return;
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+            }
+            catch(const std::exception&)
+            {
+            }
+        }
+    }
+    void validateKnobConstraints(const IEngineConfig& config) const
+    {
+        if(!config.isValid())
+        {
+            return;
+        }
+        std::unordered_set<std::string> seen;
+        for(const auto& setting : config.knobSettingWrappers())
+        {
+            const auto name = setting->knobId();
+            if(!seen.insert(name).second
+               || (name != BENCHMARKING_KNOB_NAME && name != WORKSPACE_SIZE_LIMIT_KNOB_NAME
+                   && std::find(_engine.knobs.begin(), _engine.knobs.end(), name)
+                          == _engine.knobs.end()))
+            {
+                throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                            "Unknown or duplicate selection constraint '" + name
+                                                + "'");
+            }
+        }
+    }
+
 private:
+    std::vector<KernelDefinition> applyConstraints(const Catalog& catalog,
+                                                   const IngestorSettings& settings,
+                                                   const MatchContext& context) const
+    {
+        auto filtered = applyKnobFilter(catalog.entries, settings.knobFilter);
+        if(settings.workspaceLimit)
+        {
+            filtered.erase(
+                std::remove_if(filtered.begin(),
+                               filtered.end(),
+                               [&](const auto& kernel) {
+                                   const auto dispatch = _stateManager.getDispatchDetails(kernel);
+                                   return dispatch.handler->workspaceBytes(
+                                              context, catalog.bound, kernel)
+                                          > static_cast<uint64_t>(*settings.workspaceLimit);
+                               }),
+                filtered.end());
+        }
+        return filtered;
+    }
+
+    KnobFilter candidateKnobs(const KernelDefinition& kernel) const
+    {
+        KnobFilter tuple;
+        for(const auto& name : _engine.knobs)
+        {
+            const auto it = kernel.metadata.find(name);
+            // getCustomKnobs advertises only integer metadata today. Non-integer
+            // fields must not be invented as unsupported knobs during enumeration.
+            if(it != kernel.metadata.end())
+            {
+                if(const auto* value = std::get_if<int64_t>(&it->second))
+                {
+                    tuple.emplace(name, *value);
+                }
+            }
+        }
+        return tuple;
+    }
+
     /// Every feature value that describes one benchmarked (problem, kernel) pair: the
     /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
     ///
@@ -436,16 +770,8 @@ private:
     /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
     /// the opacity its benchmarkId comment exists to protect.
     ///
-    /// Keys mirror how FeatureExtractor will bind the same values, so a logged column and
-    /// a `features_signature` entry are the same string minus the `$`. Both roots come
-    /// from `bindNamespace`: bound tokens land under `q` (`bindQueryVars`) and KMD
-    /// metadata under `kernel` (`bindKernelVars`). Dropping either prefix here would name
-    /// a column no signature can reference.
-    ///
-    /// Note this makes `q` a namespace meaning "the problem", which is NOT what RFC 0020
-    /// §6.1 means by it -- there `$q` is a pattern variable naming the query tensor. The
-    /// divergence is FeatureExtractor's, not this function's; mirroring it is the only way
-    /// the two sides agree today. Reconciling them is the pattern-driven path's to do.
+    /// Keys are the exact published binding names without '$'; array elements are
+    /// also emitted as indexed references for direct-column feature projection.
     ///
     /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
     /// present would make the corpus collectable only by a build that already has the
@@ -457,11 +783,12 @@ private:
         nlohmann::json features = nlohmann::json::object();
         for(const auto& [token, value] : bound)
         {
-            features["q." + token] = detail::metadataValueToJson(value);
+            detail::addMetadataFeature(
+                features, !token.empty() && token.front() == '$' ? token.substr(1) : token, value);
         }
         for(const auto& [field, value] : kernel.metadata)
         {
-            features["kernel." + field] = detail::metadataValueToJson(value);
+            detail::addMetadataFeature(features, "kernel." + field, value);
         }
         // The device half. A sweep merged from several boards of one arch is the point:
         // the UHD is arch-keyed, so `device` alone says which card a row came from while

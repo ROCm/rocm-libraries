@@ -557,7 +557,7 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
 
 template <class FieldType>
 static inline void FillFindReturnParameters(const std::vector<Solution>& results,
-                                            FieldType miopenConvAlgoPerf_t::*field,
+                                            FieldType miopenConvAlgoPerf_t::* field,
                                             const char* log_start,
                                             int* const returned_algo_count,
                                             miopenConvAlgoPerf_t* perf_results)
@@ -939,7 +939,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::AI;
-        const static std::string arch = ctx.GetStream().GetDeviceName();
+        const auto arch = ctx.GetStream().GetDeviceName();
         std::vector<uint64_t> solvers;
         try
         {

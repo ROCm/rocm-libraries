@@ -20,14 +20,24 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
 
-/// Number of built-in heuristic policies every manager registers in its constructor.
+/// Number of built-in heuristic POLICIES every manager registers in its constructor.
 ///
 /// Derived rather than hardcoded: these expectations previously pinned a literal 2 and
 /// went stale the moment a third built-in (UHD) was registered. Asking a fresh manager
 /// keeps them correct as built-ins are added or removed.
+///
+/// Counts policy IDs, not plugins: one plugin may expose several policies (the
+/// prediction built-in serves both SelectionHeuristic::ModeA and ::ModeB), and what
+/// getHeuristicPolicyInfos() reports is one entry per policy.
 static size_t builtInPolicyCount()
 {
-    return HeuristicPluginManager{}.getPlugins().size();
+    const HeuristicPluginManager manager;
+    size_t policies = 0;
+    for(const auto& plugin : manager.getPlugins())
+    {
+        policies += plugin->getAllPolicyIds().size();
+    }
+    return policies;
 }
 
 class TestHeuristicPluginResourceManager : public ::testing::Test

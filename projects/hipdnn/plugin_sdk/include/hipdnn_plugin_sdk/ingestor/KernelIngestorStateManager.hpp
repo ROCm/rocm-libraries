@@ -31,7 +31,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/LruCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCache.hpp>
 #include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 
@@ -183,6 +183,21 @@ public:
         return _schema;
     }
 
+    /// Graph bindings only: the L1 path never constructs or ranks a kernel catalog.
+    std::optional<BoundTokens> graphBindings(const MatchContext& context) const
+    {
+        return _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
+                                        : _graphMatchFn(context);
+    }
+
+    /// Calibrated model scores for exact configuration prediction, never cached timings.
+    std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
+                                                const MatchContext& context,
+                                                std::string& modelId) const
+    {
+        return _heuristic->calibratedRanking(catalog, context, modelId);
+    }
+
     /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
     {
@@ -193,6 +208,25 @@ public:
     Catalog unsortedCatalog(const MatchContext& context) const
     {
         return catalogFor(context);
+    }
+
+    /// Matching only, in descriptor-ID order: independent of heuristic/winner state.
+    /// A page walk must not change order when another caller benchmarks the catalog.
+    Catalog enumerableCatalog(const MatchContext& context) const
+    {
+        auto catalog = catalogFor(context);
+        std::sort(catalog.entries.begin(),
+                  catalog.entries.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.kernelId < rhs.kernelId; });
+        for(size_t i = 1; i < catalog.entries.size(); ++i)
+        {
+            if(catalog.entries[i - 1].kernelId == catalog.entries[i].kernelId)
+            {
+                throw std::invalid_argument("Ambiguous candidate id '"
+                                            + toString(catalog.entries[i].kernelId) + "'");
+            }
+        }
+        return catalog;
     }
 
     /// Every kernel that applies to the graph and device @p context names, best first.

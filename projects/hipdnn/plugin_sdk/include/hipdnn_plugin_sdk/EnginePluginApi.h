@@ -144,6 +144,56 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
                                        hipdnnPluginConstData_t* engine_details);
 
 /**
+ * @brief Optional matched-catalog enumeration (engine plugin API 1.5.0).
+ *
+ * The engine config's explicit knob settings restrict the graph/device catalog.
+ * offset is zero-based; limit must be in [1, 10000]. Returns EngineDetails with
+ * candidate_page including total_count and offset. Stable candidate-ID order is
+ * independent of heuristic ranking. An offset beyond total_count is an error.
+ * Complete returned knob tuples must resolve uniquely to their candidate.
+ *
+ * Absence of this symbol or NOT_APPLICABLE means enumeration is unsupported,
+ * not an empty catalog. Use DestroyEngineDetails to free a successful response.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginEnumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                          const hipdnnPluginConstData_t* engine_config,
+                                          const hipdnnPluginConstData_t* op_graph,
+                                          uint64_t offset,
+                                          uint64_t limit,
+                                          hipdnnPluginConstData_t* engine_details);
+
+/**
+ * @brief Describes or evaluates an engine UHD prediction (engine API 1.5.0).
+ *
+ * ENGINE predicts ordinary execution with tuning off, without enumerating or
+ * scoring configurations. CONFIGURATION returns an engine ID and complete knob
+ * settings identifying one configuration, with its physical, calibrated TFLOPS.
+ * Neither request may benchmark, tune, or execute GPU work.
+ * Description requests publish the model binding and input features even when no
+ * model is installed. A missing prediction never changes engine applicability.
+ *
+ * @param[in] handle Engine plugin handle.
+ * @param[in] engine_config Serialized EngineConfig, including selection constraints.
+ * @param[in] op_graph Serialized operation graph.
+ * @param[in] kind Requested prediction layer.
+ * @param[in] evaluate Zero for description only, one to evaluate the prediction.
+ * @param[out] prediction Serialized EnginePrediction from engine_prediction.fbs.
+ * The provider owns successful output until hipdnnEnginePluginDestroyEngineDetails
+ * releases it. On failure, output must remain empty.
+ *
+ * @return SUCCESS with an AVAILABLE, UNAVAILABLE, or INVALID prediction, or a
+ * parameter/operational error. An absent export or NOT_APPLICABLE means unsupported.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetPrediction(hipdnnEnginePluginHandle_t handle,
+                                    const hipdnnPluginConstData_t* engine_config,
+                                    const hipdnnPluginConstData_t* op_graph,
+                                    hipdnnEnginePredictionKind_t kind,
+                                    int32_t evaluate,
+                                    hipdnnPluginConstData_t* prediction);
+
+/**
  * @brief Destroys the `engine_details` object and releases the associated resources.
  *
  * @param[in] handle The engine plugin handle.

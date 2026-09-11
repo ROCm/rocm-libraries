@@ -42,6 +42,11 @@ public:
                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
+    // No getPrediction override: ASM SDPA is an opaque engine with no UED, so no UHD can
+    // bind a `predict_engine_tflops` model to it. It therefore contributes no score and
+    // falls back to static ordering, which is the sanctioned outcome of RFC 0019 §11.2
+    // and its Open Question 7. IEngine's default reports UNAVAILABLE.
+
     size_t
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
         getMaxWorkspaceSize(const Handle& handle,

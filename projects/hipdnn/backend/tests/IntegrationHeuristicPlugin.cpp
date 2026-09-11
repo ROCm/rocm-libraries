@@ -623,7 +623,18 @@ TEST_F(IntegrationHeuristicPluginLoadedNoOptional, PluginWithoutOptionalCanStill
     const std::vector<int64_t> inputIds = {1, 2, 3};
     plugin().setEngineIds(descGuard.get(), inputIds.data(), inputIds.size());
 
-    const bool applied = plugin().finalize(descGuard.get());
+    int calls = 0;
+    const hipdnnHeuristicHostCallbacks_t host{
+        1,
+        sizeof(hipdnnHeuristicHostCallbacks_t),
+        &calls,
+        [](void* context, int64_t, hipdnnEnginePredictionKind_t, hipdnnPluginConstData_t*) {
+            ++*static_cast<int*>(context);
+            return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+        }};
+    const bool applied = plugin().finalizeWithHost(descGuard.get(), &host);
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(plugin().getEngineConfig(descGuard.get(), inputIds.front()), nullptr);
     EXPECT_FALSE(applied); // This plugin declines to apply
 
     const auto sortedIds = plugin().getSortedEngineIds(descGuard.get());

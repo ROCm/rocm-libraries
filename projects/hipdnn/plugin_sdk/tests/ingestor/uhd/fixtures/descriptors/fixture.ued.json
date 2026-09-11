@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "revision": "1.0",
+  "id": "f1900000-0000-0000-0000-000000000001",
+  "name": "test:generated_features",
+  "metadata": "f1900000-0000-0000-0000-000000000002",
+  "knobs": ["tile_m", "dtype"]
+}

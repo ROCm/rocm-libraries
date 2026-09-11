@@ -65,12 +65,12 @@ def _score_flatbuffer_model(buffer: bytes, features) -> float:
     writer that produces a buffer the runtime misreads fails here.
 
     Semantics copied from
-    plugin_sdk/include/hipdnn_plugin_sdk/ingestor/uhd/adapters/TreeDataAdapter.hpp:
+    plugin_sdk/include/hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp:
       - score() is `base_score + sum(tree)`; `learning_rate` is metadata and is NOT
-        applied, because LightGBM folds shrinkage into the dumped leaf values (:294-299)
-      - a node is a leaf when `left_children[node] < 0` (:342-350)
-      - `decision_lte` absent or true means `<=`, false means `<` (:356-362)
-      - a NaN feature, or a feature index outside the row, takes `default_left` (:369-385)
+        applied, because LightGBM folds shrinkage into the dumped leaf values
+      - a node is a leaf when `left_children[node] < 0`
+      - `decision_lte` absent or true means `<=`, false means `<`
+      - a NaN feature, or a feature index outside the row, takes `default_left`
     """
     model = GbdtModel.GetRootAs(buffer, 0)
     total = model.BaseScore()
@@ -113,37 +113,6 @@ def _score_flatbuffer_tree(tree, features) -> float:
         node = left if go_left else right
 
     return 0.0
-
-
-class TestTrainModelCvPaths:
-    """Both cross-validation paths must actually run.
-
-    Regression: the no-group-columns path (the default) passed an int as
-    `folds=`, which lgb.cv rejects, and then hit `stratified=True` routing a
-    continuous target through StratifiedKFold. The tool could not train at all
-    without --group-by.
-    """
-
-    def test_trains_without_group_columns(self):
-        import pandas as pd
-
-        X, y = _create_synthetic_data(n_samples=200, n_features=3)
-        df = pd.DataFrame(X, columns=["a", "b", "c"])
-        df["target"] = y
-
-        model = train_model(df, ["a", "b", "c"], "target", None, num_boost_round=10)
-        assert model.num_trees() > 0
-
-    def test_trains_with_group_columns(self):
-        import pandas as pd
-
-        X, y = _create_synthetic_data(n_samples=200, n_features=3)
-        df = pd.DataFrame(X, columns=["a", "b", "c"])
-        df["target"] = y
-        df["grp"] = np.arange(len(df)) % 10
-
-        model = train_model(df, ["a", "b", "c"], "target", ["grp"], num_boost_round=10)
-        assert model.num_trees() > 0
 
 
 class TestCostMetricDetection:

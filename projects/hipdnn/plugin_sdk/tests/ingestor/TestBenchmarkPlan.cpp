@@ -32,7 +32,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -878,7 +878,8 @@ TEST(TestIngestorBenchmarkPlan, ARecordCarriesTheTimesItsSamplesProduced)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
     const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
 
     plan.execute(handle, nullptr, 0U, nullptr);
@@ -963,8 +964,8 @@ TEST(TestIngestorBenchmarkPlan, ACandidatesFeatureValuesAppearInItsRecordVerbati
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     const auto plan = makeDeterministicPlan(
-        oneCandidateWithFeatures({{"q.seqlen", 512}, {"kernel.tile_m", 128},
-                                  {"kernel.dtype", "fp16"}}),
+        oneCandidateWithFeatures(
+            {{"q.seqlen", 512}, {"kernel.tile_m", 128}, {"kernel.dtype", "fp16"}}),
         handle,
         {4.0});
 
@@ -1001,7 +1002,8 @@ TEST(TestIngestorBenchmarkPlan, ACandidateWithNoFeaturesLogsExactlyTheRecordItAl
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const BenchmarkTestHandle handle;
     std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back({testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
     const auto plan = makeDeterministicPlan(std::move(candidates), handle, {4.0});
 
     plan.execute(handle, nullptr, 0U, nullptr);
@@ -1110,15 +1112,14 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
     const StubDeviceResolver resolver;
     // Every candidate reports the same time: this asserts what was logged, not who won,
     // and a constant keeps the sweep off a device.
-    const OraclePlanBuilder builder(
-        engine,
-        *manager,
-        resolver,
-        [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
-           const StubHandle&,
-           const hipdnnPluginDeviceBuffer_t*,
-           uint32_t,
-           void*) -> std::optional<double> { return 1.0; });
+    const OraclePlanBuilder builder(engine,
+                                    *manager,
+                                    resolver,
+                                    [](const hipdnn_plugin_sdk::IPlan<StubHandle>&,
+                                       const StubHandle&,
+                                       const hipdnnPluginDeviceBuffer_t*,
+                                       uint32_t,
+                                       void*) -> std::optional<double> { return 1.0; });
 
     const TestGraph graph(makeGraphId(0x51));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
@@ -1147,10 +1148,8 @@ TEST(TestIngestorBenchmarkPlan, BuildPlanGivesEachCandidateItsFeaturesAndTheDevi
     std::vector<int64_t> blockSizes;
     for(const auto& record : records)
     {
-        EXPECT_EQ(record["q.seqlen"].get<int64_t>(), 512)
-            << "the problem tokens graph matching bound must reach the row, spelled the way "
-               "a features_signature entry '$q.seqlen' spells them";
-        EXPECT_EQ(record["q.layout"].get<std::string>(), "nhwc");
+        EXPECT_EQ(record["seqlen"].get<int64_t>(), 512);
+        EXPECT_EQ(record["layout"].get<std::string>(), "nhwc");
         ASSERT_TRUE(record.contains("kernel.block_size"));
         blockSizes.push_back(record["kernel.block_size"].get<int64_t>());
         EXPECT_TRUE(record["kernel.dtype"].is_string());

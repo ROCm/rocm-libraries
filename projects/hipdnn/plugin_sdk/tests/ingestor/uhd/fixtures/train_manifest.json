@@ -1,5 +1,9 @@
 {
-  "uhd_id": "8d63aa4a-2510-4b56-9a5d-f586354e392c",
+  "uhd_id": "413c3e1a-df46-4494-ae53-b10849427244",
+  "requested_features": [
+    "kernel.tile_m",
+    "q.seqlen"
+  ],
   "features": [
     "kernel.tile_m",
     "q.seqlen"
@@ -9,6 +13,25 @@
     "$q.seqlen"
   ],
   "features_hash": "sha256:30aa9a4e48ea3f2b",
+  "trained_against": {
+    "ued": {
+      "id": "f1900000-0000-0000-0000-000000000001",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "f1900000-0000-0000-0000-000000000002",
+      "revision": "1.0"
+    },
+    "umd": []
+  },
+  "device_coverage": {
+    "device_count": null,
+    "fields": {}
+  },
+  "constant_features": [],
+  "dropped_constant_features": [],
+  "drop_constant_features": false,
+  "categorical_encoding": {},
   "target": "tflops",
   "objective": "max",
   "score_units": "tflops",
@@ -16,10 +39,25 @@
   "score_transform": "log1p",
   "group_by": [],
   "num_trees": 230,
+  "feature_importance": {
+    "kernel.tile_m": {
+      "gain": 337.6591169160135,
+      "split": 515
+    },
+    "q.seqlen": {
+      "gain": 797.454863237543,
+      "split": 2015
+    }
+  },
   "num_samples": 480,
   "input_file": "D:\\repos\\rocm-libraries\\projects\\hipdnn\\plugin_sdk\\tests\\ingestor\\uhd\\fixtures\\training_data.csv",
+  "input_sha256": "c0ff5e47d25d86a715a04c93a83981167cd5118d43d3e2b8103a309c32842d16",
   "training_arches": [
     "gfx942"
   ],
-  "model_version": null
+  "model_version": "1.0.0",
+  "training_options": {
+    "num_boost_round": 500,
+    "early_stopping_rounds": 50
+  }
 }

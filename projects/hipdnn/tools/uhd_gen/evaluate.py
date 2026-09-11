@@ -766,12 +766,20 @@ class ModelBundle:
     source: str
     trained_on: str | None
     training_rows: int | None
+    descriptor: dict = field(default_factory=dict)
+    manifest: dict = field(default_factory=dict)
+    role: str | None = None
 
 
 def _flatbuffer_scorer(
     artifact: Path,
     features: list[str],
     categorical_encoding: dict[str, dict[str, int]] | None = None,
+    *,
+    signature: list | None = None,
+    feature_evaluator: str | None = None,
+    expected_hash: str | None = None,
+    score_transform: str = "log1p",
 ) -> Scorer:
     """Score with the artifact that actually ships.
 
@@ -792,6 +800,10 @@ def _flatbuffer_scorer(
 
     with open(artifact, "rb") as handle:
         model = GbdtModelT.InitFromPackedBuf(bytearray(handle.read()), 0)
+    if expected_hash is not None:
+        stored_hash = model.featuresHash.decode("utf-8") if isinstance(model.featuresHash, bytes) else model.featuresHash
+        if stored_hash != expected_hash:
+            raise ValueError("descriptor features_hash does not match the shipped model artifact")
 
     trees = [
         (
@@ -808,7 +820,8 @@ def _flatbuffer_scorer(
     base = float(model.baseScore)
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        matrix = build_feature_matrix(frame, features, categorical_encoding)
+        matrix = build_feature_matrix(frame, features, categorical_encoding,
+                                      signature=signature, feature_evaluator=feature_evaluator)
         total = np.full(len(frame), base, dtype=np.float64)
         for feature_index, threshold, left, right, leaf, default_left, lte in trees:
             node = np.zeros(len(frame), dtype=np.int64)
@@ -825,7 +838,7 @@ def _flatbuffer_scorer(
                 go_left = np.where(np.isnan(x), default_left[here], go_left)
                 node[rows] = np.where(go_left, left[here], right[here])
             total += leaf[node]
-        return np.expm1(total)
+        return np.expm1(total) if score_transform == "log1p" else total
 
     return score
 
@@ -834,72 +847,106 @@ def _booster_scorer(
     model_file: Path,
     features: list[str],
     categorical_encoding: dict[str, dict[str, int]] | None = None,
+    *,
+    signature: list | None = None,
+    feature_evaluator: str | None = None,
+    score_transform: str = "log1p",
 ) -> Scorer:
     import lightgbm as lgb
 
-    from .train_uhd import build_feature_matrix, predict
+    from .train_uhd import build_feature_matrix
 
     booster = lgb.Booster(model_file=str(model_file))
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        return predict(booster, build_feature_matrix(frame, features, categorical_encoding))
+        values = booster.predict(build_feature_matrix(
+            frame, features, categorical_encoding, signature=signature, feature_evaluator=feature_evaluator))
+        return np.expm1(values) if score_transform == "log1p" else values
 
     return score
 
 
-def load_model(model_dir: Path, model_file: Path | None = None) -> ModelBundle:
+def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evaluator: str | None = None,
+               runtime_predictions: list[dict] | None = None) -> ModelBundle:
     """Load a `train --output-dir` result: features, direction, and something to rank with."""
     descriptor_paths = sorted(model_dir.glob("*.uhd.json"))
+    if len(descriptor_paths) > 1:
+        raise ValueError(f"{model_dir} has multiple UHD descriptors; use a directory containing one model")
     descriptor = _load_json(descriptor_paths[0]) if descriptor_paths else {}
     manifest_path = model_dir / "train_manifest.json"
     manifest = _load_json(manifest_path) if manifest_path.exists() else {}
+    role = manifest.get("role")
+    if role is None:
+        # A promoted model ships without its training manifest, and RFC 0019 Section 3.1
+        # leaves the role to the owning UED rather than the UHD. `promote` encodes that
+        # role map in the install layout, `<ued-id>/<role>/<arch>/`, so read it back.
+        from .provenance import ROLES
+        if model_dir.resolve().parent.name in ROLES:
+            role = model_dir.resolve().parent.name
+    immediate = role == "predict_engine_tflops"
+    if immediate:
+        from .immediate import validate_model
+        validate_model(descriptor)
 
-    features = manifest.get("features") or [
-        name.lstrip("$") for name in descriptor.get("features_signature", [])
-    ]
-    if not features:
-        raise ValueError(
-            f"{model_dir} carries neither a train_manifest.json with `features` nor a "
-            "descriptor with `features_signature`; there is no way to know which "
-            "columns the model was trained on"
-        )
+    from .features import build_features_signature, compute_features_hash, evaluate_feature_rows, signature_references
+
+    signature = descriptor.get("features_signature") or manifest.get("features_signature")
+    if not signature and manifest.get("features"):
+        signature = build_features_signature(manifest["features"])
+    if not signature and not (immediate and descriptor.get("adapter") in ("native", "custom_library")):
+        raise ValueError(f"{model_dir} carries no features_signature")
+    signature = signature or []
+    features = [reference[1:] for reference in signature_references(signature)]
 
     # The objective is READ, never assumed: it decides which end of the measured range
     # is the oracle, and getting it backwards inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
 
-    # The map the model was FITTED with, read from what shipped rather than recomputed:
-    # scoring a model through a different string-to-code map ranks by thresholds that
-    # mean something else, and every regret number below would then describe a model
-    # nobody has. A model trained before the map was per-descriptor has neither key,
-    # and build_feature_matrix falls back to the fixed table it was fitted with.
-    categorical_encoding = descriptor.get("categorical_encoding") or manifest.get(
-        "categorical_encoding"
-    )
-
-    if model_file is not None:
-        candidate = model_file
-    elif (model_dir / "model.lgbm").exists():
-        candidate = model_dir / "model.lgbm"
+    categorical_encoding = descriptor.get("categorical_encoding", manifest.get("categorical_encoding", {}))
+    expected_hash = descriptor.get("features_hash", manifest.get("features_hash"))
+    if any(isinstance(entry, dict) for entry in signature):
+        actual_hash, _ = evaluate_feature_rows(pd.DataFrame(columns=features), signature,
+                                               categorical_encoding, feature_evaluator)
     else:
-        artifact = descriptor.get("tree_data", {}).get("artifact", "model.bin")
-        candidate = model_dir / artifact
-    if not candidate.exists():
-        raise ValueError(f"no model artifact at {candidate}")
+        actual_hash = compute_features_hash(signature, categorical_encoding)
+    if expected_hash is not None and actual_hash != expected_hash:
+        raise ValueError("features_signature/categorical_encoding does not match features_hash")
 
-    if candidate.suffix in (".lgbm", ".txt"):
-        scorer = _booster_scorer(candidate, features, categorical_encoding)
+    transform = descriptor.get("score", {}).get("transform", manifest.get("score_transform", "log1p"))
+    if transform not in ("identity", "log1p"):
+        raise ValueError(f"unsupported score transform {transform!r}")
+    if runtime_predictions is not None:
+        if not immediate:
+            raise ValueError("--predictions is only supported for engine-immediate evaluation")
+        from .immediate import prediction_scorer
+        scorer = prediction_scorer(descriptor, runtime_predictions)
+        candidate = Path("<runtime-predictions>")
     else:
-        scorer = _flatbuffer_scorer(candidate, features, categorical_encoding)
+        if descriptor.get("adapter") in ("native", "custom_library"):
+            raise ValueError("native/custom models require --predictions from hipdnn_bench --predict-engine")
+        if model_file is not None:
+            candidate = model_file
+        elif descriptor.get("tree_data", {}).get("artifact"):
+            candidate = model_dir / descriptor["tree_data"]["artifact"]
+        elif (model_dir / "model.lgbm").exists():
+            candidate = model_dir / "model.lgbm"
+        else:
+            candidate = model_dir / "model.bin"
+        if not candidate.exists():
+            raise ValueError(f"no model artifact at {candidate}")
+        if candidate.suffix in (".lgbm", ".txt"):
+            scorer = _booster_scorer(candidate, features, categorical_encoding,
+                                     signature=signature, feature_evaluator=feature_evaluator,
+                                     score_transform=transform)
+        else:
+            scorer = _flatbuffer_scorer(candidate, features, categorical_encoding,
+                                        signature=signature, feature_evaluator=feature_evaluator,
+                                        expected_hash=expected_hash, score_transform=transform)
 
     return ModelBundle(
-        scorer=scorer,
-        features=list(features),
-        target=manifest.get("target"),
-        objective=objective,
-        source=str(candidate),
-        trained_on=manifest.get("input_file"),
-        training_rows=manifest.get("num_samples"),
+        scorer=scorer, features=list(features), target=manifest.get("target", "tflops" if immediate else None),
+        objective=objective, source=str(candidate), trained_on=manifest.get("input_file"),
+        training_rows=manifest.get("num_samples"), descriptor=descriptor, manifest=manifest, role=role,
     )
 
 
@@ -949,6 +996,11 @@ def _holdout_integrity(corpus: Path, bundle: ModelBundle) -> dict[str, str]:
 
 def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--input", required=True, help="Benchmark CSV/JSON to evaluate on")
+    parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
+    parser.add_argument("--additional-model-dir", action="append", default=[],
+                        help="Another engine's L1 model; repeat for cross-engine immediate comparison")
+    parser.add_argument("--predictions", nargs="+",
+                        help="Runtime --predict-engine JSON responses for common native/custom model evaluation")
     parser.add_argument(
         "--model-dir",
         required=True,
@@ -958,8 +1010,8 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model artifact to rank with (default: model.lgbm if present, else the "
-        "descriptor's tree_data.artifact -- the file the engine itself loads)",
+        help="Model artifact override (default: the descriptor's tree_data.artifact, "
+        "the file the engine itself loads)",
     )
     parser.add_argument(
         "--output",
@@ -1048,18 +1100,66 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _read_corpus(path: Path) -> pd.DataFrame:
     if path.suffix == ".json":
-        return pd.read_json(path)
-    return pd.read_csv(path)
+        return pd.DataFrame(json.loads(path.read_text(encoding="utf-8")))
+    return pd.read_csv(path, dtype={"benchmark": str, "device": str})
 
 
 def run_evaluate(args: argparse.Namespace) -> int:
     corpus_path = Path(args.input)
     model_dir = Path(args.model_dir)
 
+    predictions = None
+    if args.predictions:
+        try:
+            predictions = []
+            for path in args.predictions:
+                content = _load_json(Path(path))
+                predictions.extend(content if isinstance(content, list) else [content])
+        except (OSError, ValueError) as error:
+            logger.error("%s", error)
+            return 1
     try:
-        bundle = load_model(model_dir, Path(args.model) if args.model else None)
+        bundle = load_model(model_dir, Path(args.model) if args.model else None,
+                            feature_evaluator=args.feature_evaluator, runtime_predictions=predictions)
     except (ValueError, OSError) as error:
         logger.error("%s", error)
+        return 1
+    if bundle.role == "predict_engine_tflops":
+        from .immediate import evaluate_immediate, read_corpus
+        try:
+            if args.target not in (None, "tflops") or args.objective not in (None, "max"):
+                raise ValueError("L1 evaluation cannot override calibrated tflops/max semantics")
+            if args.device_column not in (None, "device"):
+                raise ValueError("L1 evaluation groups by the recorded graph/device identity")
+            bundles = [bundle] + [load_model(Path(path), feature_evaluator=args.feature_evaluator,
+                                            runtime_predictions=predictions)
+                                  for path in args.additional_model_dir]
+            frame = read_corpus(corpus_path)
+            report = evaluate_immediate(frame, bundles, eval_fraction=args.eval_fraction, seed=args.seed,
+                                        include_per_problem=args.include_per_problem)
+            report["corpus"]["path"] = str(corpus_path)
+            report["models"] = [{"artifact": item.source, "uhd_id": item.descriptor.get("id")} for item in bundles]
+            if args.emit_train_slice:
+                keys = problem_keys(frame, resolve_grouping(frame))
+                held_out = {tuple(key) for key in report["split"]["eval_problem_keys"]}
+                slice_path = Path(args.emit_train_slice)
+                slice_path.parent.mkdir(parents=True, exist_ok=True)
+                frame[~keys.isin(held_out)].to_csv(slice_path, index=False)
+                report["split"]["train_slice"] = str(slice_path)
+            output_path = Path(args.output) if args.output else model_dir / "eval_report.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            metrics = report["metrics"]
+            print(f"Immediate prediction report: {output_path}")
+            print(f"  calibration: {json.dumps(metrics['calibration'])}")
+            print(f"  cross-engine selection: {json.dumps(metrics['immediate_selection'])}")
+            print(f"  holdout integrity: {report['holdout_integrity']['status']}")
+            return 0
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            logger.error("%s", error)
+            return 1
+    if args.additional_model_dir or args.predictions:
+        logger.error("additional models and runtime predictions require predict_engine_tflops models")
         return 1
 
     df = _read_corpus(corpus_path)

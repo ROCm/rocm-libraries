@@ -195,10 +195,29 @@ Handle destruction (implicit via RAII)
          -> Backend: hipdnnBackendCreateDescriptor(HEURISTIC)
          -> Backend: hipdnnBackendSetAttribute(heuristic, GRAPH, graphDesc)
          -> Backend: hipdnnBackendSetAttribute(heuristic, HEURISTIC_MODE, modes)
+         -> Backend: hipdnnBackendSetAttribute(heuristic, POLICY_ORDER_EXT, policyIds)
+            [only when HeuristicMode::A or ::B is requested]
          -> Backend: hipdnnBackendFinalize(heuristic)
             -> Plugin: hipdnnEnginePluginGetApplicableEngineIds()
-            -> Plugin: hipdnnEnginePluginGetEngineDetails() [per engine]
+            -> Prediction policy: query engine/configuration TFLOPS when supported
       -> detail::getEngineConfigs(configs, ids, heuristicDesc)
+
+``HeuristicMode::A`` and ``HeuristicMode::B`` are policy requests, not backend modes.
+The frontend hashes them into the descriptor's ordered policy list
+(``HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT``) as ``SelectionHeuristic::ModeA`` and
+``SelectionHeuristic::ModeB``, bracketed by ``SelectionHeuristic::Config`` first and
+``SelectionHeuristic::StaticOrdering`` last; ``HIPDNN_ATTR_ENGINEHEUR_MODE`` still
+carries a single ``HIPDNN_HEUR_MODE_FALLBACK``. Mode A requests graph-level predictions
+without materializing candidate catalogs. Mode B first requests an exact, calibrated
+configuration prediction for each engine and uses its graph-level prediction if that is
+unavailable or invalid. Both rank usable predictions by descending TFLOPS and retain
+unscored applicable engines afterward. If all predictions are unusable, the policy
+declines and the next policy in the order runs.
+
+Heuristic results carry the engine ID and, for scored configurations, the owned
+knob tuple. Plan construction preserves those settings to execute the scored
+configuration. Graph-level selections use the chosen engine's normal selector
+with ``global.benchmarking=0``. Existing engine cache behavior is unchanged.
 
 
 ``create_execution_plan_ext()``

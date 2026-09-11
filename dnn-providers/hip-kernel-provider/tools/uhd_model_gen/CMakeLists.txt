@@ -13,6 +13,7 @@ add_executable(uhd_model_gen UhdModelGen.cpp)
 # The flatbuffers SDK for the two schemas, the plugin SDK for FeatureExtractor::computeHash
 # -- the same function the runtime validates the emitted hash against. Not the test SDK,
 # whose GbdtModelTestBuilder overlaps: a shipped tool must not reach into test scaffolding.
-target_link_libraries(uhd_model_gen PRIVATE hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(uhd_model_gen PRIVATE hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
+target_compile_definitions(uhd_model_gen PRIVATE __HIP_PLATFORM_AMD__)
 
 target_compile_options(uhd_model_gen PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

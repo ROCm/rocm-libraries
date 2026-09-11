@@ -3,12 +3,13 @@
 # SPDX-License-Identifier: MIT
 """UHD Generation Tool CLI.
 
-Four subcommands, one per stage of RFC 0019.13's pipeline that exists today:
+Subcommands for collection, training, evaluation and descriptor installation:
 
     export-benchmarks   ingestor benchmark log -> §8.3 training CSV
     train               training CSV -> UHD descriptor + model artifact
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
+    generate            graph corpus -> public collection -> train/evaluate/promote
 
 Collect, train and install:
 
@@ -18,9 +19,10 @@ Collect, train and install:
 
     python -m uhd_gen train \\
         --input bench.csv \\
+        --descriptor-tree ./descriptors --engine hipkernel:pointwise \\
         --features q.seqlen_q kernel.block_size device.cu_count \\
         --target tflops \\
-        --group-by q.seqlen_q \\
+        --group-by benchmark device \\
         --output-dir ./uhd_output \\
         --descriptor-name pointwise \\
         --name "Pointwise UHD"
@@ -28,41 +30,46 @@ Collect, train and install:
     python -m uhd_gen promote \\
         --model-dir ./uhd_output \\
         --descriptor-tree ./descriptors \\
+        --arch gfx942 \\
         --engine hipkernel:pointwise
 
     python -m uhd_gen evaluate \\
         --input bench.csv \\
         --model-dir ./uhd_output
 
-Features must be namespace-qualified (`q.`, `kernel.`, `device.`); an unqualified
-name produces a descriptor that loads but never scores.
-
-Without the `promote` step the engine keeps its previous `heuristic` id and the new
-model is never consulted -- silently, since ranking by priority is a valid state.
+Feature columns are the full published names without a leading `$`; no namespace
+is inserted. Use --feature-signature for canonical inline expression objects.
+Computed features require the shared hipdnn_uhd_features executable.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import logging
 import sys
 import uuid
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
+from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
 from .merge import add_merge_arguments, run_merge
 from .features import (
     build_features_signature,
     compute_features_hash,
     derive_categorical_encoding,
+    evaluate_feature_rows,
+    parse_signature_entry,
+    signature_references,
 )
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
-from .train_uhd import evaluate_regret, find_constant_feature_columns, train_model
+from .train_uhd import build_feature_matrix, evaluate_regret, train_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -147,6 +154,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_promote_arguments(promote)
 
+    immediate_import = subparsers.add_parser("import-immediate", help="import hipdnn_bench --collect-immediate JSON without candidate enumeration")
+    immediate_import.add_argument("--input", nargs="+", required=True, help="Immediate JSON responses or normalized CSV corpora")
+    immediate_import.add_argument("--output", required=True, help="Output .json or .csv corpus")
+
     knobs = subparsers.add_parser(
         "knobs",
         help="measure what each knob is worth, and how few AOT variants suffice",
@@ -161,6 +172,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_merge_arguments(merge)
 
+    from .generate import add_generate_arguments, run_generate
+    generate = subparsers.add_parser("generate", help="collect, train, evaluate and promote from a graph corpus")
+    add_generate_arguments(generate)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -169,6 +184,25 @@ def main(argv: list[str] | None = None) -> int:
         return benchmark_log_main(argv[1:])
 
     args = parser.parse_args(argv)
+    if args.command == "import-immediate":
+        from .immediate import normalize_corpus, read_corpus
+        try:
+            frame = normalize_corpus(pd.concat([read_corpus(Path(path)) for path in args.input], ignore_index=True))
+            destination = Path(args.output)
+            if destination.suffix not in (".json", ".csv"):
+                raise ValueError("--output must have .json or .csv suffix")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.suffix == ".json":
+                records = frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
+                destination.write_text(json.dumps(records, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            else:
+                frame.to_csv(destination, index=False)
+            return 0
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            logger.error("%s", error)
+            return 1
+    if args.command == "generate":
+        return run_generate(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
@@ -181,28 +215,27 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
+    from .provenance import ROLES
+    parser.add_argument("--role", choices=ROLES, default="sort_kernel_catalog")
+    parser.add_argument("--arch", help="UED role-map architecture, or default for a multi-arch model")
     parser.add_argument(
         "--input",
         required=True,
         help="Benchmark CSV/JSON with feature columns and target",
     )
-    parser.add_argument(
-        "--features",
-        required=True,
-        nargs="+",
-        help="Feature column names to train on",
-    )
+    feature_source = parser.add_mutually_exclusive_group(required=True)
+    feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
+    feature_source.add_argument("--feature-signature", help="JSON file containing a canonical inline features_signature array")
+    provenance = parser.add_mutually_exclusive_group()
+    provenance.add_argument("--descriptor-tree", help="Descriptors whose revisions are captured before fitting")
+    provenance.add_argument("--provenance", help="Explicit recorded trained_against JSON snapshot")
+    parser.add_argument("--engine", help="UED name/UUID, or immediate engine canonical name/public ID")
+    parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
     parser.add_argument(
         "--drop-constant-features",
         action="store_true",
         dest="drop_constant_features",
-        help="Drop feature columns that never vary in the input, and remove them from "
-        "the engine's knobs at promote time. Off by default: constancy is measured "
-        "against this corpus, and a CSV cannot tell a field the pack pins from one a "
-        "thin sweep failed to cover -- dropping the second yields a model that cannot "
-        "generalise and a features_signature that depends on coverage. Pass this only "
-        "when you have decided the field is genuinely not worth varying, because it "
-        "removes the knob from the engine's public surface.",
+        help="Omit constant model inputs; never changes the engine's authored public knobs.",
     )
     parser.add_argument(
         "--target",
@@ -328,9 +361,7 @@ def _resolve_uhd_id(requested: str | None) -> str:
         parsed = uuid.UUID(requested)
     except (ValueError, AttributeError, TypeError) as error:
         raise ValueError(
-            f"--uhd-id {requested!r} is not a UUID ({error}); the UED's `heuristic` "
-            "field is resolved by id, so a malformed one would leave the engine with "
-            "no heuristic and no error"
+            f"--uhd-id {requested!r} is not a UUID ({error})"
         ) from error
     canonical = str(parsed)
     if canonical != requested:
@@ -341,320 +372,188 @@ def _resolve_uhd_id(requested: str | None) -> str:
 
 
 def _run_train(args: argparse.Namespace) -> int:
+    from .provenance import snapshot_provenance, validate_provenance
+    from .immediate import ROLE, read_corpus, training_binding, validate_signature
+
+    immediate = args.role == ROLE
+    binding = None
+
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
-
-    # Before the output directory exists and long before training spends minutes: a bad
-    # id is an argument error, and finding it after the model is written wastes the run.
     try:
         uhd_id = _resolve_uhd_id(args.uhd_id)
-    except ValueError as error:
-        logger.error("%s", error)
-        return 1
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Loading data from %s", input_path)
-    if input_path.suffix == ".json":
-        df = pd.read_json(input_path)
-    else:
-        df = pd.read_csv(input_path)
-    logger.info("Loaded %d row(s)", len(df))
-
-    # RFC 0019.13 §10.2 step 1. A §8.3 CSV records the pairs that failed to run so
-    # coverage can be audited; they carry no timings, so training on them would fit
-    # the model to empty cells. Absent column means the CSV predates the envelope.
-    if "is_valid" in df.columns:
-        before = len(df)
-        df = df[df["is_valid"].astype(str).str.lower() == "true"]
-        skipped = before - len(df)
-        if skipped:
-            logger.info("Dropped %d row(s) with is_valid=False", skipped)
-        if df.empty:
-            logger.error("Every row in %s is is_valid=False; nothing to train on", input_path)
-            return 1
-
-    missing = set(args.features) - set(df.columns)
-    if missing:
-        logger.error("Missing feature columns: %s", missing)
-        return 1
-    if args.target not in df.columns:
-        logger.error("Missing target column: %s", args.target)
-        return 1
-
-    # RFC 0019 §7.2: features_hash is computed over the signature actually trained, so
-    # the drop decision has to happen here, before training and before the signature is
-    # built -- not as a post-hoc edit of either.
-    constants = find_constant_feature_columns(df, args.features)
-    constant_listing = ", ".join(f"{name}={value!r}" for name, value in constants)
-    features = list(args.features)
-    dropped: list[str] = []
-
-    if constants and len(constants) == len(args.features):
-        # Fails with the override too. The flag chooses a signature; it cannot make a
-        # column vary, and the degenerate model is the same either way.
-        logger.error(
-            "Every requested feature column is constant in %s, so there is nothing to "
-            "train on: %s. A model over columns that never vary scores every candidate "
-            "identically; shipping one is worse than shipping none, because the engine "
-            "would rank by a model that cannot discriminate instead of falling back to "
-            "its declared order. --drop-constant-features does not help -- it changes "
-            "the signature, not the fact that no column varies. Widen the corpus, or "
-            "pass --features that vary in it.",
-            input_path,
-            constant_listing,
-        )
-        return 1
-
-    if constants:
-        # Surfaced on every run, kept or dropped: a constant field is something the
-        # kernel author needs to know about their pack, and it is the one finding that
-        # is free -- it needs no benchmark, only the corpus. `uhd_gen knobs` ranks what
-        # each varying knob is worth; this is the part that costs nothing to say.
-        logger.warning(
-            "%d feature column(s) never vary in %s: %s. They cannot separate one "
-            "candidate from another, so no tree will split on them.",
-            len(constants),
-            input_path,
-            constant_listing,
-        )
-        if args.drop_constant_features:
-            for name, value in constants:
-                logger.warning(
-                    "DROPPING constant feature column %s (every row is %r) at "
-                    "--drop-constant-features. It leaves features_signature, and "
-                    "promote will remove it from the engine's knobs so the two agree.",
-                    name,
-                    value,
-                )
-            dropped = [name for name, _ in constants]
-            features = [name for name in args.features if name not in set(dropped)]
+        if Path(args.descriptor_name).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
+            raise ValueError("--descriptor-name must be a file stem, not a path")
+        # This is captured before data preparation or fitting, never stamped later.
+        if immediate:
+            if args.target != "tflops" or args.objective != "max" or args.score_units not in (None, "tflops"):
+                raise ValueError("predict_engine_tflops requires --target tflops --objective max --score-units tflops")
+            if args.report_regret:
+                raise ValueError("L1 evaluation compares immediate engines, not within-engine candidate regret")
+            df, binding = training_binding(read_corpus(input_path), args.engine)
+            trained_against = binding["trained_against"]
+            if args.provenance:
+                recorded = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+                if recorded != trained_against:
+                    raise ValueError("recorded provenance differs from immediate engine binding")
+            elif args.descriptor_tree:
+                recorded = snapshot_provenance(Path(args.descriptor_tree), args.engine, args.arch)
+                if recorded != trained_against:
+                    raise ValueError("descriptor provenance differs from immediate engine binding")
+            if args.group_by is not None and args.group_by != ["benchmark", "device"]:
+                raise ValueError("L1 training groups must be benchmark device, never engine/candidate rows")
+            args.group_by = ["benchmark", "device"]
+            args.calibrated = True
+            observed_arches = sorted(df["arch"].unique())
+            if args.training_arches and sorted(set(args.training_arches)) != observed_arches:
+                raise ValueError("--training-arches must match the measured immediate corpus")
+            args.training_arches = observed_arches
+            if args.arch is None:
+                if len(observed_arches) != 1:
+                    raise ValueError("multi-architecture L1 training requires --arch default")
+                args.arch = observed_arches[0]
+            if args.arch != "default" and (len(observed_arches) != 1 or args.arch != observed_arches[0]):
+                raise ValueError("L1 role-map arch must cover the complete training corpus")
         else:
-            logger.warning(
-                "KEEPING them in features_signature. Constancy is measured against this "
-                "corpus, not the pack: a field the sweep failed to cover looks identical "
-                "to one the kernels pin, and dropping the first produces a model that "
-                "cannot generalise. Removing a knob is the kernel author's call -- see "
-                "`uhd_gen knobs` for what each is worth -- and --drop-constant-features "
-                "carries it through to the engine's knob list."
-            )
-
-        if len(constants) / len(args.features) >= CONSTANT_FEATURE_WARN_FRACTION:
-            logger.warning(
-                "%d of %d requested feature columns are constant (%.0f%%, at or above "
-                "the %.0f%% thin-corpus threshold). Kernels that bake their geometry in "
-                "pin knobs by construction, and a pinned knob really is uninformative -- "
-                "but nothing in a CSV tells that apart from a corpus that only ever "
-                "sampled one value, and for a thin corpus dropping is the WRONG fix. "
-                "Check that %s spans the problems and kernels you expect to rank before "
-                "trusting this model.",
-                len(constants),
-                len(args.features),
-                100.0 * len(constants) / len(args.features),
-                100.0 * CONSTANT_FEATURE_WARN_FRACTION,
-                input_path,
-            )
-
-    if args.objective == "max" and _looks_like_cost_metric(args.target):
-        logger.warning(
-            "Target '%s' looks like a cost metric but --objective is 'max', so the "
-            "runtime will prefer the WORST kernel. Pass --objective min if that is "
-            "not what you want.",
-            args.target,
+            if args.provenance:
+                trained_against = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+            elif args.descriptor_tree:
+                arch = args.training_arches[0] if args.training_arches and len(args.training_arches) == 1 else None
+                trained_against = snapshot_provenance(Path(args.descriptor_tree), args.engine, arch)
+            else:
+                raise ValueError("training requires --descriptor-tree or --provenance")
+            df = (pd.DataFrame(json.loads(input_path.read_text(encoding="utf-8")))
+                  if input_path.suffix == ".json" else pd.read_csv(input_path, dtype={"benchmark": str, "device": str}))
+            if "is_valid" in df.columns:
+                before = len(df)
+                df = df[df["is_valid"].astype(str).str.lower() == "true"]
+                logger.info("Dropped %d row(s) with is_valid=False", before - len(df))
+        if df.empty:
+            raise ValueError("No valid rows to train on")
+        signature = (
+            json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
+            if args.feature_signature else build_features_signature(args.features)
         )
-
-    logger.info("Training on features: %s", features)
-    logger.info("Target column: %s (objective: %s)", args.target, args.objective)
-    if args.group_by:
-        logger.info("GroupKFold columns: %s", args.group_by)
-
-    # Derived from the frame that is about to be fitted, and from the feature list that
-    # survived the constant-column decision above -- the same list the signature is
-    # built from. The very same dict is handed to train_model, folded into
-    # features_hash and written into the descriptor: one map, one model, one hash. A
-    # second map computed independently for the descriptor is a model whose thresholds
-    # mean something the runtime will never reproduce.
-    try:
-        categorical_encoding = derive_categorical_encoding(df, features)
-    except ValueError as error:
-        logger.error("%s", error)
-        return 1
-
-    # An unencodable categorical value is an input error like a missing column, and is
-    # reported like one. Letting build_feature_matrix's ValueError escape would print a
-    # traceback through LightGBM's call stack, burying the column/row/value it names --
-    # the only three facts an author needs to fix the CSV.
-    try:
+        if not isinstance(signature, list) or not signature:
+            raise ValueError("features_signature must be a nonempty JSON array")
+        signature = [parse_signature_entry(entry) for entry in signature]
+        requested_signature = list(signature)
+        references = signature_references(signature)
+        if immediate:
+            for published in df["features"].unique():
+                validate_signature(signature, set(json.loads(published)))
+        missing = {reference[1:] for reference in references} - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing feature columns: {sorted(missing)}")
+        if args.target not in df.columns:
+            raise ValueError(f"Missing target column: {args.target}")
+        coverage = device_field_coverage(df)
+        enforce_device_coverage(signature, coverage)
+        categorical_encoding = derive_categorical_encoding(df, [ref[1:] for ref in references])
+        if any(isinstance(entry, dict) for entry in signature):
+            features_hash, values = evaluate_feature_rows(df, signature, categorical_encoding, args.feature_evaluator)
+            matrix = np.asarray(values, dtype=np.float64)
+        else:
+            features_hash = compute_features_hash(signature, categorical_encoding)
+            matrix = build_feature_matrix(df, [entry[1:] for entry in signature], categorical_encoding)
+        names = [entry[1:] if isinstance(entry, str) else f"expression_{index}"
+                 for index, entry in enumerate(signature)]
+        constant_indices = [index for index in range(matrix.shape[1])
+                            if np.all(matrix[:, index] == matrix[0, index])]
+        constants = []
+        for index in constant_indices:
+            value = df[signature[index][1:]].iloc[0] if isinstance(signature[index], str) else float(matrix[0, index])
+            constants.append((names[index], value.item() if hasattr(value, "item") else value))
+        if len(constants) == len(signature):
+            raise ValueError("Every requested feature column is constant: " +
+                             ", ".join(f"{name}={value!r}" for name, value in constants))
+        dropped = []
+        if constants:
+            logger.warning("%d feature column(s) never vary: %s", len(constants),
+                           ", ".join(f"{name}={value!r}" for name, value in constants))
+            if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
+                logger.warning("High constant-feature proportion: check device and problem coverage")
+            if args.drop_constant_features:
+                dropped = [names[index] for index in constant_indices]
+                keep = [index for index in range(len(signature)) if index not in constant_indices]
+                signature = [signature[index] for index in keep]
+                names = [names[index] for index in keep]
+                matrix = matrix[:, keep]
+                remaining_refs = set(signature_references(signature))
+                categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
+                if any(isinstance(entry, dict) for entry in signature):
+                    features_hash, _ = evaluate_feature_rows(df.iloc[:0], signature, categorical_encoding, args.feature_evaluator)
+                else:
+                    features_hash = compute_features_hash(signature, categorical_encoding)
+                logger.warning("Dropping constant model inputs %s; authored knobs are unchanged", dropped)
+        if args.objective == "max" and _looks_like_cost_metric(args.target):
+            logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
+        groups = args.group_by
+        if groups is None and "benchmark" in df.columns:
+            groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
         model = train_model(
-            df,
-            features,
-            args.target,
-            args.group_by,
-            num_boost_round=args.num_boost_round,
-            early_stopping_rounds=args.early_stopping,
-            categorical_encoding=categorical_encoding,
+            df, names, args.target, groups, num_boost_round=args.num_boost_round,
+            early_stopping_rounds=args.early_stopping, categorical_encoding=categorical_encoding,
+            feature_matrix=matrix,
         )
-    except ValueError as error:
+        metrics = None
+        if args.report_regret:
+            metrics = evaluate_regret(
+                df, names, args.target, args.report_regret,
+                num_boost_round=args.num_boost_round, categorical_encoding=categorical_encoding,
+                feature_matrix=matrix, objective=args.objective,
+            )
+    except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
 
-    if args.report_regret:
-        # Reported after training and measured independently of it: this scores the
-        # ranking the model induces on problems it did not see, which is the question
-        # the heuristic exists to answer. RMSE says how close the numbers are.
-        metrics = evaluate_regret(
-            df,
-            args.features,
-            args.target,
-            args.report_regret,
-            num_boost_round=args.num_boost_round,
-        )
-        logger.info(
-            "Out-of-fold top-1 accuracy %.1f%% over %d problems "
-            "(%d single-variant excluded, %d unusable)",
-            metrics["top1_accuracy"] * 100.0,
-            metrics["problems_scored"],
-            metrics["problems_single_variant"],
-            metrics["problems_unusable"],
-        )
-        logger.info(
-            "Regret mean %.4f, median %.4f, p90 %.4f, p99 %.4f, max %.4f",
-            metrics["mean_regret"],
-            metrics["median_regret"],
-            metrics["p90_regret"],
-            metrics["p99_regret"],
-            metrics["max_regret"],
-        )
-        with (output_dir / "regret.json").open("w") as handle:
-            json.dump(metrics, handle, indent=2)
-
+    # No descriptor or model artifact is published before all input checks and fitting.
+    output_dir.mkdir(parents=True, exist_ok=True)
     lgbm_path = output_dir / "model.lgbm"
     model.save_model(str(lgbm_path))
-    logger.info("Saved LightGBM model to %s", lgbm_path)
-
-    features_signature = build_features_signature(features)
-    features_hash = compute_features_hash(features_signature, categorical_encoding)
     fb_path = output_dir / "model.bin"
-    convert(
-        lgbm_path,
-        features_hash,
-        fb_path,
-        num_training_samples=len(df),
-        training_arches=args.training_arches,
-        model_version=args.model_version,
-    )
-    logger.info("Converted to FlatBuffer: %s", fb_path)
-
+    convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
+            training_arches=args.training_arches, model_version=args.model_version)
     if not args.keep_lgbm:
         lgbm_path.unlink()
-        logger.info("Removed intermediate %s", lgbm_path)
-
-    # `uhd_id` was resolved at entry, from --uhd-id or a fresh uuid4.
-    stem = args.descriptor_name
-
-    # The whole UHD, in the descriptor. RFC 0019 §4 always specified JSON; an earlier
-    # design put these fields in a FlatBuffer that a four-field stub pointed at, which
-    # made the UHD the only descriptor in the family a human could not read, diff or
-    # review -- to save 134 bytes on a file read once per engine.
-    #
-    # `model.bin` stays binary. It is read once per candidate score, and at a realistic
-    # 500 trees it is 3.7 MB; that one earns its format.
     descriptor = {
-        "version": "1.0",
-        "id": uhd_id,
-        "name": args.name,
-        "adapter": "tree_data",
-        "features_signature": features_signature,
-        "features_hash": features_hash,
-        "objective": args.objective,
-        "score": {
-            "units": args.score_units or args.target,
-            "calibrated": args.calibrated,
-            # log1p because train_uhd.train_model always fits on log1p(target); the
-            # runtime inverts it to recover the declared units.
-            "transform": "log1p",
-        },
-        # The body key equals the adapter value (RFC 0019 §4). `artifact` is relative to
-        # this file, which is where the loader resolves it from, so the pair relocates
-        # together.
+        "version": "1.0", "id": uhd_id, "name": args.name, "adapter": "tree_data",
+        "features_signature": signature, "features_hash": features_hash,
+        "trained_against": trained_against, "objective": args.objective,
+        "score": {"units": args.score_units or args.target, "calibrated": args.calibrated, "transform": "log1p"},
         "tree_data": {"artifact": fb_path.name},
     }
     if categorical_encoding:
-        # Only when there is one. A signature reading no string field ships the
-        # descriptor it always shipped, and compute_features_hash leaves its hash
-        # alone to match -- an empty map is not a contract change and must not read
-        # as one. Placed beside the signature it encodes (RFC 0019 §4/§6.5).
         descriptor["categorical_encoding"] = categorical_encoding
-    descriptor_path = output_dir / f"{stem}.uhd.json"
-    with open(descriptor_path, "w", encoding="utf-8") as handle:
-        json.dump(descriptor, handle, indent=2)
-        handle.write("\n")
-    logger.info("Generated descriptor: %s", descriptor_path)
-
+    descriptor_path = output_dir / f"{args.descriptor_name}.uhd.json"
+    descriptor_path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
     manifest = {
-        "uhd_id": uhd_id,
-        # What was asked for and what was trained, separately: a manifest that recorded
-        # only one of them would hide that the emitted signature is not the caller's.
-        "requested_features": list(args.features),
-        "features": features,
+        "uhd_id": uhd_id, "requested_features": args.features or requested_signature,
+        "features": names, "features_signature": signature, "features_hash": features_hash,
+        "trained_against": trained_against, "device_coverage": coverage,
         "constant_features": [{"column": name, "value": value} for name, value in constants],
-        "dropped_constant_features": dropped,
-        "drop_constant_features": bool(args.drop_constant_features),
-        "features_signature": features_signature,
-        "features_hash": features_hash,
-        # Recorded unconditionally, unlike in the descriptor: the manifest is the
-        # provenance record, and "this corpus had no categorical column" is a fact
-        # about the training run worth being able to read without inferring it from
-        # an absent key.
-        "categorical_encoding": categorical_encoding,
-        "target": args.target,
-        "objective": args.objective,
-        "score_units": args.score_units or args.target,
-        "score_calibrated": args.calibrated,
-        "score_transform": "log1p",
-        "group_by": args.group_by or [],
-        "num_trees": model.num_trees(),
-        # What the trees actually split on, so a kernel author can be told which knobs
-        # the model found predictive without re-deriving it from the binary. Gain is
-        # the loss reduction the feature bought; split is how often it was chosen.
-        # Diagnostic only -- a feature can be heavily split on and still be free to
-        # pin, because predicting time well is not the same as changing which
-        # candidate wins. `uhd_gen knobs` measures that, and it is the number that
-        # decides an AOT build.
+        "dropped_constant_features": dropped, "drop_constant_features": bool(args.drop_constant_features),
+        "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
+        "score_units": args.score_units or args.target, "score_calibrated": args.calibrated,
+        "score_transform": "log1p", "group_by": groups or [], "num_trees": model.num_trees(),
         "feature_importance": {
-            name: {
-                "gain": float(gain),
-                "split": int(split),
-            }
-            for name, gain, split in zip(
-                features,
-                model.feature_importance(importance_type="gain"),
-                model.feature_importance(importance_type="split"),
-            )
+            name: {"gain": float(gain), "split": int(split)}
+            for name, gain, split in zip(names, model.feature_importance(importance_type="gain"),
+                                         model.feature_importance(importance_type="split"))
         },
-        "num_samples": len(df),
-        "input_file": str(input_path),
-        "training_arches": args.training_arches or [],
-        "model_version": args.model_version,
+        "num_samples": len(df), "input_file": str(input_path.resolve()),
+        "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "training_arches": args.training_arches or [], "model_version": args.model_version,
+        "training_options": {"num_boost_round": args.num_boost_round, "early_stopping_rounds": args.early_stopping},
     }
-    manifest_path = output_dir / "train_manifest.json"
-    with open(manifest_path, "w", encoding="utf-8") as handle:
-        json.dump(manifest, handle, indent=2)
-    logger.info("Wrote training manifest: %s", manifest_path)
-
-    print("\nUHD generation complete")
-    print(f"  descriptor:     {descriptor_path}")
-    print(f"  model artifact: {fb_path} ({model.num_trees()} trees)")
-    print(f"  features hash:  {features_hash}")
-    if dropped:
-        print(f"  dropped (constant): {', '.join(dropped)}")
-    print(
-        "\nThe engine's UED must name this heuristic by id:\n"
-        f'  "heuristic": "{uhd_id}"\n'
-        "\nInstall the pair and write that id for you:\n"
-        f"  python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE>"
-    )
-
+    if immediate:
+        manifest.update(role=ROLE, binding=binding, arch=args.arch,
+                        training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))))
+    (output_dir / "train_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if metrics is not None:
+        (output_dir / "regret.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+    print(f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}")
+    print(f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}")
     return 0
 
 

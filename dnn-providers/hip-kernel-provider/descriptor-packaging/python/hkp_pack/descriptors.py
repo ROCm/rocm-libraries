@@ -136,11 +136,7 @@ def _validate_version(value, where):
     Mirrors the loader's parseDescriptorVersion (loader is authoritative); the
     tool fails fast on a malformed value rather than shipping an ungatable file.
     """
-    if (
-        not isinstance(value, str)
-        or value.count(".") != 1
-        or not all(part.isdigit() for part in value.split("."))
-    ):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+\.[0-9]+", value):
         raise HkpPackError(
             f"{where} has invalid version '{value}' "
             "(expected '<major>.<minor>' with numeric halves)"
@@ -353,6 +349,19 @@ def _validate_ued(desc):
             f"UED {desc.path.name} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
+    where = f"UED {desc.path.name}"
+    if "heuristic" in desc.doc:
+        raise HkpPackError(f"{where}: legacy heuristic is not supported; use role/arch maps")
+    for role in _UHD_ROLES:
+        if role not in desc.doc:
+            continue
+        entries = desc.doc[role]
+        if not isinstance(entries, dict) or not entries:
+            raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
+        for arch, identity in entries.items():
+            if arch != "default":
+                _reject_nonbare_arch([arch], where)
+            _validate_uuid(identity, f"{where}.{role}.{arch}")
 
 
 # The loader's enum vocabularies, mirrored so a bad spelling is a pack-time
@@ -360,12 +369,14 @@ def _validate_ued(desc):
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
 # metadataTypeFromString.
 _MATCH_SCOPES = ("graph", "kernel")
-_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "custom_library")
+_UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
+_UHD_ROLES = ("sort_kernel_catalog", "predict_engine_tflops", "predict_applicable_kernels")
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
 # The adapters whose body names a file the packed tree has to carry. `static_order`
 # scores from the descriptor's own fields and `native` names a symbol the provider
 # registered in-process; neither has anything on disk.
-_ARTIFACT_ADAPTERS = ("tree_data", "table", "custom_library")
+_ARTIFACT_ADAPTERS = ("tree_data", "table", "onnx", "custom_library")
 _METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
 
@@ -395,39 +406,118 @@ def _validate_udd(desc):
     _require(desc.doc, ["name", "dispatch_symbol"], f"UDD {desc.path.name}")
 
 
+def _validate_uuid(value, where):
+    if not isinstance(value, str) or not _UUID_RE.fullmatch(value):
+        raise HkpPackError(f"{where} requires a UUID, got {value!r}")
+
+
+def _known_keys(value, allowed, where):
+    if not isinstance(value, dict):
+        raise HkpPackError(f"{where} must be an object")
+    unknown = set(value) - set(allowed)
+    if unknown:
+        raise HkpPackError(f"{where} has unknown fields {sorted(unknown)}")
+
+
+def _string(value, where):
+    if not isinstance(value, str) or not value:
+        raise HkpPackError(f"{where} must be a nonempty string")
+
+
+def _validate_provenance(value, where):
+    _known_keys(value, ("ued", "kmd", "umd"), where)
+    _require(value, ("ued", "kmd", "umd"), where)
+    if not isinstance(value["umd"], list):
+        raise HkpPackError(f"{where}.umd must be an array")
+    for kind in ("ued", "kmd", "umd"):
+        dependencies = value[kind] if kind == "umd" else [value[kind]]
+        seen = set()
+        for dependency in dependencies:
+            entry_where = f"{where}.{kind}"
+            _known_keys(dependency, ("id", "revision"), entry_where)
+            _require(dependency, ("id", "revision"), entry_where)
+            _validate_uuid(dependency["id"], entry_where)
+            _validate_version(dependency["revision"], f"{entry_where} revision")
+            identity = dependency["id"].lower()
+            if identity in seen:
+                raise HkpPackError(f"{entry_where} repeats dependency {identity}")
+            seen.add(identity)
+
+
 def _validate_uhd(desc, source_root):
-    """UHD: adapter is a closed enum, and the adapter-scoped body it selects has
-    to carry what that adapter cannot work without. Mirrors
-    parseHeuristicDescriptor.
-
-    The UHD is the whole descriptor now, not a stub naming a FlatBuffer, so the
-    fields checked here are the ones the runtime reads -- a body naming no
-    artifact drops the model at load and the engine ranks by declared order,
-    silently.
-
-    Takes `source_root` because it does not only validate: an artifact-bearing
-    adapter registers its file as a sidecar here, which is what carries the model
-    into the packed tree. Validating without registering ships a descriptor whose
-    artifact was checked and then left behind.
-    """
+    """Mirror the canonical Draft7 header, then resolve artifact sidecars safely."""
+    doc = desc.doc
     where = f"UHD {desc.path.name}"
-    _require(desc.doc, ["name", "adapter"], where)
-    _require_enum(desc.doc, "adapter", _UHD_ADAPTERS, where)
-
-    adapter = desc.doc["adapter"]
+    _known_keys(doc, ("version", "id", "name", "adapter", "features_signature",
+                     "features_hash", "categorical_encoding", "trained_against",
+                     "objective", "score", *_UHD_ADAPTERS), where)
+    _require(doc, ("version", "id", "name", "adapter"), where)
+    if doc["version"] != "1.0":
+        raise HkpPackError(f"{where}: unsupported file-format version {doc['version']!r}")
+    _validate_uuid(doc["id"], where)
+    _string(doc["name"], f"{where}.name")
+    _require_enum(doc, "adapter", _UHD_ADAPTERS, where)
+    adapter = doc["adapter"]
+    bodies = [key for key in _UHD_ADAPTERS if key in doc]
+    if bodies != [adapter] or not isinstance(doc[adapter], dict):
+        raise HkpPackError(f"{where} requires exactly one body matching adapter '{adapter}'")
+    if adapter != "static_order" or "objective" in doc:
+        _require(doc, ("objective",), where)
+        _require_enum(doc, "objective", ("max", "min"), where)
+    if adapter in ("tree_data", "table", "onnx"):
+        _require(doc, ("features_signature", "features_hash", "trained_against"), where)
+    if "features_signature" in doc:
+        signature = doc["features_signature"]
+        if not isinstance(signature, list) or not signature:
+            raise HkpPackError(f"{where}.features_signature must be a nonempty array")
+        for entry in signature:
+            if not ((isinstance(entry, str) and entry.startswith("$") and len(entry) > 1)
+                    or (isinstance(entry, dict) and len(entry) == 1)):
+                raise HkpPackError(f"{where}.features_signature requires bare references or inline expressions")
+        _require(doc, ("features_hash", "trained_against"), where)
+    if "features_hash" in doc:
+        value = doc["features_hash"]
+        if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{16}", value):
+            raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
+    if "trained_against" in doc:
+        _validate_provenance(doc["trained_against"], f"{where}.trained_against")
+    if "categorical_encoding" in doc:
+        encoding = doc["categorical_encoding"]
+        if not isinstance(encoding, dict):
+            raise HkpPackError(f"{where}.categorical_encoding must be an object")
+        for name, codes in encoding.items():
+            if not isinstance(codes, dict) or not codes or any(type(code) is not int for code in codes.values()):
+                raise HkpPackError(f"{where}.categorical_encoding.{name} must map values to integer codes")
+    if "score" in doc:
+        score = doc["score"]
+        _known_keys(score, ("units", "calibrated", "transform"), f"{where}.score")
+        for key in ("units", "transform"):
+            if key in score:
+                _string(score[key], f"{where}.score.{key}")
+        if "calibrated" in score and not isinstance(score["calibrated"], bool):
+            raise HkpPackError(f"{where}.score.calibrated must be a boolean")
+    body = doc[adapter]
+    if adapter == "static_order":
+        _known_keys(body, ("order",), f"{where}.{adapter}")
+        if "order" in body and (not isinstance(body["order"], list)
+                                or any(not isinstance(item, str) for item in body["order"])):
+            raise HkpPackError(f"{where}.static_order.order must be an array of strings")
+        return
     if adapter == "native":
-        body = desc.doc.get("native")
-        if not isinstance(body, dict) or not body.get("symbol"):
-            raise HkpPackError(f"{where} adapter 'native' requires 'native.symbol'")
+        _known_keys(body, ("symbol",), f"{where}.{adapter}")
+        _string(body.get("symbol"), f"{where}.native.symbol")
         return
-    if adapter not in _ARTIFACT_ADAPTERS:
-        return
-
-    body = desc.doc.get(adapter)
-    if not isinstance(body, dict) or not body.get("artifact"):
-        raise HkpPackError(f"{where} adapter '{adapter}' requires '{adapter}.artifact'")
-
-    desc.sidecars.append(_resolve_sidecar(desc, source_root, body["artifact"]))
+    key = "library" if adapter == "custom_library" else "artifact"
+    allowed = ("library", "symbol", "hash", "config") if adapter == "custom_library" else ("artifact", "hash")
+    _known_keys(body, allowed, f"{where}.{adapter}")
+    _string(body.get(key), f"{where}.{adapter}.{key}")
+    if "hash" in body:
+        _string(body["hash"], f"{where}.{adapter}.hash")
+    if adapter == "custom_library":
+        _string(body.get("symbol"), f"{where}.{adapter}.symbol")
+        if "config" in body and not isinstance(body["config"], dict):
+            raise HkpPackError(f"{where}.custom_library.config must be an object")
+    desc.sidecars.append(_resolve_sidecar(desc, source_root, body[key]))
 
 
 def _resolve_sidecar(desc, source_root, payload):
@@ -499,6 +589,8 @@ def _validate_shape(desc, source_root, log=print):
     # the inline UKD form is exempt (rejected in _validate_inline_ukd).
     _require(doc, ["version"], f"descriptor {path.name}")
     _validate_version(doc.get("version"), f"descriptor {path.name}")
+    if dtype in ("ued", "kmd", "umd") and "revision" in doc:
+        _validate_version(doc["revision"], f"descriptor {path.name} revision")
     if dtype == UKD_TYPE:
         _validate_standalone_ukd(desc, log)
     if dtype == KDP_TYPE:
@@ -674,18 +766,22 @@ def _validate_references(flat):
                     f"UKD '{udoc.get('id')}' arch {udoc.get('arch')} is not a "
                     f"subset of KDP {kdp.path.name} arch {doc.get('arch')}"
                 )
+    typed_ids = {kind: {d.id for d in flat.by_type(kind)} for kind in ("kmd", "uhd")}
     for ued in flat.by_type("ued"):
-        for ref in (ued.doc.get("heuristic"), ued.doc.get("metadata")):
-            if ref is not None and ref not in ids:
+        references = [(ued.doc.get("metadata"), "kmd")]
+        references += [(ref, "uhd") for role in _UHD_ROLES
+                       for ref in ued.doc.get(role, {}).values()]
+        for ref, kind in references:
+            if ref is not None and ref not in typed_ids[kind]:
                 raise HkpPackError(
-                    f"UED {ued.path.name} references unknown descriptor Id '{ref}'"
+                    f"UED {ued.path.name} references unknown {kind.upper()} descriptor Id '{ref}'"
                 )
 
 
 def reachable_generic_ids(flat, surviving_kdps):
     """Ids of the generics reachable from a set of surviving KDPs.
 
-    Walks KDP -> {matchers, engine, dispatch} and UED -> {heuristic, metadata}
+    Walks KDP -> {matchers, engine, dispatch} and UED -> {role models, metadata}
     transitively. A generic survives pruning iff its Id is in this set.
     """
     by_id = flat.generic_by_id()
@@ -702,5 +798,6 @@ def reachable_generic_ids(flat, surviving_kdps):
         reachable.add(rid)
         gdesc = by_id[rid]
         if gdesc.type == "ued":
-            pending += [gdesc.doc.get("heuristic"), gdesc.doc.get("metadata")]
+            pending.append(gdesc.doc.get("metadata"))
+            pending += [ref for role in _UHD_ROLES for ref in gdesc.doc.get(role, {}).values()]
     return reachable
