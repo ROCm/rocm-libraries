@@ -3891,7 +3891,31 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
 }
 #endif
 
+// Shared handler for the Build*MultiDevicePlan function-try-blocks: log the
+// in-flight exception and discard any partial plan state so plan creation can
+// fall back to another path.  `except_what` is null for unknown
+// (non-std::exception) throws.
+void rocfft_plan_t::discard_failed_multi_device_plan(const std::string& calling_func,
+                                                     const char*        except_what)
+{
+    if(LOG_TRACE_ENABLED())
+    {
+        if(except_what)
+            (*LogSingleton::GetInstance().GetTraceOS())
+                << "Exception caught in " << calling_func << "\nDetails:\n\t" << except_what
+                << std::endl;
+        else
+            (*LogSingleton::GetInstance().GetTraceOS())
+                << "Unknown exception caught in " << calling_func << std::endl;
+    }
+    // discard any partial state created before the throw
+    multiPlan.clear();
+    multiPlanAntecedents.clear();
+    tempBuffers.clear();
+}
+
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
+try
 {
     const auto local_comm_rank = desc.get_local_comm_rank();
 
@@ -4195,199 +4219,186 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
 
     return true;
 }
+catch(const std::exception& e)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, e.what());
+    return false;
+}
+catch(...)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, nullptr);
+    return false;
+}
 
 bool rocfft_plan_t::BuildMultiDevicePlan()
+try
 {
-    // BuildOptMultiDevicePlan may have attempted stuff before bailing: clean up first
-    // TODO: remove when BuildOptMultiDevicePlan is taken out
-    multiPlan.clear();
-    multiPlanAntecedents.clear();
-    tempBuffers.clear();
-
-    try
+    // Code path restricted to configurations distributing data sets on
+    // input or output
+    if(desc.expected_undistributed_location_for(io_data_label::INPUT)
+       && desc.expected_undistributed_location_for(io_data_label::OUTPUT))
     {
-        // Code path restricted to configurations distributing data sets on
-        // input or output
-        if(desc.expected_undistributed_location_for(io_data_label::INPUT)
-           && desc.expected_undistributed_location_for(io_data_label::OUTPUT))
+        return false;
+    }
+
+    // desc.{in,out}Fields.size() == 1 guaranteed given validation checks
+    const auto& ifield = desc.get_field_for(io_data_label::INPUT);
+    const auto& ofield = desc.get_field_for(io_data_label::OUTPUT);
+
+    // Figure out which length axes to compute on input/output
+    const auto full_axes_on_input  = ifield.get_undistributed_length_dimensions();
+    const auto full_axes_on_output = ofield.get_undistributed_length_dimensions();
+    if(full_axes_on_input.size() == desc.rank() && full_axes_on_output.size() == desc.rank())
+    {
+        // Embarrassingly-parallel case very likely (check that batch ranges are identical brickwise...)
+        // TODO: embarrassingly parallel cases without gather/scatter/transpose if all batch ranges match, brickwise
+        return false;
+    }
+    // Define the length axes to be computed on input and the axes to be computes on output
+    // and find out which axes need an intermediary field (e.g., pencil decompositions on I/O)
+    std::set<size_t> partial_axes, axes_computed_on_input, axes_computed_on_output;
+    for(size_t dim = 0; dim < desc.rank(); dim++)
+    {
+        const auto axis_is_full_on_input  = full_axes_on_input.contains(dim);
+        const auto axis_is_full_on_output = full_axes_on_output.contains(dim);
+        // Note: the innermost length *must* be full on input (resp. output) for
+        // forward (resp. inverse) real transforms
+        if(dim == 0 && dft_is_real(transformType))
         {
-            return false;
-        }
+            if((dft_is_forward(transformType) && !axis_is_full_on_input)
+               || (dft_is_inverse(transformType) && !axis_is_full_on_output))
+                return false;
 
-        // desc.{in,out}Fields.size() == 1 guaranteed given validation checks
-        const auto& ifield = desc.get_field_for(io_data_label::INPUT);
-        const auto& ofield = desc.get_field_for(io_data_label::OUTPUT);
-
-        // Figure out which length axes to compute on input/output
-        const auto full_axes_on_input  = ifield.get_undistributed_length_dimensions();
-        const auto full_axes_on_output = ofield.get_undistributed_length_dimensions();
-        if(full_axes_on_input.size() == desc.rank() && full_axes_on_output.size() == desc.rank())
-        {
-            // Embarrassingly-parallel case very likely (check that batch ranges are identical brickwise...)
-            // TODO: embarrassingly parallel cases without gather/scatter/transpose if all batch ranges match, brickwise
-            return false;
-        }
-        // Define the length axes to be computed on input and the axes to be computes on output
-        // and find out which axes need an intermediary field (e.g., pencil decompositions on I/O)
-        std::set<size_t> partial_axes, axes_computed_on_input, axes_computed_on_output;
-        for(size_t dim = 0; dim < desc.rank(); dim++)
-        {
-            const auto axis_is_full_on_input  = full_axes_on_input.contains(dim);
-            const auto axis_is_full_on_output = full_axes_on_output.contains(dim);
-            // Note: the innermost length *must* be full on input (resp. output) for
-            // forward (resp. inverse) real transforms
-            if(dim == 0 && dft_is_real(transformType))
-            {
-                if((dft_is_forward(transformType) && !axis_is_full_on_input)
-                   || (dft_is_inverse(transformType) && !axis_is_full_on_output))
-                    return false;
-
-                if(dft_is_forward(transformType))
-                    axes_computed_on_input.insert(dim);
-                else
-                    axes_computed_on_output.insert(dim);
-                continue;
-            }
-
-            if(!axis_is_full_on_input && !axis_is_full_on_output)
-            {
-                partial_axes.insert(dim);
-                continue;
-            }
-            // Prefer computing length axis on input if possible so long as
-            // some work is also guaranteed on output.
-            if(axis_is_full_on_input
-               && (!axis_is_full_on_output || !axes_computed_on_output.empty()))
-            {
+            if(dft_is_forward(transformType))
                 axes_computed_on_input.insert(dim);
-            }
             else
-            {
-                // axis_is_full_on_output == true given above checks
                 axes_computed_on_output.insert(dim);
-            }
+            continue;
         }
 
-        // We need at least one length axis to compute on input and another one
-        // on output at the moment.
-        // TODO: transpose from I/O to adhoc views otherwise
-        if(axes_computed_on_input.empty() || axes_computed_on_output.empty())
-            return false;
-
-        if(!partial_axes.empty())
+        if(!axis_is_full_on_input && !axis_is_full_on_output)
         {
-            // Support for pencil decompositions to be added later on
-            return false;
+            partial_axes.insert(dim);
+            continue;
         }
-
-        // The desired multi-device transform is tackled via a sequence of successive
-        // lower-dimensional transforms & transpositions that creates a sequence of field
-        // views from the input field view to the output field view.
-        // - For complex transforms, the type of the successive lower-dimensional transforms
-        //   is identical to the requested (plan's) type of transform.
-        // - For real transforms, the lower-dimensional transform handling the innermost
-        //   (0th) length dimension must be identical to the requested (plan's) type of
-        //   transform, i.e., real, and handled first (resp. last) for forward (resp.
-        //   inverse) transforms. All other lower-dimensional transforms are forward
-        //   (resp. inverse) *complex* transforms.
-
-        // Two lower-dimensional embarrassingly-parallel FFTs are in the sequence unless there
-        // are some partial length axes on input *and* output (e.g., pencil decompositions).
-        std::list<embarrassingly_parallel_fft> sequence_of_sub_ffts;
-
-        // Internally-created field views may need temporary buffers
-        std::vector<TempBufferLease> leased_buffers;
-        // In-place operations in output views are always acceptable as data is meant to be written
-        // therein anyways
-        const auto& last_op = sequence_of_sub_ffts.emplace_back(
-            make_embarrassingly_parallel_fft_from_user_field<io_data_label::OUTPUT>(
-                axes_computed_on_output, leased_buffers, true /* = prefer_in_place_if_possible*/));
-        // Prefer in-place operations in input buffers if (both must be true)
-        // 1. the plan is itself configured in-place (i.e., user allows us to overwrite input data);
-        // 2. the input buffers of the subsequent embarrassingly-parallel FFT are *not* the user's input buffers.
-        const bool prefer_inplace_on_input_field
-            = placement == rocfft_placement_inplace
-              && (!partial_axes.empty()
-                  || std::all_of(
-                      last_op.input.buffers.begin(),
-                      last_op.input.buffers.end(),
-                      [](const auto& tmp) { return tmp.ptr_type() != BufferPtr::PTR_USER_IN; }));
-        sequence_of_sub_ffts.emplace_front(
-            make_embarrassingly_parallel_fft_from_user_field<io_data_label::INPUT>(
-                axes_computed_on_input, leased_buffers, prefer_inplace_on_input_field));
-        //if(!partial_axes.empty())
-        //{
-        //    const auto embedded_intermediary_view
-        //        = make_intermediary_field_view(
-        //              leased_buffers,
-        //              sequence_of_sub_ffts.front().output.get_embedding_view(),
-        //              sequence_of_sub_ffts.back().input.get_embedding_view(),
-        //              partial_axes)
-        //              .get_view_for_lengths(partial_axes);
-        //    // Intermediary view is always complex and internally-defined: in-place is always possible
-        //    sequence_of_sub_ffts.insert(
-        //        std::next(sequence_of_sub_ffts.begin()),
-        //        embarrassingly_parallel_fft(dft_is_forward(transformType)
-        //                                        ? rocfft_transform_type_complex_forward
-        //                                        : rocfft_transform_type_complex_inverse,
-        //                                    rocfft_placement_inplace,
-        //                                    precision,
-        //                                    embedded_intermediary_view,
-        //                                    embedded_intermediary_view));
-        //}
-
-        // add load/store callbacks to the relevant embarrassingly-parallel FFTs
-        sequence_of_sub_ffts.front().set_load_ops(desc.loadOps);
-        sequence_of_sub_ffts.back().set_store_ops(desc.storeOps);
-
-        // Create items for the sequence of embarrassingly-parallel FFTs and global transpositions
-        const field_view_t* current_field_view = &sequence_of_sub_ffts.front().input;
-        std::vector<size_t> antecedents;
-        for(const auto& operation : sequence_of_sub_ffts)
+        // Prefer computing length axis on input if possible so long as
+        // some work is also guaranteed on output.
+        if(axis_is_full_on_input && (!axis_is_full_on_output || !axes_computed_on_output.empty()))
         {
-            const auto current_embedding  = current_field_view->get_embedding_view();
-            const auto op_input_embedding = operation.input.get_embedding_view();
-            if(op_input_embedding != current_embedding)
-            {
-                // Transposition of field views required before the next
-                // embarrassingly-parallel FFTs
-                const auto tmp
-                    = GlobalTranspose(current_embedding, op_input_embedding, antecedents);
-                std::copy(tmp.begin(), tmp.end(), std::back_inserter(antecedents));
-            }
+            axes_computed_on_input.insert(dim);
+        }
+        else
+        {
+            // axis_is_full_on_output == true given above checks
+            axes_computed_on_output.insert(dim);
+        }
+    }
 
+    // We need at least one length axis to compute on input and another one
+    // on output at the moment.
+    // TODO: transpose from I/O to adhoc views otherwise
+    if(axes_computed_on_input.empty() || axes_computed_on_output.empty())
+        return false;
+
+    if(!partial_axes.empty())
+    {
+        // Support for pencil decompositions to be added later on
+        return false;
+    }
+
+    // The desired multi-device transform is tackled via a sequence of successive
+    // lower-dimensional transforms & transpositions that creates a sequence of field
+    // views from the input field view to the output field view.
+    // - For complex transforms, the type of the successive lower-dimensional transforms
+    //   is identical to the requested (plan's) type of transform.
+    // - For real transforms, the lower-dimensional transform handling the innermost
+    //   (0th) length dimension must be identical to the requested (plan's) type of
+    //   transform, i.e., real, and handled first (resp. last) for forward (resp.
+    //   inverse) transforms. All other lower-dimensional transforms are forward
+    //   (resp. inverse) *complex* transforms.
+
+    // Two lower-dimensional embarrassingly-parallel FFTs are in the sequence unless there
+    // are some partial length axes on input *and* output (e.g., pencil decompositions).
+    std::list<embarrassingly_parallel_fft> sequence_of_sub_ffts;
+
+    // Internally-created field views may need temporary buffers
+    std::vector<TempBufferLease> leased_buffers;
+    // In-place operations in output views are always acceptable as data is meant to be written
+    // therein anyways
+    const auto& last_op = sequence_of_sub_ffts.emplace_back(
+        make_embarrassingly_parallel_fft_from_user_field<io_data_label::OUTPUT>(
+            axes_computed_on_output, leased_buffers, true /* = prefer_in_place_if_possible*/));
+    // Prefer in-place operations in input buffers if (both must be true)
+    // 1. the plan is itself configured in-place (i.e., user allows us to overwrite input data);
+    // 2. the input buffers of the subsequent embarrassingly-parallel FFT are *not* the user's input buffers.
+    const bool prefer_inplace_on_input_field
+        = placement == rocfft_placement_inplace
+          && (!partial_axes.empty()
+              || std::all_of(
+                  last_op.input.buffers.begin(), last_op.input.buffers.end(), [](const auto& tmp) {
+                      return tmp.ptr_type() != BufferPtr::PTR_USER_IN;
+                  }));
+    sequence_of_sub_ffts.emplace_front(
+        make_embarrassingly_parallel_fft_from_user_field<io_data_label::INPUT>(
+            axes_computed_on_input, leased_buffers, prefer_inplace_on_input_field));
+    //if(!partial_axes.empty())
+    //{
+    //    const auto embedded_intermediary_view
+    //        = make_intermediary_field_view(
+    //              leased_buffers,
+    //              sequence_of_sub_ffts.front().output.get_embedding_view(),
+    //              sequence_of_sub_ffts.back().input.get_embedding_view(),
+    //              partial_axes)
+    //              .get_view_for_lengths(partial_axes);
+    //    // Intermediary view is always complex and internally-defined: in-place is always possible
+    //    sequence_of_sub_ffts.insert(
+    //        std::next(sequence_of_sub_ffts.begin()),
+    //        embarrassingly_parallel_fft(dft_is_forward(transformType)
+    //                                        ? rocfft_transform_type_complex_forward
+    //                                        : rocfft_transform_type_complex_inverse,
+    //                                    rocfft_placement_inplace,
+    //                                    precision,
+    //                                    embedded_intermediary_view,
+    //                                    embedded_intermediary_view));
+    //}
+
+    // add load/store callbacks to the relevant embarrassingly-parallel FFTs
+    sequence_of_sub_ffts.front().set_load_ops(desc.loadOps);
+    sequence_of_sub_ffts.back().set_store_ops(desc.storeOps);
+
+    // Create items for the sequence of embarrassingly-parallel FFTs and global transpositions
+    const field_view_t* current_field_view = &sequence_of_sub_ffts.front().input;
+    std::vector<size_t> antecedents;
+    for(const auto& operation : sequence_of_sub_ffts)
+    {
+        const auto current_embedding  = current_field_view->get_embedding_view();
+        const auto op_input_embedding = operation.input.get_embedding_view();
+        if(op_input_embedding != current_embedding)
+        {
+            // Transposition of field views required before the next
             // embarrassingly-parallel FFTs
-            const auto tmp = create_plan_items_for(operation, antecedents);
+            const auto tmp = GlobalTranspose(current_embedding, op_input_embedding, antecedents);
             std::copy(tmp.begin(), tmp.end(), std::back_inserter(antecedents));
-
-            // Output field view of the latter becomes "current" for the subsequent step(s).
-            current_field_view = &operation.output;
         }
 
-        return true;
-    }
-    catch(const std::exception& e)
-    {
-        if(LOG_TRACE_ENABLED())
-        {
-            (*LogSingleton::GetInstance().GetTraceOS())
-                << "Exception caught in " << ROCFFT_CURRENT_FUNCTION << "\nDetails:\n\t" << e.what()
-                << std::endl;
-        }
-    }
-    catch(...)
-    {
-        if(LOG_TRACE_ENABLED())
-        {
-            (*LogSingleton::GetInstance().GetTraceOS())
-                << "Unknown exception caught in " << ROCFFT_CURRENT_FUNCTION << std::endl;
-        }
-    }
-    // clear what may have been created if this point is reached
-    multiPlan.clear();
-    multiPlanAntecedents.clear();
-    tempBuffers.clear();
+        // embarrassingly-parallel FFTs
+        const auto tmp = create_plan_items_for(operation, antecedents);
+        std::copy(tmp.begin(), tmp.end(), std::back_inserter(antecedents));
 
+        // Output field view of the latter becomes "current" for the subsequent step(s).
+        current_field_view = &operation.output;
+    }
+
+    return true;
+}
+catch(const std::exception& e)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, e.what());
+    return false;
+}
+catch(...)
+{
+    discard_failed_multi_device_plan(ROCFFT_CURRENT_FUNCTION, nullptr);
     return false;
 }
 
