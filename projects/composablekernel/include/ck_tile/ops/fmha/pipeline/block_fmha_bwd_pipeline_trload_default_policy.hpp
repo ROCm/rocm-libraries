@@ -594,8 +594,10 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         constexpr auto desc_0 = make_naive_tensor_descriptor_packed(
             make_tuple(number<M0>{}, number<N0>{}, number<M1>{}, number<N1>{}, number<M2>{}));
 
-        constexpr index_t M1_0 = 2, M1_1 = 2;
-        constexpr index_t N1_0 = 2, N1_1 = 8;
+        // XOR swizzles (M1_0, N1_0); the leftover goes to M1_1. kCMLane is 4 on
+        // wave64 but 2 on wave32, so the split cannot be a constant.
+        constexpr index_t M1_0 = min(2, M1), M1_1 = M1 / M1_0;
+        constexpr index_t N1_0 = 2, N1_1 = N1 / N1_0;
         static_assert(M1_0 * M1_1 == M1, "M1_0 * M1_1 must equal M1");
         static_assert(N1_0 * N1_1 == N1, "N1_0 * N1_1 must equal N1");
 

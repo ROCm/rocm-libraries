@@ -489,6 +489,10 @@ struct FmhaBwdDQDKDVKernel
     static_assert(kUseQrQtrDorPipeline == (kMaxSeqLenQ != 0));
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
+#elif defined(__gfx125__)
+    // gfx1250 has ds_load_tr but no async global->LDS, so only the QrQtrDor
+    // decode pipeline is ported out of the trload family.
+    static constexpr bool kIsAvailable = !kUseTrLoad || kUseQrQtrDorPipeline;
 #else
     static constexpr bool kIsAvailable = !kUseTrLoad;
 #endif
