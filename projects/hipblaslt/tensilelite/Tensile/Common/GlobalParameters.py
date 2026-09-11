@@ -608,6 +608,7 @@ defaultBenchmarkCommonParameters = [
     {"MbskPrefetchMethod": [-1]},
     {"PrefetchAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
+    {"WGMBitSwizzle": [False]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},

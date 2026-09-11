@@ -390,6 +390,84 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     return module
 
+# Grid shape the bit swizzle was derived for: WorkGroup0 (M-tiles) is a 7-bit
+# index (128 tiles), WorkGroup1 (N-tiles) is a 4-bit index (16 tiles).
+_BITSWIZZLE_NUM_WG0 = 128
+_BITSWIZZLE_NUM_WG1 = 16
+
+def WGMBitSwizzle(writer, kernel, sgprWGM):
+    """
+    Bit-permutation workgroup swizzle (pure shift/mask, no division).
+
+    At kernel entry WorkGroup0 = g % NumWorkGroups0 (hardware x, fastest moving)
+    and WorkGroup1 = g // NumWorkGroups0, so the linear id is
+        g = WorkGroup1 * NumWorkGroups0 + WorkGroup0.
+    For the power-of-two grid (NumWorkGroups0 == 128, NumWorkGroups1 == 16) the
+    linear id is remapped to tiles as:
+
+        n_tile = (g >> 5) & 15
+        m_tile = ((g & 7) << 4) | (((g >> 9) & 3) << 2) | ((g >> 3) & 3)
+
+    Rewritten as word ops on the incoming WorkGroup0 (bits g0..g6) and
+    WorkGroup1 (bits g7..g10):
+
+        m_tile = ((WG0 >> 3) & 3) | (WG1 & 0xC) | ((WG0 & 7) << 4)
+        n_tile = ((WG0 >> 5) & 3) | ((WG1 & 3) << 2)
+
+    8 consecutive workgroups then share the same n_tile (reuse the B panel in L2)
+    while striding m_tile by 16. The result is written back into WorkGroup0
+    (= m_tile) and WorkGroup1 (= n_tile) so downstream address generation is
+    unchanged. If the grid is not exactly 128 x 16 we fall through to DefaultWGM
+    at runtime rather than miscompute.
+    """
+    module = Module("graWGMBitSwizzle")
+    module.addComment0("Bit-permutation WGM swizzle (shift/mask, no divide)")
+
+    labelFallback = Label(label=writer.labels.getNameInc("WGMBitFallback"), comment="grid != 128x16 -> DefaultWGM")
+    labelEnd      = Label(label=writer.labels.getNameInc("WGMBitEnd"), comment="")
+
+    # Runtime guard: only apply the swizzle for the exact power-of-two grid it
+    # was derived for; otherwise use the general DefaultWGM path.
+    if not clusterEnabled(kernel["ClusterDim"]):
+        module.add(SCmpEQU32(src0=sgpr("NumWorkGroups0"), src1=_BITSWIZZLE_NUM_WG0, comment="NumWorkGroups0 == 128 ?"))
+        module.add(SCBranchSCC0(labelName=labelFallback.getLabelName(), comment="fall back if not 128 M-tiles"))
+        module.add(SCmpEQU32(src0=sgpr("NumWorkGroups1"), src1=_BITSWIZZLE_NUM_WG1, comment="NumWorkGroups1 == 16 ?"))
+        module.add(SCBranchSCC0(labelName=labelFallback.getLabelName(), comment="fall back if not 16 N-tiles"))
+
+        with writer.allocTmpSgpr(3, tag="WGMBit_tmpSgpr") as tmpSgprInfo:
+            sgprM   = tmpSgprInfo.idx      # m_tile accumulator
+            sgprN   = tmpSgprInfo.idx + 1  # n_tile accumulator
+            sgprTmp = tmpSgprInfo.idx + 2  # scratch
+
+            module.addComment0("m_tile = ((WG0>>3)&3) | (WG1&0xC) | ((WG0&7)<<4)")
+            module.add(SLShiftRightB32(dst=sgpr(sgprM), shiftHex=hex(3), src=sgpr("WorkGroup0"), comment="WG0>>3"))
+            module.add(SAndB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=hex(0x3), comment="& 3 -> m[1:0]"))
+            module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=hex(0xC), comment="WG1 & 0xC -> m[3:2]"))
+            module.add(SOrB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=sgpr(sgprTmp), comment="m |= WG1&0xC"))
+            module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup0"), src1=hex(0x7), comment="WG0 & 7"))
+            module.add(SLShiftLeftB32(dst=sgpr(sgprTmp), shiftHex=hex(4), src=sgpr(sgprTmp), comment="<<4 -> m[6:4]"))
+            module.add(SOrB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=sgpr(sgprTmp), comment="m |= (WG0&7)<<4"))
+
+            module.addComment0("n_tile = ((WG0>>5)&3) | ((WG1&3)<<2)")
+            module.add(SLShiftRightB32(dst=sgpr(sgprN), shiftHex=hex(5), src=sgpr("WorkGroup0"), comment="WG0>>5"))
+            module.add(SAndB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=hex(0x3), comment="& 3 -> n[1:0]"))
+            module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=hex(0x3), comment="WG1 & 3"))
+            module.add(SLShiftLeftB32(dst=sgpr(sgprTmp), shiftHex=hex(2), src=sgpr(sgprTmp), comment="<<2 -> n[3:2]"))
+            module.add(SOrB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=sgpr(sgprTmp), comment="n |= (WG1&3)<<2"))
+
+            module.addComment0("write swizzled tiles back: WorkGroup0=m_tile, WorkGroup1=n_tile")
+            module.add(SMovB32(dst=sgpr("WorkGroup0"), src=sgpr(sgprM), comment="WorkGroup0 = m_tile"))
+            module.add(SMovB32(dst=sgpr("WorkGroup1"), src=sgpr(sgprN), comment="WorkGroup1 = n_tile"))
+
+        module.add(SBranch(labelName=labelEnd.getLabelName(), comment="skip DefaultWGM"))
+
+    # Fallback path (also the ClusterDim path): general DefaultWGM.
+    module.add(labelFallback)
+    module.add(DefaultWGM(writer, kernel, sgprWGM))
+    module.add(labelEnd)
+
+    return module
+
 def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, sgprChunkSize):
     module = Module()
 
