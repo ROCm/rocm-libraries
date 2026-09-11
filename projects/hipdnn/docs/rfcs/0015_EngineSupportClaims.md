@@ -737,7 +737,7 @@ sidecars are a complete, hardware-free description of claimed support. A contrib
 regenerate or diff the matrix from a plain checkout with no GPU, no plugin, and no DVC pull
 (only `.json`/`.support.json` are needed, and both live in git — §9.2).
 
-**Renderer.** `dnn-providers/integration-tests/tools/render_support_matrix.py` discovers every
+**Renderer.** `dnn-providers/integration-tests/scripts/render_support_matrix.py` discovers every
 support sidecar under the golden-data tree — each `{Name}.support.json` and each sweep
 `support.json` — joins each to its graph (`{Name}.json`, or the expanded `cases[].id` from
 `graph.template.json` + `sweep.json`), and emits one combined markdown matrix: engine columns,
@@ -745,10 +745,39 @@ one row per claimed graph keyed by `(operation, layout, dtype, scenario)`, each 
 verdict per `(arch, platform)`.
 The matrix is a **view** of the committed claims, not a second state to maintain.
 
+**Two projections of one collection.** The renderer resolves each sidecar into a flat list of
+claim units once, then projects that list two ways. `--format markdown` (the default) writes
+`dnn-providers/integration-tests/SUPPORT_MATRIX.md`: a human document that aggregates cases into
+`(operation, layout, dtype, scenario)` rows and annotates each row with an HTML comment naming
+the contributing bundle path, its tier, and its case count — coordinates back to the claim, not
+the claim itself. `--format json` writes the same collection unaggregated: one record per
+claimed graph, carrying tier, bundle path, case id, and the per-engine target list. Any richer
+consumer — a browsable or zoomable view of the matrix — should read that JSON rather than
+scraping the rendered tables, so the two views cannot disagree about what is claimed.
+Enumerating every case id inline in the markdown is available (`--max-case-ids`) but off by
+default: it multiplies the document size to no visual effect, and a large enough markdown file
+stops rendering on GitHub at all.
+
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
-derived. The matrix is regenerated (and its freshness checked) by a CI lint that fails if the
-committed matrix differs from a re-render of the current sidecars — so the committed doc can
-never silently drift from the claims.
+derived. It is **generated on demand and not committed** — a contributor who wants it runs the
+renderer against their checkout. This is deliberate: the rendered document is ~420 KB and grows
+with every bundle and every gfx target added, which makes it both a large diff on every sidecar
+edit and close enough to the size at which GitHub stops rendering markdown to be a liability.
+Not committing it also removes the drift problem outright rather than policing it: there is no
+second copy to go stale.
+
+The cost is that a support change is no longer visible in a pull request diff, and a reader
+cannot browse the matrix on the web without a checkout. Reviewers of a sidecar change should
+regenerate locally to see the delta. If the document is ever made small enough to commit —
+projecting only the overview and per-variant tables, which are ~18% of it and carry essentially
+every claim change — the freshness lint below should come back with it.
+
+What remains in CI is the weaker but still useful half: the `render-support-matrix` pre-commit
+hook renders the matrix and discards it, failing if any sidecar cannot be resolved. That catches
+a malformed or orphaned sidecar at commit time. `render_support_matrix.py --check` still exists
+and compares a rendering against a file on disk, for anyone who does keep a local copy; it is no
+longer wired into CI. Claim *correctness* is enforced separately by `verify-support-claims`
+(§9.3) and by the integration tests themselves (§4).
 
 Two clarifications. (1) The matrix row key `(operation, layout, dtype, scenario)` is
 *coarser* than the actual claim key (the on-disk graph, §4): two bundles — or two sweep cases —
