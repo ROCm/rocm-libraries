@@ -42,6 +42,11 @@ struct InsertWaitAluOptions {
     /// own pipe, while XDL and CSMACC are the only units in flight and so complete in
     /// issue order. Weaker wait, same guarantee.
     bool sharedOrderCountFollowers = false;
+    /// Count an XDL producer's followers from the next matrix op onward rather than its
+    /// own pipe. The CSMACC ops in between share the producer's co-issue window and may
+    /// retire first, so they are excluded; everything from that matrix op on is ordered
+    /// behind it. Independent of sharedOrderCountFollowers: a different correctness rule.
+    bool xdlCountFromNextWmma = false;
     /// Treat a producer as retired once an emitted count drained the shared order past
     /// it. A per-pipe floor rises more slowly and still reports such a producer live.
     bool sharedOrderDrainRetires = false;

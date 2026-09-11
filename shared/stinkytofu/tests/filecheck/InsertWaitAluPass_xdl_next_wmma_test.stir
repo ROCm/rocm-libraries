@@ -1,0 +1,61 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,xdlCountFromNextWmma --print-output
+#
+# A matrix producer's followers are counted from the NEXT matrix op onward. The CSMACC
+# ops between the two share the producer's co-issue window and may retire before it, so
+# they are not followers; everything from that next matrix op on is ordered behind it.
+
+#===----------------------------------------------------------------------===#
+# wmma0 vadd1 vadd2 wmma1 vadd3, consumer reads wmma0's dest.
+# Own pipe sees 1 follower (wmma1). Counting from wmma1 onward gives 2 (wmma1, vadd3).
+# vadd1/vadd2 are excluded: they co-issue with wmma0 and may finish first.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_counts_from_next_wmma
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
+# CHECK: ds_load_b32
+
+st.func @xdl_counts_from_next_wmma() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# No matrix op follows the producer, so there is nothing to count from and the
+# per-pipe count stands. Three CSMACC ops follow but none of them is a follower.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_no_next_wmma_keeps_per_pipe
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: ds_load_b32
+
+st.func @xdl_no_next_wmma_keeps_per_pipe() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A TRANS op after the producer breaks the issue-order argument, so the rule is
+# declined and the per-pipe count stands: own pipe sees 1 follower (wmma1).
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @xdl_next_wmma_declined_when_other_unit_issues
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK: ds_load_b32
+
+st.func @xdl_next_wmma_declined_when_other_unit_issues() {
+^entry:
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v6 = "st.v_add_f32"(v7, v9) { issueCycles = 1, latencyCycles = 5 }
+  v190 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}

@@ -71,6 +71,11 @@ const HWModel::WaitHide* g_waitHide = nullptr;
 // Shared-VA-order refinements, from InsertWaitAluOptions. Off is the baseline: the
 // per-pipe ordinals alone, always correct and always stricter.
 bool g_sharedOrderCountFollowers = false;
+// Count an XDL producer's followers from the next matrix op onward. The CSMACC ops
+// between the producer and that matrix op sit in the producer's own co-issue window
+// and may retire before it, so they are not followers; everything from the next
+// matrix op on is ordered behind the producer and is.
+bool g_xdlCountFromNextWmma = false;
 bool g_sharedOrderDrainRetires = false;
 
 // Render one WaitHide entry for the debug banner; 0 reads as off.
@@ -362,6 +367,10 @@ struct VgprStamp {
     // producer that are still OUTSTANDING, so it has to live in a frame; xdlSince is an
     // age and counts retired ops too, which would emit a wait weaker than required.
     unsigned vaOrdShared = 0;
+    // Shared position just before the first matrix op issued after this producer, or 0
+    // until one has. Ops from there on are ordered behind the producer; the ones between
+    // sit in its co-issue window and are not.
+    unsigned nextWmmaShared = 0;
     // XDL ordinal steps issued since this producer stamped, saturating at g_xdlSinceCap.
     // An age, not a position: a merge rebases every frame onto its in-flight width, and a
     // producer older than that width cannot be named by a position in it, which is how the
@@ -422,10 +431,13 @@ class WaitcntBrackets {
             // stamps it writes are reset to zero below, after this.
             if (pipe == PIPE_XDL || pipe == PIPE_DPMACC || pipe == PIPE_TRANS) {
                 for (auto& [k, s] : scores) {
-                    if (pipe == PIPE_XDL)
+                    if (pipe == PIPE_XDL) {
                         s.xdlSince = std::min(g_xdlSinceCap, s.xdlSince + inc);
-                    else
+                        // vaUB already counts this op, so the position before it is vaUB - inc.
+                        if (s.nextWmmaShared == 0) s.nextWmmaShared = vaUB - inc;
+                    } else {
                         s.otherUnitSince = true;
+                    }
                 }
             }
 
@@ -441,6 +453,7 @@ class WaitcntBrackets {
                 s.vaInc = inc;
                 s.vaOrdShared = vaUB;
                 s.xdlSince = 0;
+                s.nextWmmaShared = 0;
                 s.otherUnitSince = false;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
@@ -654,6 +667,16 @@ class WaitcntBrackets {
                                              << "]\n");
                         continue;
                     }
+                    // Everything from the next matrix op onward is ordered behind this
+                    // producer. A retired next matrix op would mean this one retired too,
+                    // so the live check also keeps the count inside the frame.
+                    if (g_xdlCountFromNextWmma && onlyXdlAndCsmaccSince(s) &&
+                        s.nextWmmaShared > vaLB && vaUB - s.nextWmmaShared > followers) {
+                        PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from next-wmma ["
+                                             << (vaUB - s.nextWmmaShared) << " vs per-pipe "
+                                             << followers << "]\n");
+                        followers = vaUB - s.nextWmmaShared;
+                    }
                 }
                 if (g_waitHide != nullptr && !xdlFormMixed && p == PIPE_CSMACC) {
                     // A CSMACC producer is satisfied by matrix ops, not by its own
@@ -848,6 +871,9 @@ class WaitcntBrackets {
                          fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom, "vmTex");
             mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
                          myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
+            mergeSlotOrd(s.nextWmmaShared, o ? o->nextWmmaShared : 0, myShiftShared,
+                         otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
+                         "nextWmmaShared");
             // Ages and the out-of-order flag need no rebasing, so they join by value. Keep
             // the fewer matrix ops and the set flag: both make the hide harder to satisfy.
             // A path with no VA producer here carries no age to compare.
@@ -1039,6 +1065,7 @@ class InsertWaitAluPassImpl : public Pass {
     explicit InsertWaitAluPassImpl(const InsertWaitAluOptions& opts) {
         g_enableESM2TrackValuVsrc = opts.enableESM2TrackValuVsrc;
         g_sharedOrderCountFollowers = opts.sharedOrderCountFollowers;
+        g_xdlCountFromNextWmma = opts.xdlCountFromNextWmma;
         g_sharedOrderDrainRetires = opts.sharedOrderDrainRetires;
     }
 
@@ -1419,6 +1446,7 @@ class InsertWaitAluPassImpl : public Pass {
                              << " vmVsrcBridge=" << waitHideStr(g_waitHide->vmVsrcBridge) << "\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
                              << " countFollowers=" << g_sharedOrderCountFollowers
+                             << " xdlFromNextWmma=" << g_xdlCountFromNextWmma
                              << " drainRetires=" << g_sharedOrderDrainRetires
                              << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
     }

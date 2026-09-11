@@ -277,6 +277,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
         mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc,
                                                    /*sharedOrderCountFollowers=*/true,
+                                                   /*xdlCountFromNextWmma=*/true,
                                                    /*sharedOrderDrainRetires=*/true}));
     }
 
