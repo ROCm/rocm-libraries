@@ -839,11 +839,15 @@ if(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS AND NOT WIN32)
                 "HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS requires target ${_target}")
         endif()
     endforeach()
+    if(NOT TARGET intrinsics_compiled)
+        message(FATAL_ERROR
+            "HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS requires target intrinsics_compiled")
+    endif()
 
     # StinkyTofu is added EXCLUDE_FROM_ALL by rocisa. This explicit ALL target
     # makes the native payload part of the hipBLASLt build before installation.
     add_custom_target(hipblaslt-stinkytofu-host-tests ALL
-        DEPENDS ${_stinkytofu_test_targets})
+        DEPENDS ${_stinkytofu_test_targets} intrinsics_compiled)
     install(TARGETS ${_stinkytofu_test_targets}
         RUNTIME DESTINATION "${_stinkytofu_test_dest}"
         COMPONENT tests)
@@ -860,6 +864,9 @@ if(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS AND NOT WIN32)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu-test-architectures.txt"
         DESTINATION "${_stinkytofu_test_dest}"
         RENAME architectures.txt
+        COMPONENT tests)
+    install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+        DESTINATION "${_stinkytofu_test_dest}"
         COMPONENT tests)
 
     install(DIRECTORY "${_stinkytofu_src}/tests/filecheck/"
