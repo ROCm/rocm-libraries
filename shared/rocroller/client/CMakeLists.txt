@@ -40,6 +40,7 @@ target_link_libraries(rocroller-gemm
         rocroller::host-numerics
         roc::host-numerics-amd-gpu-layout
         CLI11::CLI11
+        ${msgpack_libs}
 )
 target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
