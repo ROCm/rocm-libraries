@@ -16,8 +16,12 @@ pytestmark = pytest.mark.unit
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path):
+def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
+    # ``pip wheel`` runs in a child process. Give it an explicit ROCm identity
+    # so this metadata test does not depend on tox's bootstrap fallback.
+    monkeypatch.setenv("TENSILELITE_ROCM_VERSION", "7.0.0")
+
     subprocess.run(
         [
             sys.executable,
