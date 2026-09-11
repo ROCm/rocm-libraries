@@ -296,6 +296,20 @@ if (NOT BUILD_CLIENTS_ONLY)
   add_subdirectory(library)
 endif()
 
+# Fortran bindings, generated from the headers above and committed next to them.
+# Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS is OFF
+# or when no Fortran compiler is available, so a C-only site is unaffected.
+#
+# Outside the BUILD_CLIENTS_ONLY branch on purpose, and not merely for symmetry
+# with the other libraries. That branch decides whether librocsparse is BUILT
+# here; the bindings need it linked, not built, and resolve it from the prefix
+# path when the in-tree target is absent. Inheriting the skip would be actively
+# broken now that clients consume this target rather than building their own:
+# BUILD_FORTRAN_CLIENTS defaults to ON, so -DBUILD_CLIENTS_ONLY=ON would skip
+# this directory and then stop in clients/CMakeLists.txt with "the
+# rocsparse_fortran target is missing".
+add_subdirectory(fortran)
+
 # Trigger client builds if selected
 if(BUILD_CLIENTS)
   add_subdirectory(clients)

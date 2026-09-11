@@ -80,17 +80,15 @@ endif()
 project(rocsparse-clients LANGUAGES CXX ${fortran_language})
 
 if ( BUILD_FORTRAN_CLIENTS )
-  set(rocsparse_fortran_source
-      ../library/src/rocsparse_enums.f90
-      ../library/src/rocsparse.f90
-  )
-
-  # Set Fortran module output directory
-  set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/rocsparse)
-
-  # Create rocBLAS Fortran module
-  add_library(rocsparse_fortran OBJECT ${rocsparse_fortran_source})
-
+  # The Fortran binding is no longer built here from hand-written sources: it is
+  # generated from the C headers and built by ../fortran, which exports the
+  # roc::rocsparse_fortran target the samples link against. Building it twice
+  # would also collide, since both targets carry the same name.
+  if ( NOT TARGET rocsparse_fortran )
+    message(FATAL_ERROR
+      "BUILD_FORTRAN_CLIENTS is ON but the rocsparse_fortran target is missing. "
+      "It is built by projects/rocsparse/fortran; enable BUILD_FORTRAN_BINDINGS.")
+  endif()
 endif()
 
 # OpenMP
