@@ -212,7 +212,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         use_sinks=False,
                         sliding_window=0,
                         has_softcap=False,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -228,7 +229,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         use_sinks=False,
                         sliding_window=0,
                         has_softcap=False,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -245,7 +247,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         sliding_window=0,
                         has_softcap=False,
                         num_segments=4,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -258,7 +261,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         num_kv_heads=2,
                         dtype="fp16",
                         num_segments=4,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
         ]
@@ -324,7 +328,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         use_sinks=False,
                         sliding_window=0,
                         has_softcap=True,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -341,7 +346,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         sliding_window=0,
                         has_softcap=False,
                         use_alibi=True,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -358,7 +364,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         sliding_window=0,
                         has_softcap=False,
                         num_segments=4,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
             Case(
@@ -371,7 +378,8 @@ def _attention_cases(arch: str = "gfx950") -> List[Case]:
                         num_kv_heads=2,
                         dtype="bf16",
                         num_segments=4,
-                    )
+                    ),
+                    arch=arch,
                 ),
             ),
         ]

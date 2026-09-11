@@ -212,7 +212,11 @@ def supports_tiled_3d(
     # The tiled 3D segment kernel uses the same gfx950-only wide-K MFMA +
     # LDS transpose-read primitives as the 2D kernel; reject other targets
     # with a structured reason. See ``instances/common/attention_arch.py``.
-    from ..common.attention_arch import validate_tiled_attention_arch
+    from ..common.attention_arch import (
+        attention_lds_capacity_bytes,
+        tiled_3d_lds_bytes,
+        validate_tiled_attention_arch,
+    )
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
     if not arch_ok:
@@ -233,6 +237,20 @@ def supports_tiled_3d(
         return (
             False,
             f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
+        )
+    # LDS budget. Q + double-buffered K/V + P scale as O(T * HD), and the
+    # capacity is arch-specific (gfx942 64 KiB vs gfx950 160 KiB), so the same
+    # geometry that fits on one target overflows the other. Without this the
+    # kernel builds, lowers and verifies, then dies in the backend with
+    # "local memory (N) exceeds limit (M)" -- a compile-time failure the gate
+    # is supposed to turn into a clean (False, reason).
+    lds_need = tiled_3d_lds_bytes(head_size=head_size, tile_size=block_size)
+    lds_cap = attention_lds_capacity_bytes(arch)
+    if lds_need > lds_cap:
+        return (
+            False,
+            f"tiled 3D kernel: head_size={head_size} block_size={block_size} "
+            f"needs {lds_need} B of LDS > {lds_cap} B on {arch}",
         )
     # FP8 K/V cache: enabled via ``kv_storage_dtype="fp8e4m3"``. The
     # ``use_fp8`` flag mirrors the upstream API; both must be set

@@ -79,13 +79,48 @@ def supports_tiled_2d(*, arch: str = "gfx950", **kwargs):
     return _supports(arch=arch, **kwargs)
 
 
+# Tiled-3D split-KV is arch-divergent for the same reason tiled-2D is: the
+# gfx950 segment kernel uses ``ds_read_tr16_b64`` and the wide-K
+# ``mfma_f32_16x16x32`` bf16/f16 atom, neither of which exists on gfx942 --
+# a gfx942 request that resolves the gfx950 builder produces a module that
+# lowers and verifies cleanly and then dies in the backend. So route the
+# builders and the gate through the arch-aware ``_tiled_3d_impl(arch)`` seam,
+# exactly as the tiled-2D block above does. The spec types stay bound to the
+# gfx950 module as the default shape; arch-specific spec resolution goes
+# through ``_tiled_3d_impl(arch)``.
 from .gfx950.attention_tiled_3d import (  # noqa: F401
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
-    build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
-    supports_tiled_3d,
 )
+
+
+def build_unified_attention_3d_tiled(spec, *, arch: str = "gfx950"):
+    """Arch-aware wrapper: dispatch the tiled-3D segment builder on ``arch``."""
+    from .common.attention_unified import _tiled_3d_impl
+
+    _, _, _build, _, _ = _tiled_3d_impl(arch)
+    return _build(spec, arch=arch)
+
+
+def build_unified_attention_reduce_tiled(spec, *, arch: str = "gfx950"):
+    """Arch-aware wrapper: dispatch the tiled-3D reduce builder on ``arch``.
+
+    The reduce kernel is arch-neutral today (pure f32 load / exp2 / store), but
+    it is routed through the same seam so the pair cannot drift apart.
+    """
+    from .common.attention_unified import _tiled_3d_impl
+
+    _, _, _, _build, _ = _tiled_3d_impl(arch)
+    return _build(spec, arch=arch)
+
+
+def supports_tiled_3d(*, arch: str = "gfx950", **kwargs):
+    """Arch-aware wrapper: dispatch the tiled-3D gate on ``arch``."""
+    from .common.attention_unified import _tiled_3d_impl
+
+    *_, _supports = _tiled_3d_impl(arch)
+    return _supports(arch=arch, **kwargs)
+
 
 # Full FMHA / Sage / sparse attention public surface, re-exported at the package
 # top level to preserve the API that ``rocke.instances`` exposed pre-carve.

@@ -406,7 +406,7 @@ def build_attention_3d(
             has_softcap=has_softcap,
             num_segments=num_segments,
         )
-        return build_unified_attention_3d_tiled(spec)
+        return build_unified_attention_3d_tiled(spec, arch=arch)
 
     return _build
 
@@ -427,7 +427,7 @@ def build_attention_reduce(
             dtype=dtype,
             num_segments=num_segments,
         )
-        return build_unified_attention_reduce_tiled(spec)
+        return build_unified_attention_reduce_tiled(spec, arch=arch)
 
     return _build
 
@@ -2099,13 +2099,16 @@ def cases():
     )
     add(
         "attention",
-        "attention/gfx942/3d_fp16_d128_b64",
+        "attention/gfx942/3d_fp16_d128_b32",
         "gfx942",
         build_attention_3d(
             "irhash_attn_942_3d_fp16",
             "gfx942",
             head_size=128,
-            block_size=64,
+            # b32, not the b64 the gfx950 cases use: on gfx942's 64 KiB LDS the
+            # d128/b64 geometry needs 71680 B and supports_tiled_3d now rejects
+            # it. b32 (37888 B) is the widest legal tile for d128 here.
+            block_size=32,
             num_query_heads=4,
             num_kv_heads=2,
             dtype="fp16",
@@ -2114,13 +2117,16 @@ def cases():
     )
     add(
         "attention",
-        "attention/gfx942/3d_bf16_d128_b64",
+        "attention/gfx942/3d_bf16_d128_b32",
         "gfx942",
         build_attention_3d(
             "irhash_attn_942_3d_bf16",
             "gfx942",
             head_size=128,
-            block_size=64,
+            # b32, not the b64 the gfx950 cases use: on gfx942's 64 KiB LDS the
+            # d128/b64 geometry needs 71680 B and supports_tiled_3d now rejects
+            # it. b32 (37888 B) is the widest legal tile for d128 here.
+            block_size=32,
             num_query_heads=4,
             num_kv_heads=2,
             dtype="bf16",

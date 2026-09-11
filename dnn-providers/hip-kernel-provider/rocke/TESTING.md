@@ -256,7 +256,8 @@ Failures that are known and owned live in a `KNOWN_BAD` allowlist, same
 convention and same rule as `KNOWN_VIOLATIONS` in
 [`test_library_layering.py`](library/tests/test_library_layering.py): **it only
 shrinks.** An entry that starts compiling is itself reported as a failure, so a
-fix cannot leave dead weight behind.
+fix cannot leave dead weight behind. It is **empty today** — the two entries the
+gate landed with were real bugs, and fixing them is what emptied it.
 
 ### 4.5 Do the two engines carry the same declares? (the table check)
 

@@ -413,6 +413,41 @@ follow the bf16 path onto a generic `atomicrmw fadd <2 x half>`, so rocke emits
 what the backend actually consumes instead of relying on auto-upgrade. That is an
 emission change and needs a golden re-bless, so it is not folded in here.
 
+### 4.10 The gate's own `KNOWN_BAD` — root-caused and emptied
+
+`attention/gfx942/3d_{bf16,fp16}_d128_b64` was recorded above as an "LLVM 23
+backend fatal". It is neither LLVM-23-specific nor a toolchain bug — it
+reproduces on LLVM 22 / ROCm 7.2 and it is two rocke bugs stacked:
+
+1. **Wrong-arch builder resolution.** `library/kernels/__init__.py` re-exported
+   the **gfx950** `build_unified_attention_3d_tiled` / `..._reduce_tiled` /
+   `supports_tiled_3d` directly, so every gfx942 tiled-3D request built the
+   gfx950 kernel. The corpus case labelled `gfx942` was emitting
+   `llvm.amdgcn.ds.read.tr16.b64` and `llvm.amdgcn.mfma.f32.16x16x32.bf16`,
+   both gfx950-only — the module compiles clean for `-mcpu=gfx950` and dies for
+   `-mcpu=gfx942`. The tiled-**2D** path had already been routed through an
+   arch-aware `_tiled_2d_impl(arch)` wrapper for exactly this reason, with a
+   comment explaining the hazard; tiled-3D was left binding gfx950 even though
+   `_tiled_3d_impl(arch)` existed and was used for the gate. Fixed by mirroring
+   the 2D wrapper and threading `arch` through the harness and the HIP-lowering
+   parity builder.
+2. **Missing LDS-capacity gate.** With the right kernel selected, gfx942
+   d128/b64 needs 71680 B against gfx942's 65536 B limit. `supports_tiled_3d`
+   had no LDS check on either arch, so it returned `supported` for a geometry
+   that cannot be built. Fixed with `tiled_3d_lds_bytes()` in
+   `kernels/common/attention_arch.py` (exact for all nine supported
+   `(head_size, block_size)` pairs) checked against
+   `attention_lds_capacity_bytes(arch)` in both gates. gfx950's 160 KiB admits
+   every supported geometry, so that arch is unaffected.
+
+The two corpus cases were retargeted `b64 -> b32` (37888 B, the widest legal
+d128 tile on gfx942) and the golden re-blessed; only those two entries moved.
+`KNOWN_BAD` is now empty and the sweep is 128/128.
+
+Worth noting for the wider plan: this is the second bug class the module gate
+catches that no amount of decl-table checking would — the declares were all
+fine, the *arch routing* was not.
+
 ## 5. Verification / test surface
 
 Byte-identity gate (mandatory for any emission change, both engines):

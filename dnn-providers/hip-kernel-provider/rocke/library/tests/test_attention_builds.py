@@ -2336,9 +2336,11 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
-        per-arch ``supports_tiled_3d`` gate. Both arches share the same
-        accept/reject contract, so the cases are driven for each arch via the
-        ``arch=`` kwarg.
+        per-arch ``supports_tiled_3d`` gate. The shape/dtype contract is shared,
+        so those cases are driven for each arch via the ``arch=`` kwarg -- but
+        the LDS budget is not: Q + double-buffered K/V + P scale as O(T * HD),
+        and gfx942 has 64 KiB against gfx950's 160 KiB. d128/b64 needs 71680 B,
+        so it is an accept on gfx950 and a reject on gfx942.
         """
         from kernels import supports_tiled_3d
 
@@ -2361,7 +2363,6 @@ class TestAttentionHelpers(unittest.TestCase):
                 dict(head_size=256),
                 dict(head_size=64),
                 dict(block_size=32),
-                dict(block_size=64),
                 dict(dtype="bf16"),
                 dict(num_queries_per_kv=1),
                 dict(num_queries_per_kv=4),
@@ -2375,6 +2376,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertTrue(
                     ok, msg=f"{arch}: expected accept for {accept}, got: {reason}"
                 )
+            # d128/b64 is the arch-divergent case: legal on gfx950, over budget
+            # on gfx942. Before the gate carried an LDS check it was accepted on
+            # both, and the gfx942 kernel then died in the backend with
+            # "local memory (71680) exceeds limit (65536)".
+            ok_b64, reason_b64 = supports_tiled_3d(
+                **{**base, "block_size": 64}, arch=arch
+            )
+            if arch == "gfx942":
+                self.assertFalse(ok_b64, msg="gfx942 d128/b64 exceeds 64 KiB LDS")
+                self.assertIn("LDS", reason_b64)
+            else:
+                self.assertTrue(ok_b64, msg=f"{arch}: d128/b64 should accept")
             # Bad head_size, bad block_size, fp8-without-kv_storage, and an
             # unsupported dtype are gated on both arches.
             for override in [

@@ -78,16 +78,7 @@ def _bootstrap_sys_path() -> None:
 # library/tests/test_library_layering.py, and carries the same rule: this list
 # only ever SHRINKS. An entry that starts passing is itself a failure (see
 # STALE below) so a fix cannot silently leave dead weight behind.
-KNOWN_BAD: dict[str, str] = {
-    "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-    "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-}
+KNOWN_BAD: dict[str, str] = {}
 
 
 def _llvm_tool(name: str) -> str | None:

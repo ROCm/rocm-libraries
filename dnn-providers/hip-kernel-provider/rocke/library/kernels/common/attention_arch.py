@@ -154,7 +154,8 @@ _DEFAULT_LDS_CAPACITY_BYTES = 65536
 def attention_lds_capacity_bytes(arch: str) -> int:
     """Per-workgroup LDS capacity for ``arch`` from the target catalog.
 
-    Single definition for the attention family's LDS-budget gates (dense, tiled-2D).
+    Single definition for the attention family's LDS-budget gates (dense, tiled-2D,
+    tiled-3D).
     ``ArchTarget.from_gfx`` raises ``KeyError`` for a target with no catalog row; we
     fall back to :data:`_DEFAULT_LDS_CAPACITY_BYTES` so a catalog gap degrades the
     budget check to a conservative default instead of breaking the caller's
@@ -164,3 +165,31 @@ def attention_lds_capacity_bytes(arch: str) -> int:
         return ArchTarget.from_gfx(arch).lds_capacity_bytes
     except KeyError:
         return _DEFAULT_LDS_CAPACITY_BYTES
+
+
+# ``block_m`` is a fixed 16 in both tiled-3D segment kernels (the MFMA M tile);
+# it stays a parameter so the estimate can follow the builder if that changes.
+TILED_3D_BLOCK_M = 16
+
+
+def tiled_3d_lds_bytes(
+    *, head_size: int, tile_size: int, block_m: int = TILED_3D_BLOCK_M
+) -> int:
+    """LDS bytes the tiled-3D segment kernel allocates for this geometry.
+
+    The gfx942 and gfx950 segment kernels lay LDS out identically --
+    ``Q[BLOCK_M, HD] + K[2, T, HD] + V[2, T, HD] + P[BLOCK_M, T]``, all in the
+    16-bit compute dtype, naturally aligned with no padding -- so one estimate
+    serves both. Exact rather than conservative: it reproduces the allocator's
+    total for every supported ``(head_size, block_size)`` pair.
+
+    The K/V staging buffers are the compute dtype even for an fp8 KV cache (the
+    cache is widened on the way into LDS), so the element size is 2 regardless
+    of ``kv_storage_dtype``.
+    """
+    elem = 2
+    return elem * (
+        block_m * head_size  # Q
+        + 2 * 2 * tile_size * head_size  # K and V, both double-buffered
+        + block_m * tile_size  # P
+    )
