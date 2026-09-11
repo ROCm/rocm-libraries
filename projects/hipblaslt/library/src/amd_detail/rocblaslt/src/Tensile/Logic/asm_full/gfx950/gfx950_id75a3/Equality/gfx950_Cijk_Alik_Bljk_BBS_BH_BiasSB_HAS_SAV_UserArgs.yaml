@@ -501942,7 +501942,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
@@ -502212,7 +502212,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
@@ -502486,7 +502486,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
@@ -502758,7 +502758,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
@@ -503031,7 +503031,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
@@ -503303,7 +503303,7 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true,
     SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
