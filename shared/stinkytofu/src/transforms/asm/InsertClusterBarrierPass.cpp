@@ -1291,13 +1291,15 @@ class InsertClusterBarrierPassImpl : public Pass {
         return &InsertClusterBarrierPassImpl::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         const auto& arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-        const std::unordered_map<const StinkyInstruction*, uint32_t> cycleMap =
-            (rule3SignalLeadCycles_ > 0) ? computeEstimatedCyclesPerInstruction(func, passCtx)
-                                         : std::unordered_map<const StinkyInstruction*, uint32_t>{};
+        static const std::unordered_map<const StinkyInstruction*, uint32_t> kEmptyCycleMap;
+        const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap =
+            (rule3SignalLeadCycles_ > 0)
+                ? AM.getResult<EstimateAsmCyclesPerInstructionAnalysis>(func)
+                : kEmptyCycleMap;
 
         // The rules go in the order they are numbered. Each one decides where to
         // put things by reading what is already in the way -- which signal is
