@@ -29,20 +29,21 @@ namespace
 using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
-/// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
-/// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
-/// "bin/hiptest#0". Used rather than a hand-forged file so the reader under test is
-/// the pinned reader meeting an archive it actually accepts. The parse-level cases
-/// need a real *container*, not a matching *device*; the device cases read this
-/// build's own packed archive -- see unitKpackRoot().
-constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
-constexpr const char* ARCHIVE_ARCH = "gfx1100";
-constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
-
 using hip_kernel_provider::testing::findPackedArchDirectory;
 using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelSource;
 using hip_kernel_provider::testing::unitKpackRoot;
+using hip_kernel_provider::testing::vendoredKpackArchive;
+
+/// rocm-kpack's own test archive, staged beside the packed sets and resolved from this
+/// binary's location. It holds gfx1100 and gfx1101 binaries under the toc keys
+/// "lib/libhip.so#0" and "bin/hiptest#0". Used rather than a hand-forged file so the
+/// reader under test is the pinned reader meeting an archive it actually accepts. The
+/// parse-level cases need a real *container*, not a matching *device*; the device cases
+/// read this build's own packed archive -- see unitKpackRoot().
+const std::filesystem::path& REAL_ARCHIVE = vendoredKpackArchive();
+constexpr const char* ARCHIVE_ARCH = "gfx1100";
+constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
 /// The two descriptors the packed conv set stages, one inline and one standalone. Their
 /// archive and toc_key are read out of the built files rather than written here: a copy
@@ -129,7 +130,7 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the vendored kpack archive is missing beside this binary: " << REAL_ARCHIVE;
 
     try
     {
@@ -152,7 +153,7 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the vendored kpack archive is missing beside this binary: " << REAL_ARCHIVE;
 
     try
     {

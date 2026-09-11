@@ -10,6 +10,7 @@
 
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "TestDescriptorRoot.hpp"
 #include "compilation/KpackModuleCache.hpp"
 
 namespace hip_kernel_provider::compilation
@@ -17,10 +18,14 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
-/// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
-/// payloads rather than HSA code objects, which is what makes it useful here: it is a
-/// real container, so the reader parses it, but nothing in it can load.
-constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
+/// rocm-kpack's own test archive, staged beside the packed sets and resolved from this
+/// binary's location. Its entries are placeholder payloads rather than HSA code objects,
+/// which is what makes it useful here: it is a real container, so the reader parses it,
+/// but nothing in it can load.
+///
+/// Held as a string because KpackModuleCache::load takes one, and a path converts to
+/// std::string only where the platform's native encoding is narrow.
+const std::string REAL_ARCHIVE = hip_kernel_provider::testing::vendoredKpackArchive().string();
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
@@ -62,7 +67,7 @@ TEST(TestKpackModuleCacheKey, KeyDistinguishesTocKeyAndArch)
 TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the vendored kpack archive is missing beside this binary: " << REAL_ARCHIVE;
 
     try
     {
@@ -94,7 +99,7 @@ TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the vendored kpack archive is missing beside this binary: " << REAL_ARCHIVE;
 
     try
     {

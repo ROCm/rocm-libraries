@@ -90,4 +90,18 @@ inline const std::filesystem::path& unitKpackRoot()
 }
 #endif
 
+#ifdef HIPKERNELPROVIDER_VENDORED_KPACK_RELPATH
+/// rocm-kpack's own test archive, staged beside the packed sets in the test descriptor
+/// tree and reached by the same binary-relative offset.
+///
+/// The parse-level cases need a real container rather than a device that matches, so this
+/// archive holds gfx1100 and gfx1101 whatever the build targets.
+inline const std::filesystem::path& vendoredKpackArchive()
+{
+    static const std::filesystem::path s_path
+        = descriptorSetRoot(HIPKERNELPROVIDER_VENDORED_KPACK_RELPATH);
+    return s_path;
+}
+#endif
+
 } // namespace hip_kernel_provider::testing

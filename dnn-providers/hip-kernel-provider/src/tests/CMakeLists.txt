@@ -114,8 +114,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # here -- including the dispatch ones, which sit under engines/ -- so they sit between
     # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
     # which the device cases find the archive this build packed for the local arch, and
-    # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE below, which the parse-level cases open because
-    # they need a real container rather than a matching device.
+    # HIPKERNELPROVIDER_VENDORED_KPACK_RELPATH below, which the parse-level cases open
+    # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
@@ -128,8 +128,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # test assets: the reader is now the platform's shared library, so there is no
     # fetched source tree to take it from, and a 518-byte container is cheaper to carry
     # than a build-time dependency on one.
+    #
+    # Staged into the test descriptor tree and named by the same binary-relative offset
+    # the descriptor sets use, so the cases open the copy beside whichever binary runs.
+    # These binaries also run from a packaged artifact that carries no checkout, so the
+    # offset is the only form that resolves there. install(DIRECTORY) on that tree ships
+    # the archive with the descriptors.
+    set(_hkp_vendored_kpack_subdir "fixtures")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_vendored_kpack_subdir}/test_zstd.kpack"
+        COPYONLY)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
+        HIPKERNELPROVIDER_VENDORED_KPACK_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_vendored_kpack_subdir}/test_zstd.kpack")
 
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
