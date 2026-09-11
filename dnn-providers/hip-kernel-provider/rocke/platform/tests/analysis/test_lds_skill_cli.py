@@ -11,34 +11,40 @@ from pathlib import Path
 import subprocess
 import sys
 
-
-PLATFORM = Path(__file__).resolve().parents[2]
-PREDICT = (
-    PLATFORM
-    / "dsl_docs"
-    / "optimization"
-    / "utilities"
-    / "skills"
-    / "lds-bank-conflict-expert"
-    / "scripts"
-    / "predict.py"
-)
+import rocke
+from rocke.assets import dsl_docs_dir
 
 
-def _run(request: dict[str, object]) -> subprocess.CompletedProcess[str]:
+# Installed tests carry the CLI beside this module; checkouts use the skill tree.
+PREDICT = Path(__file__).resolve().with_name("lds-bank-conflict-expert") / "predict.py"
+if not PREDICT.is_file():
+    PREDICT = (
+        dsl_docs_dir()
+        / "optimization"
+        / "utilities"
+        / "skills"
+        / "lds-bank-conflict-expert"
+        / "scripts"
+        / "predict.py"
+    )
+
+
+def _run(request: dict[str, object], cwd: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(PLATFORM / "python")
+    # Use the package pytest imported, in either the source or installed layout.
+    env["PYTHONPATH"] = str(Path(rocke.__file__).resolve().parent.parent)
     return subprocess.run(
         [sys.executable, str(PREDICT), "-"],
         input=json.dumps(request),
         text=True,
         capture_output=True,
         env=env,
+        cwd=cwd,
         check=False,
     )
 
 
-def test_skill_cli_emits_canonical_conflict_json():
+def test_skill_cli_emits_canonical_conflict_json(tmp_path: Path):
     completed = _run(
         {
             "target": "gfx90a",
@@ -58,7 +64,8 @@ def test_skill_cli_emits_canonical_conflict_json():
                     "access_width_bytes": 4,
                 },
             ],
-        }
+        },
+        cwd=tmp_path,
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -75,14 +82,15 @@ def test_skill_cli_emits_canonical_conflict_json():
     assert completed.stdout == completed.stdout.strip() + "\n"
 
 
-def test_skill_cli_rejects_unregistered_target_without_fallback():
+def test_skill_cli_rejects_unregistered_target_without_fallback(tmp_path: Path):
     completed = _run(
         {
             "target": "gfx9999",
             "opcode": "ds_read_b32",
             "wave_size": 64,
             "accesses": [],
-        }
+        },
+        cwd=tmp_path,
     )
 
     assert completed.returncode == 2
