@@ -94,6 +94,10 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
 
 const flatbuffers::DetachedBuffer& EngineConfigDescriptor::ensurePrediction() const
 {
+    // A lock rather than call_once: this descriptor stays mutable while the prediction is
+    // readable, so the cache has to be rebuildable. Two concurrent readers must not both
+    // pack and replace it, which would free bytes the other just returned.
+    const std::lock_guard<std::mutex> guard(_predictionMutex);
     if(_predictionBuffer.size() == 0)
     {
         THROW_IF_NULL(_engine,
@@ -116,6 +120,18 @@ const flatbuffers::DetachedBuffer& EngineConfigDescriptor::ensurePrediction() co
         _predictionBuffer = builder.Release();
     }
     return _predictionBuffer;
+}
+
+void EngineConfigDescriptor::invalidatePrediction()
+{
+    const std::lock_guard<std::mutex> guard(_predictionMutex);
+    if(_predictionBuffer.size() != 0)
+    {
+        // Retired, not freed: a caller may still hold these bytes, which the attribute
+        // documents as valid for the descriptor's lifetime.
+        _retiredPredictions.push_back(std::move(_predictionBuffer));
+    }
+    _predictionBuffer = flatbuffers::DetachedBuffer();
 }
 
 void EngineConfigDescriptor::getPrediction(hipdnnBackendAttributeType_t attributeType,
@@ -232,9 +248,8 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
                     "Prediction evaluate requires int64");
         THROW_IF_NE(
             elementCount, 1, HIPDNN_STATUS_BAD_PARAM, "Prediction evaluate requires one value");
-        THROW_IF_NULL(arrayOfElements,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "Prediction evaluate is null");
+        THROW_IF_NULL(
+            arrayOfElements, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "Prediction evaluate is null");
         const auto value = *static_cast<const int64_t*>(arrayOfElements);
         THROW_IF_TRUE(value != 0 && value != 1,
                       HIPDNN_STATUS_BAD_PARAM,
@@ -253,7 +268,7 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
 
     // reset the cached buffers when an attribute is set so they cannot go out of date.
     _engineConfigSerializedBuffer = flatbuffers::DetachedBuffer();
-    _predictionBuffer = flatbuffers::DetachedBuffer();
+    invalidatePrediction();
 }
 
 void EngineConfigDescriptor::setEngine(hipdnnBackendAttributeType_t attributeType,
@@ -377,6 +392,7 @@ void EngineConfigDescriptor::setEngineConfig(
     _engineConfigData
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>(config);
     _engineConfigSerializedBuffer = flatbuffers::DetachedBuffer();
+    invalidatePrediction();
     _deferWorkspace = deferWorkspace;
 }
 

@@ -38,7 +38,13 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
     auto loaded = std::make_shared<Model>();
     try
     {
-        parser_detail::provenance(config.trainedAgainst, "L1 UHD trained_against");
+        // Optional by construction: parseUhdConfig and the schema require trained_against
+        // only for a model carrying a feature signature, so a native or custom_library
+        // model that featurizes from its own bindings legally omits it.
+        if(config.trainedAgainst.is_object())
+        {
+            parser_detail::provenance(config.trainedAgainst, "L1 UHD trained_against");
+        }
         loaded->extractor = std::make_unique<const FeatureExtractor>(config.featuresSignature,
                                                                      config.categoricalEncoding);
         if(loaded->extractor->kernelDependentCount() != 0)
@@ -119,9 +125,8 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
 /// @brief Check that a resolved role model agrees with the engine asking for it.
 /// Descriptor provenance is not rechecked here: the UUID and major/minor rule of
 /// RFC 0019 §8.1 already ran in the loader, which is what binds this UHD to this UED.
-inline void validateBinding(const UhdConfig& config,
-                            const std::string& engine,
-                            const std::string& arch)
+inline void
+    validateBinding(const UhdConfig& config, const std::string& engine, const std::string& arch)
 {
     if((!config.engineName.empty() && config.engineName != engine)
        || (!config.role.empty() && config.role != ENGINE_ROLE)
@@ -190,12 +195,8 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
             {
                 binding["uhd_id"] = config.uhdId;
             }
-            // Describe the descriptors the active model was trained against so a
-            // stale model can be retrained against the set that replaced them.
-            if(config.trainedAgainst.is_object())
-            {
-                binding["trained_against"] = config.trainedAgainst;
-            }
+            // trained_against is left to the caller: the engine knows the descriptor set
+            // the model is being compared against, which is what a staleness check needs.
             result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();

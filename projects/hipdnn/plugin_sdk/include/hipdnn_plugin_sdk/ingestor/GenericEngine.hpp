@@ -217,8 +217,7 @@ public:
         // engine with no resolved `predict_engine_tflops` role simply has none.
         static const uhd::UhdConfig UNBOUND;
         const auto& uhdConfig = selected != nullptr ? *selected : UNBOUND;
-        const bool evaluateEngine
-            = evaluate && !invalid && kind == HIPDNN_ENGINE_PREDICTION_ENGINE;
+        const bool evaluateEngine = evaluate && !invalid && kind == HIPDNN_ENGINE_PREDICTION_ENGINE;
         std::shared_ptr<const uhd::prediction_detail::Model> compiled;
         if(evaluateEngine && selected != nullptr)
         {
@@ -235,6 +234,8 @@ public:
         if(!result.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(result.binding_json);
+            // The descriptor set this engine loaded from, which is what a staleness check
+            // compares the model's own trained_against against.
             for(const auto& dependency : _provenance.items())
             {
                 binding["trained_against"][dependency.key()] = dependency.value();
@@ -259,6 +260,14 @@ public:
         {
             result.status = PredictionStatus::INVALID;
             result.reason = "The selected engine-prediction UHD is missing or incompatible";
+            // A disabled model still took the description branch to get here. Ranking is
+            // not a description request, so the payload it built is dropped rather than
+            // serialized across the plugin ABI for every candidate engine.
+            if(evaluate)
+            {
+                result.binding_json.clear();
+                result.features_json.clear();
+            }
         }
         return result;
     }
@@ -285,8 +294,10 @@ public:
 
 private:
     /// Compiling a UHD rebuilds its feature contract and reads its artifact off disk.
-    /// The descriptor tree is immutable for a provider lifetime, so each architecture's
-    /// model is compiled once and shared by every later query on this engine.
+    /// A usable model is compiled once and shared by every later query on this engine.
+    /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
+    /// an artifact that is still being installed, or a transient read error, must not
+    /// disable the model for the rest of the provider's lifetime.
     std::shared_ptr<const uhd::prediction_detail::Model>
         compiledModel(const std::string& arch, const uhd::UhdConfig& config) const
     {
@@ -295,7 +306,13 @@ private:
         {
             return cached->second;
         }
-        return _modelCache.emplace(arch, uhd::prediction_detail::model(config)).first->second;
+        auto compiled = uhd::prediction_detail::model(config);
+        if(compiled != nullptr
+           && compiled->status == hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+        {
+            _modelCache.emplace(arch, compiled);
+        }
+        return compiled;
     }
 
     EngineDescriptor _engine;
@@ -307,8 +324,7 @@ private:
     std::string _selectorRevision;
     nlohmann::json _provenance;
     mutable std::mutex _modelMutex;
-    mutable std::map<std::string, std::shared_ptr<const uhd::prediction_detail::Model>>
-        _modelCache;
+    mutable std::map<std::string, std::shared_ptr<const uhd::prediction_detail::Model>> _modelCache;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

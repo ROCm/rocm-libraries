@@ -557,8 +557,9 @@ std::vector<uint8_t>
     const auto plugin = _handleToPlugin.at(handle);
     const auto serializedGraph = graph->getSerializedGraph();
     hipdnnPluginConstData_t data{nullptr, 0};
-    plugin->enumerateCandidates(handle, &engineConfig, &serializedGraph, offset, limit, &data);
-    // Reuse the details allocator/deallocator protocol, including exceptional paths.
+    // Reuse the details allocator/deallocator protocol, and establish ownership BEFORE
+    // entering the plugin: enumerateCandidates throws on a late failure that may already
+    // have written an allocation into `data`.
     const auto release = [&plugin, handle](hipdnnPluginConstData_t* owned) {
         if(owned->ptr != nullptr)
         {
@@ -573,6 +574,7 @@ std::vector<uint8_t>
         }
     };
     const std::unique_ptr<hipdnnPluginConstData_t, decltype(release)> guard(&data, release);
+    plugin->enumerateCandidates(handle, &engineConfig, &serializedGraph, offset, limit, &data);
     THROW_IF_NULL(data.ptr, HIPDNN_STATUS_PLUGIN_ERROR, "Plugin returned a null candidate page");
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
     THROW_IF_FALSE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::EngineDetails>(),

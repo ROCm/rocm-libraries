@@ -2225,58 +2225,63 @@ inline std::vector<DescriptorSet>
         // gets exactly the same pre-flight: an unregistered native symbol or an
         // artifact reached from outside the descriptor tree disables that model and
         // preserves the engine (RFC 0019 §11.2).
-        const auto usableModel
-            = [&set](const std::string& arch, const auto& model, const char* absent) {
-                  bool usable = true;
-                  if(model.adapter == UhdAdapter::NATIVE
-                     && !(model.featuresSignature.empty()
-                              ? ScoreRegistry::isRegistered(model.nativeSymbol)
-                              : uhd::NativeScorerRegistry::isRegistered(model.nativeSymbol)))
-                  {
-                      HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                              << set.engine.name << "' arch='" << arch
-                                              << "' model=" << toString(model.id)
-                                              << " names unregistered score symbol '"
-                                              << model.nativeSymbol
-                                              << "'; disabling model, preserving engine");
-                      usable = false;
-                  }
-                  if(!model.modelArtifactPath.empty())
-                  {
-                      std::error_code error;
-                      const auto resolved = std::filesystem::weakly_canonical(
-                          model.baseDir / model.modelArtifactPath, error);
-                      const auto boundary = std::filesystem::weakly_canonical(
-                          model.treeRoot.empty() ? model.baseDir : model.treeRoot, error);
-                      const auto relative = resolved.lexically_relative(boundary);
-                      if(error || relative.empty() || relative.is_absolute()
-                         || (!relative.empty() && *relative.begin() == ".."))
-                      {
-                          HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                                  << set.engine.name << "' arch='" << arch
-                                                  << "' model=" << toString(model.id)
-                                                  << " artifact '" << model.modelArtifactPath
-                                                  << "' is outside the descriptor tree '"
-                                                  << boundary.string()
-                                                  << "'; disabling model, preserving engine");
-                          usable = false;
-                      }
-                      else if(!std::filesystem::is_regular_file(resolved, error))
-                      {
-                          HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
-                                                 << set.engine.name << "' arch='" << arch
-                                                 << "' model=" << toString(model.id)
-                                                 << " names model artifact '" << resolved.string()
-                                                 << "', which is absent; " << absent);
-                      }
-                  }
-                  return usable;
-              };
+        // `uhdScorer` selects the registry by ROLE, not by the model's shape: a
+        // predict_engine_tflops model always resolves through uhd::NativeScorerRegistry
+        // (the registry makeUhdAdapter consults), while a ranking model without a feature
+        // signature is a ScoreRegistry comparator. Inferring that from featuresSignature
+        // would disable a legal signature-less native L1 model that featurizes from its
+        // own bindings.
+        const auto usableModel =
+            [&set](const std::string& arch, const auto& model, const char* absent, bool uhdScorer) {
+                bool usable = true;
+                if(model.adapter == UhdAdapter::NATIVE
+                   && !(uhdScorer || !model.featuresSignature.empty()
+                            ? uhd::NativeScorerRegistry::isRegistered(model.nativeSymbol)
+                            : ScoreRegistry::isRegistered(model.nativeSymbol)))
+                {
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "descriptor loader: engine '"
+                        << set.engine.name << "' arch='" << arch << "' model=" << toString(model.id)
+                        << " names unregistered score symbol '" << model.nativeSymbol
+                        << "'; disabling model, preserving engine");
+                    usable = false;
+                }
+                if(!model.modelArtifactPath.empty())
+                {
+                    std::error_code error;
+                    const auto resolved = std::filesystem::weakly_canonical(
+                        model.baseDir / model.modelArtifactPath, error);
+                    const auto boundary = std::filesystem::weakly_canonical(
+                        model.treeRoot.empty() ? model.baseDir : model.treeRoot, error);
+                    const auto relative = resolved.lexically_relative(boundary);
+                    if(error || relative.empty() || relative.is_absolute()
+                       || (!relative.empty() && *relative.begin() == ".."))
+                    {
+                        HIPDNN_PLUGIN_LOG_ERROR(
+                            "descriptor loader: engine '"
+                            << set.engine.name << "' arch='" << arch
+                            << "' model=" << toString(model.id) << " artifact '"
+                            << model.modelArtifactPath << "' is outside the descriptor tree '"
+                            << boundary.string() << "'; disabling model, preserving engine");
+                        usable = false;
+                    }
+                    else if(!std::filesystem::is_regular_file(resolved, error))
+                    {
+                        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: engine '"
+                                               << set.engine.name << "' arch='" << arch
+                                               << "' model=" << toString(model.id)
+                                               << " names model artifact '" << resolved.string()
+                                               << "', which is absent; " << absent);
+                    }
+                }
+                return usable;
+            };
         for(auto modelIt = set.heuristicsByArch.begin(); modelIt != set.heuristicsByArch.end();)
         {
             if(usableModel(modelIt->first,
                            modelIt->second,
-                           "kernels will rank by priority, then descriptor id"))
+                           "kernels will rank by priority, then descriptor id",
+                           /*uhdScorer=*/false))
             {
                 ++modelIt;
             }
@@ -2295,7 +2300,10 @@ inline std::vector<DescriptorSet>
         for(auto modelIt = set.enginePredictionsByArch.begin();
             modelIt != set.enginePredictionsByArch.end();)
         {
-            if(usableModel(modelIt->first, modelIt->second, "the engine reports no prediction"))
+            if(usableModel(modelIt->first,
+                           modelIt->second,
+                           "the engine reports no prediction",
+                           /*uhdScorer=*/true))
             {
                 ++modelIt;
             }

@@ -108,11 +108,6 @@ struct Options
     int64_t offset = 0;
     int64_t limit = 10000;
     std::vector<std::pair<std::string, int64_t>> knobs;
-    /// True when --knob named a configuration. The benchmarking pin this tool adds for
-    /// its own execution is not a user constraint: an engine-level estimate is by
-    /// definition unconstrained, and injecting the pin into the query would silently
-    /// turn every prediction into an exact-configuration one.
-    bool userConstrained = false;
     int maxIterations = 100;
     /// Ten, not one. Measured: with a single warmup iteration the first timed run of a fresh
     /// process came in at 0.038 ms against a steady state of 0.014 -- kernel compilation
@@ -305,7 +300,6 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
             throw std::invalid_argument("Engine prediction/description/collection modes cannot "
                                         "be combined with sweep or candidate enumeration");
         }
-        options.userConstrained = !options.knobs.empty();
         const auto benchmarking
             = std::find_if(options.knobs.begin(), options.knobs.end(), [](const auto& setting) {
                   return setting.first == hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME;
@@ -623,9 +617,7 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     return {};
 }
 
-int runEngineMode(hipdnnHandle_t handle,
-                  BenchGraph& graph,
-                  const Options& options)
+int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& options)
 {
     std::vector<KnobSetting> settings;
     settings.reserve(options.knobs.size());
@@ -637,11 +629,19 @@ int runEngineMode(hipdnnHandle_t handle,
     const bool evaluate = options.engineMode == EngineMode::PREDICT;
     // User knob constraints describe an exact configuration, so they select the kind:
     // an engine-level estimate is by definition unconstrained. The benchmarking pin this
-    // tool adds for its own execution is not such a constraint and is not queried with.
-    const auto kind = options.userConstrained ? hipdnn_frontend::PredictionKind::CONFIGURATION
-                                              : hipdnn_frontend::PredictionKind::ENGINE;
-    const std::vector<KnobSetting> queryConstraints
-        = options.userConstrained ? settings : std::vector<KnobSetting>{};
+    // tool adds for its own execution is not such a constraint and is never queried with:
+    // the backend requires an exact-configuration prediction to preserve every requested
+    // knob, and an engine whose catalog has no global.benchmarking knob cannot.
+    std::vector<KnobSetting> queryConstraints;
+    for(const auto& [name, value] : options.knobs)
+    {
+        if(name != hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME)
+        {
+            queryConstraints.emplace_back(name, value);
+        }
+    }
+    const auto kind = queryConstraints.empty() ? hipdnn_frontend::PredictionKind::ENGINE
+                                               : hipdnn_frontend::PredictionKind::CONFIGURATION;
     nlohmann::json output
         = {{"engine_id", options.engineId},
            {"is_valid", false},
