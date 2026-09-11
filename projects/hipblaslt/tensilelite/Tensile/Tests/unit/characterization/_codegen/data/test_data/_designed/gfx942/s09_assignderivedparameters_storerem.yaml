@@ -1,0 +1,61 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S09_assignDerivedParameters_StoreRem: StoreRemapVectorWidth derivation +
+#   reject sites in Solution.py assignDerivedParameters.
+#
+# Target (currently-missing) Solution.py lines: 5322, 5324
+#   - the `storeRemap: Per wave single global write ... one M column` reject:
+#     SRVW*WavefrontSize < MacroTile0 (small SRVW, large MT0).
+#
+# Mechanism: bf16 BBS TN with StoreRemapVectorWidth=4, SourceSwap=0,
+#   VectorWidthA=VectorWidthB=1. ForkParameters cartesian yields two solutions:
+#     * MI [16,16,16,1,1,4,4,2,2]  -> MT0=128, SRVW*64=256 >= MT0: passes guard.
+#     * MI [16,16,16,1,1,16,4,2,2] -> MT0=512, SRVW*64=256 < 512: trips the
+#       reject at 5322/5324.
+#   SourceSwap=0 is required by StoreRemap and lights the SRVW derivation path.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBias: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) TN, StoreRemap, SourceSwap=0.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 16, 1, 1, 16, 4, 2, 2]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreRemapVectorWidth: [4]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']

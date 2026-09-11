@@ -397,3 +397,37 @@ and an in-tree `rocisa` build. Seventy-one nodes retain their kernel counts and
 emitter return codes. Four reviewed nodes change count, and every retained
 kernel still emits with return code `0`; ADR 0014 records those cases and the
 upstream cause.
+
+## D28 — Correct the disabled TDMSplit characterization
+
+**ADR:** [`adr/0015-correct-disabled-tdmsplit-test.md`](adr/0015-correct-disabled-tdmsplit-test.md)
+
+**Decision:** Replace the unreachable TDMSplit emission and saved-result checks
+with assertions that normal solution derivation returns no kernels and reports
+`TDMSplit is currently disabled`. The test no longer claims coverage of emitter
+code that product validation prevents it from reaching.
+
+## D29 — Refresh S00-S07 emit results after develop changes
+
+**ADR:** [`adr/0016-refresh-s00-s07-results-after-develop.md`](adr/0016-refresh-s00-s07-results-after-develop.md)
+
+**Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D30 — Refresh S08-S11 emit results after develop changes
+
+**ADR:** [`adr/0017-refresh-s08-s11-results-after-develop.md`](adr/0017-refresh-s08-s11-results-after-develop.md)
+
+**Decision:** Re-record only the 11 failing S08-S11 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D31 — Rebaseline coverage after the develop rebase
+
+**ADR:** [`adr/0018-rebaseline-coverage-after-develop.md`](adr/0018-rebaseline-coverage-after-develop.md)
+
+**Decision:** Regenerate the per-file baseline from the green post-rebase unit
+run. The update raises 16 floors, adds 14 current files, removes two entries for
+files deleted by develop, and explicitly lowers the nine reproducibly stale
+floors listed in ADR 0018. The tolerance remains 1 percentage point.
