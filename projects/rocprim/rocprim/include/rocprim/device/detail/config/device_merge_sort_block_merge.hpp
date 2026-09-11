@@ -3757,7 +3757,6 @@ using merge_sort_block_merge_targets
                    comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>,
                    comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>,
                    comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>,
-                   comp_target<gen::cdna5, target_arch::gfx1250, gpu::mi455x, rep::amdgcn>,
                    comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>;
 
 } // end namespace detail
