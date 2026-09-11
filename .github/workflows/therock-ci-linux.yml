@@ -209,3 +209,14 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
+
+  rocjitsu-tensilelite-linux:
+    name: rocjitsu tensilelite (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # Run on gfx94X (baseline validation against HW) and gfx125X (emulation-only target).
+    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx125')) && contains(inputs.projects_to_test, 'tensilelite') }}
+    uses: ./.github/workflows/therock-rocjitsu-tensilelite-linux.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      build_runs_on: ${{ inputs.build_runs_on }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
