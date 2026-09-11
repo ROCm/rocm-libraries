@@ -172,7 +172,12 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS)
+            if(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS)
+                set(STINKYTOFU_BUILD_TESTS ON)
+                # Python interpreter shutdown is outside the native sanitizer
+                # scope and the installed Phase-2 runner intentionally excludes it.
+                set(STINKYTOFU_BUILD_PYTHON OFF)
+            elseif("gfx1250" IN_LIST GPU_TARGETS)
                 set(STINKYTOFU_BUILD_PYTHON ON)
             else()
                 set(STINKYTOFU_BUILD_PYTHON OFF)

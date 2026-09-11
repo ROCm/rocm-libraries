@@ -3,7 +3,7 @@
 
 # Multi-Arch CI ASAN for rocm-libraries
 #
-# Phase-1 presubmit and on-demand ASAN builds. TheRock's
+# Phased presubmit and on-demand ASAN builds. TheRock's
 # configure_multi_arch_ci.py automatically selects host-asan for pull_request
 # events and full asan for workflow_dispatch. Presubmit is intentionally
 # label-gated by the existing ci:host-asan/ci:asan opt-in while the CPU-only
@@ -111,7 +111,7 @@ jobs:
       build_python_packages: false
       build_pytorch: false
       build_jax: false
-      # Phase-1 presubmit components are produced by compiler-runtime and
+      # Admitted Phase-1/Phase-2 components are produced by compiler-runtime and
       # math-libs. Avoid unrelated WSL, system, and packaging work on PRs;
       # workflow_dispatch retains the complete full-ASAN graph.
       build_stages: ${{ github.event_name == 'pull_request' && 'compiler-runtime,math-libs' || '' }}
@@ -141,7 +141,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty means run all; otherwise intersect changed-project consumers with
-      # the explicit Phase-1 host-ASAN admission list in TheRock.
+      # the explicit phased host-ASAN admission list in TheRock.
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       ref: 290d148a503508436b7fd9212871454ac52a1df7
