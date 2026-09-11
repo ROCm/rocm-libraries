@@ -3215,7 +3215,7 @@ PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_rocke_examples.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 python python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096

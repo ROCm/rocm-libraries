@@ -49,8 +49,8 @@ VENV=python3   # or the path to your venv's python
 | `__init__.py` | package marker + module overview docstring |
 
 The kernel body itself is not in this directory — it lives in
-`rocke.instances.common.deep_fused_conv_pool` (arch-parametric) and is pinned to
-gfx950 by `rocke.instances.gfx950.deep_fused_conv_pool` (wave64, `32×32×16`
+`kernels.common.deep_fused_conv_pool` (arch-parametric) and is pinned to
+gfx950 by `kernels.gfx950.deep_fused_conv_pool` (wave64, `32×32×16`
 MFMA, kernel name `rocke_gfx950_deep_fused_conv_pool`).
 
 ## Run commands
@@ -196,7 +196,7 @@ idle).
   `32×32×16` fp16 MFMA atom; the gfx950 shim re-exports the common builder under
   the historical kernel name `rocke_gfx950_deep_fused_conv_pool`.
 - **Arch-parametric body.** The kernel source is shared in
-  `rocke.instances.common.deep_fused_conv_pool` and is driven by the resolved MMA
+  `kernels.common.deep_fused_conv_pool` and is driven by the resolved MMA
   op, so the same code can emit a gfx1201 WMMA path (wave32, `16×16×16`) — that
   lives in a separate `examples/gfx1201/deep_fused_conv_pool_verify.py` example,
   not here.

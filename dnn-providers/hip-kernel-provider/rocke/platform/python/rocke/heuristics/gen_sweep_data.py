@@ -205,7 +205,7 @@ def _conv_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
 
 
 def _conv_build(spec: object):
-    from ..instances import build_implicit_gemm_conv
+    from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
 
     return build_implicit_gemm_conv(spec)
 

@@ -253,15 +253,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
-    # KDA (Key-Delta-Attention) specs — all fields carry defaults.
-    "kernels.gfx942.kda_chunkwise.KdaTileSpec": (),
-    "kernels.gfx942.kda_chunkwise.KdaChunkFusedSpec": (),
-    "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
-    "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
-    "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
-    "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
-    "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
-    "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
     # Convolution specs (migrated from platform to library in AICK-5627).
     # Required fields are the problem shape; everything else carries a default.
     "kernels.common._conv_implicit_gemm_common.ConvProblem": (

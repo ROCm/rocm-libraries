@@ -11,9 +11,9 @@ Per the validation pass on this checkout, every shipped example builds and verif
 
 | File                                              | Purpose                                                          | Reproduction command |
 |---------------------------------------------------|------------------------------------------------------------------|----------------------|
-| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m rocke.examples.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m rocke.examples.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
+| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m builders.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m builders.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
 | `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096` |
 | `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128` |
 | `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python python/rocke/examples/ck_tile_parity.py --op all` |
@@ -118,7 +118,7 @@ python tests/test_rocke.py
 python python/test/test_rocke_examples.py
 
 # 3. README-style implicit-GEMM conv build + verify.
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 # 4. Distribution demos.

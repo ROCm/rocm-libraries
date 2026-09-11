@@ -4,8 +4,8 @@
 """Shared dataclasses, descriptors, and MFMA helpers for implicit-GEMM conv.
 
 Internal module (underscore-prefixed).  External callers should import from
-:mod:`rocke.instances.common.conv_implicit_gemm` (forward) or
-:mod:`rocke.instances.common.conv_implicit_gemm_wgrad` (backward-weight) —
+:mod:`kernels.common.conv_implicit_gemm` (forward) or
+:mod:`kernels.common.conv_implicit_gemm_wgrad` (backward-weight) —
 both re-export everything they consume from here.
 
 What lives here

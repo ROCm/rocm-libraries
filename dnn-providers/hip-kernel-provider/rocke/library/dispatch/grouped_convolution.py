@@ -510,42 +510,8 @@ class ConvGroupedSpec:
         launch without re-running the formula in the caller.
         """
         assert self.direction == "wgrad", "to_wgrad_spec is only valid for wgrad specs"
-        from rocke.helpers.split_k import select_split_k_wgrad
-
         target = ArchTarget.from_gfx(self.arch)
-        p = problem
-        # Honor a concrete split-K fixed by the candidate (WMMA forces 1 -- it
-        # has no split-K path); otherwise auto-resolve via the CK formula on the
-        # per-group GEMM dims (== full dims when groups==1).  Grouped rides the
-        # group on block_id_z alongside the K-slice (z = groups*split_k), so
-        # grouped split-K is valid on MFMA.
-        if self.split_k != -1:
-            resolved_split_k = self.split_k
-        else:
-            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=p.K // p.groups,
-                wg_N=spatial * (p.C // p.groups),
-                wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-                tile_m=self.tile_m,
-                tile_n=self.tile_n,
-                tile_k=self.tile_k,
-                arch=self.arch,
-            ).split_k
-        two_stage = self.force_deterministic and resolved_split_k > 1
-        # Apply the 2 GiB−4 workspace cap: ws_bytes is i32 in the kernel ABI, so a
-        # workspace that exceeds 2^31−1 bytes would overflow. When the cap is hit,
-        # fall back to split_k=1 (plain store, already deterministic) so callers
-        # requesting force_deterministic still get a correct result.
-        if two_stage:
-            spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-            wg_M = p.K // p.groups
-            wg_N = spatial * (p.C // p.groups)
-            ws_bytes = p.groups * resolved_split_k * wg_M * wg_N * 4
-            _MAX_WS = (1 << 31) - 4  # 2 GiB - 4
-            if ws_bytes > _MAX_WS:
-                two_stage = False
-                resolved_split_k = 1
+        resolved_split_k, two_stage, _ = _resolve_wgrad_split_k(self, problem)
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -586,6 +552,54 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
     return (gn, gm, p.groups)
 
 
+# ws_bytes is i32 in the kernel ABI, so a two-stage workspace above this would
+# overflow the argument.
+_MAX_WGRAD_WS_BYTES = (1 << 31) - 4  # 2 GiB - 4
+
+
+def _resolve_wgrad_split_k(
+    spec: ConvGroupedSpec, p: "ConvProblem"
+) -> Tuple[int, bool, int]:
+    """Resolve wgrad split_k and two-stage eligibility; returns
+    ``(split_k, two_stage, requested_split_k)``.
+
+    Honors a concrete split-K fixed by the candidate (WMMA forces 1 -- it has
+    no split-K path); otherwise auto-resolves via the CK formula on the
+    per-group GEMM dims (== full dims when groups==1). Grouped rides the group
+    on block_id_z alongside the K-slice (z = groups*split_k), so grouped
+    split-K is valid on MFMA.
+
+    The result is then held under the workspace cap: when it bites, split_k
+    falls back to 1 (a plain store, already deterministic) so callers
+    requesting force_deterministic still get a correct result. Shared by
+    ``to_wgrad_spec`` and ``_wgrad_grid`` so the spec and the launch grid can
+    never disagree on split_k.
+    """
+    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
+    wg_M = p.K // p.groups
+    wg_N = spatial * (p.C // p.groups)
+    if spec.split_k != -1:
+        requested = spec.split_k
+    else:
+        from rocke.helpers.split_k import select_split_k_wgrad
+
+        requested = select_split_k_wgrad(
+            wg_M=wg_M,
+            wg_N=wg_N,
+            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
+            tile_m=spec.tile_m,
+            tile_n=spec.tile_n,
+            tile_k=spec.tile_k,
+            arch=spec.arch,
+        ).split_k
+    split_k = requested
+    two_stage = spec.force_deterministic and split_k > 1
+    if two_stage and p.groups * split_k * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
+        two_stage = False
+        split_k = 1
+    return split_k, two_stage, requested
+
+
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
     assert isinstance(req, ConvGroupedRequest)
     p = _problem(req)
@@ -596,23 +610,9 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     cpg = p.C // p.groups
     wg_M = kpg  # per-group output channels
     wg_N = spatial * cpg  # per-group filter spatial × input channel
-    wg_K = p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1)  # output spatial positions
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
-    if spec.split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        split_k = select_split_k_wgrad(
-            wg_M=wg_M,
-            wg_N=wg_N,
-            wg_K=wg_K,
-            tile_m=spec.tile_m,
-            tile_n=spec.tile_n,
-            tile_k=spec.tile_k,
-            arch=spec.arch,
-        ).split_k
-    else:
-        split_k = spec.split_k
+    split_k, _two_stage, _requested = _resolve_wgrad_split_k(spec, p)
     # The group index rides on block_id_z alongside the K-slice: z = groups*
     # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
     # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
@@ -1413,6 +1413,22 @@ def dispatch_conv_grouped(
     candidate = registry.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
+    explanation = [
+        f"selected {candidate.name} ({req.direction}) on {req.arch}",
+        f"algorithm={candidate.algorithm}",
+        f"spec_id={candidate.spec_id}",
+        f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})",
+        f"spec_hash={kid.spec_hash}",
+        f"request_hash={kid.request_hash}",
+    ]
+    if req.direction == "wgrad":
+        split_k, _two_stage, requested = _resolve_wgrad_split_k(spec, _problem(req))
+        if split_k != requested:
+            explanation.append(
+                f"split_k {requested} -> {split_k}: the two-stage workspace would "
+                f"exceed the {_MAX_WGRAD_WS_BYTES}-byte i32 limit, so the "
+                f"deterministic plain store is used instead"
+            )
     return DispatchResult(
         request=req,
         candidate=candidate,
@@ -1421,12 +1437,5 @@ def dispatch_conv_grouped(
         grid=candidate.grid(spec, req),
         block=candidate.block(spec),
         signature=tuple(candidate.signature(spec)),
-        explanation=(
-            f"selected {candidate.name} ({req.direction}) on {req.arch}",
-            f"algorithm={candidate.algorithm}",
-            f"spec_id={candidate.spec_id}",
-            f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})",
-            f"spec_hash={kid.spec_hash}",
-            f"request_hash={kid.request_hash}",
-        ),
+        explanation=tuple(explanation),
     )

@@ -395,6 +395,6 @@ pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
 ```text
 python -m rocke # list discoverable entry points
 python -m rocke.run_manifest # numpy + HIP manifest runner
-python -m rocke.examples.common.bake_off_implicit_gemm # example generator
+python -m builders.common.bake_off_implicit_gemm # example generator
 python -m rocke.sweep_bench # benchmark a sweep manifest
 ```

@@ -12,7 +12,7 @@ tensor of shape ``[M, K]`` where::
 
 For each output position ``(m, k)`` it computes the corresponding NHWC
 input address using the same coordinate-transform DAG the implicit-GEMM
-convolution uses (:func:`rocke.instances.common.conv_implicit_gemm.make_a_descriptor`),
+convolution uses (:func:`kernels.common.conv_implicit_gemm.make_a_descriptor`),
 and writes either the input value or zero (for padded / out-of-image
 positions). The kernel is pure index transform + copy — no MFMA, no LDS
 staging — so it makes a useful end-to-end test of the descriptor + buffer

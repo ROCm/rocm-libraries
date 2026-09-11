@@ -69,7 +69,7 @@ Build + verify in one shot from the README-style entry:
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=python python \
-  -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+  -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python \
   -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
@@ -269,7 +269,7 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python python/test/test_rocke_examples.py
 
-PYTHONPATH=python python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=python python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 PYTHONPATH=python python python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096

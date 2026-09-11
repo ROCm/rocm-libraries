@@ -8,12 +8,3 @@ capability in a way that changes the kernel structure versus the shared
 deep-fused conv/pool body, driven by the resolved ``MmaOp``) live in
 ``instances/common/``; this module only pins the WMMA geometry and re-exports.
 """
-
-from .deep_fused_conv_pool import (  # noqa: F401
-    FusedConvPoolProblem,
-    Gfx1201DeepFusedConvPoolSpec,
-    build_deep_fused_conv_pool,
-    deep_fused_conv_pool_grid,
-    deep_fused_conv_pool_signature,
-    is_valid_spec as is_valid_deep_fused_conv_pool_spec,
-)

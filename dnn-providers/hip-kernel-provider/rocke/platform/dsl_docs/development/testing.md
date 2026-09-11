@@ -82,7 +82,7 @@ when the C++ test binaries are built), use `python tests/run_all.py`.
 
 The example generators that build HSACO + manifest and verify against a
 reference live under `python/rocke/examples/` (run them as modules, e.g.
-`python -m rocke.examples.common.bake_off_implicit_gemm`); see the next
+`python -m builders.common.bake_off_implicit_gemm`); see the next
 section.
 
 ## Manual Build + Verify One Instance
@@ -93,7 +93,7 @@ cd <rocke/platform>
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=python python \
-    -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+    -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
 ls "$OUT_DIR"
@@ -282,7 +282,7 @@ export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python tests/test_rocke.py                             # unit (most no-GPU; ~20 need a GPU)
-python -m rocke.examples.common.bake_off_implicit_gemm \
+python -m builders.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify

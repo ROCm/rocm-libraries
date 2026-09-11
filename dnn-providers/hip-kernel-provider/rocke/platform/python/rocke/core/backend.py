@@ -1507,7 +1507,7 @@ def lower_img2col(
     """Lower an :class:`Img2ColSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.img2col import build_img2col
+        from kernels.common.img2col import build_img2col
         from .lower_llvm import lower_kernel_to_llvm
 
         k = build_img2col(spec, arch=arch)

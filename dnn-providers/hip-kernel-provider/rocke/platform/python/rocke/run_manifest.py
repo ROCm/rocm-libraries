@@ -83,8 +83,13 @@ def register_manifest_runner(kind: str, builder: ProblemBuilder) -> None:
 
 
 def registered_manifest_kinds() -> Tuple[str, ...]:
-    """Every manifest kind this process can run, for error messages and CI."""
-    return tuple(sorted(_RUNNERS))
+    """Every manifest kind this process can run, for error messages and CI.
+
+    Includes library-owned kinds from ``_LIBRARY_RUNNER_MODULES`` even before
+    their module has been lazily imported, so this stays accurate regardless
+    of whether ``resolve_manifest_runner`` has already run for them.
+    """
+    return tuple(sorted(set(_RUNNERS) | set(_LIBRARY_RUNNER_MODULES)))
 
 
 # Library-owned manifest runners: imported lazily on first use so the platform

@@ -11,5 +11,5 @@ Scripts:
 The accompanying ``*.md`` notes in this directory are the experiment log /
 analysis for the optimization levers (LDS handoff elimination, barrier merge,
 m-decode bypass, async/direct probes). These pin ``arch="gfx950"`` and drive
-``rocke.instances.gfx950.deep_fused_conv_pool``.
+``kernels.gfx950.deep_fused_conv_pool``.
 """

@@ -345,7 +345,7 @@ if(ROCKE_INSTALL_TESTS)
     # directory (which contains the installed rocke package) so `import rocke`
     # resolves without the source-tree sys.path shims.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" -v --timeout=60)\n")
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;quick\"\n"
