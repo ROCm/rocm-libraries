@@ -45,8 +45,8 @@
 #include "harness/bundle/SupportClaims.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
-#include "ScratchDirectory.hpp"
 #include "SupportClaimTestUtils.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 using hipdnn_frontend::ErrorCode;
 using hipdnn_integration_tests::bundle::enginesAccept;
@@ -65,7 +65,7 @@ using hipdnn_integration_tests::bundle::writeObservedSupportClaims;
 using hipdnn_integration_tests::bundle::test_utils::readFile;
 using hipdnn_integration_tests::bundle::test_utils::singleGraphObservation;
 using hipdnn_integration_tests::bundle::test_utils::sweepCaseObservation;
-using hipdnn_integration_tests::scratch::makeDir;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -162,7 +162,7 @@ std::optional<SupportVerdict> verdictFor(const std::vector<SupportResult>& resul
 
 TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
 {
-    const ScopedDirectory dir = makeDir("test_round_trip_");
+    const ScopedDirectory dir = claimScratchDirectory("test_round_trip_");
     const auto bundlePath = dir.path() / "Small.json";
     const auto sidecarPath = dir.path() / "Small.support.json";
 
@@ -222,7 +222,7 @@ TEST(TestSupportClaimRoundTrip, SingleGraphBootstrapAppendAndReRun)
 
 TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWrite)
 {
-    const ScopedDirectory dir = makeDir("test_round_trip_");
+    const ScopedDirectory dir = claimScratchDirectory("test_round_trip_");
     const auto bundlePath = dir.path() / "Small.json";
     const auto sidecarPath = dir.path() / "Small.support.json";
 
@@ -259,7 +259,7 @@ TEST(TestSupportClaimRoundTrip, SingleGraphWithdrawnSupportJudgesCleanAfterReWri
 
 TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
 {
-    const ScopedDirectory dir = makeDir("test_round_trip_");
+    const ScopedDirectory dir = claimScratchDirectory("test_round_trip_");
     const auto sweepPath = dir.path() / "sweep.json";
     const auto sidecarPath = dir.path() / "support.json";
 
@@ -338,7 +338,7 @@ TEST(TestSupportClaimRoundTrip, SweepBootstrapAppendAndReRun)
 
 TEST(TestSupportClaimRoundTrip, SweepDivergingCaseKeepsItsOwnVerdict)
 {
-    const ScopedDirectory dir = makeDir("test_round_trip_");
+    const ScopedDirectory dir = claimScratchDirectory("test_round_trip_");
     const auto sweepPath = dir.path() / "sweep.json";
     const auto sidecarPath = dir.path() / "support.json";
 
