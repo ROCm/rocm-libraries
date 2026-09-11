@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import json
-from pathlib import Path
+from importlib.resources import files
 
 import pytest
 
@@ -77,14 +77,9 @@ def test_serialization_accepts_utf8_bytes_and_rejects_other_types():
 
 
 def _load_schema() -> dict[str, object]:
+    # Resolve package data in both source and installed test layouts.
     schema_path = (
-        Path(__file__).parents[2]
-        / "python"
-        / "rocke"
-        / "analysis"
-        / "lds"
-        / "schema"
-        / "lds-conflict-result-v1.schema.json"
+        files("rocke.analysis.lds") / "schema" / "lds-conflict-result-v1.schema.json"
     )
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
