@@ -92,7 +92,9 @@ jobs:
     name: Load CI Environment
     runs-on: ubuntu-24.04
     outputs:
-      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      # Use the manually supplied or bot-maintained baseline. An empty value
+      # causes artifact reuse to be disabled and triggers a full stage build.
+      baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
