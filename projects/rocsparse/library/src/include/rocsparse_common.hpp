@@ -220,7 +220,7 @@ namespace rocsparse
 
     // __builtin_amdgcn_readfirstlane is a 32-bit op. Wider types must be
     // broadcast one 32-bit half at a time; floating-point types go through
-    // their bit pattern so they are not rounded to int (AISPARSE-759).
+    // their bit pattern so they are not rounded to int.
     __device__ __forceinline__ uint32_t read_first_lane_b32(uint32_t var)
     {
         return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int32_t>(var)));

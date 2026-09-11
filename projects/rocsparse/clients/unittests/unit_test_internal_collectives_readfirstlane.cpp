@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 //
-// Device (GPU) unit tests for rocsparse::read_first_lane (AISPARSE-759).
+// Device (GPU) unit tests for rocsparse::read_first_lane.
 //
 // __builtin_amdgcn_readfirstlane is a 32-bit op. The library overloads
 // currently forward every type through it, so 64-bit integers lose their
@@ -117,7 +117,7 @@ TEST(internal_collectives_readfirstlane, i64_below_2_31)
     expect_broadcast<int64_t>(2147481600LL, int64_t(0x0123456789abcdefLL));
 }
 
-// AISPARSE-759: 2^31 is truncated to -2^31 by the 32-bit builtin.
+// 2^31 is truncated to -2^31 by the 32-bit builtin.
 TEST(internal_collectives_readfirstlane, i64_at_2_31)
 {
     expect_broadcast<int64_t>(2147483648LL, int64_t(0x0123456789abcdefLL));
@@ -128,7 +128,7 @@ TEST(internal_collectives_readfirstlane, i64_next_nnzsplit_block)
     expect_broadcast<int64_t>(2147485696LL, int64_t(0x0123456789abcdefLL));
 }
 
-// Customer matrix nnz from AISPARSE-759.
+// Customer matrix nnz (int64, above 2^31).
 TEST(internal_collectives_readfirstlane, u64_customer_nnz)
 {
     expect_broadcast<uint64_t>(3032311773ull, 0x0123456789abcdefull);

@@ -144,7 +144,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_segmented.cpp
   unit_test_internal_collectives_search.cpp
   unit_test_internal_collectives_shfl.cpp
-  # AISPARSE-759: read_first_lane 64-bit truncation (append-only leaf)
+  # read_first_lane 64-bit truncation (append-only leaf)
   unit_test_internal_collectives_readfirstlane.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
