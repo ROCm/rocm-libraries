@@ -128,8 +128,8 @@ TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
 
     // Inject an already-derived modifier; deriving it from tagged operands is
     // tested elsewhere (adaptor _apply_true16 / attachTrue16ModifiersFromOperands).
-    auto add = [&](LogicalInstruction* inst, H dst0, std::vector<H> srcs) {
-        inst->true16 = True16Modifiers(dst0, H::NONE, std::move(srcs));
+    auto add = [&](LogicalInstruction* inst, H dst0, const std::vector<H>& srcs) {
+        inst->true16 = True16Modifiers(dst0, H::NONE, srcs);
         entryBB->appendIR(static_cast<IRBase*>(inst));
     };
 
