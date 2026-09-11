@@ -15,9 +15,9 @@ derive a second bank formula in this skill or in downstream analysis.
 2. Read [references/index.md](references/index.md) for input routing and supported
    outputs. Read [references/model-contract.md](references/model-contract.md) when
    constructing access records or interpreting conflict groups.
-3. Read the matching architecture reference. Start with
-   [references/gfx90a.md](references/gfx90a.md) for `gfx90a`; reject a target that
-   has no registered profile.
+3. Read the matching architecture reference linked from
+   [references/index.md](references/index.md). Reject a target that has no
+   registered profile.
 4. Run `scripts/predict.py` to produce canonical semantic JSON. Treat diagnostics
    as part of the result, not as optional console commentary.
 5. Analyze classifications, group membership, multiplicity, and diagnostics from
