@@ -961,7 +961,7 @@ class ProblemType(Mapping):
       self["ComputeDataType"] = DataType('s')
 
     # Modifying ComputeDataType for I8I8I_BH: if (I8I8I8+HPA), convert it to I8I8I_BH by setting ComputeDataType to i.
-    if self["ComputeDataType"].isInt8() and DataType(config["MacDataTypeA"]).isInt8() and self["HighPrecisionAccumulate"]:
+    if self["ComputeDataType"].isInt8() and self["MacDataTypeA"].isInt8() and self["HighPrecisionAccumulate"]:
       print2("DataType == i8 and HPA == True; setting compute data type to int32")
       self["ComputeDataType"] = DataType('i')
 

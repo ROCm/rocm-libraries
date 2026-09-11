@@ -1748,10 +1748,23 @@ class GlobalWriteBatchWriter:
       # The AITER mapping is specific to the gfx950 wave64 MI16 paired-store
       # geometry.  Keep the established ds_bpermute implementation everywhere
       # else; those kernels may not have v_permlane16_swap or the same lane layout.
+      # MT320x256 (MIWaveTile [10,8]) is excluded: it intermittently produces wrong
+      # results with the permlane16 shuffle.  The defect is not in the shuffle itself
+      # but in the WAR fence that follows the paired store -- buffer_store_dwordx4
+      # reads vPack[0:3] as store data and the next pair's v_cvt_pk overwrites those
+      # same VGPRs, guarded only by `s_nop 0`, which cannot guarantee the store has
+      # latched its sources.  Replacing that s_nop with `s_waitcnt vmcnt(N)` makes the
+      # failure rate track N exactly (0/1 -> 0/10 runs bad, 2 -> 3/10, 4 -> 7/10,
+      # >=8 -> 10/10), confirming the hazard.  Component C removed the 4 ds_bpermute
+      # plus s_waitcnt that used to sit in that window, so this geometry -- the widest
+      # MT0 on the guarded (PLSIN0) store path -- is the one that loses the race.
+      # A correct fence costs ~6% geomean, so keep the ds_bpermute path here instead.
+      # See ~/findings/store-wait-hazard/ for the full investigation.
       self._permlane16Active = (
         PLSIN_STORE_PERMLANE16
         and tuple(self.kernel["ISA"]) == (9, 5, 0)
         and self.kernel.get("MatrixInstM") == 16
+        and not (self.kernel["MacroTile0"] == 320 and self.kernel["MacroTile1"] == 256)
       )
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init

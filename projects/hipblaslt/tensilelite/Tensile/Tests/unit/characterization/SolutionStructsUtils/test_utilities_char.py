@@ -63,11 +63,12 @@ def test_mi_input_type_native_xf32(snapshot):
 
 
 def test_mi_input_type_plain(snapshot):
-    # Neither -> ProblemType["DataType"].
+    # Neither -> ProblemType["MacDataTypeA"].
     kernel = {
         "EnableF32XdlMathOp": False,
         "UseF32XEmulation": False,
-        "ProblemType": {"F32XdlMathOp": DataType("x"), "DataType": DataType("h")},
+        "ProblemType": {"F32XdlMathOp": DataType("x"), "DataType": DataType("h"),
+                        "MacDataTypeA": DataType("h")},
     }
     assert U.getMiInputType(kernel).toName() == snapshot
 

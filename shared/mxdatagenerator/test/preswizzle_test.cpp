@@ -1025,6 +1025,55 @@ TEST(PreSwizzleScalesGFX950Test, AlignedNoExtraPadding)
     EXPECT_EQ(sortedOutput, sortedInput);
 }
 
+TEST(PreSwizzleScalesGFX950Test, AITERDirectScaleBAddresses)
+{
+    // AITER addresses each wave's two ScaleB dwords as
+    //   waveN*64 + lane*4
+    //   waveN*64 + lane*4 + 32
+    // relative to the current N32 x K256 scale tile. Verify those byte
+    // addresses against the logical (N, K/32) coordinates of e8m0_shuffle.
+    constexpr size_t numRows = 256;
+    constexpr size_t numCols = 16;
+    std::vector<uint16_t> input(numRows * numCols);
+    std::iota(input.begin(), input.end(), uint16_t(0));
+
+    auto output = preSwizzleScalesGFX950(input, {numRows, numCols});
+
+    auto logicalIndexForSwizzledOffset = [](size_t offset) {
+        // Output dimension order is (d0,d3,d5,d2,d4,d1), where
+        // row=d0*32+d1*16+d2 and col=d3*8+d4*4+d5.
+        size_t const d1 = offset % 2;
+        size_t const d4 = (offset / 2) % 2;
+        size_t const d2 = (offset / 4) % 16;
+        size_t const d5 = (offset / 64) % 4;
+        size_t const d3 = (offset / 256) % (numCols / 8);
+        size_t const d0 = offset / (256 * (numCols / 8));
+        size_t const row = d0 * 32 + d1 * 16 + d2;
+        size_t const col = d3 * 8 + d4 * 4 + d5;
+        return row * numCols + col;
+    };
+
+    for(size_t waveN = 0; waveN < 4; ++waveN)
+    {
+        for(size_t lane = 0; lane < 64; ++lane)
+        {
+            for(size_t second = 0; second < 2; ++second)
+            {
+                size_t const dword
+                    = waveN * 64 * numCols + lane * 4 + second * 32 * numCols;
+                for(size_t byte = 0; byte < 4; ++byte)
+                {
+                    size_t const offset = dword + byte;
+                    ASSERT_LT(offset, output.size());
+                    EXPECT_EQ(output[offset], input[logicalIndexForSwizzledOffset(offset)])
+                        << "waveN=" << waveN << " lane=" << lane
+                        << " second=" << second << " byte=" << byte;
+                }
+            }
+        }
+    }
+}
+
 TEST(PreSwizzleScalesGFX950Test, InvalidSizesDimension)
 {
     std::vector<uint8_t> input(100);

@@ -520,8 +520,10 @@ def test_vgpr_lrpacking_wide_dtype(isa_info_map, hss_state):
     state["PrefetchLocalRead"] = 1
     state["DirectToVgprA"] = False
     state["DirectToVgprB"] = False
-    # f32: numRegisters()=1 >= 1 -> not doable
+    # f32: numRegisters()=1 >= 1 -> not doable. The packing check reads the mac
+    # data type, so widen that alongside DataType to keep the state coherent.
     state["ProblemType"]["DataType"] = DataType("s")
+    state["ProblemType"]["MacDataTypeA"] = DataType("s")
     result = Solution.isVgprForLocalReadPackingDoable(state, isa_info_map)
     assert result is False
 

@@ -2,12 +2,12 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 3
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -21,8 +21,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
   CpuThreads: 1
@@ -46,8 +44,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -85,7 +83,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -179,8 +177,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -203,7 +201,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -241,8 +239,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -265,7 +263,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -291,8 +289,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -325,7 +323,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -350,8 +348,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -397,7 +395,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -422,8 +420,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -467,7 +465,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -488,8 +486,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -522,7 +520,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -541,8 +539,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -575,7 +573,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -594,8 +592,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -614,7 +612,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -634,8 +632,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorA: True
@@ -654,7 +652,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -673,8 +671,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorA: True
@@ -694,7 +692,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -716,8 +714,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorB: True
@@ -740,7 +738,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -761,8 +759,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SwizzleTensorA: True
@@ -786,7 +784,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
