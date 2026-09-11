@@ -28,6 +28,7 @@
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationVerifier.hpp"
@@ -98,6 +99,43 @@ StinkyInstruction* createDsStoreB128(BasicBlock* bb, int addrReg, int dataReg) {
     store->addSrcReg(StinkyRegister("v", addrReg, 1));
     store->addSrcReg(StinkyRegister("v", dataReg, 4));
     return store;
+}
+
+/// v[<dst>:<dst>+1] = ds_load_b64(v<addr>), a two-DWORD range to compete with.
+StinkyInstruction* createDsLoadB64(BasicBlock* bb, int dstReg, int addrReg) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* load = builder.create(getMCIDByUOp(GFX::ds_load_b64, kRaTestArch));
+    load->addDestReg(StinkyRegister("v", dstReg, 2));
+    load->addSrcReg(StinkyRegister("v", addrReg, 1));
+    return load;
+}
+
+/// `v_wmma_scale16 dst, a, b, 0, scaleA, scaleB`: six register fields against
+/// the four slots s_set_vgpr_msb carries, so the two scale fields select none
+/// and reach the first bank only. The one shipped format with that shape.
+StinkyInstruction* createWmmaScale16(BasicBlock* bb, int dst, int a, int b, int scaleA,
+                                     int scaleB) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* wmma =
+        builder.create(getMCIDByUOp(GFX::v_wmma_scale16_f32_16x16x128_f8f6f4, kRaTestArch));
+    wmma->addDestReg(StinkyRegister("v", dst, 8));
+    wmma->addSrcReg(StinkyRegister("v", a, 8));
+    wmma->addSrcReg(StinkyRegister("v", b, 8));
+    wmma->addSrcReg(StinkyRegister(0));
+    wmma->addSrcReg(StinkyRegister("v", scaleA, 2));
+    wmma->addSrcReg(StinkyRegister("v", scaleB, 2));
+    return wmma;
+}
+
+/// Defines \p count consecutive VGPRs from \p base, so operands reading them
+/// are values the function defines rather than live-ins nothing may move.
+void defineVgprs(BasicBlock* bb, int base, int count) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    for (int i = 0; i < count; ++i) {
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", base + i, 1));
+        mov->addSrcReg(StinkyRegister(0));
+    }
 }
 
 /// Withhold every VGPR except [0, keep), to put the colourer under real pressure.
@@ -423,4 +461,56 @@ TEST_F(GreedyAllocatorTest, RegionScopeKeepsTailBlocksByteIdentical) {
 
     EXPECT_LT(coloured->assignmentOf(regionOnly).idx, 50u) << coloured->toString();
     EXPECT_EQ(coloured->assignmentOf(crossing).idx, 53u) << coloured->toString();
+}
+
+TEST_F(GreedyAllocatorTest, ACappedBlockTakesItsBankBeforeOthersCanFillIt) {
+    // The scale operands of v_wmma_scale16 reach the first bank only, because
+    // their encoding fields select no s_set_vgpr_msb slot. Every block prefers a
+    // low base, since pickBase scans upward and takes the first that fits, so a
+    // capped block left in the weight-ordered queue competes for its one bank
+    // against blocks that could have gone anywhere -- and arrives to find it
+    // full. Placing capped blocks in a phase of their own is the whole fix.
+    //
+    // Bank 0 is cut down to v251-v255 here, which holds the two scale pairs and
+    // nothing else. The loads are defined next to their uses and so outweigh the
+    // scale operands, which are defined first and read last; in one queue they
+    // would take v251-v254 and leave the scale operands nowhere to go.
+    BasicBlock* entry = block("entry");
+    defineVgprs(entry, /*base=*/130, /*count=*/2);
+    defineVgprs(entry, /*base=*/140, /*count=*/2);
+    StinkyInstruction* firstLoad = createDsLoadB64(entry, /*dstReg=*/200, /*addrReg=*/400);
+    StinkyInstruction* secondLoad = createDsLoadB64(entry, /*dstReg=*/202, /*addrReg=*/400);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/210, /*src0=*/200, /*src1=*/202);
+    // The matrix operands and the address are live-ins, so they are pinned where
+    // they arrive and have to sit outside the range reserved below.
+    StinkyInstruction* wmma = createWmmaScale16(entry, /*dst=*/100, /*a=*/300, /*b=*/320,
+                                                /*scaleA=*/130, /*scaleB=*/140);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V));
+    // v251-v254 is all that is left of the reachable bank, which the two scale
+    // pairs fill exactly. v255 goes too, or a load takes it and runs into the
+    // next bank, which is a separate problem and not the one under test.
+    setup.target().reserve(RegType::V, /*first=*/0, /*count=*/251);
+    setup.target().reserve(RegType::V, /*first=*/255, /*count=*/1);
+
+    const AllocationResult coloured = colour(setup);
+
+    for (size_t operand = 3; operand <= 4; ++operand) {
+        for (const StinkySSAValue* unit : ssaSourceUnits(*wmma, operand)) {
+            ASSERT_NE(unit, nullptr);
+            EXPECT_LT(coloured.assignmentOf(unit->valueId()).idx, kVgprBankSize)
+                << "operand " << operand << '\n'
+                << coloured.toString();
+        }
+    }
+
+    // And the loads, which outweigh them, were pushed past the bank. Without
+    // this the test would pass on a colouring that simply had room for both.
+    for (const StinkyInstruction* load : {firstLoad, secondLoad}) {
+        const StinkySSAValue* first = ssaDefinedValue(*load, 0);
+        ASSERT_NE(first, nullptr);
+        EXPECT_GE(coloured.assignmentOf(first->valueId()).idx, kVgprBankSize)
+            << coloured.toString();
+    }
 }

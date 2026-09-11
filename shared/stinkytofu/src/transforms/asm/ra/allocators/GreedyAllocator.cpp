@@ -23,6 +23,7 @@
 #include "GreedyAllocator.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -129,6 +130,9 @@ struct Block {
     /// Must land on hintBase rather than prefer it. Null when free to move;
     /// otherwise the reason, for the diagnostic if that register is unusable.
     const char* pinReason = nullptr;
+    /// Tightest index any member may occupy, when an operand field limits one.
+    /// Set makes this a capped block, which is placed before the free queue.
+    std::optional<uint32_t> maxIndex;
     uint32_t evictions = 0;
     bool placed = false;
     uint32_t base = 0;
@@ -367,7 +371,24 @@ class Greedy {
             }
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
+            block.maxIndex = ceilingOf(block);
         }
+    }
+
+    /// Tightest index any member of \p block may occupy, or nullopt when no
+    /// member is limited.
+    ///
+    /// A block is placed as a unit, so one limited member limits all of them.
+    /// That is why a capped block goes early: the bank it is confined to is
+    /// shared with every block that packs low, and there is no second choice.
+    std::optional<uint32_t> ceilingOf(const Block& block) const {
+        std::optional<uint32_t> tightest;
+        for (const Member& member : block.members) {
+            const uint32_t ceiling = context_.constraints.maxIndexFor(member.value);
+            if (ceiling == std::numeric_limits<uint32_t>::max()) continue;
+            if (!tightest.has_value() || ceiling < *tightest) tightest = ceiling;
+        }
+        return tightest;
     }
 
     /// Why \p block cannot move, or null when it may.
@@ -411,6 +432,8 @@ class Greedy {
         if (context_.rules.forbidsBase(block.regClass, base, block.width) != nullptr) return false;
         for (const Member& member : block.members) {
             const uint32_t idx = base + member.offset;
+            // Per member, so a multi-DWORD operand cannot half-fit.
+            if (idx > context_.constraints.maxIndexFor(member.value)) return false;
             if (!context_.target.isAllocatable(block.regClass, idx)) return false;
             if (!mayOccupy(block.regClass, idx, member.value)) return false;
         }
@@ -487,9 +510,40 @@ class Greedy {
             bindAt(block, *block.hintBase);
         }
 
+        // Capped blocks next, before anything free to go elsewhere.
+        //
+        // pickBase scans upward, so every block prefers a low base. Left in the
+        // weight-ordered queue, a capped block competes for its one reachable
+        // bank against blocks that could have gone anywhere, and under pressure
+        // finds it full. Order is the fix here, not the constraint.
+        std::vector<size_t> capped;
+        for (size_t index = 0; index < blocks_.size(); ++index) {
+            Block& block = blocks_[index];
+            if (block.pinReason != nullptr || !block.maxIndex.has_value()) continue;
+            capped.push_back(index);
+        }
+        std::sort(capped.begin(), capped.end(), [this](size_t a, size_t b) {
+            const Block& lhs = blocks_[a];
+            const Block& rhs = blocks_[b];
+            if (lhs.weight != rhs.weight) return lhs.weight > rhs.weight;
+            return lhs.leader < rhs.leader;
+        });
+        for (size_t index : capped) {
+            Block& block = blocks_[index];
+            if (tryPlace(block)) continue;
+            // Distinct from the pressure refusal below: nothing has been placed
+            // here except pinned blocks, so the reachable bank really is full
+            // rather than merely full by the time this block was reached.
+            error_ = "no " + regTypeToString(block.regClass) + " register at or below index " +
+                     std::to_string(*block.maxIndex) + " is free for " + valueName(block.leader) +
+                     ", which its operands cannot address past";
+            return false;
+        }
+
         std::vector<size_t> queue;
         for (size_t index = 0; index < blocks_.size(); ++index) {
-            if (blocks_[index].pinReason == nullptr) queue.push_back(index);
+            if (blocks_[index].pinReason == nullptr && !blocks_[index].maxIndex.has_value())
+                queue.push_back(index);
         }
         std::sort(queue.begin(), queue.end(), [this](size_t a, size_t b) {
             const Block& lhs = blocks_[a];
@@ -568,8 +622,12 @@ class Greedy {
         if (occupants.empty()) return false;  // tryPlace already refused this base
         for (size_t occupant : occupants) {
             const Block& other = blocks_[occupant];
-            if (other.pinReason != nullptr || other.weight >= block.weight ||
-                other.evictions >= kMaxEvictionsPerBlock)
+            // A capped block is as immovable as a pinned one here. Evicting it
+            // returns it to the worklist, where it is re-placed after the free
+            // queue has filled its bank -- the ordering failure, reintroduced
+            // one block at a time.
+            if (other.pinReason != nullptr || other.maxIndex.has_value() ||
+                other.weight >= block.weight || other.evictions >= kMaxEvictionsPerBlock)
                 return false;
         }
         return true;

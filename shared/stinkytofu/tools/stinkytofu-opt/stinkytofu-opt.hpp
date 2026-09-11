@@ -304,6 +304,10 @@ const std::vector<PassInfo> availablePasses = {
     //                       the value lifted into it and takes no other. One as
     //                       pinReg=s0, an inclusive run as pinReg=s0:19. Repeat
     //                       the key for disjoint runs
+    //   unbankable=hold|allocate — what to do about an operand whose field
+    //                       cannot select a VGPR bank. allocate (default)
+    //                       places it under a ceiling, before the free blocks;
+    //                       hold keeps the register the producer chose
     //   apply             — write the colouring through destroyAttachedSSA
     //                       (also runs syncRegisterSymbols; see
     //                       docs/developer/register-allocation.md §11.1)
@@ -333,6 +337,17 @@ const std::vector<PassInfo> availablePasses = {
              const std::optional<AllocationScope::HeldRange> range = parseHeldRange(name);
              if (!range.has_value()) return nullptr;
              options.pinRegisters.push_back(*range);
+         }
+         // Assigned in both branches, so an explicit hold means hold whatever
+         // the option's own default is.
+         if (const std::string unbankable = passArgValue(args, "unbankable", "allocate");
+             unbankable == "allocate") {
+             options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Allocate;
+         } else if (unbankable == "hold") {
+             options.unbankableOperands = RegisterAllocationOptions::UnbankableOperands::Hold;
+         } else {
+             std::cerr << "Error: unbankable expects hold|allocate, got '" << unbankable << "'\n";
+             return nullptr;
          }
          options.applyToOperands = hasPassArg(args, "apply");
          options.report = hasPassArg(args, "report");
