@@ -9,6 +9,7 @@ the `rocke` docs. They are reference material, not part of the runtime package.
 
 - `gemm-optimization-rocke.md`
 - `lds-optimization-rocke.md`
+- `lds-bank-conflict-expert/SKILL.md`
 - `prefetch-data-load-rocke.md`
 - `capture-kernel-trace-rocke.md`
 - `kernel-trace-analysis.md`
