@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from .features import signature_references
+from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
 
 ROLE = "predict_engine_tflops"
@@ -194,17 +195,13 @@ def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def read_corpus(path: Path) -> pd.DataFrame:
-    # The trainer's suffix rule, applied here too: --input decides the reader by its
-    # suffix whichever role is being trained, so a published .parquet dataset is never
-    # handed to the CSV reader.
-    if path.suffix == ".parquet":
-        frame = pd.read_parquet(path)
-    elif path.suffix == ".json":
-        content = json.loads(path.read_text(encoding="utf-8"))
-        frame = pd.DataFrame([content] if isinstance(content, dict) else content)
-    else:
-        frame = pd.read_csv(path, dtype={"benchmark": str, "device": str, "graph_id": str, "device_id": str})
-    return normalize_corpus(frame)
+    # The trainer's suffix rule, applied here too because it is the same reader: --input
+    # decides by suffix whichever role is being trained, so a published .parquet dataset
+    # is never handed to the CSV reader. `read_corpus_frame` also pins `graph_id` and
+    # `device_id` to text on every branch, which this normalization depends on --
+    # `_text` below rejects a non-string, so a graph named `0123` frozen as an int64 in
+    # the dataset would fail here and nowhere else.
+    return normalize_corpus(read_corpus_frame(path))
 
 
 def training_binding(frame: pd.DataFrame, engine: str | None = None) -> tuple[pd.DataFrame, dict]:

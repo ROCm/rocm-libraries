@@ -40,6 +40,8 @@ from typing import Any, Callable, Iterable, Sequence
 import numpy as np
 import pandas as pd
 
+from .corpus_io import read_corpus_frame
+
 logger = logging.getLogger(__name__)
 
 #: Report format identity. Written into every report so a consumer can tell one
@@ -1485,17 +1487,6 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _read_corpus(path: Path) -> pd.DataFrame:
-    # Same suffix rule the trainer applies, so a model trained from the published
-    # .parquet dataset is scored against that dataset rather than a re-exported CSV
-    # whose column types were decided by concatenation.
-    if path.suffix == ".parquet":
-        return pd.read_parquet(path)
-    if path.suffix == ".json":
-        return pd.DataFrame(json.loads(path.read_text(encoding="utf-8")))
-    return pd.read_csv(path, dtype={"benchmark": str, "device": str})
-
-
 def run_evaluate(args: argparse.Namespace) -> int:
     corpus_path = Path(args.input)
     model_dir = Path(args.model_dir)
@@ -1554,7 +1545,10 @@ def run_evaluate(args: argparse.Namespace) -> int:
         logger.error("additional models and runtime predictions require predict_engine_tflops models")
         return 1
 
-    df = _read_corpus(corpus_path)
+    # The same suffix rule and the same identity pinning the trainer applies, so a model
+    # trained from the published .parquet dataset is scored against that dataset rather
+    # than against a re-exported CSV whose column types were decided by concatenation.
+    df = read_corpus_frame(corpus_path)
     logger.info("Loaded %d row(s) from %s", len(df), corpus_path)
 
     target = args.target or bundle.target

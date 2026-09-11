@@ -23,13 +23,16 @@ pip install -e .
 ## The pipeline
 
 ```
-  sweep  ->  export-benchmarks  ->  train  ->  evaluate  ->  promote
-   |              |                   |           |             |
-   |              |                   |           |             `- writes the UED's
-   |              |                   |           |                role/architecture reference
-   |              |                   |           `- eval_report.json (§11.2/§11.4 regret)
-   |              |                   `- <stem>.uhd.json + model.bin
-   |              `- §8.3 training CSV
+  sweep  ->  export-benchmarks  ->  results_import  ->  train  ->  evaluate  ->  promote
+   |              |                       |              |           |             |
+   |              |                       |              |           |             `- writes the UED's
+   |              |                       |              |           |                role/architecture reference
+   |              |                       |              |           `- eval_report.json (§11.2/§11.4 regret)
+   |              |                       |              `- <stem>.uhd.json + model.bin
+   |              |                       `- dataset.parquet: §8.3's checks applied, the
+   |              |                          collector's is_valid/skip_reason rewritten as
+   |              |                          `error`, tflops/gbs derived from the opmeta
+   |              `- §8.3 collection CSV: appendable, resumable, one per shard
    `- ingestor benchmark log
 ```
 
@@ -37,12 +40,22 @@ pip install -e .
 # 1. sweep: run the graphs you care about with benchmark logging on
 HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run your graphs>
 
-# 2. export-benchmarks: log -> the §8.3 training CSV
+# 2. export-benchmarks: log -> the §8.3 collection CSV, one per shard, appendable
 python -m uhd_gen export-benchmarks sweep.log -o bench.csv
 
-# 3. train: CSV -> descriptor + model artifact
+# 3. results_import: the collected shards -> the published §8.3 dataset. This is where
+#    §8.3's checks are applied, where a failed candidate's is_valid/skip_reason becomes
+#    the dataset's `error`, and where tflops and gbs are derived from the operation's
+#    declaration -- the collector measures times, it does not know an op's flop count.
+python -m results_import.importer \
+    --csv bench.csv \
+    --opmeta ../corpus_gen/operations/matmul.opmeta.json \
+    --out dataset.parquet
+
+# 4. train: dataset -> descriptor + model artifact. A collected .csv works too, with a
+#    target the CSV carries (a timing column) and none of §8.3's checks applied.
 python -m uhd_gen train \
-    --input bench.csv \
+    --input dataset.parquet \
     --features q.M q.N q.K kernel.tile_m kernel.tile_n kernel.tile_k device.cu_count \
     --descriptor-tree ./descriptors --engine hipkernel:gemm \
     --training-arches gfx942 \
@@ -52,19 +65,19 @@ python -m uhd_gen train \
     --descriptor-name gemm \
     --name "GEMM UHD"
 
-# 4. evaluate: how much worse is the model's pick than the best kernel measured?
+# 5. evaluate: how much worse is the model's pick than the best kernel measured?
 python -m uhd_gen evaluate \
-    --input bench.csv \
+    --input dataset.parquet \
     --model-dir ./uhd_output
 
-# 5. promote: install the pair and update only its role/architecture reference
+# 6. promote: install the pair and update only its role/architecture reference
 python -m uhd_gen promote \
     --model-dir ./uhd_output \
     --descriptor-tree ./descriptors \
     --engine hipkernel:gemm --arch gfx942
 ```
 
-**Step 5 is not optional.** The UED's `sort_kernel_catalog` map must name the
+**Step 6 is not optional.** The UED's `sort_kernel_catalog` map must name the
 model under the target architecture (or `default`). Promotion updates that entry;
 other architectures and roles retain their existing models. An unavailable or
 incompatible model disables only that model, leaving a valid engine usable with
@@ -287,8 +300,8 @@ is counted in `exclusions`:
 
 | Excluded | Why |
 |----------|-----|
-| `is_valid=False` rows | A candidate that never ran has no time and cannot be the best. Its empty timing column would otherwise read as a zero and win every `min`. |
-| Rows whose target is empty or non-numeric | Same reason, without the flag. |
+| `is_valid=False` rows | A candidate that never ran has no time and cannot be the best. Its empty timing column would otherwise read as a zero and win every `min`. Only a collected CSV carries the flag. |
+| Rows whose target is empty or non-numeric | Same reason, without the flag -- which is how a published dataset spells it, since §8.3 has no validity column and records the failure in `error` instead. |
 | Problems with one measured candidate | With nothing to choose between, a correct pick is not evidence; scoring it as regret 0 would dilute the mean. |
 | Problems whose oracle value is not positive | Both formulas divide by it, and under `max` the ratio's sense flips. |
 
@@ -396,7 +409,8 @@ sanity floor does not move between runs.
 
 ## Input Format
 
-`--input` takes three forms and the suffix decides, for `train` and `evaluate` alike:
+`--input` takes three forms and the suffix decides, for `train`, `evaluate`, `knobs` and
+`merge` alike:
 
 | Suffix | What it is | When |
 |--------|------------|------|
@@ -429,6 +443,26 @@ another cannot concatenate to `object` and quietly change what the trainer sees.
 CSV branch is the escape hatch, not the route -- nothing §8.3 specifies is checked on
 it (no measurement-or-error rule, no completeness agreement, no candidate-set
 comparison across a merge), which is what the importer exists for.
+
+**A failure is spelled differently at the two ends, and the importer is where it is
+translated.** The collector writes what the runtime record carries at the moment of
+failure: `is_valid=False`, a `skip_reason`, and empty timing columns. §8.3's published
+dataset carries no validity flag at all -- a failed candidate is a null measurement plus
+a non-empty `error` -- so that no two columns can disagree about whether a row was
+measured. `results_import` rewrites the one into the other and then drops `is_valid` and
+`skip_reason` as collection bookkeeping, which is why the chain above composes: a sweep
+containing a failure is a normal sweep, not a corpus the importer refuses.
+
+`train` drops a row that carries no measurement in either spelling -- the flag, a
+non-empty `error`, or a target that is not a finite number -- and logs how many went by
+each. The failed rows stay in the dataset, because a candidate that could not run is
+information about feature space and §8.3 keeps it; they are excluded at the fit, exactly
+as `evaluate` excludes them from the oracle.
+
+**Identity columns are read as text on every route.** `benchmark`, `device`, `graph_id`
+and `device_id` name something; nothing computes with them. Left to inference a device
+called `0007` becomes the integer 7 from one format and the string `"0007"` from the
+other, and one problem becomes two.
 
 Whichever form it arrives in, the corpus must carry:
 - Feature columns (problem dimensions, kernel config, device properties)

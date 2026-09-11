@@ -32,6 +32,12 @@ def matmul() -> dict:
         return json.load(handle)
 
 
+@pytest.fixture
+def sdpa() -> dict:
+    with (OPERATIONS / "sdpa_fwd.opmeta.json").open() as handle:
+        return json.load(handle)
+
+
 def rows(**overrides) -> pd.DataFrame:
     base = {
         "q.M": [1024, 1024], "q.N": [1024, 1024], "q.K": [1024, 1024],
@@ -210,3 +216,105 @@ def test_the_pairing_is_a_convention_not_a_column_list(matmul):
 def test_an_unpaired_column_is_not_checked(matmul):
     """`kernel.tile_m` has no `kernel.tile_m_id`, so there is nothing to agree with."""
     assert len(build_dataset(rows(), matmul)) == 2
+
+
+def test_two_boards_measuring_one_shape_import_as_two_problems(matmul):
+    """A corpus spanning two machines is the normal case, not a corrupt merge.
+
+    A problem is (graph, device), so the same shape measured on two boards is two problems with
+    two candidate sets -- not one problem whose candidates repeat. Keyed on `q.*` alone the
+    second board's rows look exactly like a second collection of the first board's problem, and
+    the candidate-set check below refuses a corpus that is simply two GPUs.
+    """
+    frame = pd.concat([rows(device=["a", "a"]), rows(device=["b", "b"])], ignore_index=True)
+    frame["problem_complete"] = True
+
+    out = build_dataset(frame, matmul)
+
+    assert len(out) == 4
+    assert out["problem_complete"].all()
+
+
+def test_a_fault_on_one_board_does_not_downgrade_the_other_boards_problem(matmul):
+    """`problem_complete` is what regret depends on: a problem that no longer claims to be a
+    complete measurement of its candidate space reports regret as a lower bound. Charging that
+    to a board that measured everything is a silently pessimistic number about working hardware.
+    """
+    healthy = rows(device=["a", "a"])
+    faulted = rows(device=["b", "b"], minTimeMs=[1.0, None], avgTimeMs=[1.1, None],
+                   stddevMs=[0.01, None], iters=[10, None], error=["", "HIP error 700"])
+
+    out = build_dataset(pd.concat([healthy, faulted], ignore_index=True), matmul)
+
+    assert out.loc[out["device"] == "a", "problem_complete"].all()
+    assert not out.loc[out["device"] == "b", "problem_complete"].any()
+
+
+def test_the_collectors_spelling_of_a_failure_is_republished_as_an_error(matmul):
+    """What `uhd_gen export-benchmarks` actually writes: `is_valid=False` plus a `skip_reason`,
+    and no `error` column at all. Untranslated it is a row with neither a measurement nor an
+    error, so every sweep containing a failure would be refused and the documented chain from
+    the collector to the dataset would not compose.
+    """
+    frame = rows(minTimeMs=[1.0, None], avgTimeMs=[1.1, None], stddevMs=[0.01, None],
+                 iters=[10, None], is_valid=["True", "False"],
+                 skip_reason=["", "hip error 700"]).drop(columns=["error"])
+
+    out = build_dataset(frame, matmul)
+
+    assert out["error"].tolist() == ["", "hip error 700"]
+    # §8.3 records a failure once. A validity flag beside the error is a second spelling that
+    # can disagree with it, so it does not reach the published dataset.
+    assert "is_valid" not in out.columns and "skip_reason" not in out.columns
+    assert not out["problem_complete"].any()
+
+
+def test_a_row_marked_failed_that_still_carries_a_timing_is_still_rejected(matmul):
+    """The translation must not launder a producer bug into a valid row: a candidate that both
+    reports a time and says it never ran cannot be trusted either way.
+    """
+    frame = rows(is_valid=["True", "False"], skip_reason=["", "hip error 700"]).drop(columns=["error"])
+    with pytest.raises(ValidationError, match="both"):
+        build_dataset(frame, matmul)
+
+
+def test_a_numeric_looking_identity_is_read_as_a_name_not_a_number(tmp_path, matmul):
+    """Nothing computes with a device id or a benchmark name. Inferred, `0123` becomes the
+    integer 123, the published dataset's dtype then depends on which board was swept, and the
+    CSV and Parquet ends of the pipeline disagree about the type of the same identity.
+    """
+    path = tmp_path / "shard.csv"
+    rows(benchmark=["0123", "0123"], device=["0007", "0007"]).to_csv(path, index=False)
+
+    out = build_dataset(load_csvs([path]), matmul)
+
+    assert out["benchmark"].tolist() == ["0123", "0123"]
+    assert out["device"].tolist() == ["0007", "0007"]
+
+
+def test_a_collected_sdpa_corpus_imports_and_is_given_its_metrics(tmp_path, sdpa):
+    """The operation we actually generate gfx942 heuristics for, through the real read path.
+
+    sdpa_fwd's declared FLOP count uses `max` to guard the causal term, so importing any sdpa
+    corpus exercised an operator the evaluator lacked and died with "unsupported operator
+    'max'". Nothing here touched sdpa_fwd at all, so it was only visible on measured data.
+    """
+    path = tmp_path / "sdpa.csv"
+    pd.DataFrame({
+        "benchmark": ["prefill", "decode"], "device": ["gfx942-0", "gfx942-0"],
+        "q.batch": [2, 2], "q.heads": [16, 16], "q.seqlen_q": [1024, 1],
+        "q.seqlen_k": [1024, 4096], "q.head_dim": [128, 128],
+        "q.is_causal": [1, 1], "q.dtype": ["fp16", "fp16"],
+        "kernel.tile_m": [64, 128], "device.cu_count": [304, 304],
+        "minTimeMs": [1.0, 0.5], "avgTimeMs": [1.1, 0.55],
+        "stddevMs": [0.01, 0.01], "iters": [20, 20],
+    }).to_csv(path, index=False)
+
+    out = build_dataset(load_csvs([path]), sdpa)
+
+    scale = 4 * 2 * 16 * 128
+    assert out["tflops"].iloc[0] == pytest.approx(
+        scale * (1024 * 1024 - 1024 * 1023 / 2) / 1e-3 / 1e12)
+    # One query against 4096 keys is a full row of the mask, not half of it.
+    assert out["tflops"].iloc[1] == pytest.approx(scale * 1 * 4096 / 5e-4 / 1e12)
+    assert out["gbs"].notna().all()

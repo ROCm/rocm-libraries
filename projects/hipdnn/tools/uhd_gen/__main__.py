@@ -56,6 +56,7 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
+from .corpus_io import read_corpus_frame
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
 from .merge import add_merge_arguments, run_merge
@@ -443,24 +444,53 @@ def _run_train(args: argparse.Namespace) -> int:
                 trained_against = snapshot_provenance(Path(args.descriptor_tree), args.engine, arch)
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
-            # The suffix decides. `.parquet` is what tools/results_import publishes (RFC
-            # 0019.13 §8.3) and is the route a model anyone ships should come by: the
-            # dataset carries its own types, so a column empty in one shard and populated
-            # in another cannot concatenate to `object` and quietly change what the
-            # trainer sees. A collected CSV is read directly, and nothing §8.3 specifies
-            # is checked on it -- that is what the importer exists for -- so it is the
-            # escape hatch for a quick local run. The §11.2 label rule below is applied
-            # to all three alike: the published dataset earns no exemption from it.
-            if input_path.suffix == ".parquet":
-                df = pd.read_parquet(input_path)
-            elif input_path.suffix == ".json":
-                df = pd.DataFrame(json.loads(input_path.read_text(encoding="utf-8")))
-            else:
-                df = pd.read_csv(input_path, dtype={"benchmark": str, "device": str})
+            # The suffix decides, in `corpus_io.read_corpus_frame` for every command
+            # alike. `.parquet` is what tools/results_import publishes (RFC 0019.13
+            # §8.3) and is the route a model anyone ships should come by: the dataset
+            # carries its own types, so a column empty in one shard and populated in
+            # another cannot concatenate to `object` and quietly change what the
+            # trainer sees. A collected CSV is read directly, and nothing §8.3
+            # specifies is checked on it -- that is what the importer exists for -- so
+            # it is the escape hatch for a quick local run. The §11.2 label rule below
+            # is applied to all three alike: the published dataset earns no exemption
+            # from it.
+            df = read_corpus_frame(input_path)
+            # What "this row has no measurement" looks like, in both spellings, because
+            # a corpus arrives in both. A collected CSV says `is_valid=False`, which is
+            # what the runtime record carries at the moment of failure. §8.3's published
+            # dataset has no validity flag at all: the measurement is null and `error`
+            # carries the reason, so that no two columns can disagree about one row.
+            # Both mean the candidate never ran, and a candidate that never ran cannot
+            # be fitted -- its target is NaN, and without this the NaN reaches
+            # `train_uhd.train_model`, whose "target must contain finite nonnegative
+            # values" then reports a missing filter as a corrupt corpus. `evaluate`
+            # excludes exactly these rows, by both spellings, for the same reason
+            # (§5.6.3 and `Exclusions`), and training and evaluation must not disagree
+            # about which rows exist.
+            invalid = errored = unmeasured = 0
             if "is_valid" in df.columns:
-                before = len(df)
-                df = df[df["is_valid"].astype(str).str.lower() == "true"]
-                logger.info("Dropped %d row(s) with is_valid=False", before - len(df))
+                keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
+                invalid = int((~keep).sum())
+                df = df[keep]
+            if "error" in df.columns:
+                failed = df["error"].fillna("").astype(str).str.strip().str.len() > 0
+                errored = int(failed.sum())
+                df = df[~failed]
+            if args.target in df.columns:
+                # Coerced rather than trusted: a CSV column holding one empty cell reads
+                # back as `object`, so the target can be a string here even when every
+                # populated row is a number.
+                finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
+                unmeasured = int((~finite).sum())
+                df = df[finite]
+            if invalid or errored or unmeasured:
+                # Counted apart because they are three different producer facts, and the
+                # one that fires says which end to look at: the collector's flag, the
+                # published dataset's error, or a target column that is neither.
+                logger.info(
+                    "Dropped %d row(s) with is_valid=False, %d row(s) carrying a "
+                    "collection error, and %d row(s) whose %s is not a finite number",
+                    invalid, errored, unmeasured, args.target)
             # RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train
             # its score on `avgTimeMs`". A calibrated model is the one whose absolute
             # value gets compared across engines, and minimum- or robust-mean-derived
