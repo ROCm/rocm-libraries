@@ -2,8 +2,33 @@
 // SPDX-License-Identifier: MIT
 
 include "knob_value.fbs";
+include "engine_config.fbs";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// A real matched catalog entry, addressable by its complete enrolled knob tuple.
+table EngineCandidate {
+    id: string (required);
+    knob_settings: [KnobSetting];
+    // Canonical reference -> JSON value, without a leading '$'.
+    kernel_features: string (required);
+}
+
+// Only supplied by the optional enumeration API (HIPDNN_ATTR_ENGINE_CANDIDATES_EXT on
+// the engine descriptor), never by ordinary getDetails.
+table EngineCandidatePage {
+    graph_id: string (required);
+    device_id: string (required);
+    device_arch: string (required);
+    problem_features: string (required);
+    device_features: string (required);
+    total_count: uint64;
+    offset: uint64;
+    candidates: [EngineCandidate];
+    engine_name: string;
+    // The owning UED UUID when this is a descriptor-backed engine.
+    engine_descriptor_id: string;
+}
 
 table EngineDetails {
     engine_id: int64;
@@ -14,6 +39,7 @@ table EngineDetails {
     // hipdnnEnginePluginGetEngineName to name an engine — it is the only channel
     // load-time admission can reach. See develop-plugins.rst, "Engine names".
     name: string;
+    candidate_page: EngineCandidatePage;
 }
 
 root_type EngineDetails;

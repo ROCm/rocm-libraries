@@ -95,6 +95,24 @@ std::vector<std::filesystem::path> descriptorSearchDirectories()
         }
     }
 
+    const auto pathList = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH");
+#ifdef _WIN32
+    constexpr char PATH_SEPARATOR = ';';
+#else
+    constexpr char PATH_SEPARATOR = ':';
+#endif
+    size_t begin = 0;
+    while(begin < pathList.size())
+    {
+        const auto end = pathList.find(PATH_SEPARATOR, begin);
+        const auto root = pathList.substr(begin, end == std::string::npos ? end : end - begin);
+        if(!root.empty())
+        {
+            roots.emplace_back(root);
+        }
+        begin = end == std::string::npos ? pathList.size() : end + 1;
+    }
+
     return roots;
 }
 

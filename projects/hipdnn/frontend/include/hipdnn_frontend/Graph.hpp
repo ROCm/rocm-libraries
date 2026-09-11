@@ -240,11 +240,11 @@ protected:
     std::vector<autotune::detail::PlanSpec> _planSpecs;
 
     int64_t _maxWorkspaceAllowed = -1; // Workspace threshold; -1 = no limit.
-        // Set by deselect_workspace_greater_than().
-        // Last-write-wins semantics.
+    // Set by deselect_workspace_greater_than().
+    // Last-write-wins semantics.
     std::unordered_set<int64_t> _barredEngineIds; // Engine ID exclusion set.
-        // Set by deselect_engines().
-        // Accumulates across calls.
+    // Set by deselect_engines().
+    // Accumulates across calls.
 
     void resetActivePlanState()
     {
@@ -1372,7 +1372,6 @@ private:
                 for(size_t specIdx = 0; specIdx < filteredSpecs.size(); ++specIdx)
                 {
                     auto& spec = filteredSpecs[specIdx];
-
                     if(!spec.supportsExhaustive)
                     {
                         HIPDNN_FE_LOG_INFO("autotune: engine "

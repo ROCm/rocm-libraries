@@ -12,14 +12,18 @@ hipDNN's UHD system. Key differences:
 from __future__ import annotations
 
 import logging
-import math
 from typing import TYPE_CHECKING
 
 import lightgbm as lgb
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
-from .features import encode_feature_value
+from .features import (
+    derive_categorical_encoding,
+    encode_feature_value,
+    evaluate_feature_rows,
+    feature_reference,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -41,24 +45,20 @@ _DEFAULT_PARAMS = {
 }
 
 
-def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
-    """Turn the raw benchmark-log columns into the float matrix LightGBM trains on.
-
-    The log carries raw values: a string field such as `kernel.dtype` arrives as the
-    string `"fp16"`, not a number. This is the training side of RFC 0019 §6.5 -- every
-    string-valued column is encoded through the fixed table in features.py, which is
-    the same table the C++ runtime reads, so a split threshold learned here means the
-    same data type when the runtime recomputes the feature.
-
-    Applied unconditionally, with nothing for the caller to select. The mapping is
-    global and fixed, so a switch could only ever produce a model whose numbers
-    disagree with what the runtime will compute.
-
-    An unencodable value raises. Dropping the column, coercing it, or handing the
-    string to LightGBM as a pandas `category` would each yield a model that trains and
-    saves and then cannot be reproduced at inference -- the runtime throws on exactly
-    this string, so training has to as well.
-    """
+def build_feature_matrix(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+    *,
+    signature: list | None = None,
+    feature_evaluator: str | None = None,
+) -> np.ndarray:
+    """Project raw columns or batch inline expressions through the shared runtime."""
+    if signature is not None:
+        if any(isinstance(entry, dict) for entry in signature):
+            _, values = evaluate_feature_rows(df, signature, categorical_encoding, feature_evaluator)
+            return np.asarray(values, dtype=np.float64)
+        feature_cols = [entry[1:] for entry in signature]
     if not feature_cols:
         raise ValueError("no feature columns; there is nothing to train on")
 
@@ -72,70 +72,33 @@ def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarra
         # §6.5 rules out.
         if getattr(series.dtype, "kind", "O") in "biuf":
             columns.append(series.to_numpy(dtype=np.float64))
+            if not np.isfinite(columns[-1]).all():
+                raise ValueError(f"feature column {name!r} contains non-finite values")
             continue
 
-        reference = f"${name}"
+        reference = feature_reference(name)
+        codes = categorical_encoding.get(reference) if categorical_encoding else None
         encoded = np.empty(len(series), dtype=np.float64)
         for row, raw in enumerate(series):
             try:
-                encoded[row] = encode_feature_value(reference, raw)
+                if codes is not None and isinstance(raw, str):
+                    code = codes.get(raw)
+                    if code is None:
+                        raise ValueError(
+                            f"categorical value {raw!r} is not in the encoding for "
+                            f"{reference}, whose vocabulary is {sorted(codes)}. The "
+                            "encoding is derived from the training corpus and ships "
+                            "with the model, so a value outside it has no number here "
+                            "and none at inference either."
+                        )
+                    encoded[row] = float(code)
+                else:
+                    encoded[row] = encode_feature_value(reference, raw)
             except (TypeError, ValueError) as error:
                 raise ValueError(f"feature column {name!r}, row {row}: {error}") from error
         columns.append(encoded)
 
     return np.column_stack(columns)
-
-
-def _python_scalar(value):
-    """A pandas/numpy cell as a plain Python scalar.
-
-    The values reported here are also written into train_manifest.json. `np.int64` and
-    friends are not JSON-serialisable, so leaving them boxed would raise TypeError at
-    the manifest write -- after training has already spent its minutes -- and lose the
-    run. Non-finite floats become null for the same reason: `json.dump` would emit the
-    Python-only `NaN` literal, which no other JSON reader accepts.
-    """
-    item = value.item() if hasattr(value, "item") else value
-    if isinstance(item, float) and not math.isfinite(item):
-        return None
-    return item
-
-
-def find_constant_feature_columns(
-    df: pd.DataFrame, feature_cols: list[str]
-) -> list[tuple[str, object]]:
-    """The requested feature columns that never vary, paired with their one value.
-
-    A column with a single value across the corpus cannot separate one candidate from
-    another: every tree split on it would be degenerate. Carrying it anyway bloats
-    features_signature, changes features_hash, and buys a feature extraction per
-    candidate score at runtime (RFC 0019 §7.2) for no ranking signal at all.
-
-    Detection only. What to do about it is a policy question this cannot answer: a
-    column is constant either *by construction* -- the kernel matcher pinned it, as
-    rocKE's attention kernels pin 8 of their 14 fields, and it can never vary among the
-    candidates the model will rank -- or because the *corpus* is thin, in which case the
-    column does vary in the world and dropping it yields a model that cannot generalise.
-    A CSV cannot tell the two apart, so the caller decides (see --keep-constant-features
-    in __main__.py) and this function refuses to guess.
-
-    Returned in the caller's requested order so messages and the manifest read the way
-    the --features list was typed.
-    """
-    if df.empty:
-        # No rows observed, so no column has been seen to vary or not. Reporting all of
-        # them constant here would turn an empty corpus into a misleading "your features
-        # are useless" report instead of the empty-corpus failure it actually is.
-        return []
-
-    constants = []
-    for name in feature_cols:
-        series = df[name]
-        # dropna=False: a column of all-NaN is constant too, and a column of one value
-        # plus NaN genuinely varies -- the runtime would see two different cells.
-        if series.nunique(dropna=False) <= 1:
-            constants.append((name, _python_scalar(series.iloc[0])))
-    return constants
 
 
 def train_model(
@@ -147,6 +110,8 @@ def train_model(
     num_boost_round: int = 500,
     early_stopping_rounds: int = 50,
     n_splits: int = 5,
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+    feature_matrix: np.ndarray | None = None,
 ) -> lgb.Booster:
     """Train LightGBM regressor on log1p(target).
 
@@ -163,17 +128,24 @@ def train_model(
         num_boost_round: Maximum number of boosting rounds.
         early_stopping_rounds: Early stopping patience.
         n_splits: Number of cross-validation folds.
+        categorical_encoding: The `$reference` -> value -> code map to encode string
+            columns with, as derived from this corpus by
+            features.derive_categorical_encoding. This is the map the model is fitted
+            with, so it is the map the descriptor must ship.
 
     Returns:
         Trained LightGBM Booster.
     """
-    X = build_feature_matrix(df, feature_cols)
-    y = np.log1p(df[target_col].values)
+    X = build_feature_matrix(df, feature_cols, categorical_encoding) if feature_matrix is None else feature_matrix
+    target = df[target_col].to_numpy(dtype=np.float64)
+    if not np.isfinite(target).all() or (target < 0).any():
+        raise ValueError(f"target {target_col!r} must contain finite nonnegative values")
+    y = np.log1p(target)
 
     if params is None:
         params = dict(_DEFAULT_PARAMS)
 
-    train_data = lgb.Dataset(X, label=y, feature_name=feature_cols)
+    train_data = lgb.Dataset(X, label=y, feature_name=[f"f{index}" for index in range(X.shape[1])])
 
     # `folds` takes precomputed splits; a plain split count goes in `nfold`. Passing
     # the integer as `folds` raises AttributeError inside lgb.cv, which made the
@@ -293,6 +265,9 @@ def evaluate_regret(
     params: dict | None = None,
     num_boost_round: int = 500,
     n_splits: int = 5,
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+    feature_matrix: np.ndarray | None = None,
+    objective: str = "max",
 ) -> dict:
     """Out-of-fold top-1 regret of the ranking this regressor induces.
 
@@ -312,8 +287,15 @@ def evaluate_regret(
         params = dict(_DEFAULT_PARAMS)
 
     # Encoded, as train_model fits it. Raw values measure a different model, and for a
-    # string feature measure nothing: LightGBM rejects the column.
-    features = build_feature_matrix(df, feature_cols)
+    # string feature measure nothing: LightGBM rejects the column. Regret is measured
+    # over the corpus it is fitted on and publishes no descriptor, so when the caller
+    # passes no encoding the corpus's own map is exactly the one training would ship.
+    if feature_matrix is not None:
+        features = feature_matrix
+    else:
+        if categorical_encoding is None:
+            categorical_encoding = derive_categorical_encoding(df, feature_cols)
+        features = build_feature_matrix(df, feature_cols, categorical_encoding)
     measured = df[target_col].values
     groups = _problem_groups(df, problem_cols)
 
@@ -336,7 +318,7 @@ def evaluate_regret(
             lgb.Dataset(
                 features[train_idx],
                 label=np.log1p(measured[train_idx]),
-                feature_name=feature_cols,
+                feature_name=[f"f{index}" for index in range(features.shape[1])],
             ),
             num_boost_round=num_boost_round,
         )
@@ -351,7 +333,14 @@ def evaluate_regret(
         if int(np.count_nonzero(rows)) < 2:
             single_variant += 1
             continue
-        regret, hit = induced_ranking_regret(measured[rows], out_of_fold[rows])
+        if objective == "min":
+            values = measured[rows]
+            chosen = values[int(np.argmin(out_of_fold[rows]))]
+            best = float(np.min(values))
+            regret = (chosen - best) / best if best > 0 else float("nan")
+            hit = bool(np.isclose(chosen, best))
+        else:
+            regret, hit = induced_ranking_regret(measured[rows], out_of_fold[rows])
         if np.isnan(regret):
             unusable += 1
             continue

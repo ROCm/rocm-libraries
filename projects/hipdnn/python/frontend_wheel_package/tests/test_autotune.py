@@ -90,6 +90,13 @@ def test_autotune_enums():
     assert hipdnn.PrimingFailurePolicy.BENCHMARK_UNPRIMED.name == "BENCHMARK_UNPRIMED"
 
 
+def test_prediction_heuristic_modes_are_distinct():
+    """Python can request either prediction policy without aliasing fallback."""
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.B
+    assert hipdnn.HeuristicMode.A != hipdnn.HeuristicMode.FALLBACK
+    assert hipdnn.HeuristicMode.B != hipdnn.HeuristicMode.FALLBACK
+
+
 def test_autotune_cache_write_outcome_enum():
     """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
     names = {
@@ -492,18 +499,6 @@ def test_manual_plan_index_tuning_loop():
     with pytest.raises(RuntimeError):
         graph.get_plan_name_at_index(count)
     assert buffers  # keep device allocations alive across the call
-
-
-def test_create_execution_plan_ext_takes_knob_settings():
-    """create_execution_plan_ext() accepts optional knob overrides from Python."""
-    graph = hipdnn.Graph()
-
-    # No graph is built, so both forms fail -- what matters is that the knob
-    # settings argument exists and accepts KnobSetting objects.
-    assert graph.create_execution_plan_ext(0).is_bad()
-    error = graph.create_execution_plan_ext(0, [hipdnn.KnobSetting("tile.size", 64)])
-    assert error.is_bad()
-    assert error.get_message()
 
 
 class _NullHandle:

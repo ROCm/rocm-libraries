@@ -7,23 +7,27 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/ScoreTransform.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/UhdConfig.hpp>
 
 /// @file UhdKernelHeuristic.hpp
 /// @brief Ranks an engine's kernels with a trained UHD (RFC 0019 §5).
@@ -63,15 +67,32 @@ inline std::optional<uhd::VariableContext::ValueType> toValueType(const Metadata
 inline uhd::FeatureExtractionContext::ValueMap
     deviceVarsFrom(const DeviceProperties& deviceProperties)
 {
-    // `cu_count` and `multi_processor_count` name the same quantity; both spellings are
-    // bound so a signature authored against either resolves.
-    //
-    // `arch` is deliberately absent. It selects which UHD runs (RFC 0019 §3.1) and is
-    // passed separately to isTrainedForArch(); admitting it as a feature would let a model
-    // split on the architecture it was chosen for.
-    return {{"cu_count", static_cast<int64_t>(deviceProperties.multiProcessorCount)},
-            {"multi_processor_count", static_cast<int64_t>(deviceProperties.multiProcessorCount)},
-            {"warp_size", static_cast<int64_t>(deviceProperties.warpSize)}};
+    // Through deviceFeatureValues, never a second list: the benchmark recorder writes
+    // the same names as `device.*` columns, and a vocabulary maintained twice drifts
+    // into a model trained on a column the runtime cannot bind.
+    uhd::FeatureExtractionContext::ValueMap vars;
+    for(const auto& entry : deviceFeatureValues(deviceProperties))
+    {
+        // entry.first, not a captured structured binding: those are C++20.
+        std::visit([&vars, &entry](auto held) { vars.emplace(entry.first, held); }, entry.second);
+    }
+    return vars;
+}
+inline void appendFeatureValue(uhd::FeatureExtractionContext::ValueMap& vars,
+                               const std::string& name,
+                               const MetadataValue& value)
+{
+    if(const auto* array = std::get_if<std::vector<int64_t>>(&value))
+    {
+        for(size_t i = 0; i < array->size(); ++i)
+        {
+            vars.emplace(name + "[" + std::to_string(i) + "]", (*array)[i]);
+        }
+    }
+    else if(auto scalar = toValueType(value))
+    {
+        vars.insert_or_assign(name, std::move(*scalar));
+    }
 }
 
 inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& bound)
@@ -79,10 +100,7 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
     uhd::FeatureExtractionContext::ValueMap vars;
     for(const auto& [name, value] : bound)
     {
-        if(auto converted = toValueType(value))
-        {
-            vars.emplace(name, std::move(*converted));
-        }
+        appendFeatureValue(vars, name, value);
     }
     return vars;
 }
@@ -92,10 +110,7 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
     uhd::FeatureExtractionContext::ValueMap vars;
     for(const auto& [name, value] : kernel.metadata)
     {
-        if(auto converted = toValueType(value))
-        {
-            vars.emplace(name, std::move(*converted));
-        }
+        appendFeatureValue(vars, name, value);
     }
     vars.emplace("priority", kernel.priority);
 
@@ -104,46 +119,32 @@ inline uhd::FeatureExtractionContext::ValueMap kernelVarsFrom(const KernelDefini
     return vars;
 }
 
-
 } // namespace detail
 
 /// @brief Ranks a catalog with the model a MODEL heuristic descriptor names.
 ///
 /// @brief The `$kernel.*` axes a feature signature actually reads.
 ///
-/// RFC 0019 §6.3 check 2 requires `F == set(UED.knobs)`, where F is this set: the knobs an
-/// engine exposes must be exactly the axes its model ranks on. Both directions matter and both
-/// fail silently. A knob the model does not read is a dial the caller can turn while the
-/// heuristic ignores it; an axis with no knob is a model ranking on something the API never
-/// lets anyone vary.
-inline std::unordered_set<std::string> kernelAxesOf(const std::vector<std::string>& signature)
+/// RFC 0019 §6.3 check 2 requires `F ⊆ set(UED.knobs)`, where F is this set. The two
+/// directions are not symmetric, and the RFC originally asked for equality on the
+/// assumption that the generation tool derives the knob list *from* the trained feature
+/// set -- which would make a constant knob vanish from the UED the moment training
+/// dropped it as unsplittable.
+///
+/// It cannot: `UED.knobs` is the engine's public knob surface, read by its UMDs and by
+/// callers who tune, so a training run must not reshape it. A model that ignores a knob
+/// is a dial the heuristic does not read -- worth a warning, and normal for a knob whose
+/// column carried one value. A model ranking on an axis the UED never exposed is still a
+/// load error: the caller cannot vary what selection depends on.
+inline std::unordered_set<std::string> kernelAxesOf(const uhd::FeatureExtractor& extractor)
 {
     std::unordered_set<std::string> axes;
-    for(const auto& entry : signature)
+    for(const auto& variable : extractor.getVariableRefs())
     {
-        // Through FeatureExtractor's own parse, not a second one. RFC 0019 §7.2 allows a
-        // bare reference (`$kernel.block_size`) as well as a JsonLogic expression, and a
-        // bare reference is not valid JSON -- so parsing entries directly threw on every
-        // one of them, the catch below swallowed it, and the axis set came back empty.
-        // The §6.3 comparison then read "exposes [block_size], model ranks on <none>" and
-        // refused every bare-reference signature ever trained.
-        try
+        constexpr std::string_view PREFIX = "$kernel.";
+        if(variable.rfind(PREFIX, 0) == 0)
         {
-            for(const auto& variable : uhd::JsonLogicEvaluator::extractVariables(
-                    uhd::FeatureExtractor::parseSignatureEntry(entry)))
-            {
-                constexpr std::string_view PREFIX = "$kernel.";
-                if(variable.rfind(PREFIX, 0) == 0)
-                {
-                    axes.insert(variable.substr(PREFIX.size()));
-                }
-            }
-        }
-        catch(const std::exception&)
-        {
-            // A signature entry that will not parse is already a broken contract; the load
-            // below reports it. Skipping here keeps this helper from being the messenger.
-            continue;
+            axes.insert(variable.substr(PREFIX.size()));
         }
     }
     return axes;
@@ -173,21 +174,31 @@ public:
     static std::shared_ptr<UhdKernelHeuristic>
         makeArchResolver(const std::map<std::string, HeuristicDescriptor>& byArch,
                          const std::string& describedBy,
-                         const std::vector<std::string>& knobs)
+                         const std::vector<std::string>& knobs,
+                         const std::set<std::string>& unavailableArches = {})
     {
         auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
         built->_byArch = byArch;
         built->_knobs = knobs;
+        built->_unavailableArches = unavailableArches;
+        if(const auto fallback = byArch.find("default"); fallback != byArch.end())
+        {
+            built->_config = configFrom(fallback->second);
+        }
         return built;
     }
 
-    static std::shared_ptr<UhdKernelHeuristic> tryCreate(const HeuristicDescriptor& descriptor,
-                                                         const std::string& describedBy,
-                                                         const std::vector<std::string>& knobs = {},
-                                                         const std::map<std::string,
-                                                                        HeuristicDescriptor>&
-                                                             byArch = {})
+    static std::shared_ptr<UhdKernelHeuristic>
+        tryCreate(const HeuristicDescriptor& descriptor,
+                  const std::string& describedBy,
+                  const std::vector<std::string>& knobs = {},
+                  const std::map<std::string, HeuristicDescriptor>& byArch = {})
     {
+        // RFC 0019 §9.4's first component: "descriptor load and model parse". Timed from
+        // the top of the build so it covers configFrom, the extractor's signature
+        // compilation and the adapter's artifact read -- everything paid once per
+        // architecture before a single candidate is scored.
+        const auto loadStart = Clock::now();
         try
         {
             // The descriptor IS the UHD -- no second file to open, so nothing here can
@@ -195,29 +206,83 @@ public:
             // fields, which made the descriptor unreadable to save 134 bytes on a file
             // read once per engine.
             auto config = configFrom(descriptor);
-
-            // RFC 0019 §6.3 check 2: the exposed knobs *are* the model's feature axes.
-            // Returning nullptr degrades to declared order, which is what §5 step 7 asks for
-            // on a broken feature contract -- the model's inputs are not the ones it was
-            // trained on, so its scores would be wrong.
-            const auto axes = kernelAxesOf(config.featuresSignature);
-            const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
-            if(axes != exposed)
+            if(descriptor.adapter == UhdAdapter::STATIC_ORDER
+               || (descriptor.adapter == UhdAdapter::NATIVE && config.featuresSignature.empty()))
             {
-                const auto join = [](const auto& names) {
-                    std::string text;
-                    for(const auto& name : names)
-                    {
-                        text += (text.empty() ? "" : ", ") + name;
-                    }
-                    return text.empty() ? std::string("<none>") : text;
-                };
+                auto built
+                    = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
+                built->_config = std::move(config);
+                if(descriptor.adapter == UhdAdapter::STATIC_ORDER)
+                {
+                    built->_direct = std::make_shared<UnrankedKernelHeuristic>();
+                }
+                else
+                {
+                    built->_direct = std::make_shared<NativeKernelHeuristic>(
+                        descriptor.nativeSymbol, describedBy);
+                }
+                built->_hasDefaultModel = true;
+                built->_byArch = byArch;
+                built->_knobs = knobs;
+                return built;
+            }
+
+            auto extractor = std::make_shared<const uhd::FeatureExtractor>(
+                config.featuresSignature, config.categoricalEncoding);
+            // RFC 0019 §6.3 check 2: every axis the model ranks on must be a knob the
+            // engine exposes. Returning nullptr degrades to declared order, which is what
+            // §5 step 7 asks for on a broken feature contract -- the model would be
+            // ranking on something the caller has no way to vary.
+            const auto axes = kernelAxesOf(*extractor);
+            const std::unordered_set<std::string> exposed(knobs.begin(), knobs.end());
+            const auto join = [](const auto& names) {
+                std::string text;
+                for(const auto& name : names)
+                {
+                    text += (text.empty() ? "" : ", ") + name;
+                }
+                return text.empty() ? std::string("<none>") : text;
+            };
+
+            std::vector<std::string> unexposed;
+            for(const auto& axis : axes)
+            {
+                if(exposed.count(axis) == 0)
+                {
+                    unexposed.push_back(axis);
+                }
+            }
+            if(!unexposed.empty())
+            {
+                std::sort(unexposed.begin(), unexposed.end());
                 HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describedBy << " exposes knobs [" << join(exposed)
-                            << "] but its model ranks on [" << join(axes)
-                            << "]; RFC 0019 §6.3 requires these to be the same set, so the "
-                               "model is not used and kernels rank by priority, then id");
+                    "uhd: " << describedBy << " ranks on [" << join(unexposed)
+                            << "], which its UED does not expose as knobs [" << join(exposed)
+                            << "]; RFC 0019 §6.3 requires the model's axes to be exposed, so "
+                               "the model is not used and kernels rank by priority, then id");
                 return nullptr;
+            }
+
+            // The other direction is legal and expected. A knob whose column carried one
+            // value cannot separate candidates, so training drops it from the signature --
+            // and the UED still has to declare it, because it is the engine's public knob
+            // surface and its UMDs and callers read it. Reported so an unread dial is
+            // visible, never fatal: `uhd_gen knobs` is what tells the kernel author
+            // whether to remove it, and that call is theirs.
+            std::vector<std::string> unread;
+            for(const auto& knob : exposed)
+            {
+                if(axes.count(knob) == 0)
+                {
+                    unread.push_back(knob);
+                }
+            }
+            if(!unread.empty())
+            {
+                std::sort(unread.begin(), unread.end());
+                HIPDNN_PLUGIN_LOG_WARN("uhd: " << describedBy << " exposes knobs [" << join(unread)
+                                               << "] its model does not rank on; selection "
+                                                  "ignores them");
             }
 
             auto adapter = uhd::makeUhdAdapter(config);
@@ -229,13 +294,11 @@ public:
                 return nullptr;
             }
 
-            auto extractor = std::make_shared<const uhd::FeatureExtractor>(
-                config.featuresSignature, config.derived, config.categoricalEncoding);
-
             // RFC 0019 §6.3: the signature the model was trained against must be the one
             // the extractor will produce. Both sides carry the hash; disagreeing means the
             // pair was assembled from two different training runs.
-            if(extractor->getSignatureHash() != config.featuresHash)
+            if(!config.featuresSignature.empty()
+               && extractor->getSignatureHash() != config.featuresHash)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " signature hashes disagree -- "
                                                 << "descriptor declares '" << config.featuresHash
@@ -246,6 +309,7 @@ public:
 
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
+            built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
             // Kept for RFC 0019 §8.3: the arch this was built from is whatever the loader
             // resolved (the `default` entry), and rank() re-resolves against the running
             // device the first time it sees one that these do not describe.
@@ -283,11 +347,10 @@ public:
         config.nativeSymbol = descriptor.nativeSymbol;
         config.customLibrarySymbol = descriptor.customLibrarySymbol;
         config.modelHash = descriptor.modelHash;
-
-        for(const auto& entry : descriptor.derived)
-        {
-            config.derived.emplace_back(entry.name, entry.expression);
-        }
+        config.engineName = descriptor.engineName;
+        config.role = descriptor.role;
+        config.arch = descriptor.arch;
+        config.trainedAgainst = descriptor.trainedAgainstJson;
 
         switch(descriptor.adapter)
         {
@@ -303,6 +366,9 @@ public:
         case UhdAdapter::TABLE:
             config.adapterType = "table";
             break;
+        case UhdAdapter::CUSTOM_LIBRARY:
+            config.adapterType = "custom_library";
+            break;
         // -Wswitch-default. The enum is closed and every member is handled above.
         default:
             config.adapterType = "static_order";
@@ -311,8 +377,7 @@ public:
 
         if(!descriptor.modelArtifactPath.empty())
         {
-            config.modelArtifactPath
-                = (descriptor.baseDir / descriptor.modelArtifactPath).string();
+            config.modelArtifactPath = (descriptor.baseDir / descriptor.modelArtifactPath).string();
         }
         return config;
     }
@@ -324,6 +389,19 @@ public:
                  const BoundTokens& bound,
                  const KernelDefinition& kernel) const override
     {
+        if(!_byArch.empty() || !_unavailableArches.empty())
+        {
+            const auto resolved = resolveForArch(context.deviceProperties.gcnArchName);
+            return resolved ? resolved->score(context, bound, kernel) : 0.0;
+        }
+        if(_direct)
+        {
+            return _direct->score(context, bound, kernel);
+        }
+        if(!_extractor)
+        {
+            return 0.0;
+        }
         uhd::FeatureExtractionContext ctx;
         ctx.bindDeviceVars(detail::deviceVarsFrom(context.deviceProperties));
         ctx.bindQueryVars(detail::queryVarsFrom(bound));
@@ -333,13 +411,52 @@ public:
         return scoreCandidate(_extractor->extract(ctx)).reported;
     }
 
-    /// Whatever the UHD declared. §15.1 already refused the one combination that would make
-    /// this incoherent -- calibrated together with a descending objective -- so a calibrated
-    /// score reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine
-    /// comparison to be given.
-    bool scoreIsCalibrated() const override
+    /// @brief Scores the matching architecture in physical TFLOPS, including a singleton catalog.
+    ///
+    /// The single answer to "is this engine's score comparable against another engine's". It
+    /// replaced a `scoreIsCalibrated()` accessor that read `_config.scoreCalibrated` off *this*
+    /// object: on a resolver built by makeArchResolver that config is the `default` entry's, or
+    /// nothing at all, while the ranking comes from the architecture's own model -- so the flag
+    /// answered for a descriptor that was not the one ranking, in both directions.
+    ///
+    /// RFC 0019.13 §15.1 already refused the one combination that would make a calibrated score
+    /// incoherent -- calibrated together with a descending objective -- so a calibrated score
+    /// reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine comparison to
+    /// be given.
+    std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
+                                                const MatchContext& context,
+                                                std::string& modelId) const override
     {
-        return _config.scoreCalibrated;
+        if(!_byArch.empty() || !_unavailableArches.empty())
+        {
+            const auto resolved = resolveForArch(context.deviceProperties.gcnArchName);
+            return resolved ? resolved->calibratedRanking(catalog, context, modelId)
+                            : std::vector<ScoredKernel>{};
+        }
+        if(!_hasDefaultModel || !_config.scoreCalibrated || _config.scoreUnits != "tflops"
+           || _config.objective != "max"
+           || (!_direct
+               && (!_adapter || !_extractor
+                   || !_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))))
+        {
+            return {};
+        }
+        auto ranking = rankWith(catalog, context);
+        if(_direct)
+        {
+            for(auto& candidate : ranking)
+            {
+                candidate.score
+                    = uhd::score_transform::applyInverse(candidate.score, _config.scoreTransform);
+            }
+        }
+        // Degraded rankings use zero sentinels, never available physical estimates.
+        if(ranking.empty() || !std::isfinite(ranking.front().score) || ranking.front().score <= 0.0)
+        {
+            return {};
+        }
+        modelId = _config.uhdId;
+        return ranking;
     }
 
     /// RFC 0019 §12 asks which of the three decided. The base reports "native", which is right
@@ -358,6 +475,20 @@ public:
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {
+        // An empty catalog has nothing to order and nothing to score, and saying so needs no
+        // architecture -- the one case that still short-circuits.
+        //
+        // A *sole* candidate no longer does. Its order is settled whatever it scores, but the
+        // score is RFC 0019.13 §15.2's figure of merit and `detail::asScored` stamps the 0 that
+        // §5 step 7 reserves for "no measurement" -- a claim about the model, not about how many
+        // kernels survived filtering. Stamping it for a healthy model made a one-candidate
+        // catalog indistinguishable from a degraded ranking. Resolving and scoring costs one
+        // model load per engine per architecture, cached by resolveForArch, which is what the
+        // number meaning what it says is worth.
+        if(catalog.entries.empty())
+        {
+            return {};
+        }
         // RFC 0019 §8.3: exact gcnArchName, then `default`. Resolved here rather than at
         // load because descriptor discovery is a process-wide static that runs before any
         // device exists -- and §9.2 asks for load-on-demand with a per-engine cache anyway,
@@ -366,7 +497,7 @@ public:
         {
             return forArch->rankWith(catalog, context);
         }
-        if(_hasDefaultModel)
+        if(_hasDefaultModel && _byArch.empty() && _unavailableArches.empty())
         {
             return rankWith(catalog, context);
         }
@@ -387,59 +518,57 @@ public:
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
-    /// @returns the model for @p arch when the UED named a different one for it, else
-    ///          nullptr, meaning "the model this object already holds applies".
+    /// Resolve once per authored architecture, sharing the default model across all
+    /// devices that use it. An explicitly unavailable/failed exact entry must never
+    /// turn into a successful default model selection.
     std::shared_ptr<const UhdKernelHeuristic> resolveForArch(const std::string& arch) const
     {
-        if(arch.empty() || _byArch.empty())
+        for(const auto& unavailable : _unavailableArches)
         {
-            return nullptr;
+            if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
+            {
+                return nullptr;
+            }
         }
-        if(_byArch.size() == 1 && _byArch.count("default") == 1)
-        {
-            // The only entry is the `default` one, which is what was built eagerly. Every
-            // architecture gets it, so there is nothing to look up: no lock, no cache.
-            //
-            // Keyed on the entry being `default`, not on the count. A single *arch-named*
-            // entry is not a universal model -- treating it as one is how a gfx950-only UHD
-            // came to rank every device, including the ones it says nothing about.
-            return nullptr;
-        }
-
-        const std::lock_guard<std::mutex> lock(_archMutex);
-        if(const auto cached = _archCache.find(arch); cached != _archCache.end())
-        {
-            return cached->second;
-        }
-
         const HeuristicDescriptor* chosen = nullptr;
+        std::string key;
         for(const auto& [candidate, descriptor] : _byArch)
         {
-            // archMatches, not ==: a device reports its features (`gfx942:sramecc+:xnack-`)
-            // while an authored entry carries a bare id, so equality would miss every real
-            // device.
-            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX))
+            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
+               && candidate.size() > key.size())
             {
                 chosen = &descriptor;
-                break;
+                key = candidate;
             }
         }
         if(chosen == nullptr)
         {
-            // The `default` entry is what was built eagerly, so falling back to it means
-            // using this object. Caching the null keeps the miss from re-scanning per graph.
-            _archCache.emplace(arch, nullptr);
+            if(_unavailableArches.count("default"))
+            {
+                return nullptr;
+            }
+            if(const auto fallback = _byArch.find("default"); fallback != _byArch.end())
+            {
+                chosen = &fallback->second;
+                key = "default";
+            }
+        }
+        if(chosen == nullptr)
+        {
             return nullptr;
         }
-
-        auto loaded = tryCreate(*chosen, _describedBy, _knobs);
-        if(loaded == nullptr)
+        const std::lock_guard<std::mutex> lock(_archMutex);
+        if(const auto cached = _archCache.find(key); cached != _archCache.end())
         {
-            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " names a model for '" << arch
-                                            << "' that could not be brought up; the default "
-                                               "model ranks instead");
+            return cached->second;
         }
-        _archCache.emplace(arch, loaded);
+        auto loaded = tryCreate(*chosen, _describedBy, _knobs);
+        if(!loaded)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for '" << key
+                                            << "' failed; kernels rank by declared order");
+        }
+        _archCache.emplace(key, loaded);
         return loaded;
     }
 
@@ -462,9 +591,12 @@ private:
         const KernelDefinition* entry;
     };
 
-    std::vector<ScoredKernel> rankWith(const Catalog& catalog,
-                                       const MatchContext& context) const
+    std::vector<ScoredKernel> rankWith(const Catalog& catalog, const MatchContext& context) const
     {
+        if(_direct)
+        {
+            return _direct->rankScored(catalog, context);
+        }
         try
         {
             uhd::FeatureExtractionContext ctx;
@@ -482,19 +614,35 @@ private:
 
             // RFC 0019 §6 step 2: the problem and device slots are the same for every
             // candidate, so they are evaluated once and the kernel slots overwritten.
-            const std::vector<double> sharedRow = _extractor->extractSharedRow(ctx);
+            // §9.4 asks for the two halves to be timed apart, because the prefix is paid
+            // once per graph while the tail is the O(N) term the RFC calls "the main lever
+            // on selection cost" -- one aggregate number cannot tell them apart.
+            const auto prefixStart = Clock::now();
+            auto features = _extractor->prepare(ctx);
+            _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
+            _timing.selections.fetch_add(1, std::memory_order_relaxed);
 
             std::vector<Ranked> scored;
             scored.reserve(catalog.entries.size());
+            uint64_t tailNs = 0;
+            uint64_t scoreNs = 0;
             for(const auto& entry : catalog.entries)
             {
+                const auto tailStart = Clock::now();
                 ctx.clearKernelVars();
                 ctx.bindKernelVars(detail::kernelVarsFrom(entry));
 
-                std::vector<double> row = sharedRow;
-                _extractor->extractKernelInto(ctx, row);
-                scored.push_back({scoreCandidate(row), &entry});
+                _extractor->extractKernelInto(ctx, features);
+                tailNs += elapsedNs(tailStart);
+
+                const auto scoreStart = Clock::now();
+                auto score = scoreCandidate(features.values);
+                scoreNs += elapsedNs(scoreStart);
+                scored.push_back({score, &entry});
             }
+            _timing.tailNs.fetch_add(tailNs, std::memory_order_relaxed);
+            _timing.scoreNs.fetch_add(scoreNs, std::memory_order_relaxed);
+            _timing.candidates.fetch_add(scored.size(), std::memory_order_relaxed);
 
             const auto outOfRange = static_cast<size_t>(
                 std::count_if(scored.begin(), scored.end(), [](const Ranked& candidate) {
@@ -507,19 +655,17 @@ private:
             // false both ways, so it reads as "equivalent" to every element while real scores
             // stay ordered among themselves, which violates the strict weak ordering
             // std::stable_sort requires -- undefined behaviour, not merely a wrong order.
-            std::stable_sort(scored.begin(),
-                             scored.end(),
-                             [](const auto& a, const auto& b) {
-                                 if(a.score.ordering != b.score.ordering)
-                                 {
-                                     return a.score.ordering > b.score.ordering;
-                                 }
-                                 if(a.entry->priority != b.entry->priority)
-                                 {
-                                     return a.entry->priority > b.entry->priority;
-                                 }
-                                 return a.entry->kernelId < b.entry->kernelId;
-                             });
+            std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+                if(a.score.ordering != b.score.ordering)
+                {
+                    return a.score.ordering > b.score.ordering;
+                }
+                if(a.entry->priority != b.entry->priority)
+                {
+                    return a.entry->priority > b.entry->priority;
+                }
+                return a.entry->kernelId < b.entry->kernelId;
+            });
 
             std::vector<ScoredKernel> ordered;
             ordered.reserve(scored.size());
@@ -536,8 +682,7 @@ private:
             // The whole ranking falls back, not the kernels that happened to fail. A mix
             // of model scores and sentinels is neither order, and RFC 0019 §5 asks for a
             // degraded ranking rather than a partial one.
-            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " failed while ranking: "
-                                            << e.what()
+            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " failed while ranking: " << e.what()
                                             << "; kernels rank by priority, then descriptor id");
             // RFC 0019 §12 wants the trace to say *whether the model or a fallback decided*,
             // so the degraded path is traced too. A trace that only ever appears on success
@@ -594,11 +739,34 @@ private:
                                << " winner=" << toString(scored.front().entry->kernelId)
                                << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
-                               << " uhd=" << _config.uhdId
-                               << " adapter=" << _config.adapterType
+                               << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
                                << " objective=" << _config.objective
-                               << " features_hash=" << _config.featuresHash
+                               << " features_hash=" << _config.featuresHash << " " << timingTrace()
                                << " ranked=[" << candidates.str() << "]");
+    }
+
+    /// RFC 0019 §9.4's three components, as the per-unit figures the 2x-of-native budget is
+    /// stated in: load is per architecture, prefix is per selection, and tail and score are
+    /// per candidate -- which is the only form in which a regression is attributable, since
+    /// a sum over a run conflates a bigger catalog with a slower model.
+    ///
+    /// Cumulative, so a single line is a running average rather than one noisy sample. The
+    /// `native` adapter measures through this same path (only a `native` UHD with no
+    /// features_signature bypasses it), so it remains the baseline §9.4 compares against.
+    std::string timingTrace() const
+    {
+        const auto selections = _timing.selections.load(std::memory_order_relaxed);
+        const auto candidates = _timing.candidates.load(std::memory_order_relaxed);
+        const auto per = [](uint64_t total, uint64_t count) {
+            return count == 0 ? 0 : total / count;
+        };
+        std::ostringstream out;
+        out << "load_ns=" << _timing.loadNs.load(std::memory_order_relaxed)
+            << " prefix_ns=" << per(_timing.prefixNs.load(std::memory_order_relaxed), selections)
+            << " tail_ns=" << per(_timing.tailNs.load(std::memory_order_relaxed), candidates)
+            << " score_ns=" << per(_timing.scoreNs.load(std::memory_order_relaxed), candidates)
+            << " over=" << selections << "sel/" << candidates << "cand";
+        return out.str();
     }
 
     explicit UhdKernelHeuristic(std::string describedBy)
@@ -634,7 +802,8 @@ private:
     /// one layer up -- "the engine reports an estimated throughput of 0... and loses on merit
     /// rather than by exception" -- and a per-kernel score that means the same thing should say
     /// it the same way. Nothing needs the two distinguished: §15.2's callers use the order, and
-    /// the one caller that reads the value is estimateTflops, which reports 0 for this case too.
+    /// the caller that reads the value is calibratedRanking, which withholds a ranking whose top
+    /// score is not a positive measurement -- so estimateTflops reports 0 for this case too.
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
         const double raw = _adapter->score(row);
@@ -726,18 +895,18 @@ private:
                     << " Further occurrences for this heuristic are not logged.");
     }
 
-    /// RFC 0019 §3.1's arch -> UHD map, and §9.2's per-engine cache of what has been
-    /// loaded from it. Empty when the UED named a bare id, in which case the eagerly built
-    /// model above serves every architecture.
+    /// Authored architecture entries and their lazily loaded per-engine models.
     std::map<std::string, HeuristicDescriptor> _byArch;
+    std::set<std::string> _unavailableArches;
     std::vector<std::string> _knobs;
     mutable std::mutex _archMutex;
     mutable std::map<std::string, std::shared_ptr<const UhdKernelHeuristic>> _archCache;
 
     uhd::UhdConfig _config;
+    std::shared_ptr<const IKernelHeuristic> _direct;
     std::shared_ptr<const uhd::IUhdAdapter> _adapter;
     std::shared_ptr<const uhd::FeatureExtractor> _extractor;
-    double _objectiveSign;
+    double _objectiveSign = 1.0;
 
     /// Set the first time an out-of-range score is reported. Mutable and atomic because
     /// ranking runs through a shared_ptr<const> from any thread.
@@ -746,12 +915,42 @@ private:
     /// Set the first time an architecture resolves to no model at all.
     mutable std::atomic<bool> _reportedNoModelForArch{false};
 
-    /// The most recent offending pair, carried to the report so it names a concrete value.
-    /// Racy under concurrent ranking, which is acceptable: it is diagnostic detail on a message
-    /// that fires once, and any offending pair illustrates the condition as well as another.
-    mutable double _lastOutOfRangeRaw = 0.0;
-    mutable double _lastOutOfRangeRecovered = 0.0;
+    /// Atomic diagnostic samples avoid data races between concurrent selections.
+    mutable std::atomic<double> _lastOutOfRangeRaw{0.0};
+    mutable std::atomic<double> _lastOutOfRangeRecovered{0.0};
     std::string _describedBy;
+
+    /// steady_clock, not system_clock: these are durations, and a wall-clock adjustment
+    /// mid-selection must not show up as negative feature-extraction time.
+    using Clock = std::chrono::steady_clock;
+
+    static uint64_t elapsedNs(const Clock::time_point& start)
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+    }
+
+    /// RFC 0019 §9.4: "The components should be **wall-clocked separately** -- descriptor
+    /// load and model parse, feature extraction (shared prefix vs. per-candidate tail), and
+    /// scoring -- so a regression is attributable and so the cost of different adapters can
+    /// be compared directly". These are the numbers that requirement asks to exist; §12's
+    /// trace line reports them, so the `native` baseline and a `tree_data` model can be
+    /// compared on the same graph without a separate harness.
+    ///
+    /// Nanoseconds, accumulated over every selection this instance served. The counters sit
+    /// on the per-arch child that actually ranks, so each architecture's model is measured
+    /// separately rather than averaged with its siblings. Relaxed ordering throughout: these
+    /// are monotonic accumulators read for reporting, never for synchronisation.
+    struct SelectionTiming
+    {
+        std::atomic<uint64_t> loadNs{0}; ///< Model parse + adapter build, once per instance.
+        std::atomic<uint64_t> prefixNs{0}; ///< Shared problem/device slots, once per selection.
+        std::atomic<uint64_t> tailNs{0}; ///< Per-candidate `$kernel.*` slots.
+        std::atomic<uint64_t> scoreNs{0}; ///< Adapter inference plus the inverse transform.
+        std::atomic<uint64_t> selections{0}; ///< Denominator for prefixNs.
+        std::atomic<uint64_t> candidates{0}; ///< Denominator for tailNs and scoreNs.
+    };
+    mutable SelectionTiming _timing;
 
     /// False for an instance built by makeArchResolver: it carries candidates but no model of
     /// its own, so §8.3's `default` step has nothing to fall back to.

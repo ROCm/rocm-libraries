@@ -1,8 +1,9 @@
 {
-  "version": "0.1",
-  "id": "uhd-attention",
+  "version": "1.0",
+  "id": "73496340-efaa-53da-bc95-6fe91e179002",
   "name": "Attention static-order heuristic",
   "adapter": "native",
+  "objective": "max",
   "native": {
     "symbol": "hipkernel.attention.score"
   }

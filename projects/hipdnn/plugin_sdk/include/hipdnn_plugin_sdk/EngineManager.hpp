@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -103,6 +104,48 @@ public:
     {
         auto& engine = getEngine(engineId);
         engine.getDetails(handle, opGraph, engineDetailsOut);
+    }
+
+    void enumerateCandidates(THandle& handle,
+                             const IGraph& opGraph,
+                             const IEngineConfig& engineConfig,
+                             uint64_t offset,
+                             uint64_t limit,
+                             hipdnnPluginConstData_t& detailsOut)
+    {
+        if(limit == 0 || limit > 10000)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "Candidate page limit must be in [1, 10000]");
+        }
+        getEngine(engineConfig.engineId())
+            .enumerateCandidates(handle, opGraph, engineConfig, offset, limit, detailsOut);
+    }
+
+    /**
+     * @brief Dispatches a prediction or description to the requested engine.
+     * @param handle Plugin handle for the graph's device.
+     * @param opGraph Operation graph to predict.
+     * @param engineConfig Engine identity and explicit selection constraints.
+     * @param kind ENGINE never invokes CONFIGURATION as a fallback.
+     * @param evaluate False publishes binding/features without model evaluation.
+     * @return Owned prediction; unavailable models do not affect applicability.
+     */
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPrediction(THandle& handle,
+                      const IGraph& opGraph,
+                      const IEngineConfig& engineConfig,
+                      hipdnnEnginePredictionKind_t kind,
+                      bool evaluate) const
+    {
+        if(kind != HIPDNN_ENGINE_PREDICTION_ENGINE
+           && kind != HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "Unknown engine prediction kind");
+        }
+        return getEngine(engineConfig.engineId())
+            .getPrediction(handle, opGraph, engineConfig, kind, evaluate);
     }
 
     size_t getMaxWorkspaceSize(const THandle& handle,

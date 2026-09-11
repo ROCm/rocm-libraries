@@ -26,27 +26,27 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
-
 #include <nlohmann/json.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <cstdint>
 #include <string>
 #include <vector>
 
 #if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR)
-#error "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see tools/CMakeLists.txt"
+#error \
+    "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see tools/CMakeLists.txt"
 #endif
 
-namespace hipdnn_plugin_sdk::ingestor::uhd
+namespace hipdnn_plugin_sdk::uhd
 {
 namespace
 {
@@ -81,20 +81,17 @@ std::string trainingCsv()
 /// being installed, which is also how the README documents driving it.
 int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& outputDir)
 {
-    const std::string command = std::string("cd ") + HIPDNN_UHD_GEN_TOOLS_DIR + " && "
-                                + HIPDNN_UHD_GEN_PYTHON + " -m uhd_gen"
-                                + " --input " + csv.string()
-                                + " --features q.M kernel.tile_m"
-                                + " --target tflops"
-                                + " --output-dir " + outputDir.string()
-                                + " --name 'uhd_gen artifact test'"
-                                // A real run trains for hundreds of rounds; this corpus does
-                                // not need them, and the wall-clock is charged to every run.
-                                + " --num-boost-round 40 --early-stopping 10"
-                                // Diagnostics deliberately not suppressed: when this
-                                // fails, the tool's traceback is the only thing that says
-                                // why, and it lands in the test's output.
-                                + " 1>&2";
+    const std::string command
+        = std::string("cd \"") + HIPDNN_UHD_GEN_TOOLS_DIR + "\" && \"" + HIPDNN_UHD_GEN_PYTHON
+          + "\" -m uhd_gen train" + " --input \"" + csv.string() + "\""
+          + " --features q.M kernel.tile_m" + " --target tflops" + " --provenance \""
+          + (csv.parent_path() / "provenance.json").string() + "\"" + " --output-dir \""
+          + outputDir.string() + "\"" + " --name \"uhd_gen artifact test\""
+          + " --num-boost-round 40 --early-stopping 10"
+          // Diagnostics deliberately not suppressed: when this
+          // fails, the tool's traceback is the only thing that says
+          // why, and it lands in the test's output.
+          + " 1>&2";
     return std::system(command.c_str());
 }
 
@@ -108,6 +105,10 @@ protected:
 
         const auto csv = _dir->path() / "corpus.csv";
         std::ofstream(csv) << trainingCsv();
+        std::ofstream(_dir->path() / "provenance.json") << nlohmann::json{
+            {"ued", {{"id", "11000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+            {"kmd", {{"id", "12000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+            {"umd", nlohmann::json::array()}}.dump();
 
         _outputDir = _dir->path() / "out";
 
@@ -125,7 +126,7 @@ protected:
     /// The tool's descriptor, read back the way the runtime reads it: parsed by
     /// DescriptorLoader, then turned into a UhdConfig by the heuristic itself. There is no
     /// second file -- the descriptor IS the UHD -- so this is the whole load path.
-    hipdnn_plugin_sdk::ingestor::uhd::UhdConfig configFromTool() const
+    hipdnn_plugin_sdk::uhd::UhdConfig configFromTool() const
     {
         const auto path = _outputDir / "heuristic.uhd.json";
         std::ifstream file(path);
@@ -182,11 +183,11 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     const auto adapter = makeUhdAdapter(config);
     ASSERT_NE(adapter, nullptr) << "the model artifact did not load against its descriptor";
 
-    const FeatureExtractor extractor(config.featuresSignature, config.derived);
+    const FeatureExtractor extractor(config.featuresSignature, config.categoricalEncoding);
 
     const auto scoreFor = [&](int64_t tileM) {
         FeatureExtractionContext ctx;
-        ctx.bindQueryVars({{"M", int64_t{2048}}});
+        ctx.bindQueryVars({{"q.M", int64_t{2048}}});
         ctx.bindKernelVars({{"tile_m", tileM}});
         return adapter->score(extractor.extract(ctx));
     };
@@ -197,6 +198,6 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     EXPECT_GT(scoreFor(256), scoreFor(64));
 }
 
-} // namespace hipdnn_plugin_sdk::ingestor::uhd
+} // namespace hipdnn_plugin_sdk::uhd
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

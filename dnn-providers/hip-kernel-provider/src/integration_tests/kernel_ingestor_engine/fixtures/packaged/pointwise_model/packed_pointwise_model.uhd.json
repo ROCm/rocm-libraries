@@ -7,6 +7,14 @@
     "$kernel.block_size"
   ],
   "features_hash": "sha256:bc673de29ad2cc2c",
+  "trained_against": {
+    "ued": {"id": "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62", "revision": "1.0"},
+    "kmd": {"id": "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f", "revision": "1.0"},
+    "umd": [
+      {"id": "7a19c6e0-2d84-4b3f-91c7-05e6b8fa2d31", "revision": "1.0"},
+      {"id": "c3820f5b-71e6-4a49-8d10-b2f4970e6c58", "revision": "1.0"}
+    ]
+  },
   "objective": "max",
   "score": {
     "units": "tflops",

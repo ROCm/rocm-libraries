@@ -52,7 +52,11 @@ struct DeviceKey
     {
         return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
                && _properties.warpSize == other._properties.warpSize
-               && _properties.multiProcessorCount == other._properties.multiProcessorCount;
+               && _properties.multiProcessorCount == other._properties.multiProcessorCount
+               && _properties.totalGlobalMem == other._properties.totalGlobalMem
+               && _properties.memoryBusWidth == other._properties.memoryBusWidth
+               && _properties.memoryClockRate == other._properties.memoryClockRate
+               && _properties.sharedMemPerBlock == other._properties.sharedMemPerBlock;
     }
 
     bool operator!=(const DeviceKey& other) const
@@ -75,12 +79,20 @@ private:
     static uint64_t fold(const DeviceProperties& properties)
     {
         std::vector<uint8_t> stream;
-        stream.reserve(properties.gcnArchName.size() + sizeof(size_t) + 2 * sizeof(int));
+        stream.reserve(properties.gcnArchName.size() + 3 * sizeof(size_t) + 4 * sizeof(int));
 
         appendTrivial(stream, properties.gcnArchName.size());
         stream.insert(stream.end(), properties.gcnArchName.begin(), properties.gcnArchName.end());
         appendTrivial(stream, properties.warpSize);
         appendTrivial(stream, properties.multiProcessorCount);
+        // The memory fields separate boards of one arch that compute units does not --
+        // two cards can carry the same CU count and different HBM. Unhashed, they would
+        // share a winner-cache entry, and a ranking measured on one would be served to
+        // the other as if it had been measured there.
+        appendTrivial(stream, properties.totalGlobalMem);
+        appendTrivial(stream, properties.memoryBusWidth);
+        appendTrivial(stream, properties.memoryClockRate);
+        appendTrivial(stream, properties.sharedMemPerBlock);
 
         return hipdnn_data_sdk::utilities::fnv1aHash(stream.data(), stream.size());
     }
