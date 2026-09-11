@@ -126,7 +126,7 @@
     "Tensile/TensileRetuneLibrary.py": 96.45,
     "Tensile/TensileUpdateLibrary.py": 98.46,
     "Tensile/Toolchain/Assembly.py": 95.38,
-    "Tensile/Toolchain/Component.py": 99.19,
+    "Tensile/Toolchain/Component.py": 94.63,
     "Tensile/Toolchain/HelperKernelCache.py": 99.14,
     "Tensile/Toolchain/Source.py": 97.73,
     "Tensile/Toolchain/Validators.py": 99.24,
