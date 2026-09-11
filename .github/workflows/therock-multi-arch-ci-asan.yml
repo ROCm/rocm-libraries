@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+          ref: bc2e055ad632e1dcfc757914eff28e3bee8f9852
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -97,7 +97,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7860a48221aa7e856cdd46ab98b102f9338b9195
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@bc2e055ad632e1dcfc757914eff28e3bee8f9852
     with:
       build_variant: "asan"
       # Host instrumentation is architecture-independent, so presubmit builds
@@ -112,7 +112,7 @@ jobs:
       build_pytorch: false
       build_jax: false
       repository: ROCm/TheRock
-      ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+      ref: bc2e055ad632e1dcfc757914eff28e3bee8f9852
       changed_projects: ${{ needs.configure.outputs.changed_projects }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -125,7 +125,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7860a48221aa7e856cdd46ab98b102f9338b9195
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@bc2e055ad632e1dcfc757914eff28e3bee8f9852
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -139,7 +139,7 @@ jobs:
       # the explicit Phase-1 host-ASAN admission list in TheRock.
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
-      ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+      ref: bc2e055ad632e1dcfc757914eff28e3bee8f9852
     permissions:
       contents: read
       id-token: write
@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+          ref: bc2e055ad632e1dcfc757914eff28e3bee8f9852
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
