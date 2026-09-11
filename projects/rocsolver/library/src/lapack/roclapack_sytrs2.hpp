@@ -311,8 +311,6 @@ static __global__
     // this thread block will work on columns [jstart, jend)
     // -----------------------------------------------------
 
-    auto idx2D = [](auto i, auto j, auto ld) { return (i + j * static_cast<int64_t>(ld)); };
-
     auto const offsetB = idx2D(0, jstart, ldb);
 
     // -------------------------------------------
@@ -503,11 +501,6 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
                                         Istride const strideP,
                                         I const batch_count)
 {
-    if((n == 0) || (nrhs_arg == 0) || (batch_count == 0))
-    {
-        return rocblas_status_success;
-    }
-
     auto ceildiv = [](auto const n, auto const b) { return (n <= 0) ? 0 : (((n - 1) / b + 1)); };
 
     hipStream_t stream;
@@ -525,9 +518,13 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_upper_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
-                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
-                            strideB, ipiv_arg, strideP, batch_count);
+    bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
+    if(has_work)
+    {
+        ROCSOLVER_LAUNCH_KERNEL((apply_pivot_upper_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                                dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB,
+                                ldb, strideB, ipiv_arg, strideP, batch_count);
+    }
 
     return rocblas_status_success;
 }
@@ -758,14 +755,6 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
                                         Istride const strideP,
                                         I const batch_count)
 {
-    {
-        bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-    }
-
     auto ceildiv = [](auto const n, auto const b) { return ((n <= 0) ? 0 : ((n - 1) / b) + 1); };
 
     hipStream_t stream;
@@ -784,9 +773,13 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
     I const ny = 1;
     I const nz = 1;
 
-    ROCSOLVER_LAUNCH_KERNEL((apply_pivot_lower_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
-                            dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB, ldb,
-                            strideB, ipiv_arg, strideP, batch_count);
+    bool const has_work = (n >= 1) && (nrhs_arg >= 1) && (batch_count >= 1);
+    if(has_work)
+    {
+        ROCSOLVER_LAUNCH_KERNEL((apply_pivot_lower_kernel<T, I, UB, Istride>), dim3(nbx, nby, nbz),
+                                dim3(nx, ny, nz), 0, stream, is_forward, n, nrhs_arg, B, shiftB,
+                                ldb, strideB, ipiv_arg, strideP, batch_count);
+    }
 
     return rocblas_status_success;
 }
@@ -1143,14 +1136,6 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         return rocblas_status_success;
 
     bool const is_upper = (uplo == rocblas_fill_upper);
-    bool const is_lower = (uplo == rocblas_fill_lower);
-    {
-        bool const is_valid_uplo = is_upper || is_lower;
-        if(!is_valid_uplo)
-        {
-            return (rocblas_status_invalid_value);
-        }
-    }
 
     std::byte* const pwork = static_cast<std::byte*>(work);
     std::byte* pfree = pwork;
