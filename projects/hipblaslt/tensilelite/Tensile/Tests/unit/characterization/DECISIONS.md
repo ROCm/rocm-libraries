@@ -430,7 +430,8 @@ codes; only the content-derived basenames change.
 **Decision:** Regenerate the per-file baseline from the green post-rebase unit
 run. The update raises 16 floors, adds 14 current files, removes two entries for
 files deleted by develop, and explicitly lowers the nine reproducibly stale
-floors listed in ADR 0018. The tolerance remains 1 percentage point.
+floors listed in ADR 0018. The tolerance remains 1 percentage point. Superseded
+by D35, which corrects the reduction count and file classification.
 
 ## D32 — Config-driven saved results include emitted assembly
 
@@ -456,3 +457,12 @@ that counted code reached only before the previous code-generation exception.
 **Decision:** Include a `BenchmarkProblems` index in every set-cover case and
 pass it through the config-driven harness. This records which problem group is
 measured when a shared YAML contains more than one group.
+
+## D35 — Correct and refresh the post-mutation coverage baseline
+
+**ADR:** [`adr/0022-correct-coverage-rebaseline.md`](adr/0022-correct-coverage-rebaseline.md)
+
+**Decision:** Correct ADR 0018's accounting from nine to ten original floor
+reductions, document the omitted `Configuration.py` and `Solution.py` changes,
+and refresh the baseline after removing invalid pre-exception coverage. The
+refresh lowers three reviewed floors, raises ten, and adds two current files.
