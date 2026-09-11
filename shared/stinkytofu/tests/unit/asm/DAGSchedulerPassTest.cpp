@@ -1678,26 +1678,28 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_UsesIndependentWmmaSchedulingBudget)
            "into the active WMMA";
 }
 
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_HideBudgetPrioritizesEligibleDs) {
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_HideBudgetKeepsFreeWorkAheadOfThrottledDs) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
     createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
     StinkyInstruction* freeValu =
         createVAddInBlock(body, arch, /*destReg=*/100, /*src0Reg=*/101, /*src1Reg=*/102);
-    StinkyInstruction* budgetedDs =
+    StinkyInstruction* throttledDs =
         createMovableDsLoad(/*destReg=*/4, /*addrReg=*/304, /*ldsToken=*/2);
     createWmmaScaleF8_in(body, /*destStart=*/240, /*src0Start=*/260);
 
+    // After the first DS fills both the in-flight depth and the per-WMMA DS
+    // cap, the second DS is either capped out or throttle-gated. Hide-budget
+    // pending must not promote that DS ahead of genuinely free VALU fill.
     runPassWithDsReadThrottle(
         /*queueDepth=*/1, /*throttleLatency=*/8, /*perWmma=*/1,
         /*drainLatency=*/80, /*transitionFactor=*/0.5,
         /*transitionEntries=*/-1, /*enableWmmaHideBudgetPrescan=*/true);
 
-    EXPECT_LT(positionOf(*body, budgetedDs), positionOf(*body, freeValu))
-        << "while the cumulative WMMA hide budget is pending, an eligible DS "
-           "must take priority even when throttle pacing is active and the "
-           "per-WMMA DS cap has been reached";
+    EXPECT_LT(positionOf(*body, freeValu), positionOf(*body, throttledDs))
+        << "while the cumulative WMMA hide budget is pending, free VALU still "
+           "outranks a DS blocked by throttle pacing / the per-WMMA DS cap";
 }
 
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_BudgetedDsBeatsRealStallWhenNoFreeWork) {

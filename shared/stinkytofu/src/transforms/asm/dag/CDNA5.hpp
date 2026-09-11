@@ -1357,8 +1357,8 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatency(hw, matchingDsLoadCount,
-//            targetDSLoadLatency, numWaves).
+//            (> 0), else computeDynamicDrainLatency(hw, targetDSLoadKind,
+//            matchingDsLoadCount, targetDSLoadLatency, numWaves).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1431,8 +1431,8 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         const int latencyForAfterThreshold =
             configuredDrainLatency > 0
                 ? configuredDrainLatency
-                : computeDynamicDrainLatency(hw_, matchingDsLoadCount, (int)targetDSLoadLatency,
-                                             numWaves);
+                : computeDynamicDrainLatency(hw_, getDsReadKind(*targetDSLoad), matchingDsLoadCount,
+                                             (int)targetDSLoadLatency, numWaves);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
