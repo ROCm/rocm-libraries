@@ -2429,10 +2429,21 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
       exe_path = shutil.which(exe)
       if exe_path:
         candidate_root = Path(exe_path).parent.parent
-        version_file = candidate_root / ".info" / "version"
+        # Standard ROCm install layout: .info/version
         try:
-          version_str = version_file.read_text().strip()
+          version_str = (candidate_root / ".info" / "version").read_text().strip()
           break
+        except OSError:
+          pass
+        # TheRock component dist layout: include/hip/hip_version.h
+        try:
+          hip_ver_h = (candidate_root / "include" / "hip" / "hip_version.h").read_text()
+          maj = re.search(r'#define\s+HIP_VERSION_MAJOR\s+(\d+)', hip_ver_h)
+          min_ = re.search(r'#define\s+HIP_VERSION_MINOR\s+(\d+)', hip_ver_h)
+          pat = re.search(r'#define\s+HIP_VERSION_PATCH\s+(\d+)', hip_ver_h)
+          if maj and min_ and pat:
+            version_str = f"{maj.group(1)}.{min_.group(1)}.{pat.group(1)}"
+            break
         except OSError:
           continue
   if version_str:
