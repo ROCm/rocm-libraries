@@ -1,0 +1,34 @@
+# SwizzleB MXFP4 performance set for gfx950 (MI355X), 12 shapes.
+#
+# These are the shapes the Equality tuning file
+#   library/.../Logic/asm_full/gfx950/gfx950/Equality/
+#     gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_STB_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml
+# is tuned for.  Run with:
+#
+#   HIP_VISIBLE_DEVICES=<gpu> hipblaslt-bench --yaml mxfp4_swizzleb_dtl_gfx950.yaml
+#
+# Pin a single GPU: on a multi-GPU node other users' work perturbs the timings.
+# HIP_VISIBLE_DEVICES remaps the chosen device to logical 0, which is why every
+# entry below uses `device: 0`.
+#
+# iters is sized per shape so each entry runs for a comparable wall time, and
+# cold_iters matches iters so the rotating buffer is fully cycled before timing.
+# rotating: 512 plus flush: true keeps every iteration reading cold data, so the
+# numbers reflect HBM-resident operands rather than an L2-warm best case.
+# Dropping either one inflates the small-K shapes.
+#
+# Expected: ~4.4 PFLOP/s geomean across the 12 shapes on MI355X.  Per-shape
+# TFLOP/s is printed in the `hipblaslt-Gflops` column; print_kernel_info also
+# reports the selected solution index so a tuning miss is visible.
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  6144, K:  4096, iters: 3107, cold_iters: 3107}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  4096, K:  4096, iters: 3107, cold_iters: 3107}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N: 28672, K:  4096, iters:  457, cold_iters:  457}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  4096, K: 14336, iters: 1183, cold_iters: 1183}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  4096, K:  6144, iters: 2133, cold_iters: 2133}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M:  6144, N:  4096, K: 32768, iters: 3107, cold_iters: 3107}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  4096, K:  4096, iters:  457, cold_iters:  457}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M:  4096, N:  4096, K: 32768, iters: 1183, cold_iters: 1183}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N:  4096, K: 28672, iters: 2133, cold_iters: 2133}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 28672, N:  4096, K: 32768, iters: 3107, cold_iters: 3107}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 32768, N: 14336, K:  4096, iters:  457, cold_iters:  457}
+- {function: matmul, transA: T, transB: N, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, initialization: trig_float, alpha: 1.0, beta: 0.0, scaleA: 1001, scaleB: 1001, scale_type: f32_r, compute_type: c_f32_r, batch_count: 1, swizzle_b: true, device: 0, flush: true, rotating: 512, use_gpu_timer: true, print_kernel_info: true, M: 14336, N:  4096, K: 32768, iters: 1183, cold_iters: 1183}
