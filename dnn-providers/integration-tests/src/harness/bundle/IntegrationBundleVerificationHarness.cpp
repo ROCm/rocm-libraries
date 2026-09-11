@@ -10,6 +10,7 @@
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -21,7 +22,9 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
+#include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
@@ -45,11 +48,13 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
     if(auto reason = checkVramRequirement(_bundle->metadata, _deps.policy.deviceVramMb))
     {
+        noteSkipBeforeObservation();
         GTEST_SKIP() << *reason;
     }
 
     if(auto reason = checkArchCompatibility(_bundle->metadata, _deps.policy.arch))
     {
+        noteSkipBeforeObservation();
         GTEST_SKIP() << *reason;
     }
 }
@@ -64,7 +69,7 @@ SupportObservation
         return {};
     }
 
-    if(!session.buildError.empty())
+    if(session.buildFailed)
     {
         // Silent on purpose: runComparison() reports this same build failure as the
         // test's outcome, and one fault deserves one message. NOT_QUERIED rather
@@ -202,12 +207,67 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
+std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
+    const GraphSession& session, const std::vector<LoadedEngine>& engines)
+{
+    if(session.buildFailed)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
+                                                                             << session.buildError);
+        return {};
+    }
+
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for "
+                               << _bundlePath << ": " << session.engines.status.get_message());
+        return {};
+    }
+
+    const std::string arch = baseArchToken(_deps.policy.arch);
+    const auto& rankedIds = session.engines.rankedIds;
+
+    auto observe = [&](const LoadedEngine& engine) {
+        const bool engineIsSupported
+            = std::find(rankedIds.begin(), rankedIds.end(), engine.id) != rankedIds.end();
+        return ObservedGraphSupport{
+            _claimLocator, engine.name, arch, _deps.policy.platform, engineIsSupported};
+    };
+
+    std::vector<ObservedGraphSupport> observations;
+
+    if(_engineUnderTest)
+    {
+        // --test-engine was given: observe only that engine.
+        observations.push_back(observe(*_engineUnderTest));
+    }
+    else
+    {
+        // No --test-engine: observe every loaded engine plugin.
+        observations.reserve(engines.size());
+        for(const auto& engine : engines)
+        {
+            observations.push_back(observe(engine));
+        }
+    }
+
+    return observations;
+}
+
+void IntegrationBundleVerificationHarness::observeAndRecordSupport(const GraphSession& session)
+{
+    // Handed over whole, empty result included -- the early returns above leave a
+    // graph this run cannot refresh, and the log counts those for the summary.
+    SupportObservationLog::get().recordGraph(
+        observeSupportOnly(session, LoadedEngineTable::get().all()));
+}
+
 VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSession& session)
 {
     // A graph that would not load is the engine's problem, at every level, and it is
     // the reason nothing below can run. Checked once, here, so the rungs and the
     // modes can all assume a usable session.
-    if(!session.buildError.empty())
+    if(session.buildFailed)
     {
         return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
                                            FailureOrigin::ENGINE,

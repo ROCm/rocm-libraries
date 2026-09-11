@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
+# The GPU hipconv offloads to when a build names none that hipconv serves.
+#
+# gfx942 is cdna3's target, and cdna3 has no kernels of its own, so every other
+# architecture's entry guards discard their bodies on it. docs/architecture-guards.md says
+# why the stand-in must be a GPU hipconv declares.
+set(HIPCONV_BASELINE_GPU gfx942)
+
 # Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
 #
 # Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
@@ -20,13 +27,13 @@ if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     if(_hipconv_gpus)
         set(CMAKE_HIP_ARCHITECTURES "${_hipconv_gpus}")
     else()
-        # gfx942 is hipconv's cdna3 target, which declares no kernels of its own, so it
-        # is the cheapest stand-in. Detecting the build machine's devices instead would
-        # compile kernels for GPUs this build was never asked to serve.
+        # Detecting the build machine's devices instead would compile kernels for GPUs
+        # this build was never asked to serve.
         message(WARNING
-            "hipconv: no GPU_TARGETS entry is an offload target; building for gfx942. "
+            "hipconv: no GPU_TARGETS entry is an offload target; building for "
+            "${HIPCONV_BASELINE_GPU}. "
             "Set CMAKE_HIP_ARCHITECTURES to name the GPUs hipconv should serve.")
-        set(CMAKE_HIP_ARCHITECTURES gfx942)
+        set(CMAKE_HIP_ARCHITECTURES ${HIPCONV_BASELINE_GPU})
     endif()
 endif()
 
@@ -101,6 +108,7 @@ endforeach()
 if(NOT _arch_targets)
     message(FATAL_ERROR "hipconv: no architectures found under src/arch")
 endif()
+hipconv_set_stand_in_offload("${_arch_targets}")
 
 # ---- hipconv static library ----
 set(_arch_registry "src/arch_registry.cpp")
