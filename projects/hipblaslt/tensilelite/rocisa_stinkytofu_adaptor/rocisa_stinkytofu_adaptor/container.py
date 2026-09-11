@@ -1327,14 +1327,27 @@ class HWRegContainer(Container):
 class MemTokenData(Container):
     """Memory-token list carried on fence/barrier instructions.
 
-    Constructor: ``MemTokenData(tokens=[])``. ``tokens`` is a mutable
-    list of ints (mirrors C++ ``std::vector<int>``).
+    Constructor: ``MemTokenData(tokens=[], warTokens=[], warDistance=0)``.
+    ``tokens`` and ``warTokens`` are mutable lists of ints (mirrors C++
+    ``std::vector<int>``).
+
+    ``warTokens``/``warDistance`` describe a loop-carried write-after-read this
+    instruction guards: the tags the aliasing reads carried ``warDistance`` trips
+    ago. They differ from ``tokens`` because a memtoken names a physical buffer
+    only for the trip it was emitted from. Zero distance means no such relation.
     """
 
-    __slots__ = ("tokens",)
+    __slots__ = ("tokens", "warTokens", "warDistance")
 
-    def __init__(self, tokens: Optional[List[int]] = None) -> None:
+    def __init__(
+        self,
+        tokens: Optional[List[int]] = None,
+        warTokens: Optional[List[int]] = None,
+        warDistance: int = 0,
+    ) -> None:
         self.tokens: List[int] = list(tokens) if tokens is not None else []
+        self.warTokens: List[int] = list(warTokens) if warTokens is not None else []
+        self.warDistance: int = warDistance
 
     def toString(self) -> str:
         result = "mem_token:"
@@ -1342,6 +1355,12 @@ class MemTokenData(Container):
             if i > 0:
                 result += ","
             result += f" {tok}"
+        if self.warDistance > 0:
+            result += f" war(d={self.warDistance}):"
+            for i, tok in enumerate(self.warTokens):
+                if i > 0:
+                    result += ","
+                result += f" {tok}"
         return result
 
     def __repr__(self) -> str:

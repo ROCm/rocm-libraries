@@ -1480,15 +1480,29 @@ namespace rocisa
     {
         std::vector<int> tokens;
 
-        MemTokenData(const std::vector<int>& tokens = {})
+        // A loop-carried write-after-read this instruction guards: `warTokens` are
+        // the tags the aliasing reads carried `warDistance` trips ago, which differ
+        // from `tokens` because a memtoken names a physical buffer only for the trip
+        // it was emitted from. Zero distance means no such relation, i.e. any kernel
+        // whose tokens do not rotate. Lowered to StinkyTofu's LoopCarriedWarData.
+        std::vector<int> warTokens;
+        int              warDistance = 0;
+
+        MemTokenData(const std::vector<int>& tokens      = {},
+                     const std::vector<int>& warTokens   = {},
+                     int                     warDistance = 0)
             : Container()
             , tokens(tokens)
+            , warTokens(warTokens)
+            , warDistance(warDistance)
         {
         }
 
         MemTokenData(const MemTokenData& other)
             : Container()
             , tokens(other.tokens)
+            , warTokens(other.warTokens)
+            , warDistance(other.warDistance)
         {
         }
 
@@ -1505,6 +1519,16 @@ namespace rocisa
                 if(i > 0)
                     result += ",";
                 result += " " + std::to_string(tokens[i]);
+            }
+            if(warDistance > 0)
+            {
+                result += " war(d=" + std::to_string(warDistance) + "):";
+                for(size_t i = 0; i < warTokens.size(); ++i)
+                {
+                    if(i > 0)
+                        result += ",";
+                    result += " " + std::to_string(warTokens[i]);
+                }
             }
             return result;
         }

@@ -119,6 +119,12 @@ struct PerPredQueue {
     std::deque<StinkyInstruction*> ops;
     std::unordered_set<StinkyInstruction*> saturatedOps;
 
+    /// How many LEADING (oldest) entries arrived over a CFG edge rather than
+    /// being issued in this block walk, so `ops[0 .. carriedIn)` is what a
+    /// previous trip left behind. Maintained by transferBlock; walk-local, hence
+    /// deliberately absent from operator==.
+    size_t carriedIn = 0;
+
     int countFrom(StinkyInstruction* op) const;
     bool operator==(const PerPredQueue& other) const {
         return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps;

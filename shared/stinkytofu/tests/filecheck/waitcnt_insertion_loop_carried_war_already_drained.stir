@@ -1,0 +1,51 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The same annotated distance-1 WAR as
+# waitcnt_insertion_loop_carried_war_annotated.stir, in a loop that has already
+# discharged it. Both reads are consumed within the trip, so the second wmma's
+# drain is dlcnt = 0 and the DS queue is empty at the back edge. The next trip's
+# barrier therefore carries nothing in and needs no wait, even though the
+# annotation names a real hazard.
+#
+# This is the shape production TDM kernels have today, and it is why the
+# triple-buffer WAR has not shown up as a miscompile: the hazard is real but the
+# trailing full drain retires the previous trip's reads before the fill issues.
+# Change the loop so a read outlives its trip -- deeper register buffering, or
+# hoisting the fill above the last wmma -- and the drain disappears while the
+# hazard remains. That variant is the other test.
+#
+# The pass must not conjure a wait here just because the annotation is present:
+# doing so would cost a full pipeline drain per trip for a hazard that no longer
+# has an outstanding read to guard.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_war_already_drained
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# Nothing between the reads and the barrier: the annotation finds no carried-in read.
+# CHECK-NEXT: s_barrier_signal{{.*}}tokens = [2]
+# CHECK-NEXT: s_barrier_wait{{.*}}tokens = [2]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 1
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 0
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+st.func @waitcnt_insertion_loop_carried_war_already_drained() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] } }
+  # both reads consumed in-trip, so the trip ends with the DS queue empty
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  a[18:25] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[30:37], a[18:25])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -4821,10 +4821,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
              kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
+            # The barrier orders the waves; naming the loop-carried WAR also lets
+            # StinkyTofu drain this wave's own reads of the buffer about to be
+            # refilled. Those reads carry the tag one back-edge step away, since a
+            # memtoken names a physical buffer only for its own trip. No rotation
+            # means an empty map and nothing to name.
+            warToken = self._ldsTokenBackEdgeMap().get(self.states.ldsWriteTokenIdx)
             pointerLWCode.add(self._syncThreads(
               kernel,
               "Waiting current LR finish for next GR(TDM), sync LDS%d"%self.states.ldsWriteTokenIdx,
-              memoryToken=[self.states.ldsWriteTokenIdx]))
+              memoryToken=[self.states.ldsWriteTokenIdx],
+              warTokens=[] if warToken is None else [warToken],
+              warDistance=0 if warToken is None else 1))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -11069,9 +11077,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # SyncThreads
   ##############################################################################
-  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None):
+  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None,
+                   warTokens=None, warDistance=0):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken,
+                         warTokens=warTokens, warDistance=warDistance)
     return Module("SyncThreads (Empty)")
 
   def _tailLoopBarrierTokens(self, kernel):
