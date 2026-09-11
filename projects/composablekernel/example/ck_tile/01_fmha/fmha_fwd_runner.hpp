@@ -950,19 +950,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
             }
         }
     }
-    // A descale is dequantized_max/quantized_max, and quantized_max is what the fill
-    // actually wrote, not what the format can hold. The two coincide only for init=3,
-    // which fills to the fp8 maximum; every other fill leaves headroom, and anchoring
-    // on the format instead shrinks the logits by the ratio between them until the
-    // softmax is uniform to within a rounding step. Measured rather than tabulated so
-    // that the fills without a nominal bound, nf and tf, are covered too.
-    const auto tensor_max = [](auto& t) {
-        float m = 0.f;
-        t.ForEach([&](auto& self, const auto& i) {
-            m = std::max(m, std::abs(ck_tile::type_convert<float>(self(i))));
-        });
-        return 0.f < m ? m : 1.f;
-    };
+    // Every descale below is dequantized_max/quantized_max with quantized_max taken as the
+    // format maximum, which treats the tensors as the image of an fp32 tensor whose amax is
+    // qkv_max. That only describes a fill saturating the format, and init=3 alone does. Under
+    // any other fill the descale contradicts its own tensor: at init=uf the logits land near
+    // 1e-4, a sink token becomes the row maximum, every P value collapses onto one number and
+    // its rounding turns into a pure gain on the output.
+    if(qscale.type != quant_scale_enum::no_scale && init_method != "3")
+    {
+        std::cerr << "qscale=" << qscale_str << " requires -init=3" << std::endl;
+        return fwd_result::invalid_args;
+    }
 
     if constexpr(is_mx)
     {
@@ -1005,50 +1003,57 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::pertensor)
     {
-        const float q_quant_max = tensor_max(q_host);
-        const float k_quant_max = tensor_max(k_host);
-        const float v_quant_max = tensor_max(v_host);
+        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
+        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        const float qkv_max = 3.f;
+        float qkv_max = 3.f;
 
-        q_descale_host(0) = qkv_max / q_quant_max;
-        k_descale_host(0) = qkv_max / k_quant_max;
-        v_descale_host(0) = qkv_max / v_quant_max;
+        q_descale_host(0) = qkv_max / q_dtype_max;
+        k_descale_host(0) = qkv_max / k_dtype_max;
+        v_descale_host(0) = qkv_max / v_dtype_max;
     }
     else if(qscale.type == quant_scale_enum::blockscale)
     {
-        const float q_quant_max = tensor_max(q_host);
-        const float k_quant_max = tensor_max(k_host);
+        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
+        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        const float qkv_max = 3.f;
+        float qkv_max       = 3.f;
+        float max_descale_q = qkv_max / q_dtype_max;
+        float max_descale_k = qkv_max / k_dtype_max;
+        float max_descale_v = qkv_max / v_dtype_max;
 
-        // Powers of two because v_descale ends up in an E8M0 scale operand.
-        // Neighbouring entries differ so an index off-by-one changes the answer.
-        constexpr int kCycle = 4;
-        auto fill_blockscale = [](auto& t, int e_top, int phase) {
-            const auto lens = t.get_lengths();
-            t.ForEach([&](auto& self, auto i) {
-                const int flat = static_cast<int>((i[0] * lens[1] + i[1]) * lens[2] + i[2]);
-                self(i)        = std::ldexp(1.f, e_top - (flat + phase) % kCycle);
-            });
-        };
-        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
+        // Keep the band narrow. Neighbouring entries still differ, so an index off-by-one
+        // changes the answer, but no KV block dominates the softmax: the pipeline folds
+        // k_descale into s_acc per N-block, so a wide spread there would peak every row onto
+        // whichever block carries the largest scale and collapse the effective key count.
+        ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
+            q_descale_host);
+        ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(
+            k_descale_host);
 
-        const float v_quant_max = tensor_max(v_host);
-
-        fill_blockscale(q_descale_host, top_exp(qkv_max / q_quant_max), 0);
-        fill_blockscale(k_descale_host, top_exp(qkv_max / k_quant_max), 1);
-        fill_blockscale(v_descale_host, top_exp(qkv_max / v_quant_max), 2);
+        if(ck_tile::is_gfx125_supported())
+        {
+            // qr_tdm carries v_descale in an E8M0 operand, so sample exact powers of two.
+            ck_tile::FillUniformScaleDistribution<ck_tile::e8m0_t>{
+                max_descale_v / 8.f, max_descale_v, next_seed()}(v_descale_host);
+        }
+        else
+        {
+            ck_tile::FillUniformDistribution<float>{
+                max_descale_v * 0.8f, max_descale_v, next_seed()}(v_descale_host);
+        }
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        const float q_quant_max = tensor_max(q_host);
-        const float k_quant_max = tensor_max(k_host);
-        const float v_quant_max = tensor_max(v_host);
+        float q_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<QDataType>::max());
+        float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
+        float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        const float qkv_max = 3.f;
+        float qkv_max = 3.f;
 
-        // A descale is dequantized_max/quant_max, so these are anchored on qkv_max/quant_max
+        // A descale is dequantized_max/dtype_max, so these are anchored on qkv_max/dtype_max
         // like the other granularities. Neighbouring entries differ; no mantissa is a power
         // of two.
         constexpr int kCycle = 8;
@@ -1063,9 +1068,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
         };
         auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
 
-        fill_perhead(q_descale_host, top_exp(qkv_max / q_quant_max), 0);
-        fill_perhead(k_descale_host, top_exp(qkv_max / k_quant_max), 3);
-        fill_perhead(v_descale_host, top_exp(qkv_max / v_quant_max), 5);
+        fill_perhead(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
+        fill_perhead(k_descale_host, top_exp(qkv_max / k_dtype_max), 3);
+        fill_perhead(v_descale_host, top_exp(qkv_max / v_dtype_max), 5);
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);
