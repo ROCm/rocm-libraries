@@ -1302,10 +1302,11 @@ namespace TensileLite
                 //   31    = magicNumberAlg2's "add" indicator (abit)
                 //   30    = SK5 hybrid mode bit (SK5 path only)
                 //   29    = uniform summation order (this bit)
-                //   28..5 = zero
-                //   4..0  = shift amount
-                // magicNumberAlg2 returns p - 32 with p <= 63, so the shift
-                // never exceeds 31 and bits 5..30 are always clear here.
+                //   28..6 = zero
+                //   5..0  = shift amount
+                // magicNumberAlg2 returns p - 32 with p <= 64 (the loop's post
+                // test permits exit at p == 64), so the shift never exceeds 32
+                // and bits 6..30 are always clear here.
                 //
                 // Set iff the kernel has the runtime gate AND the mode is on:
                 // without the capability term, a solution whose assembly
@@ -3948,14 +3949,17 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            // Baseline computation order (pre-#10941, f4caa56e6ee): the
-            // dynamic-queue predicate is derived inline from the cheap SK5
-            // sub-mode query, so the XCD support guard runs BEFORE any grid /
-            // reduction / workspace work. computeStreamKDecisions() is not
-            // called here: it would redo getSKReduction() and getSKGridImpl() on
-            // the hot dispatch path, and its helpers can write TENSILE_DB
+            // Deliberate deviation from the pre-#10941 baseline (f4caa56e6ee),
+            // which called computeStreamKDecisions() ahead of the guard and used
+            // skDecisions.isDynamic as the predicate. Here the predicate is
+            // derived inline from the cheap SK5 sub-mode query, so the XCD
+            // support guard runs BEFORE any grid / reduction / workspace work:
+            // the decisions call would redo getSKReduction() and getSKGridImpl()
+            // on the hot dispatch path, and its helpers can write TENSILE_DB
             // diagnostics to stderr, so a solution the guard is about to reject
-            // would already have printed. It is still called below, but only
+            // would already have printed. The predicate value is unchanged --
+            // computeStreamKDecisions() feeds the same effectiveDynamic to the
+            // same streamKUsesDynamicQueue(). It is still called below, but only
             // when the diagnostic launch summary is enabled.
             const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                               ? streamK5EffectiveDynamic(problem, hardware)
@@ -4463,11 +4467,12 @@ namespace TensileLite
                 // the caller's buffer: the launch reserves partial tiles only
                 // when they fit the workspace it is given and otherwise falls
                 // back to DP, so an under-report costs the partial-tile path,
-                // not memory safety. Under uniform summation order the reconcile
-                // below erases the divergence for these modes anyway -- they take
-                // the work-item branch of getSKGridImpl(), which ignores the
-                // strategy and yields skGrid <= tiles, so splitk < 2 demotes the
-                // query to tree too.
+                // not memory safety. Absent a fixed grid (skFixedGrid == 0) the
+                // reconcile below erases the divergence for these modes anyway --
+                // they take the work-item branch of getSKGridImpl(), which
+                // ignores the strategy and yields skGrid <= tiles, so splitk < 2
+                // demotes the query to tree too. Under skFixedGrid the grid is
+                // the user's and the divergence can persist.
                 auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
@@ -4926,9 +4931,9 @@ namespace TensileLite
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it: the kernel builds SrdWS solely
-            // from AddressWS (StreamK.py:1862) while the queue counters are
+            // from AddressWS (StreamK.py:1852) while the queue counters are
             // addressed off AddressFlags (layout documented at
-            // StreamK.py:540-546). A per-queue-stride reservation here would
+            // StreamK.py:537-543). A per-queue-stride reservation here would
             // therefore have reserved bytes nothing ever addresses, and would
             // have made this launch-path threshold disagree with the two
             // workspace-size queries (requiredWorkspaceSize() and
@@ -5173,7 +5178,7 @@ namespace TensileLite
         // admissible solution reports which clauses emptied it, which is the
         // only way to tell "uniform summation order refused everything" from
         // "nothing matched this problem in the first place". Tallying is off
-        // unless TENSILE_DB bit 0x200000 is set and never changes the verdict.
+        // unless TENSILE_DB bit 0x400000 is set and never changes the verdict.
         char const*       obstacleToken = nullptr;
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, sk, resolvedGA, gsu, nullptr, false, &obstacleToken);

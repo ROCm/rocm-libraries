@@ -64,10 +64,10 @@ from copy import deepcopy
 #
 # The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument.
 # That bit is free: magicNumberAlg2 (ContractionSolution.cpp) packs
-# abit(31) | shift, and the shift field never exceeds 5 bits (bits 0..4).
+# abit(31) | shift, and the shift field never exceeds 6 bits (bits 0..5).
 # Bit 30 is already taken by the SK5 hybrid mode bit (see _extract_hybrid_mode).
 #
-#   31 = magic "add" bit | 30 = SK5 mode | 29 = USO | 28..5 = zero | 4..0 = shift
+#   31 = magic "add" bit | 30 = SK5 mode | 29 = USO | 28..6 = zero | 5..0 = shift
 #
 # The host sets bit 29 iff internalArgsSupport.perTileExtraIters &&
 # problem.getParams().uniformSummationOrder().

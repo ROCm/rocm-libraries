@@ -550,7 +550,7 @@ namespace TensileLite
      * The tally is thread-local and covers the candidates examined since the
      * last reset, which a caller performs immediately before a lookup.
      *
-     * Everything here is inert unless TENSILE_DB bit 0x200000 is set: recording
+     * Everything here is inert unless TENSILE_DB bit 0x400000 is set: recording
      * is a branch on a cached flag, so no counting, formatting or allocation
      * happens on a normal run. It is a dedicated bit rather than a log level so
      * that enabling it does not also switch on per-call tracing.
@@ -757,10 +757,14 @@ namespace TensileLite
         size_t               partialTileSize(size_t skGrid) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
-        // given problem/hardware. solve() consumes the reduction strategy, grid,
-        // isDynamic predicate, and workspace/DP fallback from here to populate
-        // StreamKSettings -- this is the only place that logic lives -- and it is
-        // also directly callable from unit tests. Existing helpers are reused where
+        // given problem/hardware. solve() does NOT consume this on the hot path:
+        // it builds StreamKSettings from resolveStreamKSettings() and derives the
+        // dynamic-queue predicate inline, and calls this only under
+        // Debug::printStreamKLaunchSummary(). Both paths run the same reduction /
+        // grid / workspace-DP-fallback helpers, so the decisions reported here
+        // are the launch values; keeping them in step is a maintenance
+        // obligation, not a structural guarantee. Also directly callable from
+        // unit tests. Existing helpers are reused where
         // possible (streamK5EffectiveDynamic, getSKReduction, getSKGridImpl,
         // partialTileSize); the makeArgs packing quantities are re-derived. Each
         // StreamKDecisions field documents its own provenance (available vs

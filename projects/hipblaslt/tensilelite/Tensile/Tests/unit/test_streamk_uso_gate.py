@@ -5,7 +5,7 @@
 USO is host-side runtime state that defaults OFF. The generated kernel must
 therefore carry BOTH Stream-K K-split mappings and pick one at runtime:
 
-  USO off -> historical global "first-E" mapping (the pre-USO baseline)
+  USO off -> historical global "first-E" mapping (the pre-#10941 baseline)
   USO on  -> per-tile extra-iters mapping
 
 The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument and

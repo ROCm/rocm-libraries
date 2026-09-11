@@ -107,10 +107,10 @@ namespace TensileLite
         return false;
     }
 
-    // With USO off this applies the pre-#10941 conjunction; with it on,
-    // softwarePredicate() adds streamKDynamicQueueSupported() -- the only
-    // conjunct the flag gates here, since uniformSummationOrderSupported()
-    // returns true when USO is off. hardwarePredicate keeps each arm's original
+    // With USO off this applies the pre-#10941 conjunction: problemPredicate &&
+    // taskPredicate && hardwarePredicate. With USO on, softwarePredicate() adds
+    // streamKDynamicQueueSupported() and uniformSummationOrderSupported(), both
+    // live filters on that arm. hardwarePredicate keeps each arm's original
     // position -- last off, first on -- because taskPredicate can warn via
     // requiredWorkspaceSize(), so short-circuit order is user-visible.
     template <typename MySolution, typename MyProblem>
