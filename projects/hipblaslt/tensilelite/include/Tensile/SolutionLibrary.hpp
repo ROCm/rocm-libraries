@@ -88,9 +88,9 @@ namespace TensileLite
             // uniformSummationOrderSupported() is the same kind of filter:
             // under USO it admits only kernels this problem can launch
             // (Synchronizer allocation is the remaining solve()-only clause).
-            // Selection sites that did not use this full conjunction before USO
-            // call it only when uniformSummationOrder() is set, and evaluate
-            // their own narrower pre-USO conjunction otherwise.
+            // Selection sites that did not use this conjunction before USO reach
+            // it through selectionPredicate(), which falls back to the narrower
+            // pre-USO conjunction this one subsumes when the flag is off.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware);
@@ -105,6 +105,28 @@ namespace TensileLite
             break;
         }
         return false;
+    }
+
+    // Selection filter for one solution/problem pair. With uniform summation
+    // order off this is the pre-USO conjunction; with it on, softwarePredicate()
+    // additionally applies streamKDynamicQueueSupported(). That is the only
+    // conjunct the flag gates here: uniformSummationOrderSupported() already
+    // returns true when the flag is off. hardwarePredicate stays where each arm
+    // had it -- last pre-USO, first under USO -- because taskPredicate can warn
+    // via requiredWorkspaceSize(), so short-circuit order is user-visible.
+    template <typename MySolution, typename MyProblem>
+    inline bool selectionPredicate(Task&             task,
+                                   Hardware const&   hardware,
+                                   const MySolution& solution,
+                                   const MyProblem&  problem)
+    {
+        if(problem.getParams().uniformSummationOrder())
+            return (*solution.hardwarePredicate)(hardware)
+                   && softwarePredicate(
+                       SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);
+
+        return (*solution.problemPredicate)(problem) && (*solution.taskPredicate)(task)
+               && (*solution.hardwarePredicate)(hardware);
     }
 
     template <typename MySolution>

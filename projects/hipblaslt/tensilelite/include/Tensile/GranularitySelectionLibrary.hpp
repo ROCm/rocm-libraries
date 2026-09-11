@@ -115,22 +115,7 @@ namespace TensileLite
                 auto rv = solutions.at(index);
 
                 Task task(hardware, problem, *rv);
-                // With uniform summation order off, check exactly as before the
-                // feature: problemPredicate && taskPredicate && hardwarePredicate.
-                // The softwarePredicate() reshape stays behind the check.
-                bool predicateMatch;
-                if(problem.getParams().uniformSummationOrder())
-                {
-                    predicateMatch
-                        = (*rv->hardwarePredicate)(hardware)
-                          && softwarePredicate(
-                              SolutionLibrarySearchType::DEFAULT, task, hardware, *rv, problem);
-                }
-                else
-                {
-                    predicateMatch = (*rv->problemPredicate)(problem) && (*rv->taskPredicate)(task)
-                                     && (*rv->hardwarePredicate)(hardware);
-                }
+                bool predicateMatch = selectionPredicate(task, hardware, *rv, problem);
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -163,25 +148,8 @@ namespace TensileLite
                 if(myPerformance > bestPerformance)
                 {
                     Task task(hardware, problem, *(row.second));
-                    // See the note in the exact-match path above: the
-                    // softwarePredicate() reshape stays behind the USO check so
-                    // that with USO off this is the pre-feature conjunction.
-                    bool predicateMatch;
-                    if(problem.getParams().uniformSummationOrder())
-                    {
-                        predicateMatch = (*row.second->hardwarePredicate)(hardware)
-                                         && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                                              task,
-                                                              hardware,
-                                                              *(row.second),
-                                                              problem);
-                    }
-                    else
-                    {
-                        predicateMatch = (*row.second->problemPredicate)(problem)
-                                         && (*row.second->taskPredicate)(task)
-                                         && (*row.second->hardwarePredicate)(hardware);
-                    }
+                    bool predicateMatch
+                        = selectionPredicate(task, hardware, *(row.second), problem);
 
                     if(debug)
                     {
@@ -268,30 +236,14 @@ namespace TensileLite
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            // With uniform summation order off, filter exactly as
-                            // before the feature: problemPredicate &&
-                            // taskPredicate. setGroupedGemm(true) is load-bearing
-                            // for uniformSummationOrderSupported(), but it also
-                            // re-aims GroupedGemmEqual / SynchronizerSizeCheck /
-                            // the free-size-B clause on this (local) problem copy,
-                            // so it stays behind the USO check together with the
-                            // softwarePredicate() call.
-                            bool swMatch;
+                            // setGroupedGemm(true) re-aims GroupedGemmEqual,
+                            // SynchronizerSizeCheck and the free-size-B clause on
+                            // this local copy, so it is USO-gated like the widened
+                            // predicate. Task holds a reference to problem, so the
+                            // mutation is visible to taskPredicate either way.
                             if(problem.getParams().uniformSummationOrder())
-                            {
                                 problem.setGroupedGemm(true);
-                                swMatch = softwarePredicate(searchType,
-                                                            task,
-                                                            hardware,
-                                                            *(row.second),
-                                                            problem);
-                            }
-                            else
-                            {
-                                swMatch = (*row.second->problemPredicate)(problem)
-                                          && (*row.second->taskPredicate)(task);
-                            }
-                            if(!swMatch)
+                            if(!selectionPredicate(task, hardware, *(row.second), problem))
                                 useSolution = false;
                         }
                     }
