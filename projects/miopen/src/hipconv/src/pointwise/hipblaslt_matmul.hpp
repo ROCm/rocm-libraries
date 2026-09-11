@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
@@ -31,7 +31,7 @@ private:
     hipblasStatus_t status_;
 };
 
-void launch_pointwise_gemm(const Conv2dParams& par,
+void launch_pointwise_gemm(const ConvParams& par,
                            const void* in,
                            const void* wei,
                            void* out,
