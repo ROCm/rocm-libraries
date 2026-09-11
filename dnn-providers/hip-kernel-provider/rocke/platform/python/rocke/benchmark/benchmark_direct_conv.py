@@ -173,9 +173,6 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     sH = miopen_args.sH
-    if cpg == 1 and sH != 1:
-        raise ValueError(f"depthwise kernel requires stride=1 (got sH={sH})")
-
     if miopen_args.sH != miopen_args.sW:
         print(
             f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
@@ -427,7 +424,7 @@ def _run_depthwise_sweep(
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
     B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.H, p.W, p.total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
@@ -513,7 +510,7 @@ def _run_depthwise_sweep(
             )
             continue
 
-        q_tiles = math.ceil(p.W / block_w)
+        q_tiles = math.ceil(p.Wo / block_w)
         g_tiles = math.ceil(p.groups / spec.block_ch)
         grid = (q_tiles, g_tiles, p.N)
         block = (spec.threads_per_block, 1, 1)
@@ -626,7 +623,7 @@ def _run_sweep(
     B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16).uniform_(
         -1.0, 1.0
     )
-    D_t = torch.empty(p.N, p.H, p.W, p.total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
@@ -717,7 +714,7 @@ def _run_sweep(
             )
             continue
 
-        q_tiles = (p.W + block_q - 1) // block_q
+        q_tiles = (p.Wo + block_q - 1) // block_q
         g_tiles = p.groups // block_groups
         grid = (q_tiles, g_tiles, p.N)
         block = (spec.threads_per_block, 1, 1)
@@ -978,13 +975,6 @@ def main() -> int:
             print(
                 f"error: cpg={cpg} (C/groups={args.C}/{args.groups}) must be 1 (depthwise) "
                 f"or a positive multiple of 4 (grouped)",
-                file=sys.stderr,
-            )
-            return 2
-
-        if cpg == 1 and args.sH != 1:
-            print(
-                f"error: depthwise kernel requires stride=1 (got sH={args.sH})",
                 file=sys.stderr,
             )
             return 2
