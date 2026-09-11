@@ -1,0 +1,171 @@
+# Config package for the rocBLAS Fortran bindings.
+#
+#   find_package(rocblas-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE roc::rocblas_fortran)
+#
+# The bindings ship as one static archive and one .mod set PER FORTRAN COMPILER,
+# because a .mod is not portable across compilers or even across versions of the
+# same compiler. This package therefore checks that the consumer is building with
+# the compiler the bindings were installed for, and fails with a named diagnostic
+# rather than letting the build hit an unreadable .mod much later.
+
+@PACKAGE_INIT@
+
+set(ROCBLAS_FORTRAN_COMPILER_DIR "@ROCBLAS_FORTRAN_COMPILER_DIR@")
+
+# A consumer asks "is a rocBLAS Fortran binding available here?" through
+# rocblas_FORTRAN_FOUND, which is set whether this package is reached directly by
+# find_package(rocblas-fortran) or alongside rocblas-config.cmake, with which it
+# is co-installed in lib/cmake/rocblas. It stays FALSE on every early return
+# below.
+#
+# rocBLAS never shipped a config-level Fortran variable, so unlike rocRAND this
+# name carries no previous meaning to collide with. The hand-written
+# rocblas_module.f90 it replaces was consumed by adding the source to your own
+# build, not through find_package.
+set(rocblas_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(rocblas-fortran_FOUND FALSE)
+  # One argument, not several. set() with multiple arguments builds a LIST, and
+  # find_package renders a list with a semicolon at every element boundary, so a
+  # message split across lines for readability comes out as
+  # "... find_package: ;add Fortran to ...".
+  string(CONCAT rocblas-fortran_NOT_FOUND_MESSAGE
+      "The rocBLAS Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# This MUST mirror the mapping in projects/rocblas/fortran/CMakeLists.txt
+# exactly: it recomputes, for the compiler the CONSUMER is using, the same
+# directory name the bindings were installed under. The two cannot share code --
+# this file runs in a consumer's build, long after ours is gone, so they are
+# kept in step by hand. Get it wrong, compare against CMake's raw ID, against
+# "${id}-${version}", or against the basename of an MPI wrapper, and the check
+# can never match: the package then rejects every consumer with a message
+# claiming a compiler mismatch that does not exist.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_rocblas_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+  set(_rocblas_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_rocblas_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_rocblas_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_rocblas_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_rocblas_fc "nvfortran")
+else()
+  get_filename_component(_rocblas_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_rocblas_fc}" _rocblas_fc)
+endif()
+
+# A site that installs several versions of one compiler side by side overrides
+# ROCBLAS_FORTRAN_COMPILER_DIR with a suffixed name (gfortran-13.3.0), so the
+# recorded directory is accepted when it is the derived name, or that name
+# followed by a separator and anything. A strict equality would reject exactly
+# the sites that used the documented override. Note what this cannot do: the
+# layout records no version, so the package cannot tell gfortran 13 from
+# gfortran 15 by itself.
+#
+# Done by length and substring rather than by regex. _rocblas_fc comes from
+# CMAKE_Fortran_COMPILER's basename on the fallback branch above, so it is an
+# arbitrary file name; interpolating it into a regex would let a compiler called
+# g++.wrapper or flang(2) either mismatch silently or abort CMake with a regex
+# error. There is no regex-escape in CMake, so the comparison avoids regex.
+function(_rocblas_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+# Which per-compiler directory to use.
+#
+# The recorded ROCBLAS_FORTRAN_COMPILER_DIR is the compiler the package was
+# built with, and it is only a default. A prefix can hold artifacts for several
+# compilers at once -- installing the bindings twice writes
+# include/fortran/gfortran and include/fortran/amdflang side by side -- but the
+# config package is written once, so the recorded value names whichever install
+# ran last. Trusting it blindly rejects a consumer whose .mod is present.
+#
+# So prefer the consumer's OWN compiler when its artifacts are installed here,
+# and fall back to the recorded directory when they are not.
+set(_rocblas_dir "")
+if(EXISTS "${PACKAGE_PREFIX_DIR}/include/fortran/${_rocblas_fc}/rocblas.mod")
+  set(_rocblas_dir "${_rocblas_fc}")
+else()
+  _rocblas_dir_matches("${ROCBLAS_FORTRAN_COMPILER_DIR}" "${_rocblas_fc}" _rocblas_ok)
+  if(_rocblas_ok)
+    set(_rocblas_dir "${ROCBLAS_FORTRAN_COMPILER_DIR}")
+  endif()
+endif()
+
+if(NOT _rocblas_dir)
+  # Name what IS installed, so the reader can see whether they need to rebuild
+  # or merely point at an existing directory.
+  file(GLOB _rocblas_avail RELATIVE "${PACKAGE_PREFIX_DIR}/include/fortran"
+       "${PACKAGE_PREFIX_DIR}/include/fortran/*")
+  set(rocblas-fortran_FOUND FALSE)
+  string(CONCAT rocblas-fortran_NOT_FOUND_MESSAGE
+      "This project builds with ${_rocblas_fc}, but no rocblas.mod for it is "
+      "installed under ${PACKAGE_PREFIX_DIR}/include/fortran. Available: "
+      "${_rocblas_avail}. A Fortran .mod cannot be shared across compilers; "
+      "rebuild the bindings with ${_rocblas_fc}, or set "
+      "ROCBLAS_FORTRAN_COMPILER_DIR to the directory to use.")
+  return()
+endif()
+
+# The C library the binding declares bind(C) interfaces into. It is a link-time
+# dependency of the imported target, so it has to be imported first or the
+# include() below would leave roc::rocblas_fortran pointing at an undefined
+# roc::rocblas and the generate step would fail. Skipped when the caller already
+# did find_package(rocblas), which is the common case.
+#
+# rocblas-config.cmake in turn does find_dependency(hip), and hip-config.cmake
+# reaches FindThreads, which hard-errors unless C or CXX is enabled. A
+# Fortran-only consumer has neither, so C is enabled here. Enabling a language
+# from a config package is unusual, and it is done deliberately: the alternative
+# is making every Fortran consumer of these bindings write enable_language(C)
+# for a reason that has nothing to do with their code, after a
+# "FindThreads only works if either C or CXX language is enabled" that names
+# nothing they wrote.
+if(NOT TARGET roc::rocblas)
+  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  include(CMakeFindDependencyMacro)
+  find_dependency(rocblas)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/rocblas-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was BUILT with. When the
+# consumer's compiler resolved to a different one above, repoint the imported
+# target at it, otherwise the .mod found and the archive linked would disagree.
+if(NOT _rocblas_dir STREQUAL "${ROCBLAS_FORTRAN_COMPILER_DIR}")
+  set_target_properties(roc::rocblas_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/fortran/${_rocblas_dir}")
+  get_target_property(_rocblas_cfgs roc::rocblas_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_rocblas_c IN LISTS _rocblas_cfgs)
+    set_target_properties(roc::rocblas_fortran PROPERTIES
+      IMPORTED_LOCATION_${_rocblas_c}
+        "${PACKAGE_PREFIX_DIR}/lib/fortran/${_rocblas_dir}/librocblas_fortran.a")
+  endforeach()
+endif()
+
+set(rocblas_FORTRAN_FOUND TRUE)
+
+check_required_components(rocblas-fortran)

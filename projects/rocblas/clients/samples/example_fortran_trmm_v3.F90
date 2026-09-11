@@ -25,7 +25,7 @@ module procedures
     implicit none
 contains
     subroutine trmm_reference(side, uplo, transA, diag, m, n, alpha, A, lda, B, ldb, C, ldc)
-    use rocblas_enums
+    use rocblas
         integer(kind(        rocblas_side_left)) ::   side
         integer(kind(       rocblas_fill_upper)) ::   uplo
         integer(kind(   rocblas_operation_none)) :: transA
@@ -121,7 +121,6 @@ end subroutine ROCBLAS_CHECK
 program example_fortran_trmm
     use iso_c_binding
     use rocblas
-    use rocblas_enums
     use procedures
 
     implicit none
