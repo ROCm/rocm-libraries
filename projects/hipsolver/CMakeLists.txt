@@ -87,8 +87,12 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
+# EXPORT_FORTRAN_BINDINGS is gone with the hand-written binding it controlled:
+# it chose whether the old shared hipsolver_fortran joined the hipsolver-targets
+# export set. The generated binding has an export set of its own
+# (hipsolver-fortran-targets) and a config package of its own, so the choice no
+# longer exists. BUILD_FORTRAN_BINDINGS below still turns the whole track off.
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
-option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
 # Feature flags
 option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
@@ -331,6 +335,10 @@ if(WIN32)
 endif()
 
 add_subdirectory(library)
+# Fortran bindings, generated from the headers above and committed next to
+# them. Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS
+# is OFF or when no Fortran compiler is available, so a C-only site is unaffected.
+add_subdirectory(fortran)
 
 include(clients/cmake/build-options.cmake)
 
