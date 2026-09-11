@@ -151,10 +151,10 @@ namespace TensileLite
             int numToSort = std::min(numSolutions, int(solution_ranking.size()));
             rv.reserve(numToSort);
             auto it = solution_ranking.begin(), it_end = solution_ranking.end();
-            // Snapshot the end before iterating: `it != it + numToSort`
-            // re-evaluates the bound against the current `it`, degenerating to
-            // `numToSort != 0` with no end bound, so the loop walks off the
-            // vector once any ranked kernel is rejected.
+            // Snapshot the batch end in `batch_end`: `it != it + numToSort`
+            // re-evaluates the bound against the advancing `it`, so it degenerates
+            // to `numToSort != 0` and the loop runs off the vector whenever fewer
+            // than numToSort of the ranked kernels are accepted.
             while(it != it_end && numToSort > 0)
             {
                 const int remaining = static_cast<int>(it_end - it);
@@ -165,11 +165,11 @@ namespace TensileLite
                 {
                     auto const& solution = *it->second;
                     Task        task(hardware, problem, *solution);
-                    // With uniform summation order off, filter exactly as before
-                    // the feature: problemPredicate only. The hardwarePredicate
-                    // and the softwarePredicate() conjuncts (taskPredicate,
-                    // StreamK dynamic queue) are real filters, so they stay
-                    // behind the check.
+                    // #10941 added the hardwarePredicate and softwarePredicate() checks here.
+                    // softwarePredicate(DEFAULT) subsumes problemPredicate and adds taskPredicate
+                    // plus the StreamK dynamic-queue check, both of which reject kernels the
+                    // pre-#10941 baseline (f4caa56e6ee) accepted. With uniform summation order
+                    // off, restore that baseline: problemPredicate alone.
                     bool accept;
                     if(problem.getParams().uniformSummationOrder())
                     {

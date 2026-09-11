@@ -1,22 +1,21 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Independent oracle for the two Stream-K K-split work mappings.
 
-This file is deliberately pure Python: it imports nothing from Tensile, needs no
-GPU and no build. It re-derives both mappings from first principles so that a
-regression in the generator cannot also silently "fix" the expectation.
+Pure Python: it imports nothing from Tensile and needs no GPU and no build. It
+re-derives both mappings from first principles so that a regression in the
+generator cannot also silently "fix" the expectation.
 
 The two mappings
 ----------------
 * ``global_range``  -- the historical "first-E workgroups get one extra
   iteration" mapping. It splits the *global* iteration space
-  ``[0, skTiles * itersPerTile)`` evenly across ``skGrid`` workgroups without
-  any regard for where output-tile boundaries fall.
-* ``pertile_range`` -- the USO (uniform-split-output) per-tile mapping. It is
-  only defined when ``skGrid % skTiles == 0``; it gives each tile exactly
-  ``F = skGrid // skTiles`` workgroups and splits *that tile's*
-  ``itersPerTile`` iterations among them. By construction no workgroup ever
-  straddles a tile boundary.
+  ``[0, skTiles * itersPerTile)`` evenly across ``skGrid`` workgroups,
+  ignoring where output-tile boundaries fall.
+* ``pertile_range`` -- the USO (uniform summation order) per-tile mapping,
+  defined only when ``skGrid % skTiles == 0``: each tile gets exactly
+  ``F = skGrid // skTiles`` workgroups that split *that tile's*
+  ``itersPerTile`` iterations, so no workgroup ever straddles a tile boundary.
 
 Worked divergence example (pinned by ``test_worked_divergence_example``)
 -----------------------------------------------------------------------
@@ -24,17 +23,17 @@ Worked divergence example (pinned by ``test_worked_divergence_example``)
   Global: w0=[0,3), w1=[3,6) -- w1 straddles the tile boundary at 5.
   Per-tile: w0=[0,3), w1=[3,5), w2=[5,8).
 
-That is the regression vector: under the global mapping workgroup 1 covers
-iterations 3 and 4 of tile 0 *and* iteration 0 of tile 1, which the per-tile
-mapping never does.
+That is the regression vector: the global mapping gives workgroup 1 iterations
+3 and 4 of tile 0 *and* iteration 0 of tile 1, which the per-tile mapping never
+does.
 """
 
 import pytest
 
 
 # ---------------------------------------------------------------------------
-# Oracle -- kept verbatim; `tiles` is unused in the bodies but part of the
-# signature so both mappings are called identically.
+# Oracle. `tiles` is unused in the bodies; it stays in the signature so both
+# mappings share one call form.
 # ---------------------------------------------------------------------------
 
 
@@ -56,11 +55,13 @@ def pertile_range(w, tiles, I, skGrid, skTiles):     # USO per-tile mapping
 
 
 def pertile_active(skTiles, skGrid, uso):
-    """The gate that decides whether the per-tile mapping is used at all.
+    """Gate on the per-tile mapping; mirrors the device predicate
+    ``perTileActive`` (StreamK.py, ContractionSolution.cpp).
 
-    ``skTiles == 0`` is the forceDPOnly short-circuit: there is no Stream-K
-    work to split. ``skGrid % skTiles != 0`` means the tile count does not
-    divide the grid evenly, so the per-tile mapping is undefined.
+    ``skTiles == 0`` is the forceDPOnly short-circuit: no Stream-K work to
+    split. ``skGrid % skTiles != 0`` means skTiles does not divide skGrid, so
+    there is no integer F = skGrid // skTiles and the per-tile mapping is
+    undefined.
     """
     return uso and skTiles != 0 and skGrid % skTiles == 0
 
@@ -208,8 +209,8 @@ class TestPerTileMapping:
 class TestVerdicts:
     @pytest.mark.parametrize("skTiles, skGrid, I, F, verdict", _params(DIFFER))
     def test_mappings_actually_differ(self, skTiles, skGrid, I, F, verdict):
-        # Guard against a bug that collapses both mappings onto each other:
-        # these rows MUST produce at least one differing workgroup.
+        # A bug that collapsed the two mappings onto each other would make this
+        # suite pass while testing nothing.
         assert I % F != 0, "a differing row requires itersPerTile % F != 0"
         diffs = [
             (

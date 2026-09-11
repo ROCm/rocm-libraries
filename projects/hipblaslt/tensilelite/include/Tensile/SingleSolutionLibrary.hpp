@@ -160,13 +160,11 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    // With uniform summation order off, filter exactly as before
-                    // the feature: problemPredicate && taskPredicate, nothing
-                    // else. setGroupedGemm(true) is load-bearing for
-                    // uniformSummationOrderSupported(), but it also re-aims
-                    // GroupedGemmEqual / SynchronizerSizeCheck / the free-size-B
-                    // clause on this (local) problem copy, so it stays behind the
-                    // USO check together with the softwarePredicate() call.
+                    // With uniform summation order off, filter as before #10941:
+                    // problemPredicate && taskPredicate. setGroupedGemm(true) is load-bearing for
+                    // uniformSummationOrderSupported(), but it also re-aims GroupedGemmEqual /
+                    // SynchronizerSizeCheck / LeadingFree1SizesGreaterOrEqual on this local
+                    // problem copy, so it stays behind the USO check with softwarePredicate().
                     bool swMatch;
                     if(problem.getParams().uniformSummationOrder())
                     {
@@ -276,10 +274,9 @@ namespace TensileLite
                         Task task(hardware, problem, (*solution));
                         problem.setWorkspaceSizeGroupedGemm(ws);
                         problem.setGroupedGemmCount(problems.size());
-                        // See the note in findBestSolution(): setGroupedGemm(true)
-                        // and the softwarePredicate() widening stay behind the
-                        // USO check so that with USO off this is the pre-feature
-                        // problemPredicate && taskPredicate filter.
+                        // See findBestSolution(): setGroupedGemm(true) and the
+                        // softwarePredicate() widening stay behind the USO check, so with USO off
+                        // this is the pre-#10941 problemPredicate && taskPredicate filter.
                         bool swMatch;
                         if(problem.getParams().uniformSummationOrder())
                         {

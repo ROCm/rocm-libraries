@@ -5041,10 +5041,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             return rocblaslt_status_invalid_value;
         }
         // Under USO, the same predicate findTopSolutions uses: problem, task,
-        // StreamK dynamic-queue, and uniform summation order (Synchronizer
-        // pointer skipped at selection; launch still throws if it is missing).
-        // With USO off, check exactly as before the feature: problemPredicate
-        // && taskPredicate, nothing else.
+        // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
+        // is checked only at launch, which throws if it is missing). With USO
+        // off, check as before #10941: problemPredicate && taskPredicate.
         bool swMatch;
         if(tensile_prob.getParams().uniformSummationOrder())
         {
@@ -5135,9 +5134,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             tensile_prob.gemms[i].setWorkspaceSize(algo->max_workspace_bytes);
             tensile_prob.gemms[i].setWorkspaceSizeGroupedGemm(problemWs);
             tensile_prob.gemms[i].setGroupedGemmCount(tensile_prob.gemms.size());
-            // setGroupedGemm(true) here persists on the caller's problem, so it
-            // is only applied under uniform summation order, which is the only
-            // consumer that needs it (uniformSummationOrderSupported()).
+            // #10941 added setGroupedGemm(true) for the grouped-GEMM branch of
+            // uniformSummationOrderSupported(); it persists on the caller's
+            // problem, so guard it to keep USO-off selection at pre-#10941.
             if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
                 tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
@@ -5146,8 +5145,8 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
             TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
-            // With uniform summation order off, check exactly as before the
-            // feature: hardwarePredicate && problemPredicate, no taskPredicate.
+            // With uniform summation order off, check as before #10941:
+            // hardwarePredicate && problemPredicate, no taskPredicate.
             bool match = (*solution->hardwarePredicate)(*hardware);
             if(match)
             {
@@ -5381,10 +5380,9 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         {
             data->problem.gemms[i].setWorkspaceSize(workspaceBytes);
             data->problem.gemms[i].setGroupedGemmCount(data->problem.gemms.size());
-            // setGroupedGemm(true) persists on data->problem, so it is only
-            // applied under uniform summation order, which is the only consumer
-            // that needs it (uniformSummationOrderSupported()). Pre-USO this
-            // call was not here.
+            // #10941 added setGroupedGemm(true) for the grouped-GEMM branch of
+            // uniformSummationOrderSupported(); it persists on data->problem,
+            // so guard it to keep USO-off selection at pre-#10941.
             if(data->problem.gemms[i].getParams().uniformSummationOrder())
                 data->problem.gemms[i].setGroupedGemm(true);
         }

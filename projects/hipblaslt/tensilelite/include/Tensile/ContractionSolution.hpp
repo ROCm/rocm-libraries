@@ -307,16 +307,14 @@ namespace TensileLite
      * @param skGrid            The resolved StreamK grid packed into the split.
      * @param perTileCapable    True when the selected kernel CAN redistribute
      *                          Stream-K extras within each tile
-     *                          (InternalArgsSupport::perTileExtraIters). This is
-     *                          capability only -- the kernel branches on it at
-     *                          runtime.
+     *                          (InternalArgsSupport::perTileExtraIters). Capability
+     *                          only; the kernel branches on it at runtime.
      * @param uniformSummationOrder
      *                          ContractionProblemParameters::uniformSummationOrder(),
-     *                          the host-side bit the packer forwards to the
-     *                          device in MagicShiftItersPerTile bit 29. The
-     *                          per-tile mapping is performed only when this AND
-     *                          perTileCapable hold; with it clear the kernel runs
-     *                          the historical global first-E mapping.
+     *                          the host-side bit the packer forwards to the device in
+     *                          MagicShiftItersPerTile bit 29. The per-tile mapping runs
+     *                          only when this AND perTileCapable hold; otherwise the
+     *                          kernel runs the historical global first-E mapping.
      */
     TENSILELITEHOST_EXPORT bool
         streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
@@ -347,11 +345,10 @@ namespace TensileLite
 
     /**
      * Iteration range [start, end) assigned to workgroup w under the static
-     * two-tile StreamK mapping. When the per-tile mapping is ACTIVE --
-     * perTileCapable (InternalArgsSupport::perTileExtraIters) AND
-     * uniformSummationOrder, which is exactly the runtime condition the kernel
-     * branches on -- and skGrid % tiles == 0, extras are distributed within each
-     * tile; otherwise the historical global first-E mapping is used.
+     * two-tile StreamK mapping. Extras are distributed within each tile when
+     * skGrid % tiles == 0 and both perTileCapable (InternalArgsSupport::perTileExtraIters)
+     * and uniformSummationOrder hold -- the pair the kernel branches on at runtime;
+     * otherwise the historical global first-E mapping is used.
      */
     struct StreamKWorkgroupIterRange
     {
@@ -491,15 +488,15 @@ namespace TensileLite
         // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
         // grid / tiles) instead of partialTileSize(grid).
         //
-        // The two can disagree about WHETHER a workspace is needed, not just about
-        // how many bytes: at a k-split factor grid / tiles of 1,
+        // The two can disagree about WHETHER a workspace is needed, not just how
+        // many bytes: at a k-split factor grid / tiles of 1,
         // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
-        // does not, so a parallel reduction whose grid came back equal to tiles
-        // reserves here and not there. Both call sites run
-        // streamKReconcileReduction() on the same (reduction, grid, tiles) triple
-        // immediately after getSKGridImpl(), which demotes parallel to tree whenever
-        // the split factor is below 2 and so closes that gap in both modes. The
-        // formulas still differ, but the reserve-or-not answer coincides.
+        // does not, so a parallel reduction whose grid came back equal to tiles would
+        // reserve here and not there. Both call sites run streamKReconcileReduction()
+        // on the same (reduction, grid, tiles) triple immediately after
+        // getSKGridImpl(), and it demotes parallel to tree below a split factor of 2
+        // unconditionally -- uniform summation order does not gate it -- so the gap
+        // closes in both modes. The formulas differ; the reserve-or-not answer does not.
         //
         // That agreement is load-bearing rather than incidental: it is what lets the
         // allocate-then-launch flow close. The allocator sizes from
@@ -1127,9 +1124,9 @@ namespace TensileLite
         // insufficient-workspace fall back to tree + grid==tiles.
         //
         // effectiveDynamicHint, when non-null, is the SK5 sub-mode the caller
-        // already resolved for this same (problem, hardware); it is used in
-        // place of a second streamK5EffectiveDynamic() call, which is not free
-        // (it can run the origami hybrid-mode heuristic). Null recomputes.
+        // already resolved for this (problem, hardware); it avoids a second
+        // streamK5EffectiveDynamic() call, which can run the origami hybrid-mode
+        // heuristic. Null recomputes.
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;

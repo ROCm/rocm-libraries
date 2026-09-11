@@ -88,9 +88,9 @@ namespace TensileLite
             // uniformSummationOrderSupported() is the same kind of filter:
             // under USO it admits only kernels this problem can launch
             // (Synchronizer allocation is the remaining solve()-only clause).
-            // Selection sites that did not use this conjunction before USO reach
-            // it through selectionPredicate(), which falls back to the narrower
-            // pre-USO conjunction this one subsumes when the flag is off.
+            // Sites that gained this conjunction in #10941 reach it through
+            // selectionPredicate(), which with USO off falls back to the narrower
+            // problemPredicate && taskPredicate it subsumes.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware);
@@ -107,13 +107,12 @@ namespace TensileLite
         return false;
     }
 
-    // Selection filter for one solution/problem pair. With uniform summation
-    // order off this is the pre-USO conjunction; with it on, softwarePredicate()
-    // additionally applies streamKDynamicQueueSupported(). That is the only
-    // conjunct the flag gates here: uniformSummationOrderSupported() already
-    // returns true when the flag is off. hardwarePredicate stays where each arm
-    // had it -- last pre-USO, first under USO -- because taskPredicate can warn
-    // via requiredWorkspaceSize(), so short-circuit order is user-visible.
+    // With USO off this applies the pre-#10941 conjunction; with it on,
+    // softwarePredicate() adds streamKDynamicQueueSupported() -- the only
+    // conjunct the flag gates here, since uniformSummationOrderSupported()
+    // returns true when USO is off. hardwarePredicate keeps each arm's original
+    // position -- last off, first on -- because taskPredicate can warn via
+    // requiredWorkspaceSize(), so short-circuit order is user-visible.
     template <typename MySolution, typename MyProblem>
     inline bool selectionPredicate(Task&             task,
                                    Hardware const&   hardware,

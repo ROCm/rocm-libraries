@@ -1108,9 +1108,8 @@ namespace
         EXPECT_EQ(split.extraIters, c.extraIters)
             << "skTiles*itersPerTile - SKItersPerWG*skGrid, the leftover the kernel recomputes";
 
-        // These cases model the split under uniform summation order, which is the
-        // only mode in which the per-tile extra-iters mapping runs, so the mode
-        // term is pinned on and c.perTileExtraIters remains the variable.
+        // The per-tile extra-iters mapping runs only under uniform summation order, so
+        // the mode term is pinned on and c.perTileExtraIters stays the variable.
         EXPECT_EQ(TensileLite::streamKStaticSplitRowUniform(split,
                                                             c.tiles,
                                                             c.itersPerTile,
@@ -1178,8 +1177,8 @@ namespace
                                                              skGrid,
                                                              /*perTileCapable=*/true,
                                                              /*uniformSummationOrder=*/true));
-        // The capability alone is not enough: with the mode off the kernel runs
-        // the global first-E mapping, so the split is not row-uniform.
+        // Capability alone is not enough: with the mode off the kernel still runs the
+        // global first-E mapping.
         EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
                                                               tiles,
                                                               itersPerTile,
@@ -2296,30 +2295,29 @@ namespace
     // =======================================================================
     // Uniform summation order OFF + Stream-K tile scheduling ON.
     //
-    // Both attributes default OFF and are INDEPENDENT, which makes this regime
-    // easy to miss. The SK5 sub-mode is chosen by streamK5EffectiveDynamic(),
-    // which keys off streamKTileSchedulingMode()
+    // Both attributes default OFF and are independent: streamK5EffectiveDynamic()
+    // picks the SK5 sub-mode from streamKTileSchedulingMode()
     // (HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, bench flag
-    // --streamk_tile_scheduling), NOT off uniform summation order. With both
-    // off the dynamic-queue path is never reached, so a default bench sweep
-    // reports "no change" and validates nothing here.
+    // --streamk_tile_scheduling), not from uniform summation order. With both off the
+    // dynamic-queue path is never reached, so a default bench sweep reports "no change"
+    // and validates nothing here.
     //
-    // What is pinned: resolveStreamKSettings() must not charge the workspace
-    // for anything beyond partialTileSize(grid). Per-XCD queue counters live at
-    // the base of AddressFlags, not AddressWS, so adding them makes a workspace
-    // that exactly meets requiredWorkspaceSize() look short, fires the
-    // workspace-DP fallback (reduction = tree; grid = tiles) and inflates the
-    // launch grid to the full tile count -- measured at up to 7.8x on 62 of 207
-    // Stream-K problems with uniform summation order never enabled.
+    // Pinned: resolveStreamKSettings() must charge the workspace nothing beyond
+    // partialTileSize(grid). The per-XCD queue counters live at the base of
+    // AddressFlags, not AddressWS, so charging for them makes a workspace that exactly
+    // meets requiredWorkspaceSize() look short, fires the workspace-DP fallback
+    // (reduction = tree, grid = tiles) and inflates the launch grid to the full tile
+    // count -- measured at up to 7.8x on 62 of 207 Stream-K problems with uniform
+    // summation order never enabled.
     //
-    // The test allocates EXACTLY requiredWorkspaceSize() and pins grid and tile
-    // count as distinct literals, so any reintroduced term surfaces here as the
-    // tile count. The -1 case must still fall back, otherwise the test would
-    // also pass with the threshold removed outright.
+    // The test allocates EXACTLY requiredWorkspaceSize() and pins grid and tile count
+    // as distinct literals, so any reintroduced term surfaces as the tile count. The
+    // -1 case must still fall back, or the test would also pass with the threshold
+    // removed outright.
     //
-    // solve() is the instrument on purpose: resolveStreamKSettings() is private
-    // and computeStreamKDecisions() does NOT model the launch threshold, so a
-    // test written against the public snapshot would pass on a regressed build.
+    // solve() is the instrument because resolveStreamKSettings() is private and
+    // computeStreamKDecisions() mirrors the threshold independently and never carried
+    // the queue term, so a test against that snapshot passes on a regressed build.
     TEST(RowUniformityGridSteering_pre_checkin, TileSchedulingOnModeOffPinsBaselineLaunchGrid)
     {
         auto solution = uniformitySteeringSolution();
@@ -2328,18 +2326,17 @@ namespace
         solution->sizeMapping.streamK = 5;
 
         auto device = uniformitySteeringDevice();
-        // No developer override / CU knob: the grid must come from the ordinary
-        // CU-bounded analytical selection, which is what "baseline" means here.
+        // No override knobs: the grid must come from the CU-bounded analytical
+        // selection, which is what "baseline" means here.
         device.skFixedGrid      = 0;
         device.skMaxCUs         = 0;
         device.skGridMultiplier = 1;
 
         auto problem = uniformityGemm(9984, 2048, 128);
-        // The independent attribute. This is the whole point of the test.
+        // Tile scheduling ON -- the attribute independent of uniform summation order.
         problem.setParams().setStreamKTileSchedulingMode(1);
 
-        // Anti-vacuity: if this ever starts out true the test is measuring the
-        // mode-on path and proves nothing about the default configuration.
+        // Anti-vacuity: if this starts out true the test measures the mode-on path.
         ASSERT_FALSE(problem.getParams().uniformSummationOrder())
             << "this test is only meaningful with uniform summation order OFF";
         ASSERT_TRUE(solution->streamK5EffectiveDynamic(problem, device))
@@ -2352,27 +2349,25 @@ namespace
         const size_t selectedGrid
             = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
 
-        // Pinned, not derived. These are the pre-uniform-summation-order values
+        // Pinned, not derived. These are the pre-#10941 baseline (f4caa56e6ee) values
         // for this shape on the synthetic 256-CU / 8-XCD gfx950 device.
         ASSERT_EQ(tiles, 1248u);
         ASSERT_EQ(selectedGrid, 256u);
-        // The workspace guard in resolveStreamKSettings() only runs when the
-        // grid does not divide the tiles evenly (partial tiles exist). Without
-        // this the fallback is unreachable and the test is vacuous.
+        // Under tree reduction the workspace guard in resolveStreamKSettings() runs
+        // only when the grid leaves partial tiles. Without this the fallback is
+        // unreachable and the test is vacuous.
         ASSERT_NE(tiles % selectedGrid, 0u);
 
-        // Allocate EXACTLY what the library asks for -- not a byte more. This
-        // is the contract a well-behaved caller follows, and it is precisely
-        // the allocation a phantom workspace term turns into a fallback.
+        // Allocate EXACTLY what the library asks for -- the allocation a phantom
+        // workspace term turns into a fallback.
         const size_t requested = solution->partialTileSize(selectedGrid);
         problem.setWorkspaceSize(requested);
         ASSERT_EQ(solution->requiredWorkspaceSize(problem, device), requested)
             << "the workspace query must report the partial-tile bytes it can satisfy; "
                "if it reports 0 the query itself thinks this allocation is short";
 
-        // Dummy addresses: solve() only stores pointers into the kernel
-        // argument block, it never dereferences them. c == d because the
-        // synthesised problem is cEqualsD.
+        // Dummy addresses: solve() only stores pointers into the kernel argument
+        // block, it never dereferences them.
         void* const                   fake = reinterpret_cast<void*>(0x1000);
         TensileLite::ContractionInputs inputs;
         inputs.a             = fake;
@@ -2389,9 +2384,8 @@ namespace
         ASSERT_FALSE(invocations.empty());
         const auto& main = invocations.front();
 
-        // The launched Stream-K grid. numWorkGroups.x IS sk.grid for a linear
-        // Stream-K launch (generateSingleCall assigns it directly), and is the
-        // same value packed into the SKGrid kernel argument.
+        // numWorkGroups.x IS sk.grid on a linear Stream-K launch (generateSingleCall
+        // assigns it directly) and is the value packed into the SKGrid kernel argument.
         EXPECT_EQ(main.numWorkGroups.x, selectedGrid)
             << "launch grid must stay the CU-bounded persistent grid; " << tiles
             << " means the workspace-DP fallback fired on a workspace that exactly "
@@ -2401,7 +2395,7 @@ namespace
         EXPECT_EQ(main.numWorkGroups.y, 1u);
         EXPECT_EQ(main.numWorkGroups.z, 1u);
 
-        // Grid dimensions in work items, i.e. what actually reaches hipModuleLaunchKernel.
+        // Work-item extents: what HipSolutionAdapter.cpp hands to hipExtModuleLaunchKernel.
         ASSERT_EQ(main.workGroupSize.x, 256u);
         EXPECT_EQ(main.numWorkItems.x, 256u * 256u);
         EXPECT_EQ(main.numWorkItems.y, main.workGroupSize.y);
@@ -2414,8 +2408,8 @@ namespace
         ASSERT_FALSE(slack.empty());
         EXPECT_EQ(slack.front().numWorkGroups.x, selectedGrid);
 
-        // And one byte SHORT must still fall back, or the guard is gone
-        // entirely rather than merely correctly sized.
+        // One byte short must still fall back, or the guard is gone rather than
+        // merely correctly sized.
         problem.setWorkspaceSize(requested - 1);
         auto starved = solution->solve(problem, inputs, device);
         ASSERT_FALSE(starved.empty());
