@@ -163,6 +163,24 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->split_k = 4;
         *arch = "gfx950";
         return 0;
+    case 15:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx950. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx942
+         * (16x16x16 MFMA only). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx942";
+        return 0;
     default:
         return -1;
     }

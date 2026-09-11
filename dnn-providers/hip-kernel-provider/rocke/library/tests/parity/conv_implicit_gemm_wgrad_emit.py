@@ -380,6 +380,51 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 15:
+        # Two-stage deterministic: workspace-store epilogue instead of atomic-add.
+        # split_k=4, two_stage=True, fp16 output, gfx950.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=4,
+                two_stage=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 16:
+        # Two-stage deterministic, gfx942 (16x16x16 MFMA only).
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=4,
+                two_stage=True,
+            ),
+            "gfx942",
+        )
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when
@@ -425,6 +470,27 @@ def _spec(idx: int):
                 split_k=4,
             ),
             "gfx1151",
+        )
+    if idx == 103:
+        # two_stage=True with split_k=1 -- must raise ValueError.
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
+        return (
+            WgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                split_k=1,
+                two_stage=True,
+            ),
+            "gfx950",
         )
     raise SystemExit(f"unknown config index {idx}")
 
