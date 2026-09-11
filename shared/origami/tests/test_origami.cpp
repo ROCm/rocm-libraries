@@ -1398,6 +1398,63 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
   }
 }
 
+// Helper: a config with a Tensile backend carrying MIWaveGroup + LocalSplitU.
+static origami::config_t lsu_config(size_t mtm, size_t mtn, size_t mtk,
+                                    int wgm, int wgn, int lsu) {
+  auto c = make_config(mtm, mtn, mtk, 16, 16, 16, false, 1, 1);
+  c.tensile().wave_group_m  = wgm;
+  c.tensile().wave_group_n  = wgn;
+  c.tensile().local_split_u = lsu;
+  return c;
+}
+
+TEST_CASE("Origami: K-split LSU ranking respects MT_K cap", "[origami][lsu]") {
+  // Regression guard for the depthU-512 leak.  On a skinny deep-K shape a real
+  // K-split LSU kernel uses a shallow per-iter DepthU (32x16x32, MIWaveGroup=
+  // [1,1], LSU=4).  A deep phantom tile (16x16x512 LSU=4) is NOT a real K-split
+  // kernel; K_SPLIT_LSU_MTK_MAX keeps the box relaxation (and its LSU
+  // K-shortening credit) off it, so it must not out-rank the shallow tile.
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - shallow K-split LSU out-ranks deep phantom") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(28, 256, 4096, origami::transpose_t::N,
+                                   origami::transpose_t::T);  // skinny-M NT, min=28<=32
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(lsu_config(16, 16, 512, 1, 1, 4));  // deep phantom
+      configs.push_back(lsu_config(32, 16, 32, 1, 1, 4));   // real K-split kernel
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      INFO("winner=" << results[0].config.mt.m << "x" << results[0].config.mt.n
+                     << "x" << results[0].config.mt.k);
+      REQUIRE(results[0].config.mt.k == 32);   // shallow DepthU wins
+      REQUIRE(results[0].config.mt.m == 32);
+    }
+  }
+}
+
+TEST_CASE("Origami: sub-MI GEMV prefers LSU K-split kernel", "[origami][lsu]") {
+  // N=1 huge-K reduction is CU-starved; LSU splits K across waves to parallelize.
+  // The sub-MI box relaxation lets the model credit the LSU K-shortening even
+  // though K > DEEPEN_K_MAX, so the LSU K-split kernel must out-rank the
+  // otherwise-identical non-LSU tile.
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - LSU out-ranks non-LSU for N=1 huge-K") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(256, 1, 8192, origami::transpose_t::N,
+                                   origami::transpose_t::N);  // N=1 sub-MI
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(lsu_config(32, 32, 64, 2, 2, 1));  // non-LSU
+      configs.push_back(lsu_config(32, 32, 64, 1, 1, 4));  // LSU K-split (should win)
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      INFO("winner lsu=" << results[0].config.tensile().local_split_u);
+      REQUIRE(results[0].config.tensile().local_split_u == 4);
+    }
+  }
+}
+
 TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   using origami::hardware_t;
   const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
