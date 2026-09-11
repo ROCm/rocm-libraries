@@ -597,8 +597,8 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
         case gen::cdna1:
         case gen::cdna2:
         case gen::cdna3:
-        case gen::cdna4: 
-        case gen::cdna5: return arch::wavefront::target::size64;
+        case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::cdna5:
         case gen::rdna1:
         case gen::rdna2:
         case gen::rdna3:
