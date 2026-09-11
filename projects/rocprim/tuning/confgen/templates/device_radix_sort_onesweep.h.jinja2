@@ -1,0 +1,20 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block target_tparams %}
+template<class Target, class key_type, class value_type>
+{% endblock %}
+
+{% block config_guard scoped %}{{ mk_kv_type_check(type) }}{% endblock %}
+
+{% block config_constructor -%}
+radix_sort_onesweep_config_params{
+    kernel_config_params{ {{ config.block_size_x }}, {{  config.ipt }} },
+    kernel_config_params{ {{ config.sort_block_size_x }}, {{  config.sort_ipt }} },
+    {{ config.radix_bits }},
+    block_radix_rank_algorithm::{{ config.algo }}
+}
+{%- endblock %}
+
+{% block config_base_type -%}
+radix_sort_onesweep_config_params_base<key_type, value_type>
+{%- endblock %}
