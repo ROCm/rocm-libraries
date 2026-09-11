@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <string>
 #include <vector>
 
 using namespace hip_kernel_provider;
@@ -77,4 +78,69 @@ TEST(TestKernel, LaunchesVectorAdd)
     ASSERT_EQ(hipSuccess, hipFree(devA));
     ASSERT_EQ(hipSuccess, hipFree(devB));
     ASSERT_EQ(hipSuccess, hipFree(devC));
+}
+
+TEST(TestKernelDeviceBinding, RefusesALaunchItCannotBindTheDeviceFor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    int devices = 0;
+    ASSERT_EQ(hipSuccess, hipGetDeviceCount(&devices));
+
+    // An ordinal one past the last device can never be made current, so this stays
+    // discriminating on the single-GPU hosts CI runs. The null function handle is never
+    // dereferenced: the refusal lands before hipModuleLaunchKernel is reached.
+    Kernel kernel(nullptr, "unbindable", devices);
+    kernel.setBlockSize(1);
+    kernel.setGridSize(1);
+
+    try
+    {
+        kernel.launch(nullptr);
+        FAIL() << "expected a launch onto a device that cannot be made current to be refused";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& failure)
+    {
+        const std::string message = failure.what();
+        EXPECT_NE(message.find("cannot make device " + std::to_string(devices)), std::string::npos)
+            << message;
+        EXPECT_NE(message.find("unbindable"), std::string::npos)
+            << "the message must name the kernel: " << message;
+    }
+
+    // The refused hipSetDevice left HIP error state behind on purpose; clear it or the
+    // HipErrorHandler listener fails this test for it. Both stores, because the listener
+    // reads hipExtGetLastError and clearing only the other one leaves it holding the error.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
+}
+
+TEST(TestKernelDeviceBinding, AKernelWithNoDeviceBindsNothing)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Program-sourced kernels carry NO_DEVICE and must reach the launch without binding:
+    // one Program is shared across devices, so a bind here would pin every MLOps launch to
+    // whichever device compiled first.
+    Kernel kernel(nullptr, "unbound", Kernel::NO_DEVICE);
+    kernel.setBlockSize(1);
+    kernel.setGridSize(1);
+
+    try
+    {
+        kernel.launch(nullptr);
+        FAIL() << "expected a null function handle to be refused by HIP";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& failure)
+    {
+        const std::string message = failure.what();
+        EXPECT_NE(message.find("hipModuleLaunchKernel"), std::string::npos)
+            << "a NO_DEVICE kernel must fail at the launch, never at a device bind: " << message;
+        EXPECT_EQ(message.find("cannot make device"), std::string::npos)
+            << "a NO_DEVICE kernel must not attempt a bind: " << message;
+    }
+
+    // The refused launch left HIP error state behind; clear both stores, as above.
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
 }
