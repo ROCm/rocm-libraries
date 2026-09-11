@@ -1110,10 +1110,10 @@ class TestAttentionHelpers(unittest.TestCase):
         prefill kernel (``build_attention_dense``, its own builder / ABI -- NOT
         routed through the unified 2D-tiled path the matrix above covers).
 
-        Dense bakes shape in at build time and is LDS-heavy (tunable V pad via
-        ``ROCKE_DENSE_VPAD``), so it is a live over-budget risk on its own. Covers
-        both the default and persistent (grid-stride) variants. gfx950-only,
-        torch-free -- comgr targets gfx950 via its triple.
+        Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
+        time and is LDS-heavy, so it is a live over-budget risk on its own.
+        Covers both the default and persistent (grid-stride) variants.
+        gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
@@ -2518,20 +2518,17 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
     def test_waves_per_eu_cache_key_isolation(self):
         """Specs differing only in waves_per_eu produce distinct cache keys.
 
-        Before the fix the cache key was ``(kernel_name(), batch)``; two specs
-        with different ``waves_per_eu`` share the same ``kernel_name()`` and
-        ``batch``, so the second call would silently reuse the first binary.
-        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``, so
-        each value maps to a distinct slot.
+        The cache key uses the concrete frozen spec, so every current and future
+        field participates without a hand-maintained tuple.
 
         This test verifies the key structure directly (no comgr needed);
         ``test_waves_per_eu_cache_isolation_artifacts`` covers the emitted
         artifact those distinct keys must map to.
         """
         from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import (
             AttentionDenseSpec,
-            build_attention_dense,
         )
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
@@ -2539,7 +2536,7 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
 
         # Cache keys must be distinct.
         keys = {
-            wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()
+            wpe: attention_dense_cache_key(s, arch="gfx950") for wpe, s in specs.items()
         }
         self.assertNotEqual(
             keys[1],
@@ -2548,14 +2545,15 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
             "a sweep over waves_per_eu would silently reuse the first binary",
         )
 
-        # The key difference (waves_per_eu in the 3rd position) must match the spec.
+        # The concrete spec in the key carries the differing value.
         for wpe, key in keys.items():
-            self.assertEqual(key[2], wpe, f"cache key[2] should be waves_per_eu={wpe}")
+            self.assertEqual(key[0], "gfx950")
+            self.assertEqual(key[1].waves_per_eu, wpe)
 
-        # The two specs share kernel_name() and batch (the old key was just those two).
+        # The two specs still share the concise symbol and batch.
         self.assertEqual(
-            keys[1][:2],
-            keys[2][:2],
+            (specs[1].kernel_name(), specs[1].batch),
+            (specs[2].kernel_name(), specs[2].batch),
             "kernel_name() or batch differed unexpectedly — test setup error",
         )
 

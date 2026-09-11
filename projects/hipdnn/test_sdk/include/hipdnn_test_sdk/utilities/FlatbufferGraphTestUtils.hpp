@@ -2429,11 +2429,11 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // scale_o_tensor_uid
         statsUid,
         flatbuffers::nullopt, // max_tensor_uid
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
+        flatbuffers::nullopt, // sum_exp_tensor_uid
+        flatbuffers::nullopt, // rng_dump_tensor_uid
+        flatbuffers::nullopt, // amax_s_tensor_uid
+        flatbuffers::nullopt, // amax_o_tensor_uid
+        withStats ? flatbuffers::Optional<bool>(true) : flatbuffers::nullopt, // generate_stats
         alibiMask,
         paddingMask,
         causalMask,

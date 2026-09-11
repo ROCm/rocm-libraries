@@ -85,6 +85,16 @@ namespace TensileLite
         // (sits alongside the 0x100000 StreamK-mode-selection bit above).
         bool printStreamKLaunchSummary() const;
 
+        // Reports, on stderr, every problem for which solution selection came
+        // back with nothing, together with the uniform-summation-order clauses
+        // that eliminated the candidates. Answers "why does my problem have no
+        // solution when uniform summation order is on" without requiring the
+        // gate to be re-derived from outside the library. Gated by TENSILE_DB
+        // bit 0x400000: a dedicated bit, so it can be turned on by itself
+        // without also enabling per-call tracing or the StreamK launch summary
+        // on 0x200000 above.
+        bool printNoSolutionUniformSummationOrder() const;
+
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
