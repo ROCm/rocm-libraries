@@ -33,12 +33,11 @@
   - [4.7 The reference path](#47-the-reference-path)
 - [5. Prefill kernel](#5-prefill-kernel)
   - [5.1 Chunkwise factorization](#51-chunkwise-factorization)
-  - [5.2 Numerics: midpoint factoring](#52-numerics-midpoint-factoring)
-  - [5.3 The triangular solve](#53-the-triangular-solve)
-  - [5.4 The state scan](#54-the-state-scan)
-  - [5.5 Split and fused schedules](#55-split-and-fused-schedules)
-  - [5.6 value_splits](#56-value_splits)
-  - [5.7 GDN-mode deltas, all in prep](#57-gdn-mode-deltas-all-in-prep)
+  - [5.2 The triangular solve](#52-the-triangular-solve)
+  - [5.3 The state scan](#53-the-state-scan)
+  - [5.4 Split and fused schedules](#54-split-and-fused-schedules)
+  - [5.5 value_splits](#55-value_splits)
+  - [5.6 GDN-mode deltas, all in prep](#56-gdn-mode-deltas-all-in-prep)
 - [6. Reuse in the other direction: KDA on GDN](#6-reuse-in-the-other-direction-kda-on-gdn)
 - [7. Validation strategy](#7-validation-strategy)
 - [8. Known limits and follow-ups](#8-known-limits-and-follow-ups)
@@ -57,7 +56,7 @@
 | `S` | the recurrent state of one head, `DV × DK` |
 | `q̂`, `k̂` | L2-normalised query/key |
 | `Γ_i` | cumulative in-chunk decay up to row `i`; `γ_C` is the whole-chunk decay |
-| `EV` | per-band value extent, `DV / value_splits` — the scan's working V rows (§5.6) |
+| `EV` | per-band value extent, `DV / value_splits` — the scan's working V rows (§5.5) |
 
 Ownership vocabulary: a **workgroup** is one thread block; a **wave** is 64 lanes; a **lane** is
 one thread. `WTK = warp_threads_k`, `WTV = wave_size / WTK`, `NW = num_warps`,
@@ -340,45 +339,18 @@ warp-tiled path, selected only by naming the spec directly.
 
 ### 5.1 Chunkwise factorization
 
-Tokens are grouped into chunks of `C`. Writing the in-chunk cumulative decay as `Γ` and the
-whole-chunk decay as `γ_C`, the chunk body factorizes into **six state-independent tiles**:
+GDN prefill is the KDA chunkwise kernel in `gate_kind="gdn"` mode, so the factorization is KDA's,
+unchanged: see `../kda/ALGORITHM.md` for the six state-independent tiles (`A`, `GK`, `GQ`, `Aqk`,
+`Kt`, `dec`), the chunk-parallel / state-serial split, and the midpoint-factored decay that keeps
+`Γ_i / Γ_j` inside the `f32 exp2` range. That doc states the recurrence transposed (`S_kda = Sᵀ`,
+§5.3) and names the log-domain values `Gc` / `Gref`, which this doc calls `L` / `L_ref`.
 
-```
-A    = (I + StrictTril(Diag(β) Akk))⁻¹ Diag(β)        C × C
-       Akk_ij = k_i · (k_j * Γ_i / Γ_j)
-GK   = K * Γ                                          C × DK
-GQ   = Q * Γ * scale                                  C × DK
-Aqk  = Tril(GQ (K / Γ)ᵀ)                  (i ≥ j)     C × C
-Kt   = (K * γ_C / Γ)ᵀ                                 DK × C
-dec  = γ_C                                            DK
-```
+What GDN changes is only the gate's shape. The scalar per-`(token, head)` gate is broadcast across
+all `DK` channels, so `Γ` is channel-constant and `dec` is a `DK` vector whose entries are equal.
+Every tile above is indifferent to that — §2.2. The gate evaluation itself, the GQA gather and the
+raw-input fusions are prep-side additions, listed in §2.3.
 
-followed by a serial walk over chunks carrying `S`. **Only `S` is serial** — tile construction
-depends on nothing but its own chunk, so it is one workgroup per chunk and fully parallel over the
-sequence.
-
-The reason this is possible is §1.1: the recurrence is linear, so the intra-chunk dependency
-"token `i`'s corrected value depends on every earlier one" is exactly a unit lower-triangular
-system, and a triangular solve replaces `C` sequential steps.
-
-### 5.2 Numerics: midpoint factoring
-
-Both `C × C` products need the ratio `Γ_i / Γ_j`, which spans the chunk's whole decay range and
-overflows `f32` if formed directly. Write `L_i = log Γ_i` for the cumulative **log**-decay the kernel
-actually carries (in the `log2` domain, below), so `Γ_i / Γ_j = e^(L_i − L_j)`; both products are then
-built factored against the chunk's midpoint row `ref`:
-
-```
-Akk = (K * e^(L − L_ref)) (K * e^(L_ref − L))ᵀ
-```
-
-Each factor's exponent is bounded by half the chunk range and the product reconstructs the ratio
-exactly. Every exponential is additionally clamped to the `f32 exp2` range, and the cumulative sum
-is carried pre-scaled by `log2(e)` so the hardware base-2 exponential is used with no extra
-multiply. Two `C × C` products share the same right-hand operand and are issued back to back off
-one barrier.
-
-### 5.3 The triangular solve
+### 5.2 The triangular solve
 
 `A` is produced by **blocked forward substitution**, not by forming an inverse. The right-hand side
 `Diag(β)` is seeded into the output tile, so the substitution reads its starting value in place.
@@ -402,26 +374,28 @@ the solve without this overlap.)
 The solved block is written back transposed, in the operand order the next block's rank update
 wants.
 
-### 5.4 The state scan
+### 5.3 The state scan
 
-Per chunk, working transposed throughout:
+`S` keeps the `DV × DK` orientation of §0 throughout — the device layout both kernels allocate
+(`[pool, HV, DV, DK]` for decode, `[BH, DV, DK]` for the prefill scan). `kda/ALGORITHM.md` states
+the same recurrence transposed (`S_kda = Sᵀ`, `DK × DV`); read across the two docs with that
+mapping in mind. Per chunk, one value band of the state:
 
 ```
-Zᵀ  = Sᵀ GKᵀ                    EV × C
-Rᵀ  = Vᵀ − Zᵀ                   EV × C   (in register)
+Z   = S GKᵀ                     EV × C
+Rᵀ  = Vᵀ − Z                    EV × C   (in register)
 Ṽᵀ  = Rᵀ Aᵀ                     EV × C
-O   = GQ S + Aqk Ṽ              C × EV
-Sᵀ ← Diag(dec) Sᵀ + Ṽᵀ Ktᵀ      EV × DK
+O   = GQ Sᵀ + Aqk Ṽ             C × EV
+S  ← S Diag(dec) + Ṽᵀ Ktᵀ       EV × DK
 ```
 
-Here `EV = DV / value_splits` is the band's value extent (§5.6), and each line above is a value-band
-of the `DV × DK` state defined in §0; the `ᵀ` superscripts mark the transposed *operand* orientation
-that keeps every product in `A Bᵀ` form, not a `DK × DV` re-layout of `S`.
+Here `EV = DV / value_splits` is the band's value extent (§5.5), so a band of `S` is `EV × DK`.
+`dec` is `DK`-wide, so `Diag(dec)` is `DK × DK` and multiplies the state from the **right**.
 
-Transposition is deliberate: it keeps every product in `A Bᵀ` form with the contraction on the
-fastest axis, so no operand ever needs an LDS transpose.
+The remaining `ᵀ` superscripts mark operand orientation, not a re-layout: they keep every product
+in `A Bᵀ` form with the contraction on the fastest axis, so no operand ever needs an LDS transpose.
 
-Parallel structure inside a chunk: each wave owns one atom-sized band of `Sᵀ` and the matching band
+Parallel structure inside a chunk: each wave owns one atom-sized band of `S` and the matching band
 of value channels, so all five products are wave-local; the only cross-wave rendezvous are LDS
 visibility barriers at phase boundaries. Across chunks the loop is serial, and **`S` is carried in
 MFMA accumulator registers for the entire walk** — sequence length costs no additional registers.
@@ -429,7 +403,7 @@ MFMA accumulator registers for the entire walk** — sequence length costs no ad
 The residual `Rᵀ` never needs an `f32` staging tile, and the output `O` is stored straight to HBM
 because a slot's column index is already the lane's position in the atom's N extent.
 
-### 5.5 Split and fused schedules
+### 5.4 Split and fused schedules
 
 The same math, two packagings:
 
@@ -460,7 +434,7 @@ addresses the overlaid scan tiles occupy, and the validator rejects the combinat
 the in-kernel GDN gate, so the dispatcher pins `chunk_prep` then `chunk_scan`. A fused GDN kernel is
 a follow-up (§8).
 
-### 5.6 value_splits
+### 5.5 value_splits
 
 The scan's natural grid is `BH` workgroups, which starves at small `BH`. The value extent of `S` is
 independent across rows, so it is banded into `value_splits` slices, each its own workgroup:
@@ -478,7 +452,7 @@ band must tile the waves exactly. `value_splits` is selected from a `BH`-banded 
 split fixes the scan tile geometry it requires. This is the prefill analogue of decode's `BPV`:
 both manufacture workgroups when the natural grid is too small.
 
-### 5.7 GDN-mode deltas, all in prep
+### 5.6 GDN-mode deltas, all in prep
 
 Every GDN-specific branch listed in §2.3 lives in the prep kernel. **The scan body contains no GDN
 branches at all** — it consumes tiles, and tiles from GDN mode are shaped exactly like tiles from
@@ -536,7 +510,7 @@ Both kernels are validated against **independent oracles**, not against each oth
 
 ## 8. Known limits and follow-ups
 
-**Prefill decay range (documented, accepted).** The chunkwise stabilisation of §5.2 is sized for the
+**Prefill decay range (documented, accepted).** The chunkwise stabilisation of §5.1 is sized for the
 reference gate lower bound. GDN's gate is unbounded (§2.1), so a head whose per-token decay is
 steeper than that bound exceeds the clamped `exp2` range, the midpoint factoring no longer
 reconstructs the ratio, and that single steepest-decay head's output degrades. Trained GDN keeps the
@@ -547,11 +521,11 @@ Widening the range needs nested chunking or per-token rescaling.
 
 **Follow-ups.**
 
-1. A fused-path GDN prefill kernel (§5.5).
+1. A fused-path GDN prefill kernel (§5.4).
 2. gfx942 support; the tuned tables are arch-specific and need re-sweeping.
 3. Extending the supported decay range.
 4. Scan-side parallelism beyond the current `value_splits` cap, or a shorter serial chain — the scan
-   is the critical path at small `BH` (§5.5).
+   is the critical path at small `BH` (§5.4).
 5. KDA decode on the GDN chassis, or a single decode kernel generalised over both gates (§6).
 6. Host-struct consolidation of the GDN and KDA request lineage.
 7. Machine-checked byte-identity for the cross-engine surfaces this family touches — currently
