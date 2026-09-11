@@ -21,8 +21,14 @@ namespace ck_tile {
 #endif
 // 0 = keep the hand-written scheduler prescriptions, 1 = drop them where the
 // loop body holds a single Q tile, 2 = drop them always. See schedgate.py.
+//
+// Mode 1 existed because a doubled (mirror-tile-paired) body measured 1.4-3.2%
+// worse without the prescriptions. That no longer reproduces: on this base the
+// paired bodies are 9.4-14.5% FASTER dropped, with the unpaired instances flat
+// either way as an internal control. Mode 1 is kept so the comparison can be
+// re-run, but it is no longer the default.
 #ifndef CK_TILE_FMHA_BWD_SCHED_DROP_MODE
-#define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 1
+#define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 2
 #endif
 #ifndef CK_TILE_FMHA_BWD_DV_IN_REG
 #define CK_TILE_FMHA_BWD_DV_IN_REG 1
