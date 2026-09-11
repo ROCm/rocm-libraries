@@ -91,7 +91,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     using roc::host_numerics::ScalarType;
     using roc::host_numerics::Shape;
     using roc::host_numerics::Tensor;
-    using roc::host_numerics::add;
+    using roc::host_numerics::addInto;
     using roc::host_numerics::compare;
     using roc::host_numerics::generate;
     using roc::host_numerics::multiply;
@@ -305,7 +305,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         Tensor scaledProduct
             = multiply(product, Tensor::scalar(computeType, alpha), computeType, computeType);
         Tensor scaledC = multiply(c, Tensor::scalar(computeType, beta), computeType, computeType);
-        result.copyLogicalElementsFrom(add(scaledProduct, scaledC, computeType, computeType));
+        addInto(scaledProduct, scaledC, result, computeType);
     }
 
     const double tolerance = std::numeric_limits<Tc>::epsilon() * 100 * K;
