@@ -730,6 +730,15 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # When True, replace DefaultWGM with the bit-permutation swizzle
+    # (WGMBitSwizzle in WorkGroupMappingAlgos.py). This is a pure shift/mask
+    # remap (no integer division) of the workgroup id to (m_tile, n_tile) so that
+    # 8 consecutive workgroups share the same N panel (reuse B in L2) while
+    # striding M by 16. It only fires for the power-of-two grid shape it targets
+    # (NumWorkGroups0 == 128 M-tiles, NumWorkGroups1 == 16 N-tiles); the emitted
+    # code falls back to DefaultWGM at runtime for any other grid, so enabling it
+    # never miscomputes other problem sizes.
+    "WGMBitSwizzle": [False, True],
     # 0: WorkGroupMapping is predicted at runtime.
     # 1: No mapping
     "WorkGroupMappingXCC": [
