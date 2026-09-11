@@ -423,6 +423,8 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     // keeps that register in getSrcParams() for dependency tracking, but the
     // StinkyTofu instruction definition models D0 as RW and the assembly syntax
     // must not print vdata a second time as S0.
+    // BufferAtomicPkAddBF16 is excluded on purpose: it models vdata as a plain
+    // source (it is non-returning), so its first src param must be kept.
     if (dynamic_cast<const rocisa::BufferAtomicAddF32*>(inst) ||
         dynamic_cast<const rocisa::BufferAtomicCmpswapB32*>(inst) ||
         dynamic_cast<const rocisa::BufferAtomicCmpswapB64*>(inst)) {

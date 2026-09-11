@@ -62,6 +62,12 @@ DEF_BATCH(.format = MUBUF_STORE,
         .operand_fields = { {S0, .size=128} },
     BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8", .logical = "BufferStoreD16HIU8",
     BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16", .logical = "BufferStoreD16HIB16",
+    // Fire-and-forget packed bf16 atomic add. Modelled as a store, not as
+    // MUBUF_ATOMIC, because vdata is read-only here: without a temporal hint
+    // the hardware returns nothing, and modelling vdata as an RW destination
+    // would make the emitter add th:TH_ATOMIC_RETURN and write the pre-add
+    // value back over a register the store code has already moved on from.
+    BufferAtomicPkAddBf16Inst, "buffer_atomic_pk_add_bf16", .logical = "BufferAtomicPkAddBF16",
 )
 // Control Flow — Branches (inherit {S, simm16, label, 16} from SOPP_BRANCH)
 DEF_BATCH(.format = SOPP_BRANCH,

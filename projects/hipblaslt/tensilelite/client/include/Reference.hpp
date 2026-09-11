@@ -108,8 +108,16 @@ namespace TensileLite
             float fa      = static_cast<float>(a);
             float fb      = static_cast<float>(b);
             float absDiff = std::fabs(fa - fb);
+            // For BF16 a positive threshold is an extra *absolute* allowance, not
+            // a replacement relative tolerance. Kernels that reduce in BF16 (see
+            // m_bf16AtomicSplits in ReferenceValidator) carry an error set by the
+            // intermediate partial sums, so it does not shrink as the result
+            // approaches zero through cancellation. Leaving the relative term
+            // alone keeps large values held to the normal bound.
+            float extraAbs = (threshold > 0.0) ? static_cast<float>(threshold) : 0.0f;
             return fa == fb
-                   || absDiff < AlmostEqualTolerance_BFloat16 * (std::fabs(fa) + std::fabs(fb) + 1.0f);
+                   || absDiff < AlmostEqualTolerance_BFloat16 * (std::fabs(fa) + std::fabs(fb) + 1.0f)
+                                    + extraAbs;
         }
 
         template <>
