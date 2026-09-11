@@ -147,7 +147,7 @@ repos:
         entry: python dnn-providers/integration-tests/scripts/verify_support_claims.py
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/verify_support_claims\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(test_)?verify_support_claims\.py)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)

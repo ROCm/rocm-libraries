@@ -9,7 +9,6 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -455,10 +454,13 @@ int main(int argc, char** argv) noexcept
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
-        hipdnn_integration_tests::bundle::printSupportClaimSummary(
-            hipdnn_integration_tests::bundle::supportClaimCoverage(),
-            hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
-            std::cerr);
+        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
+        {
+            hipdnn_integration_tests::bundle::printSupportClaimSummary(
+                hipdnn_integration_tests::bundle::supportClaimCoverage(),
+                hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
+                std::cerr);
+        }
 
         int exitCode = result;
 
