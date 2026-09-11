@@ -27,6 +27,7 @@ import lightgbm as lgb
 # Importing the package puts `_generated/` on sys.path; see uhd_gen/__init__.py.
 import uhd_gen  # noqa: F401
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+from hipdnn_flatbuffers_sdk.data_objects.GbdtGroup import GbdtGroupT
 from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,8 @@ def convert(
     training_arches: list[str] | None = None,
     model_version: str | None = None,
     training_date: str | None = None,
+    group_by_feature_index: int = -1,
+    group_models: list[tuple[float, "lgb.Booster"]] | None = None,
 ) -> str:
     """Convert LightGBM model to FlatBuffer GbdtModel.
 
@@ -82,6 +85,10 @@ def convert(
             detection at runtime.
         model_version: Optional semantic version (e.g., "1.0.0").
         training_date: ISO 8601 stamp to record; see `resolve_training_date`.
+        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
+            single-layer model.
+        group_models: One `(grouping value, booster)` pair per group's layer 2.
+            None writes a single-layer model.
 
     Returns:
         The SHA-256 of the bytes written, as `TreeDataAdapter` recomputes them: the
@@ -98,6 +105,10 @@ def convert(
         training_arches=training_arches,
         model_version=model_version,
         training_date=training_date,
+        group_by_feature_index=group_by_feature_index,
+        groups=None
+        if not group_models
+        else [(value, booster.dump_model()) for value, booster in group_models],
     )
 
     Path(output_path).write_bytes(buffer)
@@ -121,6 +132,8 @@ def build_gbdt_model(
     training_arches: list[str] | None = None,
     model_version: str | None = None,
     training_date: str | None = None,
+    group_by_feature_index: int = -1,
+    groups: list[tuple[float, dict[str, Any]]] | None = None,
 ) -> bytes:
     """Build FlatBuffer GbdtModel from LightGBM model JSON.
 
@@ -131,6 +144,10 @@ def build_gbdt_model(
         training_arches: GPU architectures the model was trained on.
         model_version: Semantic version string.
         training_date: ISO 8601 stamp to record; see `resolve_training_date`.
+        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
+            single-layer model.
+        groups: One `(grouping value, dumped ensemble)` pair per group, in the
+            order layer 1 decides between them. None writes a single-layer model.
 
     Returns:
         FlatBuffer bytes for GbdtModel.
@@ -161,6 +178,19 @@ def build_gbdt_model(
         model.trainingArches = list(training_arches)
     if model_version:
         model.modelVersion = model_version
+
+    # Layer 2, when the caller trained one ensemble per group. Absent, the artifact is
+    # exactly what this tool has always written and the runtime reads it as single-layer.
+    if groups:
+        model.groupByFeatureIndex = group_by_feature_index
+        model.groups = []
+        for value, group_json in groups:
+            group = GbdtGroupT()
+            group.value = float(value)
+            group.trees = [
+                _build_tree(info["tree_structure"]) for info in group_json["tree_info"]
+            ]
+            model.groups.append(group)
 
     builder = flatbuffers.Builder(1024 * 1024)
     builder.Finish(model.Pack(builder), file_identifier=GBDT_MODEL_FILE_IDENTIFIER)
