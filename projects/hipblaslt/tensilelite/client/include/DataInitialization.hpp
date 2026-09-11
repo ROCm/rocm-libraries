@@ -37,6 +37,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -1191,6 +1192,11 @@ namespace TensileLite
             // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // What currently occupies gpuInput.valid for each MX scale tensor:
+            // the solution's mxScaleFormat and the descriptor it was written for.
+            // The layout is solution-dependent, so both must match to reuse it.
+            std::map<size_t, std::pair<int, TensorDescriptor>> m_mxUploadedScale;
         };
 
         template <>
