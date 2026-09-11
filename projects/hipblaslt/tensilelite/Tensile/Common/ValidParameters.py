@@ -853,6 +853,12 @@ validParameters = { # we need to make sure this matches develop
     # partial dscnt); 2=double-buffer (issue next pass's ds_bpermute before consuming current). Only
     # active when WaveTransposeStore>0.
     "WaveTransposeStorePipe": [0, 1, 2],
+    # WaveTransposeStoreTDM: epilogue store via tensor_store_from_lds (TDM reverse DMA, LDS->global)
+    # instead of the in-register ds_bpermute reshuffle. Same WaveContiguousOutput preconditions as
+    # WaveTransposeStore>0 plus asmCaps["HasTDM"]. Writes the wave's contiguous M-block linearly into
+    # LDS then one TDM store scatters it to D via descriptor strides (tile_dim0=M, dim0_stride=StrideD).
+    # 0=off. Mutually exclusive with WaveTransposeStore (both set -> reject).
+    "WaveTransposeStoreTDM": [0, 1],
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],

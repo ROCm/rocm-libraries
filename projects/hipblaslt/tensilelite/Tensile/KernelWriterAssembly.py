@@ -16213,8 +16213,16 @@ class KernelWriterAssembly(KernelWriter):
         if kernel.get("WaveTransposeStorePipe", 0) > 0:
           cnt += T * dwordsPerBlock
         return self.vgprPool.checkOutAligned(cnt, dwordsPerBlock, tag="globalWriteElements_xpose"), cnt
+      def _checkoutTDMStoreScratch():
+        # TDM-store path reuses the vgprXposeBase field for a small scratch region:
+        #   +0 ldsWr (per-lane LDS byte write address), +1 mBase (lane M), +2 nBase (lane N), +3 tmp.
+        dwordsPerBlock = 2 * self.states.bpeCexternal
+        cnt = 4
+        return self.vgprPool.checkOutAligned(cnt, dwordsPerBlock, tag="globalWriteElements_tdmStore"), cnt
       wantXpose = (kernel.get("WaveTransposeStore", 0) > 0 and kernel.get("WaveContiguousOutput")
                    and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
+      wantTDMStore = (kernel.get("WaveTransposeStoreTDM", 0) and kernel.get("WaveContiguousOutput")
+                      and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
       if is16bitHPA:
         # For UseSubtileImpl, allocate 7 vgprs with 2-alignment (64-bit aligned) so
         # that the first 4 (reused as pack scratch for the paired 16bit store) satisfy
@@ -16235,6 +16243,8 @@ class KernelWriterAssembly(KernelWriter):
         # bf16/fp16 wave-transpose store: b128 scratch (dwordsPerBlock=4, 4-aligned), low bank.
         if wantXpose:
           xposeBase, xposeCount = _checkoutXposeScratch()
+        elif wantTDMStore:
+          xposeBase, xposeCount = _checkoutTDMStoreScratch()
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
@@ -16248,6 +16258,8 @@ class KernelWriterAssembly(KernelWriter):
            and kernel["WavefrontSize"] == 32:
           if wantXpose:
             xposeBase, xposeCount = _checkoutXposeScratch()
+          elif wantTDMStore:
+            xposeBase, xposeCount = _checkoutTDMStoreScratch()
           else:
             f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \

@@ -2609,6 +2609,22 @@ class Solution(collections.abc.Mapping):
     if state.get("WaveTransposeStore", 0) <= 0:
       state["WaveTransposeStorePipe"] = 0
 
+    # WaveTransposeStoreTDM: epilogue store via tensor_store_from_lds (TDM reverse DMA). Same
+    # WaveContiguousOutput preconditions as WaveTransposeStore>0, plus asmCaps["HasTDM"]. Mutually
+    # exclusive with WaveTransposeStore (both are wave-contiguous coalesced-store paths).
+    if state.get("WaveTransposeStoreTDM", 0):
+      dtype   = state["ProblemType"]["DestDataType"]
+      dtypeOK = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
+      if state.get("WaveTransposeStore", 0) > 0:
+        reject(state, printRejectionReason,
+               "WaveTransposeStoreTDM and WaveTransposeStore>0 are mutually exclusive")
+        return
+      if not (state["WaveContiguousOutput"] and not state["UseSubtileImpl"]
+              and state["WavefrontSize"] == 32 and dtypeOK
+              and state["ProblemType"]["HighPrecisionAccumulate"]
+              and isaInfoMap[isa].asmCaps.get("HasTDM", False)):
+        state["WaveTransposeStoreTDM"] = 0
+
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
     # if state["LDSTrInst"] != finalLDSTrInst:

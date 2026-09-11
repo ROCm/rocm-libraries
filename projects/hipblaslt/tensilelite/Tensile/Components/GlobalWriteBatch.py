@@ -22,12 +22,12 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
-  SDWAModifiers, DPPModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
+  SDWAModifiers, DPPModifiers, DSModifiers, MemTokenData, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   GlobalLoadB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
-  DSBPermuteB32, FlatAtomicCmpswapB32, \
+  DSBPermuteB32, SWaitTensorcnt, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
   SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
@@ -51,6 +51,8 @@ from ..Activation import ActivationModule
 from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
+from ..Components.TensorDataMover import TensorDataMoverStore
+from ..AsmMemoryHelpers import dsStore
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
@@ -1784,6 +1786,23 @@ class GlobalWriteBatchWriter:
     )
     if waveContigXposeStore:
       waveContigF8Merge = False  # transpose supersedes partner-merge when enabled
+    # wave32 TDM-store epilogue: write the wave's contiguous M-block linearly to LDS then one
+    # tensor_store_from_lds (reverse DMA) scatters it to D. Orthogonal knob to WaveTransposeStore
+    # (mutually exclusive, enforced in Solution.py). Same WaveContiguousOutput preconditions.
+    waveContigTDMStore = (
+      self.kernel.get("WaveTransposeStoreTDM", 0)
+      and self.kernel.get("WaveContiguousOutput")
+      and not self.kernel.get("UseSubtileImpl")
+      and not self.edge
+      and self.kernel["WavefrontSize"] == 32
+      and (destDtype.is8bitFloat() or destDtype.isBFloat16() or destDtype.isHalf())
+      and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+      and self.kernel["BufferStore"]
+      and not self.kernel["StoreRemapVectorWidth"]
+      and self.parentWriter.states.bpeCexternal == self.parentWriter.states.bpeCexternalGSU1
+    )
+    if waveContigTDMStore:
+      waveContigF8Merge = False  # TDM store supersedes partner-merge when enabled
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
         "UseSubtileImpl 16bit optimized store requires BufferStore=1"
@@ -1843,6 +1862,10 @@ class GlobalWriteBatchWriter:
     # Every store trigger below then only adds its sgM/tt1 residual — see _emitWaveTransposeSetup.
     if waveContigXposeStore:
       module.add(self._emitWaveTransposeSetup())
+    # Same idea for the TDM store: hoist the lane-invariant LDS base address once per batch; each
+    # element's ds_store then uses a compile-time offset immediate (no per-tile address math).
+    if waveContigTDMStore:
+      module.add(self._emitWaveTDMStoreSetup())
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
@@ -2471,6 +2494,17 @@ class GlobalWriteBatchWriter:
               storeCodeModule.add(xposeModule)
               self.storesIssued += xposeStores
             # else: this tt0 is packed now, consumed by its sub-group's last-tt0 trigger -> no-op.
+          elif waveContigTDMStore:
+            # TDM-store form: stage every (tt0,tt1) M-block into a per-wave LDS region laid out in the
+            # FULL wave-tile (M-contiguous, N spanning all miwt1 N-tiles). The whole wave tile is then
+            # flushed by ONE tensor_store_from_lds on the LAST element (tt1==miwt1-1 AND tt0==miwt0-1):
+            # the wave owns contiguous M (Mfull) x contiguous N (matN*miwt1), so a single DMA suffices.
+            miwt0 = self.kernel["MIWaveTile"][0]
+            miwt1 = self.kernel["MIWaveTile"][1]
+            isLast = (element[1] == miwt0 - 1) and (element[0] == miwt1 - 1)
+            tdmModule, tdmStores = self._emitWaveTDMStore(elementIdx, element[1], element[0], isLast)
+            storeCodeModule.add(tdmModule)
+            self.storesIssued += tdmStores
           elif waveContigF8Merge:
             storeCodeModule.add(self._emitF8PartnerMergeStore(addrCalc, sumIdx))
             self.storesIssued += 1
@@ -4057,6 +4091,152 @@ class GlobalWriteBatchWriter:
       "mBase":      single + 7,                         # lane-invariant M-base (no sgM term) (hoisted)
       "nBase":      single + 8,                         # lane-invariant coord1-base (no tt1 term) (hoisted)
     }
+
+  def _emitWaveTDMStoreSetup(self):
+    """Hoist the lane-invariant TDM-store LDS base address ONCE per batch (before the element loop).
+
+    ldsWr for element (tt0,tt1) = waveLdsBase + (tt1*matN + N_local)*Mfull + tt0*matM + Mhalf*8, all
+    * bpe. Only the compile-time part (tt1*matN*Mfull + tt0*matM)*bpe varies per element — it becomes
+    the ds_store offset immediate. The lane-varying part (N_local*Mfull + Mhalf*8 + waveId*waveTileBytes)
+    * bpe is identical across every element, so compute it once here into vLdsBase (scratch +0)."""
+    module = Module("WaveTDMStoreSetup")
+    bpe   = self.parentWriter.states.bpeCexternal
+    ws    = self.kernel["WavefrontSize"]
+    matM  = self.kernel["MatrixInstM"]
+    matN  = self.kernel["MatrixInstN"]
+    miwt0 = self.kernel["MIWaveTile"][0]
+    miwt1 = self.kernel["MIWaveTile"][1]
+    Mfull = miwt0 * matM
+    Nfull = miwt1 * matN
+    waveTileBytes = Mfull * Nfull * bpe
+    base    = self.cvtVgprStruct.vgprXposeBase
+    vLdsBase = base + 0                            # hoisted per-batch, consumed by every element
+    vTmp     = base + 1
+    module.addComment1("TDM store SETUP (per batch): lane-invariant LDS base = (N_local*Mfull + Mhalf*8 + waveId*waveTileBytes)*bpe")
+    module.add(VAndB32(dst=vgpr(vTmp), src0=ws - 1, src1=vgpr("Serial"), comment="laneInWave = Serial & (ws-1)"))
+    module.add(VAndB32(dst=vgpr(vLdsBase), src0=15, src1=vgpr(vTmp), comment="N_local = lane & 15"))
+    module.add(VMulLOU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=Mfull, comment="N_local*Mfull"))
+    module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=4, src=vgpr(vTmp), comment="Mhalf = laneInWave >> 4"))
+    module.add(VLShiftLeftB32(dst=vgpr(vTmp), shiftHex=3, src=vgpr(vTmp), comment="Mhalf*8"))
+    module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vTmp), comment="+ Mhalf*8"))
+    if self.kernel["NumWaves"] > 1:
+      module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=int(log2(ws)), src=vgpr("Serial"), comment="waveId = Serial >> log2(ws)"))
+      module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=Mfull * Nfull, comment="waveId*(Mfull*Nfull) [elements]"))
+      module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vTmp), comment="+ waveLdsBase (elements)"))
+    if bpe > 1:
+      module.add(VLShiftLeftB32(dst=vgpr(vLdsBase), shiftHex=int(log2(bpe)), src=vgpr(vLdsBase), comment="* bpe -> LDS byte base"))
+    return module
+
+  def _emitWaveTDMStore(self, elementIdx: int, tt0: int, tt1: int, isLast: bool):
+    """TDM-store epilogue: stage a wave's WHOLE contiguous tile into LDS, then ONE tensor_store_from_lds
+    (reverse DMA, LDS->global) scatters it to D via descriptor strides — no ds_bpermute reshuffle.
+
+    Called once per (tt0, tt1) element. WMMA f8/bf16 output: lane l holds 8 contiguous M at column
+    N_local = l&15, M-half = (l>=16). For M-tile tt0, N-tile tt1 this lane's 8-M packed block lives at
+    sumIdx = elementSumIdx[elementIdx]. We ds_store it into a per-wave LDS staging buffer laid out in
+    the OUTPUT tile's (M-inner, N-outer) order: LDS[waveBase + (tt1*matN + N_local)*Mfull + m], where
+    Mfull = miwt0*matM (wave's full M span) and the N axis spans ALL miwt1 N-tiles (Nfull = matN*miwt1).
+    The lane-invariant base is hoisted per-batch (_emitWaveTDMStoreSetup -> vLdsBase); each element only
+    adds a compile-time ds_store OFFSET immediate (tt1*matN*Mfull + tt0*matM)*bpe — no per-tile address
+    math. On the LAST element the whole wave tile is flushed by a SINGLE TDM store: tile_dim0 = Mfull
+    (contiguous), tile_dim1 = Nfull, tensor_dim0_stride = StrideD. No cross-wave barrier is needed —
+    each wave writes and reads its OWN LDS region, so only a self-wave s_wait_dscnt (WAR) is required.
+    Returns (module, numStoresIssued).
+    """
+    module = Module("WaveTDMStore")
+    bpe   = self.parentWriter.states.bpeCexternal
+    dwordsPerBlock = 2 * bpe                       # 8 M packed: f8 -> 2 dwords (b64); bf16/fp16 -> 4 (b128)
+    ws    = self.kernel["WavefrontSize"]
+    matM  = self.kernel["MatrixInstM"]
+    matN  = self.kernel["MatrixInstN"]
+    miwt0 = self.kernel["MIWaveTile"][0]
+    miwt1 = self.kernel["MIWaveTile"][1]
+    miwg0 = self.kernel["MIWaveGroup"][0]
+    miwg1 = self.kernel["MIWaveGroup"][1]
+    Mfull = miwt0 * matM                            # wave's full M span
+    Nfull = miwt1 * matN                            # wave's full N span (all N-tiles) — single-store key
+    strideD1J = "StrideD%s" % self.parentWriter.states.indexChars[self.kernel["PackedC1IndicesX"][0]]
+    waveTileBytes = Mfull * Nfull * bpe           # per-wave staging region size (whole wave tile)
+
+    vLdsBase = self.cvtVgprStruct.vgprXposeBase + 0   # hoisted lane-invariant LDS byte base
+
+    tileBase = self.ss.elementSumIdx[elementIdx]    # packed 8-M block for this (tt0, tt1)
+
+    # --- Per-element: one ds_store using the hoisted base + a compile-time offset immediate. ---
+    # offset (bytes) = (tt1*matN*Mfull + tt0*matM) * bpe  (this element's position in the wave tile).
+    tileOffsetBytes = (tt1 * matN * Mfull + tt0 * matM) * bpe
+    module.addComment1("TDM store #%d: stage (tt0=%d,tt1=%d) at LDS offset %d" % (elementIdx, tt0, tt1, tileOffsetBytes))
+    module.add(dsStore(bpe * 8, dstAddr=vgpr(vLdsBase), src=vgpr(tileBase, dwordsPerBlock),
+                       ds=DSModifiers(offset=tileOffsetBytes), comment="stage 8-M block to LDS",
+                       memToken=MemTokenData([self.parentWriter.states.memTokenLdsBuffer0])))
+
+    if not isLast:
+      return module, 0
+
+    # --- Last element: flush the whole (Mfull x Nfull) wave tile with ONE TDM store. ---
+    module.addComment1("TDM store: flush whole wave tile (Mfull=%d x Nfull=%d) in one DMA" % (Mfull, Nfull))
+    module.add(SWaitCnt(dscnt=0, comment="wait own-wave LDS staging writes (self WAR)"))
+
+    tdm = TensorDataMoverStore()
+    tdm.setMemToken([self.parentWriter.states.memTokenLdsBuffer0])
+    kw  = self.parentWriter
+    with kw.allocTmpSgpr(12, tag="tdmStoreDesc") as descRes:
+      g0 = descRes.idx        # group0: 4 sgpr
+      g1 = descRes.idx + 4    # group1: 8 sgpr
+      # Zero + set count/type/data_size/dims/tiles first (initOperands writes all of g0,g1).
+      module.add(tdm.initOperands(g0, g1))
+      module.add(tdm.setDataType(self.kernel["ProblemType"]["DestDataType"], g1))
+      with kw.allocTmpSgpr(2, tag="tdmStoreAddr") as addrRes:
+        aLo = addrRes.idx
+        wId = addrRes.idx + 1
+        # WaveIdx sgpr is freed by epilogue -> recompute waveId from Serial (lane 0's tid >> log2(ws)).
+        module.add(VReadfirstlaneB32(sgpr(wId), vgpr("Serial"), comment="first tId"))
+        module.add(SLShiftRightB32(dst=sgpr(wId), shiftHex=int(log2(ws)), src=sgpr(wId), comment="waveId = fTid >> log2(ws)"))
+        # lds_addr = waveId * waveTileBytes (per-wave staging region; matches the staging write base).
+        if self.kernel["NumWaves"] > 1:
+          module.add(SMulI32(dst=sgpr(aLo), src0=sgpr(wId), src1=waveTileBytes, comment="waveLdsBase = waveId*waveTileBytes"))
+          module.add(tdm.setLdsAddr(g0, sgpr(aLo)))
+        else:
+          module.add(tdm.setLdsAddr(g0, 0))
+        with kw.allocTmpSgpr(1, tag="tdmStoreDim") as dimRes:
+          module.add(SMovB32(dst=sgpr(dimRes.idx), src=Mfull, comment="tensor_dim0 = tile_dim0 = Mfull"))
+          module.add(tdm.setTensorDim0(g1, dimRes.idx, kw))
+          module.add(SMovB32(dst=sgpr(dimRes.idx), src=Nfull, comment="tensor_dim1 = tile_dim1 = Nfull (all N-tiles)"))
+          module.add(tdm.setTensorDim1(g1, dimRes.idx, kw))
+        module.add(tdm.setTensorTile0(g1, Mfull))
+        module.add(tdm.setTensorTile1(g1, Nfull))
+        module.add(tdm.setTensorStride0(g1, strideD1J))   # tensor_dim0_stride = StrideD (elements)
+        # global_addr = SrdD (flat top-left of macro-tile) + this wave's (M,N) byte offset. SrdD[0:1]
+        # includes wg1*MT1 (N) + batch, but NOT the wg0*MT0 (M) offset — SrdD carries only the N/batch
+        # base because buffer_store puts the M offset in the per-thread vaddr. The TDM store uses a flat
+        # global_addr with no vaddr, so we must add wg0*MT0*bpe (M) ourselves. (Missing this passes when
+        # M<=MT0 i.e. wg0==0 always, but corrupts every wg0>0 row-block on real hw — FFM hid it.)
+        module.add(tdm.setGlobalAddr(g0, "SrdD"))    # copy SrdD base + set type field (image)
+        # workgroup-M offset = wg0 * MacroTile0 * bpe (contiguous M).
+        module.add(SMulI32(dst=sgpr(aLo), src0=sgpr("WorkGroup0"), src1=self.kernel["MacroTile0"] * bpe, comment="wgM byte = wg0*MT0*bpe"))
+        module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(aLo), comment="global_addr += wgM"))
+        module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+        # waveM byte offset = (waveId & (miwg0-1)) * Mfull * bpe (contiguous M).
+        if miwg0 > 1:
+          module.add(SAndB32(dst=sgpr(aLo), src0=sgpr(wId), src1=miwg0 - 1, comment="waveId0 = waveId & (miwg0-1)"))
+          module.add(SMulI32(dst=sgpr(aLo), src0=sgpr(aLo), src1=Mfull * bpe, comment="waveM byte = waveId0*Mfull*bpe"))
+          module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(aLo), comment="global_addr += waveM"))
+          module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+        # waveN col offset = (waveId >> log2(miwg0)) * Nfull ; byte = col * StrideD * bpe.
+        if miwg1 > 1:
+          module.add(SLShiftRightB32(dst=sgpr(aLo), shiftHex=int(log2(miwg0)), src=sgpr(wId), comment="waveId1 = waveId >> log2(miwg0)"))
+          module.add(SMulI32(dst=sgpr(aLo), src0=sgpr(aLo), src1=Nfull, comment="waveN col = waveId1*Nfull"))
+          module.add(SMulI32(dst=sgpr(aLo), src0=sgpr(aLo), src1=sgpr(strideD1J), comment="* StrideD"))
+          if bpe > 1:
+            module.add(SLShiftLeftB32(dst=sgpr(aLo), shiftHex=int(log2(bpe)), src=sgpr(aLo), comment="* bpe"))
+          module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(aLo), comment="global_addr += waveN"))
+          module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=0, comment="carry"))
+      module.add(tdm.issueStore(g0, g1))
+    # No s_wait_tensorcnt after the store: this TDM store is the LAST op of the epilogue (store ->
+    # branch -> s_endpgm), and s_endpgm implicitly drains outstanding TDM stores. Nothing reads D or
+    # the tensorcnt before kernel exit, so the wait is redundant. (If a future consumer is added after
+    # the store on any path, reinstate an s_wait_tensorcnt 0 before it.)
+    return module, 1
 
   def _emitWaveTransposeSetup(self):
     """Emit the LANE-INVARIANT wave-transpose store setup ONCE per batch (before the element loop).
