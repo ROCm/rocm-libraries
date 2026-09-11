@@ -25,6 +25,20 @@
 #include <vector>
 #include <memory>
 
+#ifndef _WIN32
+#include <amd_smi/amdsmi.h>
+
+// True when `status` means AMD-SMI is answering correctly but the requested
+// telemetry (e.g. PCI BDF) is not exposed by the platform - e.g. WSL2/DXG's
+// paravirtualized GPU access, which does not expose a real PCI BDF to the
+// guest (ROCM-30983). Such platforms should disable the affected monitoring
+// gracefully rather than aborting the whole client.
+inline bool isAmdsmiTelemetryUnavailable(amdsmi_status_t status)
+{
+    return status == AMDSMI_STATUS_NOT_SUPPORTED;
+}
+#endif
+
 class EfficiencyMonitor
 {
 public:

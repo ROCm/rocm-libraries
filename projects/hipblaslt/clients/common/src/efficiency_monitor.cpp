@@ -30,6 +30,7 @@
 
 #include "efficiency_monitor.hpp"
 #include "hipblaslt/hipblaslt-ext-op.h"
+#include "hipblaslt_ostream.hpp"
 
 #ifndef _WIN32
 
@@ -491,8 +492,29 @@ private:
                 m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
             for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
             {
-                uint64_t amdSMIPCIID{};
-                AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
+                uint64_t        amdSMIPCIID{};
+                amdsmi_status_t bdfStatus
+                    = amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID);
+                if(isAmdsmiTelemetryUnavailable(bdfStatus))
+                {
+                    // WSL2/DXG's paravirtualized GPU access does not expose a PCI BDF
+                    // to the guest, so AMD-SMI correctly reports NOT_SUPPORTED here
+                    // (ROCM-30983). There's no BDF to match against on this platform;
+                    // warn once and fall back to processor 0 instead of aborting.
+                    static bool warned = false;
+                    if(!warned)
+                    {
+                        hipblaslt_cerr
+                            << "Warning: AMD-SMI does not support PCI BDF queries on "
+                               "this platform (e.g. WSL/DXG); disabling BDF-based "
+                               "device matching for efficiency monitoring and using "
+                               "processor 0."
+                            << std::endl;
+                        warned = true;
+                    }
+                    return 0;
+                }
+                AMDSMI_CHECK_EXC(bdfStatus);
 
                 msg << smiIndex << ": " << amdSMIPCIID << std::endl;
 
