@@ -19,11 +19,6 @@ import struct
 
 from .errors import HkpPackError
 
-try:
-    import msgpack
-except ImportError:  # pragma: no cover - environment without the packer's deps
-    msgpack = None
-
 _BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
 _ELF_MAGIC = b"\x7fELF"
 
@@ -49,12 +44,21 @@ _AMDGCN_TRIPLE_MARKER = "-amdgcn-"
 
 
 def _require_msgpack(where):
-    if msgpack is None:
+    """The msgpack module, imported at call time rather than at module import.
+
+    --kpack-python-dir reaches sys.path only when load_kpack() runs, which is after
+    this module was imported. Binding the name at import would cache the very failure
+    the override exists to repair, so a run that supplied a good dependency directory
+    would still be told msgpack is missing.
+    """
+    try:
+        import msgpack
+    except ImportError as exc:
         raise HkpPackError(
             f"{where}: reading a kernel signature needs the 'msgpack' module, which is "
             "not importable. It ships as a dependency of rocm_kpack; install it, or "
             "pass --kpack-python-dir pointing at an environment that has it."
-        )
+        ) from exc
     return msgpack
 
 

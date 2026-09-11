@@ -7,11 +7,6 @@ from pathlib import Path
 
 import pytest
 
-try:
-    import msgpack
-except ImportError:
-    msgpack = None
-
 _TESTS_DIR = Path(__file__).resolve().parent
 _PKG_ROOT = _TESTS_DIR.parent / "python"
 if str(_PKG_ROOT) not in sys.path:
@@ -35,6 +30,16 @@ for _rocke_sub in ("platform/python", "library"):
     _p = _ROCKE_ROOT / _rocke_sub
     if _p.is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+
+# Imported below the sys.path wiring above, never beside the other imports: msgpack
+# ships as a rocm_kpack dependency, so on a host without it installed system-wide it
+# becomes importable only once _KPACK_DIR is on the path. Importing at the top of the
+# file would cache that miss and fail every synthesised-object test on exactly the
+# environments HIPKERNELPROVIDER_ROCM_KPACK_DIR exists to serve.
+try:
+    import msgpack
+except ImportError:
+    msgpack = None
 
 _ROCKE_UKD_SOURCE = "kernels/gfx950/attention_dense.py"
 _ROCKE_UKD_BUILDER = "build_attention_dense"
