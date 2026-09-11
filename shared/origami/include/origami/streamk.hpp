@@ -97,7 +97,5 @@ ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const config_t& config,
                                  size_t sm_count_target);
 
-
-
 }  // namespace streamk
 }  // namespace origami
