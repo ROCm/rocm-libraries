@@ -30,7 +30,7 @@ override_variable(ROCM_DISABLE_CHECKS ON)
 override_variable(CMAKE_CXX_FLAGS ${filtered_cmake_cxx_flags})
 
 if(WIN32)
-  find_package(GTest 1.11.0 REQUIRED)
+  find_package(GTest 1.11.0)
 else()
   find_package(GTest)
 endif()
