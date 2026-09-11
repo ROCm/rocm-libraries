@@ -122,6 +122,95 @@ class TestFragmentShapeChecksAreNormalized(unittest.TestCase):
                     self.assertFalse(ok)
 
 
+@unittest.skipIf(gvu is None, "tile_engine tree not present")
+class TestWarpConfigurationLookupIsUnchangedOnGfx9(unittest.TestCase):
+    """The WARP_SUPPORTED_COMBINATIONS lookup stays raw for gfx9. On purpose.
+
+    Normalizing it would activate a validator that a suffixed target currently
+    bypasses -- which sounds like a fix until you look at what the table
+    contains. dispatcher/codegen/arch_specs.json, the declared single JSON
+    source of truth for arch data, lists seven warp maps for gfx942 and nine for
+    gfx950; this table lists three for each. Turning it on for suffixed names
+    therefore rejects configurations the repo's own spec calls valid.
+
+    gfx1250 is the exception, and the only one: it is absent from
+    arch_specs.json entirely, so this table is its sole listing, and it is the
+    target this work exists for.
+
+    These tests fail if someone "tidies up" the asymmetry.
+    """
+
+    _GRID = [1, 2, 4, 8]
+
+    def _decisions(self, target):
+        return {
+            (m, n, k): gvu.validate_warp_configuration(m, n, k, target)
+            for m, n, k in itertools.product(self._GRID, repeat=3)
+        }
+
+    def test_suffixed_gfx9_targets_stay_permissive(self):
+        # develop's behaviour: an unrecognized key logs and allows. Pinned so the
+        # gfx9 instance sets cannot move under an ASAN-style configure.
+        for bare in ("gfx90a", "gfx942", "gfx950"):
+            suffixed = _SUFFIXES[bare]
+            with self.subTest(arch=suffixed):
+                self.assertTrue(
+                    all(self._decisions(suffixed).values()),
+                    f"{suffixed} must remain unchecked by this table",
+                )
+
+    def test_bare_gfx9_targets_still_enforce_their_three_maps(self):
+        for bare in ("gfx90a", "gfx942", "gfx950"):
+            decisions = self._decisions(bare)
+            with self.subTest(arch=bare):
+                self.assertEqual(
+                    {c for c, ok in decisions.items() if ok},
+                    {(1, 4, 1), (2, 2, 1), (4, 1, 1)},
+                )
+
+    def test_the_table_is_a_strict_subset_of_arch_specs_json(self):
+        """Why the gfx9 lookup is left alone, asserted rather than asserted-in-prose.
+
+        If the two ever agree, the argument above evaporates and the raw lookup
+        should be revisited -- so this test is written to fail at that point.
+        """
+        import json
+
+        specs_path = DISPATCHER_DIR / "codegen" / "arch_specs.json"
+        if not specs_path.exists():
+            self.skipTest("arch_specs.json not present")
+        specs = json.load(open(specs_path))["architectures"]
+        for arch in ("gfx942", "gfx950"):
+            table = {tuple(c) for c in gvu.WARP_SUPPORTED_COMBINATIONS[arch]}
+            spec = {tuple(c) for c in specs[arch]["warp_configs"]}
+            with self.subTest(arch=arch):
+                self.assertTrue(
+                    table < spec,
+                    f"{arch}: gemm_validation_utils lists {sorted(table)}, "
+                    f"arch_specs.json lists {sorted(spec)}. If these now agree, "
+                    f"normalizing the gfx9 lookup is no longer a coverage loss.",
+                )
+
+    def test_suffixed_gfx1250_is_checked_like_bare_gfx1250(self):
+        self.assertEqual(
+            self._decisions(_SUFFIXES["gfx1250"]), self._decisions("gfx1250")
+        )
+
+    def test_suffixed_gfx1250_rejects_maps_absent_from_the_table(self):
+        # develop allowed all of these on "gfx1250:xnack-" because the lookup
+        # missed. 1x1x1 is the example the review asked about.
+        for combo in ((1, 1, 1), (1, 1, 2), (8, 8, 8), (4, 4, 1)):
+            with self.subTest(combo=combo):
+                self.assertFalse(
+                    gvu.validate_warp_configuration(*combo, _SUFFIXES["gfx1250"])
+                )
+
+    def test_gfx1201_suffix_is_not_swept_up_by_the_gfx1250_exception(self):
+        # The exception is exact-gfx1250, not gfx12-family. gfx1201 keeps
+        # develop's permissive behaviour under a suffix.
+        self.assertTrue(all(self._decisions(_SUFFIXES["gfx1201"]).values()))
+
+
 if __name__ == "__main__":
     logging.disable(logging.CRITICAL)
     sys.exit(unittest.main())
