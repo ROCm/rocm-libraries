@@ -242,6 +242,7 @@ namespace TensileLite
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
                 ("sparse",                   po::value<int>()->default_value(0), "A or B matrix is sparse matrix.")
                 ("strided-batched",          po::value<bool>()->default_value(true), "Use strided-batched or general batched")
+                ("batch-mode",               po::value<int>()->default_value(0), "Runtime batch ABI: 0=strided, 1=pointer array")
                 ("grouped-gemm",             po::value<bool>()->default_value(false), "Use grouped gemm")
                 ("kernel-language",          po::value<KernelLanguage>()->default_value(KernelLanguage::Any), "Select kernel language.")
                 ("deterministic-mode",       po::value<bool>()->default_value(false), "Enforce deterministic summation patterns"
@@ -545,6 +546,7 @@ namespace TensileLite
             DUMP_OPT("high-precision-accumulate", bool);
             DUMP_OPT("sparse", int);
             DUMP_OPT("strided-batched", bool);
+            DUMP_OPT("batch-mode", int);
             DUMP_OPT("grouped-gemm", bool);
             DUMP_OPT("kernel-language", KernelLanguage);
             DUMP_OPT("deterministic-mode", bool);
