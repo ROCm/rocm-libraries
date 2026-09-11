@@ -277,6 +277,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common._conv_implicit_gemm_common.ConvAccumulatorEpilogue": (),
     "kernels.common.conv_implicit_gemm.ImplicitGemmConvSpec": ("problem",),
     "kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec": ("problem",),
+    "kernels.common.conv_wgrad_workspace_reduce.WgradReduceSpec": ("problem",),
     "kernels.common.conv_implicit_gemm_dgrad.DgradConvSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvProblem": (
         "H",

@@ -676,9 +676,9 @@ class TestHelpers(unittest.TestCase):
         specs build and only fail deep inside the emitter, which the sweep
         drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
         """
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
-        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import (
             WgradConvSpec,
             is_valid_wgrad_spec,
         )

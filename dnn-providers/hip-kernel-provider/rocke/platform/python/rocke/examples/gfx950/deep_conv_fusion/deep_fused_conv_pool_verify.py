@@ -20,7 +20,7 @@ from pathlib import Path
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
 from rocke.instances import ConvAccumulatorEpilogue, ConvProblem
-from rocke.instances.gfx950.deep_fused_conv_pool import (
+from kernels.gfx950.deep_fused_conv_pool import (
     FusedConvPoolProblem,
     Gfx950DeepFusedConvPoolSpec,
     build_deep_fused_conv_pool,

@@ -8,11 +8,11 @@
 # build_implicit_gemm_conv_dgrad(spec, arch=<cfg arch>) and prints
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared
 # with the C emitter conv_implicit_gemm_dgrad_emit.c.
-from rocke.instances.common.conv_implicit_gemm_dgrad import (
+from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     build_implicit_gemm_conv_dgrad,
 )
-from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 

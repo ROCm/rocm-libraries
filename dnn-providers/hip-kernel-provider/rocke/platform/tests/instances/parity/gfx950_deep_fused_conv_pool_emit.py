@@ -25,11 +25,11 @@
 #   tile_n=16 and K0=K1=16.
 from dataclasses import fields
 
-from rocke.instances.gfx950.deep_fused_conv_pool import (
+from kernels.gfx950.deep_fused_conv_pool import (
     Gfx950DeepFusedConvPoolSpec,
     build_deep_fused_conv_pool,
 )
-from rocke.instances.common.deep_fused_conv_pool import (
+from kernels.common.deep_fused_conv_pool import (
     DeepFusedConvPoolSpec,
     make_deep_fused_conv_pool_spec as _make_common_spec,
 )

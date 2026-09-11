@@ -221,7 +221,7 @@ class TestCoalescedTileLoaderSplit:
 
 class TestIsValidSpecBasicPipeline:
     def _mk_basic_spec(self, async_dma=False):
-        from rocke.instances.common.conv_implicit_gemm import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
         )
@@ -244,13 +244,13 @@ class TestIsValidSpecBasicPipeline:
         )
 
     def test_basic_sync_is_valid(self):
-        from rocke.instances.common.conv_implicit_gemm import is_valid_spec
+        from kernels.common.conv_implicit_gemm import is_valid_spec
 
         ok, why = is_valid_spec(self._mk_basic_spec(async_dma=False), "gfx950")
         assert ok, f"pipeline='basic' with async_dma=False should be valid: {why}"
 
     def test_basic_async_dma_is_rejected(self):
-        from rocke.instances.common.conv_implicit_gemm import is_valid_spec
+        from kernels.common.conv_implicit_gemm import is_valid_spec
 
         ok, why = is_valid_spec(self._mk_basic_spec(async_dma=True), "gfx950")
         assert not ok, "pipeline='basic' with async_dma=True must be rejected"
@@ -266,7 +266,7 @@ class TestIsValidSpecBasicPipeline:
 
 class TestBuildConvBasicPipeline:
     def _build(self, epilogue="default"):
-        from rocke.instances.common.conv_implicit_gemm import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,

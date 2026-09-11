@@ -15,7 +15,7 @@ import numpy as np
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import compile_kernel
-from rocke.instances.gfx950.deep_fused_conv_pool import (
+from kernels.gfx950.deep_fused_conv_pool import (
     build_deep_fused_conv_pool,
     deep_fused_conv_pool_grid,
     is_valid_spec,

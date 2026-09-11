@@ -191,9 +191,9 @@ def _make_spec(
     historical values are used and the emitted IR is unchanged.
     """
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
-    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-    from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     target = ArchTarget.from_gfx(arch)
     # MMA family + tile shape follow the wave size: wave64 -> MFMA (32x32 atom),
@@ -302,7 +302,7 @@ def _run_one(
 
     from rocke import compile_kernel
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+    from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
     )
@@ -541,7 +541,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
 
     def test_async_dma_requires_k_outer(self):
         """async_dma on the M-outer tile must be rejected, not silently wrong."""
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             is_valid_wgrad_spec,
         )
 
@@ -811,7 +811,7 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         # ``lower_serialized_ir`` does not implement (a pre-existing gap in the
         # serialized cpp path, unrelated to this feature).
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
             is_valid_wgrad_spec,
         )
@@ -860,7 +860,7 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         # Note: WMMA only supports epilogue="default" (no cshuffle), and the only
         # valid WMMA fp16 wtk=32 atom requires fp16 output; fp16+default is no
         # longer valid (cshuffle required).  Skip until WMMA gets cshuffle support.
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
             is_valid_wgrad_spec,
         )
@@ -898,7 +898,7 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
             is_valid_wgrad_spec,
         )
@@ -965,7 +965,7 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
     """
 
     def _sel(self, **kw):
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         base = dict(
             arch="gfx950",
@@ -1003,7 +1003,7 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
         """
         import inspect
 
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         src = inspect.getsource(WgradConvSpec.default_lds_k_outer)
         self.assertNotIn("environ", src)
@@ -1038,9 +1038,9 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
 
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
-        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         p = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
         for wt in (16, 32):
@@ -1098,11 +1098,11 @@ def _make_two_stage_spec(
     arch, N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, split_k=4, groups=1
 ):
     """Build a WgradConvSpec with two_stage=True for MFMA (gfx942/gfx950)."""
-    from rocke.instances.common._conv_implicit_gemm_common import (
+    from kernels.common._conv_implicit_gemm_common import (
         ConvDataSpec,
         ConvProblem,
     )
-    from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
     p = ConvProblem(N=N, Hi=Hi, Wi=Wi, C=C, K=K, Y=Y, X=X, groups=groups)
     return WgradConvSpec(
@@ -1130,10 +1130,10 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     handles all groups in a single launch via block_id_z = group index.
     """
     import torch
-    from rocke.instances.common.conv_implicit_gemm_wgrad_two_stage import (
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
     )
-    from rocke.instances.common.conv_wgrad_workspace_reduce import (
+    from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
         wgrad_reduce_grid,
     )
@@ -1238,7 +1238,7 @@ def _check_two_stage(
     """
     import torch
     from dataclasses import replace as _dc_replace
-    from rocke.instances.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+    from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
     from rocke.runtime.hip_module import Runtime
 
     rt = Runtime()

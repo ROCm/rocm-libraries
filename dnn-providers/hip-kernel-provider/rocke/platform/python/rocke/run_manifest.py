@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .instances.common.deep_fused_conv_pool import (
+from kernels.common.deep_fused_conv_pool import (
     run_deep_fused_conv_pool_fp16_manifest_problem,
 )
 from .instances.common.manifest_runner.conv import run_conv_manifest_problem
@@ -39,7 +39,7 @@ from .instances.common.manifest_runner.matmul_nbits import (
     run_matmul_nbits_manifest_problem,
 )
 from .instances.common.manifest_runner.simple_ops import run_simple_op_manifest_problem
-from .instances.gfx1151.deep_fused_conv_pool import (
+from kernels.gfx1151.deep_fused_conv_pool import (
     run_deep_fused_conv_pool_i8i4_manifest_problem,
 )
 

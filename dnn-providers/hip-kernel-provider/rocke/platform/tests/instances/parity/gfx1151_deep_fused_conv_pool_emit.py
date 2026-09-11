@@ -10,7 +10,7 @@
 # build_deep_fused_conv_pool (arch="gfx1151") and prints
 # lower_kernel_to_llvm(arch="gfx1151") to stdout so it can be byte-compared with
 # the C emitter gfx1151_deep_fused_conv_pool_emit.c.
-from rocke.instances.gfx1151.deep_fused_conv_pool import (
+from kernels.gfx1151.deep_fused_conv_pool import (
     make_deep_fused_conv_pool_spec,
     build_deep_fused_conv_pool,
 )

@@ -46,6 +46,7 @@ from __future__ import annotations
 from dataclasses import replace as dc_replace
 from typing import Tuple
 
+
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     _wg_K,
@@ -120,7 +121,7 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
 def build_implicit_gemm_conv_wgrad_two_stage(
     spec: WgradConvSpec,
     arch: str = "gfx950",
-) -> Tuple["PipelineLauncher", int]:
+) -> tuple:
     """Build a two-stage deterministic wgrad pipeline.
 
     Args:
@@ -182,7 +183,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
 
     # ---- Stage 1: wgrad GEMM → f32 workspace --------------------------------
     s1_spec = dc_replace(spec, two_stage=True)
-    s1_kernel = build_implicit_gemm_conv_wgrad(s1_spec, arch)
+    s1_kernel = build_implicit_gemm_conv_wgrad(s1_spec, arch=arch)
     s1_artifact = compile_kernel(s1_kernel, arch=arch, capture_ir_text=False)
     s1_sig = _wgrad_stage1_signature(s1_spec)
     s1_launcher = KernelLauncher(

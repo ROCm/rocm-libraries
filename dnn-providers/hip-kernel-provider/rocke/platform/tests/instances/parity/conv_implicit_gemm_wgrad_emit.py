@@ -35,11 +35,11 @@
 # (These illustrate the validator contract. The C emitter defines only cases
 # 0-10, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
-from rocke.instances.common.conv_implicit_gemm_wgrad import (
+from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
-from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 
@@ -171,7 +171,7 @@ def _spec(idx: int):
     if idx == 7:
         # Split-K=4 with fp32 output, gfx950.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         return (
             WgradConvSpec(
@@ -233,7 +233,7 @@ def _spec(idx: int):
         # Split-K=4 with bf16 output -- exercises packed bf16 atomic +
         # accumulation-error path (the newest codegen, previously untested).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         return (
             WgradConvSpec(
@@ -301,7 +301,7 @@ def _spec(idx: int):
         )
 
     if idx == 12:
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         # K-outer + direct load. Exercises the async loader on the swapped tile
         # axes, the contig_cols guard and the packed (pad-0) LDS shape.
@@ -360,7 +360,7 @@ def _spec(idx: int):
         # with the global read for tile it+1 issued before the MFMA for tile it
         # and the LDS write deferred past the second barrier. Needs a
         # compile-time trip count, hence the fixed split_k.
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (

@@ -21,7 +21,7 @@ from kernels.common.conv_wgrad_workspace_reduce import (
     WgradReduceSpec,
     build_conv_wgrad_workspace_reduce,
 )
-from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvProblem
 from _emit_common import run_emit
 
 
