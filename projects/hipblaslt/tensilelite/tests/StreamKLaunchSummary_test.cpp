@@ -942,10 +942,10 @@ TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
 // because the parallel grid is an exact multiple of tiles (grid == tiles*skSplit
 // == 64*4), which makes requiredWorkspaceSizeGsu's tiles*gsu equal
 // partialTileSize's grid. The one triple where the formulas would disagree --
-// parallel at a split factor of 1 -- reaches them only with uniform summation
-// order OFF: with the mode ON streamKReconcileReduction() demotes it to tree
-// first. See the comment on StreamKDecisions::requiredWorkspaceBytes, and the
-// pair of workspace-starved tests below, which pin both sides of that gate.
+// parallel at a split factor of 1 -- never reaches them: streamKReconcileReduction()
+// demotes it to tree first, in either mode. See the comment on
+// StreamKDecisions::requiredWorkspaceBytes, and the pair of workspace-starved
+// tests below.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
 {
@@ -1026,33 +1026,21 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
 
 // ---------------------------------------------------------------------------
 // A workspace-starved parallel scenario, with uniform summation order OFF --
-// i.e. the default, and the behaviour that predates the mode entirely.
+// i.e. the default.
 //
 // Same shape as the test above, but with no workspace at all. getSKReduction()
 // still says parallel -- it never looks at the workspace -- but origami's
 // k_split_aware grid selection does: with zero workspace no split factor F >= 2
 // is admissible, so it returns grid == tiles (64) instead of 256. That leaves a
-// (parallel, F == 1) triple, which streamKReconcileReduction() would demote to
-// tree -- except that the helper is gated on uniform summation order and the
-// mode is off here, so it returns the reduction untouched.
+// (parallel, F == 1) triple, which streamKReconcileReduction() demotes to tree.
 //
-// The workspace-fit guard below it therefore still sees `parallel`, and its
-// `reduction == parallel` disjunct reserves partials unconditionally (parallel
-// is the one reduction that always needs them). partialTileSize(64) does not
-// fit in a zero-byte workspace, so the guard itself demotes the launch: tree,
-// grid = tiles, workspaceDPFallbackFired = true, dpOnly = true, and
-// idealWorkspaceBytes keeps the size that did not fit.
-//
-// The launched configuration (grid = tiles = 64, tree, zero workspace) is the
-// same either way; what the gate decides is WHICH mechanism produced it, and
-// hence what the summary attributes it to -- "workspaceDP" here versus "none"
-// in the uniform-summation-order variant below. Note also that
-// requiredWorkspaceSize() reports 0 through a different arm than the snapshot:
-// it takes the parallel branch with splitk = grid/tiles = 1, and
-// requiredWorkspaceSizeGsu(..., 1) is 0 because gsu > 1 is what sizes its
-// buffer.
+// The demotion is not conditioned on the mode -- F < 2 is unlaunchable for
+// parallel either way -- so this pins that the mode-off path reaches the same
+// decision as the mode-on variant below: the reconcile runs BEFORE the
+// workspace-fit guard, the guard then sees tree with tiles % grid == 0, decides
+// no partials are needed, and never runs its body. No fallback is attributed.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderTakesWorkspaceDpFallback)
+TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcilesToTree)
 {
     AnalyticalEnv       env;
     ContractionSolution solution;
@@ -1070,33 +1058,33 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderTakesWor
     ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
-    // Anti-vacuity: the pre-guard reduction really is parallel. (getSKReduction
-    // is workspace-independent, so it reports what the snapshot started from.)
+    // Anti-vacuity: the pre-reconcile reduction really is parallel.
+    // (getSKReduction is workspace-independent, so it reports what the snapshot
+    // started from.)
     ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
-        << "scenario must start from parallel reduction, otherwise the workspace "
-           "guard below is not what demoted it";
+        << "scenario must start from parallel reduction, otherwise the reconcile "
+           "below is not what demoted it";
 
     auto d = solution.computeStreamKDecisions(problem, env.device);
 
     EXPECT_EQ(d.reduction, origami::reduction_t::tree)
-        << "the workspace-fit guard demotes the launch when partials do not fit";
-    EXPECT_TRUE(d.workspaceDPFallbackFired)
-        << "the reconcile is gated off, so the guard saw parallel and fired";
-    EXPECT_TRUE(d.dpOnly) << "the workspace fallback is a DP-only trigger";
-    EXPECT_FALSE(d.forceDPOnly) << "not the compile-time param; the runtime fallback";
+        << "streamKReconcileReduction demotes parallel at a split factor of 1, "
+           "with the mode off as well as on";
+    EXPECT_FALSE(d.workspaceDPFallbackFired)
+        << "the reconcile ran first, so the workspace guard saw tree and divisible "
+           "tiles and never fired";
+    EXPECT_FALSE(d.dpOnly) << "no DP trigger is set: this is a plain tree launch";
+    EXPECT_FALSE(d.forceDPOnly) << "not the compile-time param either";
     EXPECT_FALSE(d.streamKDP);
 
     EXPECT_EQ(d.tiles, 64u);
-    EXPECT_EQ(d.finalGrid, d.tiles) << "the fallback sets grid = tiles";
-    // Grid selection had already landed on tiles, so the fallback did not move it.
+    EXPECT_EQ(d.finalGrid, d.tiles) << "grid selection, not a clamp, produced grid = tiles";
+    // Nothing moved the grid: selection already landed on tiles.
     EXPECT_EQ(d.selectedGrid, d.tiles);
     EXPECT_EQ(d.selectedGrid, d.finalGrid);
 
-    // The guard ran, so it computed and recorded the size that did not fit.
-    EXPECT_EQ(d.idealWorkspaceBytes, solution.partialTileSize(d.finalGrid));
-    EXPECT_EQ(d.idealWorkspaceBytes, 4194304u) << "128*128*4 bytes * 64 work-groups";
-    EXPECT_GT(d.idealWorkspaceBytes, d.givenWorkspaceBytes) << "why it fell back";
-    // Nothing is actually reserved: the fallback fired.
+    EXPECT_EQ(d.idealWorkspaceBytes, 0u)
+        << "the partials guard never ran, so no ideal size was ever computed";
     EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
     EXPECT_FALSE(d.workspaceAllocated);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
@@ -1104,30 +1092,29 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderTakesWor
     std::ostringstream os;
     solution.printStreamKLaunchSummary(os, problem, d);
     const std::string line = collapseSpaces(os.str());
-    EXPECT_NE(line.find("changedBy = workspaceDP"), std::string::npos)
-        << "the workspace fallback is the last clamp to touch the grid";
-    EXPECT_NE(line.find("source = workspaceDP(runtime)"), std::string::npos);
+    EXPECT_NE(line.find("changedBy = none"), std::string::npos)
+        << "no clamp produced the launch grid; grid selection did";
+    EXPECT_NE(line.find("source = none"), std::string::npos);
     EXPECT_NE(line.find("reduction = tree"), std::string::npos);
     EXPECT_EQ(line.find("preFallback"), std::string::npos)
-        << "selection already sat on tiles, so nothing moved before the fallback";
+        << "selection already sat on tiles, so nothing moved";
 }
 
 // ---------------------------------------------------------------------------
-// The same workspace-starved parallel scenario with uniform summation order ON,
-// which is the one configuration where streamKReconcileReduction() is live.
+// The same workspace-starved parallel scenario with uniform summation order ON.
 //
 // Grid selection behaves identically (the F-star snap in getSKGridImpl is a
 // no-op here: it only fires for g0 != tiles, and g0 == tiles == 64), so the
-// snapshot again reaches the reconcile with a (parallel, F == 1) triple. This
-// time the helper demotes it to tree BEFORE the workspace-fit guard. The guard
-// then sees tree with tiles % grid == 0, decides no partials are needed, and
-// never runs its body: idealWorkspaceBytes stays 0 and workspaceDPFallbackFired
-// stays false.
+// snapshot again reaches the reconcile with a (parallel, F == 1) triple and the
+// helper demotes it to tree BEFORE the workspace-fit guard. The guard then sees
+// tree with tiles % grid == 0, decides no partials are needed, and never runs
+// its body: idealWorkspaceBytes stays 0 and workspaceDPFallbackFired stays
+// false.
 //
-// So under the mode this is NOT a fallback -- it is the selected launch, and the
-// summary attributes the grid to nothing ("changedBy = none"). The launch itself
-// is byte-for-byte the one the variant above reaches through the fallback; only
-// the attribution differs. The genuine parallel-side workspace-DP fallback on a
+// This is NOT a fallback -- it is the selected launch, and the summary
+// attributes the grid to nothing ("changedBy = none"). Paired with the variant
+// above to pin that the mode does not change the outcome. The genuine
+// parallel-side workspace-DP fallback on a
 // grid that is NOT already tiles is covered by the test below, which uses a
 // fixed grid to get past origami's own workspace clamp.
 // ---------------------------------------------------------------------------
@@ -1195,8 +1182,8 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
 // grid = tiles assignment is a no-op even when it fires. skFixedGrid bypasses
 // origami's selection entirely (getSKGridImpl takes the user-override branch
 // before it consults skDynamicGrid), so a fixed grid of 2*tiles keeps the split
-// factor at 2 -- which streamKReconcileReduction accepts even with uniform
-// summation order on -- while the workspace stays at zero. That is the one
+// factor at 2 -- which streamKReconcileReduction accepts -- while the
+// workspace stays at zero. That is the one
 // shape where the guard sees parallel, computes a non-zero partials size, finds
 // it does not fit, and actually moves the grid.
 //

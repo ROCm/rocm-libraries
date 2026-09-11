@@ -498,15 +498,8 @@ namespace TensileLite
         // reserves here and not there. Both call sites run
         // streamKReconcileReduction() on the same (reduction, grid, tiles) triple
         // immediately after getSKGridImpl(), which demotes parallel to tree whenever
-        // the split factor is below 2 -- but that helper is gated on uniform
-        // summation order, so it only closes the gap when the mode is on. With the
-        // mode off (the default, and the behaviour that predates it) the split-of-1
-        // parallel triple survives into both sizings, and they agree only because
-        // the snapshot's workspace-fit guard then demotes the launch itself
-        // whenever partialTileSize(grid) does not fit. The formulas differ; the
-        // reserve-or-not answer coincides on every shape reachable through
-        // allocate-then-launch, where the allocated workspace is exactly
-        // requiredWorkspaceSize()'s zero.
+        // the split factor is below 2 and so closes that gap in both modes. The
+        // formulas still differ, but the reserve-or-not answer coincides.
         //
         // That agreement is load-bearing rather than incidental: it is what lets the
         // allocate-then-launch flow close. The allocator sizes from

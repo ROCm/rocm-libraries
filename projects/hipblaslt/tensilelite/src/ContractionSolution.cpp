@@ -3671,29 +3671,12 @@ namespace TensileLite
         // SK5-dynamic are pinned to tree at the launch sites only; see
         // requiredWorkspaceSize() for why the resulting divergence is bounded.
         //
-        // GATED ON uniformSummationOrder. With the mode OFF this is a no-op and
-        // the pre-USO behaviour is restored exactly: solve() throws on a
-        // (parallel, F < 2) triple instead of silently launching tree on a
-        // parallel-chosen grid, and the workspace guard in
-        // requiredWorkspaceSize() / resolveStreamKSettings() /
-        // computeStreamKDecisions() still sees `parallel`, so its DP fallback
-        // fires exactly as it did before USO existed. That triple is reachable
-        // with the mode off via TENSILE_STREAMK_FIXED_GRID, which overrides the
-        // grid after getSKReduction() has already answered parallel; demoting
-        // it silently would change BOTH the launch grid and the reported
-        // workspace relative to the pre-USO baseline.
-        //
-        // With the mode ON the demotion is load-bearing: the F-star snap in
-        // getSKGridImpl() can legitimately land on F == 1 (the all-full grid)
-        // with parallel already selected, and there tree is the correct,
-        // expressible launch rather than an error.
-        inline origami::reduction_t streamKReconcileReduction(origami::reduction_t reductionStrat,
-                                                              size_t               skGrid,
-                                                              size_t               tiles,
-                                                              bool uniformSummationOrder)
+        // Unconditional, not uniform-summation-order enforcement: F < 2 is
+        // unlaunchable for parallel whatever the mode, and solve() still throws
+        // on the triple. Demoting here keeps that throw unreachable.
+        inline origami::reduction_t streamKReconcileReduction(
+            origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
         {
-            if(!uniformSummationOrder)
-                return reductionStrat;
             if(reductionStrat == origami::reduction_t::parallel
                && (tiles == 0 || (skGrid / tiles) < 2))
                 return origami::reduction_t::tree;
@@ -3842,16 +3825,14 @@ namespace TensileLite
             // launched: it runs the same reduction selection, the same
             // getSKGridImpl() call and the same workspace-insufficient DP
             // fallback requiredWorkspaceSize() reports on, and additionally
-            // applies streamKReconcileReduction() -- a no-op unless uniform
-            // summation order is on -- so query and launch cannot disagree.
+            // applies streamKReconcileReduction(), so query and launch cannot
+            // disagree.
             sk = resolveStreamKSettings(problem, hardware);
 
-            // Baseline check, restored unconditionally. With uniform summation
-            // order OFF nothing demotes a (parallel, F < 2) triple, so this is
-            // reachable -- e.g. via TENSILE_STREAMK_FIXED_GRID -- and rejecting
-            // loudly is what the pre-USO baseline did. With the mode ON
-            // resolveStreamKSettings() has already reconciled such a triple to
-            // tree, so this cannot fire there.
+            // Defense in depth. resolveStreamKSettings() demotes every
+            // (parallel, F < 2) triple to tree, so this should not fire; keep it
+            // so a future path that bypasses that demotion fails loudly rather
+            // than launching an inexpressible reduction.
             //
             // Deliberate deviation from the baseline: tiles == 0 is folded into
             // the throw rather than left to divide by zero. Grouped-GEMM callers
@@ -4327,8 +4308,7 @@ namespace TensileLite
                 // parallel reduction. Reconcile with the SAME helper
                 // resolveStreamKSettings() uses, on the same triple, so the
                 // size reported here is the size the launch actually needs.
-                reductionStrat = streamKReconcileReduction(
-                    reductionStrat, skGrid, tiles, problem.getParams().uniformSummationOrder());
+                reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -4763,8 +4743,7 @@ namespace TensileLite
         // Same reconciliation, same helper, same triple as
         // requiredWorkspaceSize(). Must run before the workspace-fit fallback
         // below so that fallback sees the reduction the launch will use.
-        sk.reduction = streamKReconcileReduction(
-            sk.reduction, sk.grid, tiles, problem.getParams().uniformSummationOrder());
+        sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
@@ -5817,8 +5796,7 @@ namespace TensileLite
         // launch will use. Omitting it would let this snapshot report a
         // workspaceDP fallback (and a grid) that the launch never took, whenever
         // the grid lands on a splitting factor below 2 with parallel selected.
-        reduction = streamKReconcileReduction(
-            reduction, grid, tiles, problem.getParams().uniformSummationOrder());
+        reduction = streamKReconcileReduction(reduction, grid, tiles);
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
