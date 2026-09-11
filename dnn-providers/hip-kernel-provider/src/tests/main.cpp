@@ -4,6 +4,7 @@ SPDX-License-Identifier: MIT
 */
 
 #include <filesystem>
+#include <iostream>
 
 #include <gtest/gtest.h>
 
@@ -13,6 +14,8 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
+#include "TestDescriptorRoot.hpp"
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
@@ -21,22 +24,32 @@ int main(int argc, char** argv)
     // dispatch cases benchmark, and benchmarking writes a shard through to disk.
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
 
-#ifdef HIPDNN_TEST_DESCRIPTOR_DIR
-    // Point this binary at the descriptors staged beside the build's plugin. The engine
-    // implementation is linked in statically here, so its module-relative lookup has no
-    // module to measure from and falls through to the install prefix, which a build tree
-    // has never written. Done here rather than in the CTest environment so the binary
-    // runs standalone -- and so a path from this machine stays out of the install-time
-    // CTest file, which is generated from that same environment.
+#ifdef HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR
+    // Point this binary at the descriptors staged beside it. The engine implementation is
+    // linked in statically here, so its module-relative lookup measures from this
+    // executable and would otherwise fall through to the install prefix, which a build
+    // tree has never written. Done here rather than in the CTest environment so the binary
+    // runs standalone, and so nothing machine-specific reaches the install-time CTest
+    // file, which is generated from that same environment.
     //
-    // Never overrides a value the caller set, and never sets one naming nothing: on an
-    // installed run the staged tree is absent and resolution should reach the installed
-    // copy instead.
-    if(std::error_code notFound;
-       hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty()
-       && std::filesystem::is_directory(HIPDNN_TEST_DESCRIPTOR_DIR, notFound))
+    // Never overrides a value the caller set. Fail the process when the resolved root
+    // holds no descriptor, which is otherwise indistinguishable from a run on a device
+    // the descriptors do not cover.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", HIPDNN_TEST_DESCRIPTOR_DIR);
+        const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR);
+        const auto unusable
+            = hip_kernel_provider::testing::describeUnusableDescriptorRoot(descriptors);
+        if(!unusable.empty())
+        {
+            std::cerr << unusable
+                      << ". Build the descriptor staging targets, or set "
+                         "HIPDNN_DESCRIPTOR_DIR to a root that holds them.\n";
+            return 1;
+        }
+
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", descriptors.string().c_str());
     }
 #endif
 
@@ -47,7 +60,7 @@ int main(int argc, char** argv)
     auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
     // Initialize plugin logger with test recording callback so that plugin logs
-    // logs are first routed to the log recorder for capture and use by the unit tests.
+    // are first routed to the log recorder for capture and use by the unit tests.
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 

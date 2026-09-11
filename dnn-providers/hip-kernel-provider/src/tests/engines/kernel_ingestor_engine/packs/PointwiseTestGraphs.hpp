@@ -5,8 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -107,6 +109,21 @@ inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_v
                                  + "'");
     }
     return *match;
+}
+
+/// How many distinct pack ids @p set holds.
+///
+/// The packer emits one copy of a pack per architecture. Every copy keeps the authored
+/// pack id. Count the ids to get the number of authored packs. That count does not
+/// change with the number of architectures.
+inline std::size_t distinctPackIdCount(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+    for(const auto& pack : set.packs)
+    {
+        ids.insert(pack.id);
+    }
+    return ids.size();
 }
 
 /// KMD fields both reference packs vary along. Shared because the *schema* shape is
@@ -423,12 +440,18 @@ inline flatbuffers::FlatBufferBuilder
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto resolvedWDims = wDims.value_or(std::vector<int64_t>{1, xDims[1], 2, 2});
-    const auto resolvedYDims
-        = yDims.value_or(std::vector<int64_t>{xDims[0],
-                                              resolvedWDims[0],
-                                              xDims[2] - resolvedWDims[2] + 1,
-                                              xDims[3] - resolvedWDims[3] + 1});
+    // std::optional::value_or evaluates its argument unconditionally, so deriving the
+    // defaults with value_or indexes xDims even when the caller supplied w/y dims. The
+    // rank-3 refusal case passes a 3-element xDims, making xDims[3] an out-of-bounds
+    // read. Derive a default only when one is needed.
+    const auto resolvedWDims
+        = wDims.has_value() ? *wDims : std::vector<int64_t>{1, xDims.at(1), 2, 2};
+    const auto resolvedYDims = yDims.has_value()
+                                   ? *yDims
+                                   : std::vector<int64_t>{xDims.at(0),
+                                                          resolvedWDims.at(0),
+                                                          xDims.at(2) - resolvedWDims.at(2) + 1,
+                                                          xDims.at(3) - resolvedWDims.at(3) + 1};
     const auto resolvedWDataType = wDataType.value_or(dataType);
 
     const auto xStrides = xStridesOverride.value_or(packedRowMajorStrides(xDims));
@@ -525,7 +548,9 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000002");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.source.sourceFile = entryPoint + ".cpp";
+    // The key the compiled-in source table holds, which is what the staged descriptor of
+    // this kernel carries.
+    kernel.source.sourceFile = "kernels/" + entryPoint + ".cpp";
     kernel.source.entryPoint = entryPoint;
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};

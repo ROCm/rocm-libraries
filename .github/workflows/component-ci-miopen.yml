@@ -9,7 +9,7 @@
 # no-CK UBSan debug build, and gtest binary naming convention validation.
 #
 # The HIP package job additionally carries the two gates on the public/private
-# split: a source-only cross-check of its four hand-maintained files, and the
+# split: a source-only cross-check of its five hand-maintained files, and the
 # public-ABI gate requiring libMIOpen.so's exported public C API to stay
 # identical to the committed baseline.
 
@@ -28,7 +28,7 @@ jobs:
   miopen-build:
     name: ${{ matrix.name }}
     container:
-      image: rocm/miopen-dev:latest
+      image: rocm/miopen-dev:multiarch_dev_20260910
     strategy:
       fail-fast: false
       matrix:
@@ -111,12 +111,16 @@ jobs:
             .dvc
             .github
             cmake
+            dnn-providers/miopen-provider
             projects/miopen
             shared/ctest
 
-      # The public/private split keeps four files in lockstep by hand: the
-      # public header, the private _impl declarations, the compile-time rename
-      # and the forwarding stubs. This cross-checks them from source alone, so
+      # The public/private split keeps five files in lockstep by hand: the
+      # public header, the private _impl declarations, the compile-time rename,
+      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
+      # The fifth lives outside projects/miopen, which is why the sparse
+      # checkout above includes the provider directory: the check can only
+      # compare files it can read. This cross-checks them from source alone, so
       # unlike the ABI gate below it needs no build and runs in seconds -- hence
       # its placement before the configure step, where it fails fast. It is the
       # only check that can see signature drift; the symbol-set gate cannot,
@@ -124,7 +128,9 @@ jobs:
       # rides the same job as that gate to keep both split checks in one place.
       - name: Public/private header consistency check
         if: matrix.job_id == 'hip-package-build'
-        run: python3 projects/miopen/script/check_public_abi.py check-headers
+        run: |
+          python3 projects/miopen/script/check_public_abi.py check-headers \
+            --require-provider
 
       - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
         run: |
@@ -140,18 +146,18 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
-          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          ref: b2099a6b8703c089134ad526253752d26bbbf43a # 2026-09-10
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
 
-      - name: Build rocjitsu KMD
+      - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'
         run: |
           apt-get update && apt-get install -y libdrm-dev
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
+          cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
 
       - name: Configure build
         run: |
@@ -200,7 +206,7 @@ jobs:
       - name: Run miopen_gtest_check (rocjitsu)
         if: matrix.job_id == 'hip-package-build'
         run: |
-          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
-          LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
-            ./build/bin/miopen_gtest --gtest_list_tests > test_list
+          rocjitsu-build/tools/rocjitsu/rocjitsu \
+            --config rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
+            -- ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list

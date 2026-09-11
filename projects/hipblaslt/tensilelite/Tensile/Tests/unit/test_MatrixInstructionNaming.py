@@ -51,30 +51,6 @@ def capsLoaded():
         pytest.skip("gfx1250 capabilities unavailable")
 
 
-@pytest.fixture(autouse=True)
-def _isolatedKernelState():
-    """Undo any pinned-kernel/VGPR state a test leaves on the rocIsa singleton.
-
-    pytest-xdist reuses worker processes across test files, so anything a test
-    here pins on rocisa's process-wide singleton and does not clean up leaks
-    into whichever unrelated test runs next in the same worker -- e.g. a macro
-    test that never calls setKernel and expects capability defaults would
-    silently observe gfx1250's real asm bugs instead.
-    """
-    ti = rocisa.rocIsa.getInstance()
-    prevKernel = ti.getKernel()
-    prevVgprIdx = ti.getVgprIdx()
-    prevVgprMsb = ti.getVgprMsb()
-    yield
-    if getattr(prevKernel, "isa", None) is None:
-        ti.setKernelInfo(prevKernel)
-    else:
-        ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
-    for name, idx in prevVgprIdx.items():
-        ti.setVgprIdx(name, idx)
-    ti.setVgprMsb(prevVgprMsb)
-
-
 def mnemonic(mi4, dtype, **kwargs):
     dt = DataType(dtype)
     return matrixInstructionMnemonic(
