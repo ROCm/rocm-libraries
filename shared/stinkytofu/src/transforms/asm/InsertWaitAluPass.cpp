@@ -55,6 +55,8 @@ bool g_enableESM2TrackValuVsrc = false;
 
 // Shared-VA-order refinements, from InsertWaitAluOptions.
 bool g_sharedOrderCountFollowers = false;
+// Count an XDL producer's followers from the next matrix op onward.
+bool g_xdlCountFromNextWmma = false;
 
 // TEMP HACK gate. When true, suppress the va_vdst wait for the VGPR-source (RAW)
 // hazard of GLOBAL-family memory ops and global_prefetch — the "valu writes VGPR,
@@ -211,6 +213,11 @@ inline bool isCountablePipe(VaPipe p) {
     return p == PIPE_CSMACC || p == PIPE_DPMACC || p == PIPE_TRANS || p == PIPE_XDL;
 }
 
+// Pipes that can anchor a matrix producer's follower count.
+inline bool isAnchorPipe(VaPipe p) {
+    return p == PIPE_XDL || p == PIPE_TRANS;
+}
+
 // ---------------------------------------------------------------------------
 // Instruction classifiers
 // ---------------------------------------------------------------------------
@@ -360,6 +367,8 @@ struct VgprStamp {
     unsigned vaInc = 1;
     // This producer's ticket in the shared VA order.
     unsigned vaOrdShared = 0;
+    // Shared ticket just before the nearest anchor issued after this producer, or 0 until one has.
+    unsigned nextAnchorShared = 0;
     // Matrix-op steps since this producer stamped, saturating at g_xdlSinceCap. An age, not
     // a position: a merge rebases positions, and an age survives that.
     unsigned xdlSince = 0;
@@ -455,6 +464,8 @@ class WaitcntBrackets {
             else
                 // Outside the modeled set: mark every live producer so the hide declines.
                 s.unmodeledSince = true;
+            // vaUB counts this op, so vaUB - inc is the ticket before it. First anchor wins.
+            if (isAnchorPipe(pipe) && s.nextAnchorShared == 0) s.nextAnchorShared = vaUB - inc;
         }
     }
 
@@ -485,6 +496,7 @@ class WaitcntBrackets {
                 s.vaInc = inc;
                 s.vaOrdShared = vaUB;
                 s.xdlSince = 0;
+                s.nextAnchorShared = 0;
                 s.unmodeledSince = false;
                 PASS_DEBUG(std::cerr << "[InsertWaitAlu]     stamp va v" << k.idx << "("
                                      << halfName(k.half) << ") [pipe=" << vaPipeName(pipe)
@@ -633,6 +645,14 @@ class WaitcntBrackets {
                            << " >= " << xdlHideXdl << "*" << s.vaInc << "]\n");
                 return ~0u;
             }
+            // Ops from the anchor onward are ordered behind this producer; live keeps it in frame.
+            if (g_xdlCountFromNextWmma && sharedCountApplies(s) && s.nextAnchorShared > vaLB &&
+                vaUB - s.nextAnchorShared > followers) {
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]     va_vdst from next-wmma ["
+                                     << (vaUB - s.nextAnchorShared) << " vs per-pipe " << followers
+                                     << "]\n");
+                followers = vaUB - s.nextAnchorShared;
+            }
         }
         if (p == PIPE_CSMACC) {
             const unsigned since = s.xdlSince;
@@ -660,7 +680,7 @@ class WaitcntBrackets {
     // Wait needed for this reg's VA producers.
     unsigned vaFollowers(const VgprStamp& s) const {
         // The weaker count stops the per-pipe floor rising, so test the shared floor instead.
-        if (g_sharedOrderCountFollowers && hasVaProducer(s) &&
+        if ((g_sharedOrderCountFollowers || g_xdlCountFromNextWmma) && hasVaProducer(s) &&
             (s.vaOrdShared == 0 || s.vaOrdShared <= vaLB)) {
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]     drained by shared order [ord="
                                  << s.vaOrdShared << " vaLB=" << vaLB << "]\n");
@@ -825,6 +845,9 @@ class WaitcntBrackets {
                          fMyOldFloor[FIFO_TEX], fOtherOldFloor[FIFO_TEX], strictDom, "vmTex");
             mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
                          myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
+            mergeSlotOrd(s.nextAnchorShared, o ? o->nextAnchorShared : 0, myShiftShared,
+                         otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
+                         "nextAnchorShared");
             mergeStampAge(s, o, myVa, oVa, strictDom);
             // Paired survives the join only if both paths agree.
             s.pairedFlat = s.pairedFlat && o && o->pairedFlat;
@@ -940,6 +963,7 @@ class InsertWaitAluPassImpl : public Pass {
     explicit InsertWaitAluPassImpl(const InsertWaitAluOptions& opts) {
         g_enableESM2TrackValuVsrc = opts.enableESM2TrackValuVsrc;
         g_sharedOrderCountFollowers = opts.sharedOrderCountFollowers;
+        g_xdlCountFromNextWmma = opts.xdlCountFromNextWmma;
     }
 
    private:
@@ -1305,7 +1329,8 @@ class InsertWaitAluPassImpl : public Pass {
                              << " vmVsrcTex=" << waitHideStr(g_waitHide->vmVsrcTex)
                              << " [xdlSinceCap=" << g_xdlSinceCap << "]\n");
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] sharedOrder"
-                             << " countFollowers=" << g_sharedOrderCountFollowers << "\n");
+                             << " countFollowers=" << g_sharedOrderCountFollowers
+                             << " xdlFromNextWmma=" << g_xdlCountFromNextWmma << "\n");
     }
 
    public:
