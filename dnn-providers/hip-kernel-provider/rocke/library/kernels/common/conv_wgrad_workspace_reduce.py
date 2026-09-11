@@ -101,6 +101,7 @@ class WgradReduceSpec:
 
 def build_conv_wgrad_workspace_reduce(
     spec: WgradReduceSpec,
+    *,
     arch: str = "gfx950",  # noqa: ARG001 — reserved for future arch dispatch
 ) -> KernelDef:
     """Build the IR for the Stage 2 workspace-reduce kernel.

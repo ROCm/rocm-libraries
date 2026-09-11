@@ -130,7 +130,7 @@ def main() -> int:
         fold_k32=use_k32,
     )
 
-    kernel = build_direct_conv_16c(spec)
+    kernel = build_direct_conv_16c(spec, arch=arch)
     if args.isa is not None:
         artifact = compile_kernel(kernel, isa=args.isa)
     else:

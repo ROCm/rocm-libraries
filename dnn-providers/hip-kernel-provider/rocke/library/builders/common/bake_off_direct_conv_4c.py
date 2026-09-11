@@ -51,10 +51,13 @@ def main() -> int:
         block_groups=16,
     )
 
-    kernel = build_direct_conv_4c(spec)
     if args.isa is not None:
+        from rocke.core.arch import arch_from_isa
+        arch = arch_from_isa(args.isa) or args.arch
+        kernel = build_direct_conv_4c(spec, arch=arch)
         artifact = compile_kernel(kernel, isa=args.isa)
     else:
+        kernel = build_direct_conv_4c(spec, arch=args.arch)
         artifact = compile_kernel(kernel, arch=args.arch)
 
     p = problem

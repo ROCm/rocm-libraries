@@ -25,7 +25,7 @@ Usage::
 
     from dataclasses import replace
     spec = WgradConvSpec(problem=..., split_k=4, two_stage=True)
-    pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
+    pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch=arch)
 
     ws = DeviceMem(ws_nbytes)
 
@@ -120,6 +120,7 @@ def _wgrad_stage1_signature(spec: WgradConvSpec) -> list:
 
 def build_implicit_gemm_conv_wgrad_two_stage(
     spec: WgradConvSpec,
+    *,
     arch: str = "gfx950",
 ) -> tuple:
     """Build a two-stage deterministic wgrad pipeline.
@@ -143,7 +144,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         at all.  Zero-initialising the workspace is therefore not required
         for correctness::
 
-            pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch)
+            pipeline, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(spec, arch=arch)
             ws = DeviceMem(ws_nbytes)
             pipeline((s1_vals, s2_vals), (s1_cfg, s2_cfg), stream=stream)
 
@@ -199,7 +200,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         dtype_d=spec.data.dtype_d,
         groups=spec.problem.groups,
     )
-    s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch)
+    s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
     s2_artifact = compile_kernel(s2_kernel, arch=arch, capture_ir_text=False)
     s2_sig = wgrad_reduce_signature(s2_spec)
     s2_launcher = KernelLauncher(
