@@ -38,10 +38,15 @@ from typing import Iterable, List, Match, Tuple
 
 
 DOC_PATTERN = r"/\*!(?:(?!\*/).)*\*/"
+PREFIX_PATTERN = (
+    r"(?:DEPRECATED_[A-Z0-9_]+\([^\n]*\)|"
+    r"HIPSPARSE_DEPRECATED_MSG\([^\n]*\)|"
+    r"HIPSPARSE_EXPORT)"
+)
 GROUP_PATTERN = re.compile(
     r"(?P<canonical>"
     + DOC_PATTERN
-    + r")\n"
+    + r")\n+"
     + r"(?P<open>/\*\*@\{\*/)\n"
     + r"(?P<body>.*?)"
     + r"(?P<close>/\*\*@\}\*/)",
@@ -49,9 +54,12 @@ GROUP_PATTERN = re.compile(
 )
 ENTRY_PATTERN = re.compile(
     r"(?:(?P<doc>" + DOC_PATTERN + r")\n)?"
-    r"(?P<prefix>(?:(?:DEPRECATED_[A-Z0-9_]+\([^\n]*\)|HIPSPARSE_EXPORT)\n)+)"
+    r"(?P<prefix>(?:" + PREFIX_PATTERN + r"\n)+)"
     r"(?=hipsparseStatus_t\s+(?P<name>hipsparse[A-Za-z0-9_]+)\s*\()",
     re.DOTALL,
+)
+DECL_NAME_PATTERN = re.compile(
+    r"hipsparseStatus_t\s+(hipsparse[A-Za-z0-9_]+)\s*\("
 )
 
 
@@ -73,7 +81,18 @@ def synchronize_group(
     )
     body = match.group("body")
     entries = list(ENTRY_PATTERN.finditer(body))
+    declared = DECL_NAME_PATTERN.findall(body)
     stale = []
+
+    if [entry.group("name") for entry in entries] != declared:
+        unmatched = [
+            name
+            for name in declared
+            if name not in {entry.group("name") for entry in entries}
+        ]
+        raise RuntimeError(
+            "unable to parse grouped declarations: " + ", ".join(unmatched)
+        )
 
     for entry in entries[1:]:
         if entry.group("doc") != canonical:
@@ -116,7 +135,6 @@ def main() -> int:
         / "library"
         / "include"
         / "internal"
-        / "level1"
     )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -124,7 +142,7 @@ def main() -> int:
         nargs="*",
         type=Path,
         default=[default_path],
-        help="header file or directory (defaults to internal/level1)",
+        help="header file or directory (defaults to library/include/internal)",
     )
     parser.add_argument(
         "--write",
