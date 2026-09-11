@@ -22,13 +22,16 @@ include( ../../../cmake/sqlite.cmake )
 
 add_executable( rocfft-internal-test
   function_pool_test.cpp
+  kernel_name_test.cpp
   rtc_test.cpp
+  ../enum_printer.cpp
   ../rocfft_stub.cpp
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device/generator>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/shared>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
