@@ -20,15 +20,52 @@
 
 include( ../../../cmake/sqlite.cmake )
 
+# The planning core is compiled into the rocfft shared library rather than an
+# object library, so build those sources here to reach them.
+set( rocfft_planning_source
+  ../assignment_policy.cpp
+  ../auxiliary.cpp
+  ../chirp.cpp
+  ../data_layout.cpp
+  ../enum_printer.cpp
+  ../exec_info.cpp
+  ../fuse_shim.cpp
+  ../kargs.cpp
+  ../node_factory.cpp
+  ../plan.cpp
+  ../rccl_wrapper.cpp
+  ../repo.cpp
+  ../rocfft_stub.cpp
+  ../rtc_exports.cpp
+  ../transform.cpp
+  ../tree_node.cpp
+  ../tree_node_1D.cpp
+  ../tree_node_2D.cpp
+  ../tree_node_3D.cpp
+  ../tree_node_bluestein.cpp
+  ../tree_node_real.cpp
+  ../tuning_kernel_tuner.cpp
+  ../tuning_plan_tuner.cpp
+  ../twiddles.cpp
+)
+
 add_executable( rocfft-internal-test
   function_pool_test.cpp
+  plan_test.cpp
+  repo_test.cpp
   rtc_test.cpp
-  ../rocfft_stub.cpp
+  ${rocfft_planning_source}
 )
+
+# powX.cpp carries device code and stays out of the test binary;
+# ROCFFT_BUILD_INTERNAL_TEST picks its stubs out of rocfft_stub.cpp instead.
+target_compile_definitions( rocfft-internal-test PRIVATE ROCFFT_BUILD_INTERNAL_TEST )
 
 target_include_directories( rocfft-internal-test PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device/generator>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/library/src/device>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/shared>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
@@ -50,8 +87,10 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-gen
   rocfft-rtc-launch
   rocfft-rtc-subprocess
+  rocfft-solution-map
+  rocfft-tuning-helper
   generator
-  hip::host
+  hip::device
   ${ROCFFT_SQLITE_LIB}
 )
 
