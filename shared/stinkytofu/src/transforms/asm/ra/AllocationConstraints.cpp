@@ -18,6 +18,7 @@
 #include "stinkytofu/hardware/AsmTargetRegisters.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
@@ -188,6 +189,37 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSe
     }
 }
 
+/// Cap the values used where the instruction cannot select a VGPR bank.
+///
+/// `s_set_vgpr_msb` carries four 2-bit slots, so a format with more register
+/// operands than that leaves the surplus fields reaching one bank only.
+/// `encodeFieldToVgprOffSlot` reports them as slot -1, and a value read or
+/// written through such a field has to live in the bank it can reach.
+///
+/// Combined by minimum, because a value has one ceiling per use and must
+/// satisfy all of them. Overwriting instead would let an unconstrained use
+/// erase a constrained one, with the outcome depending on visit order.
+void collectBankReachableCeilings(const StinkyInstruction& instruction, const RegClassSet& classes,
+                                  std::vector<uint32_t>& maxIndexByValue) {
+    const std::vector<std::vector<SSAValueID>> destGroups =
+        valueGroups(instruction, classes, /*destinations=*/true);
+    const std::vector<std::vector<SSAValueID>> srcGroups =
+        valueGroups(instruction, classes, /*destinations=*/false);
+
+    forEachVgprOperandField(
+        instruction, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+            if (slot >= 0) return;
+            if (!reg.isRegister() || reg.reg.type != RegType::V) return;
+
+            const std::vector<std::vector<SSAValueID>>& groups = isDest ? destGroups : srcGroups;
+            if (operand >= groups.size()) return;
+            for (const SSAValueID id : groups[operand]) {
+                if (id == kInvalidSSAValueID || id >= maxIndexByValue.size()) continue;
+                maxIndexByValue[id] = std::min(maxIndexByValue[id], kVgprBankSize - 1);
+            }
+        });
+}
+
 /// Wavefront size of \p function, which is what selects the EXEC register the
 /// exec-span walk looks for.
 ///
@@ -251,6 +283,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
     constraints.classByValue_.assign(valueCount + 1, RegType::UNKNOWN);
     constraints.hintByValue_.assign(valueCount + 1, std::nullopt);
     constraints.pinnedByValue_.assign(valueCount + 1, false);
+    constraints.maxIndexByValue_.assign(valueCount + 1, std::numeric_limits<uint32_t>::max());
 
     for (StinkySSAValue* value : function.ssaArena().values()) {
         recordValue(value, constraints.classByValue_, constraints.hintByValue_);
@@ -275,6 +308,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             collectLiftedSources(*instruction, liftedClasses, constraints.tupleRuns_);
             collectReadWriteTies(*instruction, liftedClasses, execMasked.count(instruction) != 0,
                                  constraints.affinitySets_);
+            collectBankReachableCeilings(*instruction, liftedClasses, constraints.maxIndexByValue_);
         }
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {
@@ -339,6 +373,12 @@ bool AllocationConstraints::isPinned(SSAValueID id) const {
     return pinnedByValue_[id];
 }
 
+uint32_t AllocationConstraints::maxIndexFor(SSAValueID id) const {
+    constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
+    if (id == kInvalidSSAValueID || id >= maxIndexByValue_.size()) return kNoLimit;
+    return maxIndexByValue_[id];
+}
+
 std::string AllocationConstraints::toString() const {
     std::ostringstream out;
     out << "values=" << (classByValue_.empty() ? 0 : classByValue_.size() - 1);
@@ -348,6 +388,8 @@ std::string AllocationConstraints::toString() const {
         out << '%' << id << ':' << regTypeToString(classOf(static_cast<SSAValueID>(id)));
         if (hintByValue_[id].has_value()) out << " hint " << regKeyToString(*hintByValue_[id]);
         if (isPinned(static_cast<SSAValueID>(id))) out << " pinned";
+        const uint32_t ceiling = maxIndexFor(static_cast<SSAValueID>(id));
+        if (ceiling != std::numeric_limits<uint32_t>::max()) out << " max " << ceiling;
         out << '\n';
     }
     for (const TupleRun& run : tupleRuns_) {

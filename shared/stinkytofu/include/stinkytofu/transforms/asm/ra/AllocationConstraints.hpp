@@ -79,6 +79,18 @@ class AllocationConstraints {
     /// code rather than a slower kernel.
     bool isPinned(SSAValueID id) const;
 
+    /// Highest index \p id may occupy, or no limit when nothing constrains it.
+    ///
+    /// Lower than the register file when the value is used through an operand
+    /// field that cannot select a VGPR bank. Such a field has eight bits of
+    /// index and no selector, so it reaches one bank only, and a value it names
+    /// has to live inside that bank.
+    ///
+    /// Legality, not policy, for the same reason isPinned() is. A colourer that
+    /// ignores it emits an operand naming a register the instruction cannot
+    /// reach, which is wrong arithmetic rather than a slower kernel.
+    uint32_t maxIndexFor(SSAValueID id) const;
+
     /// Scalar live-ins left unpinned: read before anything defines them, but
     /// above where the dispatch stops writing, so they arrive holding nothing.
     ///
@@ -104,6 +116,7 @@ class AllocationConstraints {
     std::vector<RegType> classByValue_;
     std::vector<std::optional<RegKey>> hintByValue_;
     std::vector<bool> pinnedByValue_;
+    std::vector<uint32_t> maxIndexByValue_;
     std::vector<SSAValueID> undefinedLiveIns_;
     std::vector<TupleRun> tupleRuns_;
     std::vector<AffinitySet> affinitySets_;
