@@ -8,6 +8,7 @@ import shutil
 
 from setuptools import setup
 from setuptools.command.build_py import build_py
+from setuptools.command.egg_info import egg_info
 
 _metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
 
@@ -26,6 +27,15 @@ class CleanBuildPy(build_py):
         super().run()
 
 
+class BuildEggInfo(egg_info):
+    """Keep generated distribution metadata out of the source root."""
+
+    def finalize_options(self):
+        if self.egg_base is None:
+            egg_base = Path(__file__).with_name("build") / "egg-info"
+            egg_base.mkdir(parents=True, exist_ok=True)
+            self.egg_base = str(egg_base)
+        super().finalize_options()
 def _build_rocm_version() -> str:
     """
     Return the ROCm identity encoded in the TensileLite wheel.
@@ -56,5 +66,5 @@ setup(
         "filelock",
         "numpy",
     ],
-    cmdclass={"build_py": CleanBuildPy},
+    cmdclass={"build_py": CleanBuildPy, "egg_info": BuildEggInfo},
 )
