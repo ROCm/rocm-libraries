@@ -26,7 +26,6 @@ import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
-from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 
 """
@@ -42,7 +41,7 @@ COUNT = [1, 6, 10, 14, 25, 50, 100]
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_adjacent_difference')
+        return TunerArgs(algo_full_name='device_search_n')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -77,7 +76,6 @@ class Tuner(BaseTuner):
         """Tune for all value type combinations"""
         for data_type in COMMON_KEY_TYPES:
             self.tune_type(data_type)
-
 
 if __name__ == "__main__":
     Tuner.cli()
