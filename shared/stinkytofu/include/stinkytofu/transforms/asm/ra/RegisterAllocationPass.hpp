@@ -63,6 +63,25 @@ struct RegisterAllocationOptions {
     /// s0 through s19. See AllocationScope::pinRegisters.
     std::vector<AllocationScope::HeldRange> pinRegisters;
 
+    /// What to do about operands whose encoding field cannot select a VGPR
+    /// bank, and which therefore reach one bank only.
+    ///
+    /// Allocate places them like anything else, under a ceiling, in a phase
+    /// before the free blocks. It owes the producer nothing, so it moves an
+    /// out-of-reach operand back into the bank instead of inheriting it.
+    ///
+    /// Hold keeps the register the producer chose. That register is reachable
+    /// by construction, since the producer emitted working code, so the answer
+    /// is known good before allocation starts -- but only while the producer
+    /// keeps choosing reachable ones. Asked to freeze an out-of-reach register
+    /// it refuses, having no other register to offer.
+    ///
+    /// Allocate is the default. The two were measured against each other and
+    /// came out close on high-water mark and occupancy, which left robustness
+    /// to decide it.
+    enum class UnbankableOperands { Hold, Allocate };
+    UnbankableOperands unbankableOperands = UnbankableOperands::Allocate;
+
     bool applyToOperands = false;  // false = shadow
     bool verify = true;
 
