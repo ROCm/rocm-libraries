@@ -90,9 +90,32 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
         return _policyOrder;
     }
     // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
-    // rules win when set; StaticOrdering is the canonical last-resort fallback
-    // and always succeeds when there is at least one candidate. Vendor
-    // heuristic plugins may be inserted via env or descriptor attribute above.
+    // rules win when set; UHD (Universal Heuristic Descriptor) provides data-driven
+    // selection when RFC 0017 UED/UKD metadata is available; StaticOrdering is the
+    // canonical last-resort fallback and always succeeds when there is at least
+    // one candidate. Vendor heuristic plugins may be inserted via env or descriptor
+    // attribute above.
+    //
+    // NOTE: `SelectionHeuristic::StaticOrdering` here is NOT RFC 0019's `static_order`
+    // UHD adapter, despite the names. They operate at different levels:
+    //
+    //   StaticOrdering (this policy, RFC 0007)  ranks ENGINES. Input is the candidate
+    //     engine ids; the order comes from a fixed vendor precedence in
+    //     sortEngineIds() (MIOpen, ASM_SDPA, rocKE, …), overridable with
+    //     HIPDNN_HEUR_FALLBACK_ENGINE_ORDER.
+    //
+    //   static_order (a UHD adapter, RFC 0019 §5)  ranks KERNELS within one engine.
+    //     The order comes from that engine's own descriptor `order` field
+    //     (priority, id, or any KMD field) and never leaves the engine.
+    //
+    // RFC 0019 §2 draws the same line: kernel selection is UHD's scope, engine
+    // selection is RFC 0007's. Both can run for one graph -- the engine's UHD ranks its own
+    // kernels (RFC 0019 §5: "the engine owns the UHD that ranks it"), then StaticOrdering
+    // ranks whatever engines remain. Read §6 step 6's "degrades to static_order (priority +
+    // id)" as the kernel comparator inside the engine, not as a hand-off to this policy.
+    // SelectionHeuristic::UHD used to sit between these two. It ranked kernels where the
+    // heuristic-plugin ABI can only return engine ids, so it always reported applied=0 and
+    // never changed this chain's outcome; the ranking it computed is now done by the engine.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),

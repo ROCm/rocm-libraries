@@ -363,6 +363,45 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
                                             int64_t* engine_ids,
                                             size_t* num_engines);
 
+/**
+ * @brief Retrieves the selection trace for observability (RFC 0019 §13).
+ *
+ * Returns diagnostic information about the most recent selection for a given engine.
+ * Valid only after Finalize has been called. If Finalize declined (out_applied == 0),
+ * trace may be absent or partial.
+ *
+ * The trace is returned as a JSON string owned by the plugin. The string remains valid
+ * until the next Finalize call on this descriptor or the descriptor is destroyed.
+ *
+ * Trace JSON schema (all fields optional, present when available):
+ * {
+ *   "uhd_id": string,              // UHD identifier
+ *   "model_version": string,       // Model version/hash
+ *   "training_arches": [string],   // Architectures the model was trained on
+ *   "adapter_type": string,        // "tree_data", "static_order", "onnx", etc.
+ *   "used_model": bool,            // true if model scored, false if fallback
+ *   "fallback_reason": string,     // present if used_model == false
+ *   "arch_was_trained": bool,      // false if device arch not in training set
+ *   "device_arch": string,         // Device architecture
+ *   "features_hash_model": string, // Hash from model artifact
+ *   "features_hash_config": string,// Hash from UHD config
+ *   "features_hash_match": bool    // true if hashes match
+ * }
+ *
+ * @param[in] desc The policy descriptor.
+ * @param[in] engine_id The engine ID to retrieve trace for.
+ * @param[out] trace_json Pointer to receive JSON string pointer (plugin-owned, read-only).
+ *
+ * @return HIPDNN_PLUGIN_STATUS_SUCCESS if trace is available,
+ *         HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED if descriptor not finalized,
+ *         HIPDNN_PLUGIN_STATUS_NOT_SUPPORTED if engine has no trace,
+ *         error code on other failures.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyGetTrace(hipdnnHeuristicPolicyDescriptor_t desc,
+                                  int64_t engine_id,
+                                  const char** trace_json);
+
 /** @} */ // End of HeuristicPolicySelection group
 
 #ifdef __cplusplus

@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "5a1c0000-0000-4000-8000-000000000003",
+  "name": "hipkernel:PointwiseModel",
+  "graph_match": { "native": "hipkernel.pointwise.graph_match" },
+  "heuristic": "5a1c0000-0000-4000-8000-000000000002",
+  "metadata": "5a1c0000-0000-4000-8000-000000000001",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

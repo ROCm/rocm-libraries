@@ -22,4 +22,8 @@ table ConvolutionWrwAttributes {
 
     // Algorithm/mode selection
     conv_mode: ConvMode;
+
+    // RFC 0019 §8: FLOP and byte count for arithmetic intensity (optional)
+    umd_flops: string;  // JsonLogic expression over tensor dims → total FLOPs
+    umd_bytes: string;  // JsonLogic expression over tensor dims → total bytes moved
 }

@@ -961,7 +961,7 @@ def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
         # cleanly and is rejected at load, dropping the matcher, then the pack
         # naming it, then the engine -- at a log level that is off by default.
         ("pointwise.umd.json", {"scope": "Kernel"}, "invalid scope"),
-        ("shared.uhd.json", {"kind": "Native"}, "invalid kind"),
+        ("shared.uhd.json", {"adapter": "Native"}, "invalid adapter"),
         (
             "pointwise.kmd.json",
             {"fields": [{"name": "block_size", "type": "integer"}]},

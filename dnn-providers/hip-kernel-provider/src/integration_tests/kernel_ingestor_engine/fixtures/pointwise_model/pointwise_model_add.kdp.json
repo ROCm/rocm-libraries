@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "5a1c0000-0000-4000-8000-000000000004",
+  "name": "hipkernel:pointwise_model_add",
+  "matchers": [
+    "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe",
+    "1a7f52c8-b036-4e91-95d2-6c83af407b14"
+  ],
+  "dispatch": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
+  "engine": "5a1c0000-0000-4000-8000-000000000003",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "0a1c0000-0000-4000-8000-000000000005",
+      "name": "pointwise_model_add.f32_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fa1c0000-0000-4000-8000-000000000006",
+      "name": "pointwise_model_add.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    }
+  ]
+}

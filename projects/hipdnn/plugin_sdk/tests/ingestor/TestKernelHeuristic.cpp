@@ -13,9 +13,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelHeuristicFactory.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
@@ -46,8 +48,8 @@ TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "misspelled selector";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = "hipdnn.kernel_ingestor.test.misspelled";
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = "hipdnn.kernel_ingestor.test.misspelled";
 
     try
     {
@@ -312,8 +314,8 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "test heuristic";
-    descriptor.kind = HeuristicKind::NATIVE;
-    descriptor.payload = SCORE_SYMBOL;
+    descriptor.adapter = UhdAdapter::NATIVE;
+    descriptor.nativeSymbol = SCORE_SYMBOL;
 
     const auto heuristic = makeKernelHeuristic(descriptor);
 
@@ -324,16 +326,38 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
-TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
+TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicDegradesWhenAModelCannotBeBroughtUp)
 {
-    // HeuristicKind::MODEL has no adapter yet; fails at assembly time, not first rank().
+    // A MODEL naming an artifact that is not there degrades rather than throwing, which is
+    // the difference between it and NATIVE: an unregistered symbol is a build fact and the
+    // engine could never score, while a missing artifact is a deployment fact and the
+    // engine still selects, by declared order (RFC 0019 §5).
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";
-    descriptor.kind = HeuristicKind::MODEL;
-    descriptor.payload = "some/model/artifact.bin";
+    descriptor.adapter = UhdAdapter::TREE_DATA;
+    descriptor.modelArtifactPath = "some/model/artifact.bin";
+    descriptor.featuresSignature = {R"("$kernel.tile_m")"};
+    descriptor.featuresHash = "sha256:whatever";
 
-    EXPECT_THROW(makeKernelHeuristic(descriptor), std::invalid_argument);
+    std::shared_ptr<IKernelHeuristic> heuristic;
+    ASSERT_NO_THROW(heuristic = makeKernelHeuristic(descriptor));
+    ASSERT_NE(heuristic, nullptr);
+
+    // Ranking still works, and gives the order an engine with no model would give.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowPriorityId = testId(0x01);
+    const auto highPriorityId = testId(0x02);
+    catalog.entries = {makeDefinition(lowPriorityId, 64, 1), makeDefinition(highPriorityId, 64, 5)};
+
+    const auto ranked = heuristic->rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicFallsBackWhenNoDescriptorIsSupplied)
@@ -411,14 +435,120 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 {
     // The fallback must contribute no ordering of its own: any score spread would
     // outrank priority, which is the one signal an engine without a model still has.
+    // It reports 0 -- RFC 0019 §5 step 7's value for "no measurement" -- so a fallback and a
+    // model that scored zero describe themselves the same way. traceDecidedBy() is what tells
+    // them apart, and estimateTflops needs one rule rather than two sentinels.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
-              heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)));
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)), 0.0);
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)),
+                     0.0);
+
+    // Equal-in-ordering is what the fallback owes. These two definitions carry the same
+    // priority, so the documented tiebreak -- ascending descriptor id -- has to decide, and
+    // a NaN score must not have leaked into the comparator to decide it instead.
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+    const auto ranked = heuristic.rankScored(catalog, context);
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01)) << "the id tiebreak did not decide";
+    EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "the fallback invented a figure of merit";
+}
+/// RFC 0019 §5 step 7: "No model, or the scorer errors -> rank by static_order (priority + id)",
+/// under the heading "A failure degrades the result; it never fails the request" -- which spells
+/// out that a malformed descriptor set "must not fail after the engine has already claimed
+/// applicability."
+///
+/// The model path honoured this from the start; the native path did not, and every UHD shipped
+/// today is native. It is reachable from descriptor data alone: the shipped scorer reads
+/// kernel.getIntMetadata("block_size"), which throws std::out_of_range when a KDP joins the
+/// engine with a kernel that omits the knob.
+class ThrowingHeuristic : public IKernelHeuristic
+{
+public:
+    double score(const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& /*kernel*/) const override
+    {
+        throw std::out_of_range("kernel has no metadata field 'block_size'");
+    }
+};
+
+TEST(TestIngestorKernelHeuristic, AThrowingScorerDegradesInsteadOfFailingTheRequest)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+
+    // The request survives at all -- this is the whole of step 7's guarantee.
+    std::vector<ScoredKernel> ranked;
+    ASSERT_NO_THROW(ranked = heuristic.rankScored(catalog, context));
+
+    // And it is a usable answer: static_order, which step 5 defines as priority then id. These
+    // two carry equal priority, so ascending id decides.
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(ranked.front().score, 0.0) << "a failed ranking reported a figure of merit";
+
+    // The whole ranking degrades, not the candidates that happened to throw: a mix of real
+    // scores and sentinels is neither order.
+    EXPECT_DOUBLE_EQ(ranked.back().score, 0.0);
+}
+
+TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
+{
+    // Degrading silently would leave an engine that looks like it ranks on a model while
+    // ranking on declared order -- the failure RFC 0019 §12 exists to make visible.
+    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
+        HIPDNN_SEV_INFO);
+
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+    (void)heuristic.rankScored(catalog, context);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "scorer threw while ranking"));
+    EXPECT_TRUE(recorder.hasLogContaining("block_size")) << "the cause was not carried through";
+
+    // Once: the cause is a property of the descriptor set, so it recurs for every graph.
+    const auto after = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    (void)heuristic.rankScored(catalog, context);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), after) << "the report repeated";
+}
+
+TEST(TestIngestorKernelHeuristic, RankAlsoSurvivesAThrowingScorer)
+{
+    // rank() is what production calls (KernelIngestorStateManager), and it is derived from
+    // rankScored -- so the guard has to reach it without a second implementation.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    catalog.entries.push_back(makeDefinition(testId(0x02), 4096));
+    catalog.entries.push_back(makeDefinition(testId(0x01), 64));
+
+    const ThrowingHeuristic heuristic;
+    std::vector<KernelDefinition> ordered;
+    ASSERT_NO_THROW(ordered = heuristic.rank(catalog, context));
+    ASSERT_EQ(ordered.size(), 2U);
+    EXPECT_EQ(ordered.front().kernelId, testId(0x01));
 }
 
 } // namespace

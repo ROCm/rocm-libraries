@@ -2,6 +2,8 @@
   "version": "0.1",
   "id": "uhd-attention",
   "name": "Attention static-order heuristic",
-  "kind": "native",
-  "payload": "hipkernel.attention.score"
+  "adapter": "native",
+  "native": {
+    "symbol": "hipkernel.attention.score"
+  }
 }
