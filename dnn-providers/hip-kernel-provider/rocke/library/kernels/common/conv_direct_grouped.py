@@ -239,7 +239,9 @@ def is_valid_spec_16c(
     return True, "ok"
 
 
-def build_direct_conv_16c(spec: DirectConv16cSpec, *, arch: str = "gfx950") -> KernelDef:
+def build_direct_conv_16c(
+    spec: DirectConv16cSpec, *, arch: str = "gfx950"
+) -> KernelDef:
     """Build the IR for one direct conv 16c kernel instance.
 
     See the module docstring for the kernel structure. The Python

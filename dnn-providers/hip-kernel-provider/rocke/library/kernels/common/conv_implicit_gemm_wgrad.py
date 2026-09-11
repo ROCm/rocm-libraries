@@ -499,7 +499,11 @@ class WgradConvSpec:
         # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
         # requirement only applies to atomic split-K paths (not two_stage).
         _needs_atomic = (self.split_k == 0 or self.split_k > 1) and not self.two_stage
-        if _needs_atomic and self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+        if (
+            _needs_atomic
+            and self.data.dtype_d in ("bf16", "fp16")
+            and self.epilogue == "default"
+        ):
             raise ValueError(
                 f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "

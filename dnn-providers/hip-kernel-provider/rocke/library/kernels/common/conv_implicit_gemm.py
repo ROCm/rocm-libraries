@@ -1968,7 +1968,10 @@ def _emit_cshuffle_epilogue(
         bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
     )
 
-def build_implicit_gemm_conv(spec: "ImplicitGemmConvSpec", *, arch: str = "gfx950") -> "KernelDef":
+
+def build_implicit_gemm_conv(
+    spec: "ImplicitGemmConvSpec", *, arch: str = "gfx950"
+) -> "KernelDef":
     """Build the IR for one implicit-GEMM forward convolution kernel.
 
     Public API: takes only ``spec`` and ``arch``.  For internal extension via

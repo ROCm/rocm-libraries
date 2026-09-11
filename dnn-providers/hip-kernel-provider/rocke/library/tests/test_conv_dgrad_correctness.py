@@ -52,7 +52,11 @@ def _run_benchmark(*extra_args, timeout=600):
     """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
     import io
 
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": os.pathsep.join([_PYDIR, _LIB_DIR])}
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": os.pathsep.join([_PYDIR, _LIB_DIR]),
+    }
     cmd = [
         sys.executable,
         "-m",

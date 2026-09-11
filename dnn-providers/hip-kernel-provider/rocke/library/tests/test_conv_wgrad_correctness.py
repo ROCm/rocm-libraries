@@ -1071,12 +1071,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
                     )
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-                        lds_k_outer=on,
-                    )
-
-
 def _u8_ts(t):
     """Return a ctypes byte array backed by a torch tensor's data pointer."""
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
