@@ -2157,10 +2157,35 @@ double compute_tile_latency(const problem_t& problem,
   // LSU deepening (a shorter per-wave K-loop) only pays off on smaller shapes;
   // on large GEMMs it mis-tunes.  Confine the LSU iteration gain to a small-shape
   // box; outside it, LSU does not shorten the modelled K-loop.
-  const bool deepening_box =
+  //
+  // Exception 1: sub-MI shapes (a problem dim below the MI width) are GEMV-like --
+  // few output tiles, DRAM-bound, and LSU is the intended parallelization.  The
+  // box's K<=DEEPEN_K_MAX limit exists to protect large 2D GEMMs and wrongly
+  // blocks LSU exactly where deep-K GEMV needs it, so lift it for sub-MI.
+  //
+  // Exception 2: K-split LSU kernels build their waves from the K-partition, not
+  // the MN tile -- they carry a degenerate MN wave-group (MIWaveGroup=[1,1], i.e.
+  // base_waves < simds) with lsu > 1 on purpose.  For these the K-shortening is by
+  // design, so drop the box's K-limit.  BUT only for genuinely skinny problems
+  // (min(M,N) <= K_SPLIT_LSU_MN_MAX): on moderate 2D shapes the flat-in-MT_K
+  // mainloop lets the K-shortening over-deepen the tile (depthU->512), so keep
+  // them on the normal path where LSU does not fire.
+  // Also cap MT_K: real K-split LSU kernels use a shallow per-iter DepthU
+  // (16-64) and build depth from the K-partition.  A deep tile (e.g. 16x16x512)
+  // is not one; letting it take the relaxation lets the LSU K-shortening credit a
+  // phantom deep-narrow tile that beats the real shallow K-split kernel.
+  const bool sub_mi = (problem.size.m < config.mi.m || problem.size.n < config.mi.n);
+  const bool skinny = (std::min(problem.size.m, problem.size.n)
+                       <= heuristic_defaults_t::K_SPLIT_LSU_MN_MAX);
+  const bool shallow_du = (config.mt.k <= heuristic_defaults_t::K_SPLIT_LSU_MTK_MAX);
+  const bool k_split_lsu = (lsu > 1 && base_waves < simds_per_cu && skinny && shallow_du);
+  const bool mn_in_box =
       (std::min(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MN_MAX
-       && std::max(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MAX_DIM
-       && K <= heuristic_defaults_t::DEEPEN_K_MAX);
+       && std::max(problem.size.m, problem.size.n) <= heuristic_defaults_t::DEEPEN_MAX_DIM);
+  const bool deepening_box = sub_mi
+      || (k_split_lsu && std::max(problem.size.m, problem.size.n)
+                             <= heuristic_defaults_t::DEEPEN_MAX_DIM)   // K-split LSU: any K
+      || (mn_in_box && K <= heuristic_defaults_t::DEEPEN_K_MAX);        // original full box
   const long lsu_par_gain = (lsu > 1 && deepening_box)
       ? std::max<long>(1, static_cast<long>(std::min(base_waves * static_cast<size_t>(lsu), simds_per_cu)
                                             / std::max<size_t>(std::min(base_waves, simds_per_cu), 1)))
@@ -2357,9 +2382,16 @@ double compute_tile_latency(const problem_t& problem,
   // oversized MT_M computes rows it doesn't use with nothing to amortize against,
   // and ETP under-charges this single-tile case.  Restricted to grid_M == 1 (for
   // grid_M >= 2 ETP already covers the partial tile).  Zero when MT_M divides M.
+  //
+  // GEMV in M (M == 1) with a deep enough K-loop: the m_edge waste is unavoidable
+  // (every candidate uses MT_M >= MI_M > 1) and identical across tiles, so applying
+  // it only mis-ranks by per-iter cost -- penalizing the deep-K tiles these
+  // memory-bound reductions actually want.
   const double m_dd = static_cast<double>(std::max<size_t>(config.mt.m, 1));
   const double M_problem = static_cast<double>(problem.size.m);
-  const double m_edge_ratio = (M_problem > 0.0 && M_problem <= m_dd)
+  const bool submi_gemv =
+      (problem.size.m == 1 && problem.size.k >= heuristic_defaults_t::SUBMI_GEMV_K_MIN);
+  const double m_edge_ratio = (!submi_gemv && M_problem > 0.0 && M_problem <= m_dd)
       ? (m_dd - M_problem) / M_problem : 0.0;
 
   const double L_du_waste =

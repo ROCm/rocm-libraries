@@ -105,6 +105,16 @@ struct heuristic_defaults_t {
   static constexpr double TAIL_WASTE_PENALTY             = 4.0;
   static constexpr double OVERSIZE_WASTE_WEIGHT          = 3.0;
   static constexpr double M_EDGE_PENALTY                 = 2.0;
+  static constexpr size_t SUBMI_GEMV_K_MIN               = 256;
+  // Max min(M,N) for a shape to be "skinny" enough that K-split LSU (degenerate
+  // MN wave-group + lsu>1) may lift the deepening-box K-limit.  Above this the
+  // shape has enough MN parallelism and LSU K-shortening over-deepens depthU
+  // (regressing shapes observed at min>=96; legit K-split shapes at min<=32).
+  static constexpr size_t K_SPLIT_LSU_MN_MAX             = 32;
+  // Max MT_K for the K-split LSU box relaxation.  Real K-split kernels use a
+  // shallow per-iter DepthU; deeper tiles taking the relaxation let the LSU
+  // K-shortening credit phantom deep-narrow tiles (the 16x16x512 leak).
+  static constexpr size_t K_SPLIT_LSU_MTK_MAX           = 128;
   static constexpr double EPILOGUE_OCC_SATURATION         = 2.0;
   static constexpr double SCALAR_STORE_EXPOSED_PENALTY    = 4.0;
 };
