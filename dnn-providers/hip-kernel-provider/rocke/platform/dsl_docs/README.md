@@ -156,7 +156,7 @@ The docs in this folder are written against the current code. Run commands
 from the `rocke/platform/` root with the Python interpreter for your ROCm environment:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 

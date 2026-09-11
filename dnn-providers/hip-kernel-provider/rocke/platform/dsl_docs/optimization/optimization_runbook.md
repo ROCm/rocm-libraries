@@ -3209,7 +3209,7 @@ export PYTHONPATH=python
 
 ```bash
 cd <composablekernel-checkout>
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_rocke_examples.py

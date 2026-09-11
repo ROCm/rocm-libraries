@@ -108,7 +108,7 @@ The full validation flow used during this docs pass:
 ```bash
 cd <composablekernel-checkout>
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 # 1. Static unit suite.

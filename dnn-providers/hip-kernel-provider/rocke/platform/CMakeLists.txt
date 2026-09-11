@@ -343,7 +343,9 @@ if(ROCKE_INSTALL_TESTS)
 
     # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
     # directory (which contains the installed rocke package) so `import rocke`
-    # resolves without the source-tree sys.path shims.
+    # resolves without the source-tree sys.path shims. The staged library tree
+    # does not need to be listed here: tests/conftest.py probes for it and
+    # inserts it on sys.path, covering both the staged and checkout layouts.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -354,18 +356,26 @@ if(ROCKE_INSTALL_TESTS)
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
     # PYTHONPATH includes both the rocke platform package (.) and the library tree
-    # (tests/library) so kernels.*, builders.*, and dispatch.* are importable.
-    set(_ROCKE_LIBRARY_CONV_TESTS
+    # so kernels.*, builders.*, and dispatch.* are importable. Both the test paths
+    # and that tree are relative to the CTestTestfile's own directory, which sits
+    # one level below the install root in standalone mode -- hence the
+    # ROCKE_TEST_CTEST_REL prefix on each, matching the other installed tests.
+    set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
+    set(_ROCKE_LIBRARY_CONV_TESTS "")
+    foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_CONV_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_test}\"")
+    endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_conv_pytest python -m pytest ${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=120)\n")
+           "add_test(rocke_library_conv_pytest python -m pytest${_ROCKE_LIBRARY_CONV_TESTS} -v --timeout=120)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=.:tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.:${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
   endif()
 

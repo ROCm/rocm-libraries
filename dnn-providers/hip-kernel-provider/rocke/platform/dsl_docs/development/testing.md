@@ -50,7 +50,7 @@ PY
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library \
   python tests/test_rocke.py
 ```
 
@@ -92,7 +92,7 @@ cd <rocke/platform>
 
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=python python \
+PYTHONPATH=python:../library python \
     -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
@@ -278,7 +278,7 @@ A two-minute smoke for a clean clone:
 ```bash
 cd <rocke/platform>
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python tests/test_rocke.py                             # unit (most no-GPU; ~20 need a GPU)
