@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc,sharedOrderCountFollowers,sharedOrderDrainRetires --print-output
 #
 # While XDL and CSMACC are the only units with work outstanding they complete in
 # issue order, so a CSMACC producer's wait counts everything issued after it on

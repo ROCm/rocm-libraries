@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --InsertWaitAluPass=enableESM2TrackValuVsrc,sharedOrderCountFollowers,sharedOrderDrainRetires --print-output
 
 # CHECK-LABEL: @csmacc_live_across_join
 # CHECK: s_wait_alu

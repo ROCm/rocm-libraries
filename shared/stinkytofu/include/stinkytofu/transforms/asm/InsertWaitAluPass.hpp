@@ -31,19 +31,20 @@ class Pass;
 class ModulePass;
 
 /// Pass policy, deliberately not in HWModel (see its SCOPE note: facts, not knobs).
-/// The two shared-order refinements are correct wherever VA_VDST is one counter
-/// shared by every VALU pipe; they are switchable so a run can be bisected against a
-/// stricter one without rebuilding the arch table.
+///
+/// The baseline is the per-pipe / per-FIFO follower count alone: always correct on any
+/// arch, and stricter than it needs to be. Every refinement below is off by default and
+/// added per arch by the backend that knows the rule holds there.
 struct InsertWaitAluOptions {
     /// Stamp VALU source operands as well as dests, for the src-operand WAR hazard.
     bool enableESM2TrackValuVsrc = false;
     /// Count a CSMACC producer's followers across the whole VA order rather than its
     /// own pipe, while XDL and CSMACC are the only units in flight and so complete in
     /// issue order. Weaker wait, same guarantee.
-    bool sharedOrderCountFollowers = true;
+    bool sharedOrderCountFollowers = false;
     /// Treat a producer as retired once an emitted count drained the shared order past
     /// it. A per-pipe floor rises more slowly and still reports such a producer live.
-    bool sharedOrderDrainRetires = true;
+    bool sharedOrderDrainRetires = false;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).

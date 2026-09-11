@@ -275,7 +275,9 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // Must be the last pass to rewrite or move instructions before the wait pass: it
         // measures distances that pass then relies on.
         mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
-        mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc}));
+        mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc,
+                                                   /*sharedOrderCountFollowers=*/true,
+                                                   /*sharedOrderDrainRetires=*/true}));
     }
 
     mpm.addPass(createFunctionToModuleAdaptor(createInsertCoexecHazardPass()));

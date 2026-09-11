@@ -68,10 +68,10 @@ bool g_enableESM2TrackValuVsrc = false;
 // Set once per function in setupArch, alongside g_enableESM2TrackValuVsrc.
 const HWModel::WaitHide* g_waitHide = nullptr;
 
-// Shared-VA-order refinements, from InsertWaitAluOptions. Off leaves the pass on the
-// per-pipe ordinals alone, which is always correct and always stricter.
-bool g_sharedOrderCountFollowers = true;
-bool g_sharedOrderDrainRetires = true;
+// Shared-VA-order refinements, from InsertWaitAluOptions. Off is the baseline: the
+// per-pipe ordinals alone, always correct and always stricter.
+bool g_sharedOrderCountFollowers = false;
+bool g_sharedOrderDrainRetires = false;
 
 // Render one WaitHide entry for the debug banner; 0 reads as off.
 inline std::string waitHideStr(int v) {
