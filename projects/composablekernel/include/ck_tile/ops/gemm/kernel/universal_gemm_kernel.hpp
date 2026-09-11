@@ -480,6 +480,27 @@ struct UniversalGemmKernel
         return LargeTensors && IsLargeTensorGlobalLoadSupported();
     }
 
+    // True when the kernel shifts the A and E base pointers by the M tile before building their
+    // descriptors, so those descriptors span at most one M tile however large M is. Not virtual:
+    // a derived kernel opts in by declaring its own version, which hides this one and is found
+    // through SelfType. Declaring it without performing the shift corrupts memory; performing the
+    // shift without declaring it only loses large-M support.
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported() { return false; }
+
+    // Single definition of the offsetted M extent, shared by the host-side large-tensor guard
+    // (i_m = 0) and the derived kernel's device-side clamp so the two cannot drift apart.
+    CK_TILE_HOST_DEVICE static index_t ClampMToOffsettedTile(index_t M, index_t i_m)
+    {
+        if constexpr(SelfType::IsLargeTensorMOffsettingSupported())
+        {
+            return std::min(M - i_m, TilePartitioner::MPerBlock);
+        }
+        else
+        {
+            return M;
+        }
+    }
+
     // Pad/guard sequence for a 2D block tile. The leading (strided) dimension carries the
     // 64-bit global-path OOB guard (that path has no hardware bounds check); the contiguous
     // dimension carries its tile pad, plus the guard when it is the contraction (K) dimension
@@ -763,6 +784,10 @@ struct UniversalGemmKernel
                        SizeLimit;
             };
 
+            // A and E are addressed through descriptors a derived kernel may restrict to a
+            // single M tile; D is not, so it is checked against the full kargs.M below.
+            const index_t m_extent = SelfType::ClampMToOffsettedTile(kargs.M, 0);
+
             const bool any_large_tensor = [&]() {
                 bool r = false;
 
@@ -770,7 +795,7 @@ struct UniversalGemmKernel
                     using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
                     using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
                     r                = r || is_large_tensor(
-                                 AiLayout{}, kargs.M, kargs.K, kargs.stride_As[i], AiDataType{});
+                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
                 });
                 static_for<0, NumBTensor, 1>{}([&](auto i) {
                     using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
@@ -784,7 +809,7 @@ struct UniversalGemmKernel
                     r                = r || is_large_tensor(
                                  DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
                 });
-                r = r || is_large_tensor(CLayout{}, kargs.M, kargs.N, kargs.stride_E, EDataType{});
+                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
 
                 return r;
             }();

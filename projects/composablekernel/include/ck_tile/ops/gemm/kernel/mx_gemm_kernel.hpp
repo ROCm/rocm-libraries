@@ -148,6 +148,19 @@ struct MxGemmKernel
     static constexpr index_t NXdlPackEff = MxGemmPipeline::NXdlPackEff;
     static constexpr index_t KXdlPackEff = MxGemmPipeline::KXdlPackEff;
 
+    // Large tensor support (when M is large, N and K are relatively small): RunGemm shifts the
+    // A / E / A-scale base pointers by the M tile and clamps kargs.M, so those descriptors span
+    // at most one M tile however large M is.
+    static constexpr bool kOffsetPtrsByTileCoords =
+        std::is_same_v<tensor_layout::gemm::RowMajor,
+                       remove_cvref_t<std::tuple_element_t<0, AsLayout>>> &&
+        std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
+
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported()
+    {
+        return kOffsetPtrsByTileCoords;
+    }
+
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
     CK_TILE_HOST static constexpr KernelArgs
@@ -393,13 +406,8 @@ struct MxGemmKernel
         std::array<ScalePtrType, NumATensor> as_scale_ptr;
         std::array<const ADataType*, NumATensor> as_ptr_;
         index_t block_idx_m_;
-        // Large tensor support (when M is large, N and K are relatively small)
-        using ALayout = remove_cvref_t<std::tuple_element_t<0, AsLayout>>;
-        constexpr bool offset_ptrs_by_tile_coords =
-            std::is_same_v<tensor_layout::gemm::RowMajor, ALayout> &&
-            std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
 
-        if constexpr(offset_ptrs_by_tile_coords)
+        if constexpr(kOffsetPtrsByTileCoords)
         {
             static_for<0, NumATensor, 1>{}([&](auto i) {
                 as_ptr_[i] = as_ptr[i] + static_cast<std::ptrdiff_t>(block_idx_m) *
@@ -412,7 +420,7 @@ struct MxGemmKernel
                                       (kargs.K / BlockScaleSize / KXdlPackEff);
             });
 
-            kargs.M      = std::min(kargs.M - block_idx_m, TilePartitioner::MPerBlock);
+            kargs.M      = BaseKernel::ClampMToOffsettedTile(kargs.M, block_idx_m);
             block_idx_m_ = 0;
         }
         else
