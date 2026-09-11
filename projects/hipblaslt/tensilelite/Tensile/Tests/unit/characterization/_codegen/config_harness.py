@@ -352,6 +352,41 @@ def golden_digest(results):
     )
 
 
+def assert_config_emits_golden(
+    config_path,
+    arch,
+    snapshot,
+    *,
+    limit=8,
+    all_ok=True,
+    validate_source=False,
+):
+    """Emit one configuration once and check its shared smoke-test contract."""
+    results = emit_kernels_from_config(config_path, limit=limit, arch=arch)
+    assert results, f"expected >=1 kernel, got {len(results)}"
+    if all_ok:
+        assert all(err == 0 for (_base, _src, err) in results)
+    if validate_source:
+        for base, src, err in results:
+            assert err == 0, f"kernel {base!r} emitted with err={err}"
+            assert base.startswith("Cijk_")
+            assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
+            assert arch in src, f"kernel {base!r}: wrong arch in assembly"
+    assert golden_digest(results) == snapshot
+    return results
+
+
+def assert_config_derives_golden(config_path, arch, snapshot, *, expect_solutions):
+    """Derive one configuration once and check its saved solution-count result."""
+    solutions = solutions_from_config(config_path, arch=arch)
+    if expect_solutions:
+        assert solutions, f"expected >=1 surviving solution, got {len(solutions)}"
+    else:
+        assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
+    assert len(solutions) == snapshot
+    return solutions
+
+
 _TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
 _WAVE32_RE = re.compile(r"^\s*\.amdhsa_wavefront_size32\s+1", re.M)
 

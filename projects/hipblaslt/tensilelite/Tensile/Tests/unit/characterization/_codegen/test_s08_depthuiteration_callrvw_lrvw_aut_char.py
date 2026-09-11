@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from config_harness import solutions_from_config
+from config_harness import assert_config_derives_golden
 
 pytestmark = pytest.mark.unit
 
@@ -42,20 +42,6 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s08_depthuiteration_callrvw_lrvw_aut_derives_reject():
-    """calLRVW rejects during assignDerivedParameters -> 0 valid solutions.
-
-    The gfx1250 HasWMMA_V3 fork reaches calLRVW in Solution.py, where the
-    explicit-LRVW != maxLRVW guards (lines 3523 A-side, 3558 B-side) fire and
-    reject, so no valid solution survives.
-    """
-    sols = solutions_from_config(_CONFIG, arch=_ARCH)
-    assert len(sols) == 0, (
-        f"Expected 0 surviving solutions (fork reachable-invalid), "
-        f"got {len(sols)}"
-    )
-
-
 def test_s08_depthuiteration_callrvw_lrvw_aut_golden(snapshot):
     """S08 golden: surviving-solution count pins the reachable-invalid reject."""
-    assert len(solutions_from_config(_CONFIG, arch=_ARCH)) == snapshot
+    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=False)

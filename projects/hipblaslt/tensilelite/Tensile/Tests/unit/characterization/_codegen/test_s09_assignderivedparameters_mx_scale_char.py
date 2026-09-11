@@ -32,7 +32,7 @@ import os
 
 import pytest
 
-from config_harness import solutions_from_config
+from config_harness import assert_config_derives_golden
 
 pytestmark = pytest.mark.unit
 
@@ -48,20 +48,6 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s09_assignderivedparameters_mx_scale_derives():
-    """MX-scale non-subtile forks survive assignDerivedParameters (>=1 solution).
-
-    Each fork reaches the non-subtile MX-scale GRVW/GLT derivation cluster in
-    Solution.py ``assignDerivedParameters`` and derives a valid Solution, so at
-    least one solution survives (the target lines fire during derivation).
-    """
-    sols = solutions_from_config(_CONFIG, arch=_ARCH)
-    assert len(sols) >= 1, (
-        f"Expected >=1 surviving solution (MX-scale non-subtile derivation), "
-        f"got {len(sols)}"
-    )
-
-
 def test_s09_assignderivedparameters_mx_scale_golden(snapshot):
     """S09 golden: surviving-solution count pins the MX-scale derivation."""
-    assert len(solutions_from_config(_CONFIG, arch=_ARCH)) == snapshot
+    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=True)

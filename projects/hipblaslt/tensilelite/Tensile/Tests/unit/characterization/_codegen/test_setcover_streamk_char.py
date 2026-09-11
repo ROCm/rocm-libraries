@@ -15,7 +15,7 @@ actual per-kernel error codes rather than asserting err==0.
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_config_emits_golden
 
 pytestmark = pytest.mark.unit
 
@@ -39,12 +39,4 @@ _IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]
 @pytest.mark.parametrize("config,arch,all_ok", _CONFIGS, ids=_IDS)
 def test_setcover_streamk_emits_golden(config, arch, all_ok, snapshot):
     """Config emits >=1 kernel (all err==0 when all_ok); golden pins per-kernel err."""
-    results = emit_kernels_from_config(config, limit=8, arch=arch)
-    assert len(results) >= 1
-    if all_ok:
-        assert all(err == 0 for (_b, _s, err) in results)
-    digest = sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
-    )
-    assert digest == snapshot
+    assert_config_emits_golden(config, arch, snapshot, limit=8, all_ok=all_ok)

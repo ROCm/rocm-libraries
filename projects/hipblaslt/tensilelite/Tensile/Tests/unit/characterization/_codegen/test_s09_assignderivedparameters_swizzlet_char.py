@@ -27,7 +27,7 @@ import os
 
 import pytest
 
-from config_harness import solutions_from_config
+from config_harness import assert_config_derives_golden
 
 pytestmark = pytest.mark.unit
 
@@ -43,21 +43,6 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s09_assignderivedparameters_swizzlet_derives_reject():
-    """All forks reject during assignDerivedParameters -> 0 valid solutions.
-
-    The SwizzleTensorA/B derivation reaches the Solution.py swizzle block
-    (lines 3742, 3789, 3856, 3861-3863, 3867); the DirectToVgprA/B forks each
-    trip the SwizzleTensorA/B-requires-DirectToVgpr reject and early-return, so
-    no valid solution survives.
-    """
-    sols = solutions_from_config(_CONFIG, arch=_ARCH)
-    assert len(sols) == 0, (
-        f"Expected 0 surviving solutions (all forks reachable-invalid), "
-        f"got {len(sols)}"
-    )
-
-
 def test_s09_assignderivedparameters_swizzlet_golden(snapshot):
     """S09 golden: surviving-solution count pins the reachable-invalid reject."""
-    assert len(solutions_from_config(_CONFIG, arch=_ARCH)) == snapshot
+    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=False)
