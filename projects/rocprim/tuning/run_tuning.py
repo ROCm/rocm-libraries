@@ -72,7 +72,7 @@ def get_available_algorithms() -> List[str]:
         "device_binary_search",
         "device_lower_bound",
         "device_upper_bound",
-        'device_search_n',
+        "device_search_n",
         "device_partition_flag",
         "device_partition_predicate",
         "device_partition_three_way",
