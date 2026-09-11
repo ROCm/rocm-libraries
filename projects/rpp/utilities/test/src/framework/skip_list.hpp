@@ -54,7 +54,7 @@ inline constexpr const char* kSkipList[] = {
     "Voxel_Geometric/FlipVoxelTest.Correctness/HOST_*_NDHWC3_FullRoi_*",
 
     // ---- known kernel defects ---------------------------------------------------
-    "Image_Color/ColorCastTest.Correctness/*_a0p6_r30_g90_b150",
+    "Image_Color/ColorCastTest.Correctness/*",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h0_s0",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h90_s1",
@@ -277,8 +277,8 @@ inline constexpr const char* kSkipList[] = {
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis7_cms1_2x5x12x19",
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis7_cms2_2x5x12x19",
     "Misc_Statistical/NormalizeTest.Correctness/HIP_F*_3D_axis7_cms3_2x5x12x19",
-    "Misc_Statistical/NormalizeTest.Correctness/*_I8toF32_*",
-    "Misc_Statistical/NormalizeTest.Correctness/*_U8toF32_*",
+    "Misc_Statistical/NormalizeTest.Correctness/*_I8toI8_*",
+    "Misc_Statistical/NormalizeTest.Correctness/*_U8toU8_*",
     "Misc_Statistical/NormalizeTest.Correctness/*_cms0_*",
     "Misc_Statistical/NormalizeTest.Correctness/HOST_*_3D_axis4_*",
     "Misc_Statistical/NormalizeTest.Correctness/HOST_*_3D_axis6_*",

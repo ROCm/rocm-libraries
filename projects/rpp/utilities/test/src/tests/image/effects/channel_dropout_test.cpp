@@ -74,18 +74,22 @@ void run_channel_dropout(const TestConfig& cfg, const ChannelDropoutParams& op) 
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. golden starts as a copy of the input so the untouched
-    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
-    std::vector<T> input(count), golden(count), actual(count);
+    // (1) Host golden model. golden starts as a copy of the DESTINATION seed so the untouched
+    // (outside-ROI) region is defined; only the ROI is overwritten by the reference. That seed is a
+    // different pattern from the source (salt = 1) because the all-keep mask {1,1,1} makes the
+    // expected output equal to the input: seeding the destination from the input would then make
+    // golden, seed and expected identical, and a kernel that wrote nothing would pass.
+    std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
-    golden = input;
+    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
+    golden = dstInit;
     channel_dropout_reference<T>(input.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
                                  roi.data(), XYWH, dropout.data());
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
-    dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
+    dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_channel_dropout(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, dropout.data(),

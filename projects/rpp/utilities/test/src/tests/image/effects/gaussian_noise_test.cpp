@@ -63,14 +63,19 @@ void run_gaussian_noise(const TestConfig& cfg) {
         roi[i] = roiVec[i];
     }
 
-    std::vector<T> input(count), golden(count), actual(count);
+    // The destination starts from a DIFFERENT pattern than the source (salt = 1). Seeding it with
+    // the source would make golden, the device seed and the expected output byte-identical at this
+    // parameter corner -- the op is a passthrough here -- so a kernel that wrote nothing at all
+    // would pass. With a distinct seed the ROI has to be overwritten for the comparison to hold.
+    std::vector<T> input(count), dstInit(count), golden(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
-    golden = input;
+    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
+    golden = dstInit;
     gaussian_noise_identity_reference<T>(input.data(), golden.data(), desc, roi.data(), XYWH);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
-    dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
+    dst.write(dstInit.data(), bytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_gaussian_noise(src.ptr(), &desc, dst.ptr(), &desc, mean.data(), stdDev.data(),

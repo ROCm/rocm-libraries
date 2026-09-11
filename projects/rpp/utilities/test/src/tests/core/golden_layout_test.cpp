@@ -227,8 +227,8 @@ TEST(GoldenLayoutTest, NormalizeExcludesPaddingFromStatistics) {
         std::vector<Rpp32f> src(generic_element_count(sd)), dst(generic_element_count(dd), 0.f);
         fill_input_nd<Rpp32f>(src.data(), sd, DType::F32, 0);
         std::vector<Rpp32f> mean(256, 0.f), stdDev(256, 0.f);
-        normalize_reference<Rpp32f, Rpp32f>(src.data(), dst.data(), sd, dd, 1, mean.data(),
-                                            stdDev.data(), 3, 1.0f, 0.0f);
+        normalize_reference<Rpp32f, Rpp32f>(src.data(), dst.data(), sd, dd, DType::F32, 1,
+                                            mean.data(), stdDev.data(), 3, 1.0f, 0.0f);
         return logical_values(dst, dd);
     });
 }

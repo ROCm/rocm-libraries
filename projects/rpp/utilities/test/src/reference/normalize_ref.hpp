@@ -98,9 +98,9 @@ inline Rpp32u normalize_param_size(const std::vector<Rpp32u>& paramDims) {
 
 template <typename Tin, typename Tout>
 void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDesc,
-                         const RpptGenericDesc& dstDesc, Rpp32u axisMask, const Rpp32f* meanTensor,
-                         const Rpp32f* stdDevTensor, Rpp8u computeMeanStddev, Rpp32f scale,
-                         Rpp32f shift) {
+                         const RpptGenericDesc& dstDesc, DType dtOut, Rpp32u axisMask,
+                         const Rpp32f* meanTensor, const Rpp32f* stdDevTensor,
+                         Rpp8u computeMeanStddev, Rpp32f scale, Rpp32f shift) {
     const NdDims dims = nd_dims(srcDesc);
     const Rpp32u nDim = nd_rank(dims);
     const Rpp32u batch = dims[0];
@@ -170,7 +170,13 @@ void normalize_reference(const Tin* src, Tout* dst, const RpptGenericDesc& srcDe
             const double inv = (stdDev[p] != 0.0) ? (1.0 / stdDev[p]) : 0.0;
             const double v = (to_double(src[srcIdx]) - mean[p]) * inv * static_cast<double>(scale) +
                              static_cast<double>(shift);
-            dst[dstIdx] = from_double<Tout>(v);
+            // Clamped on store for the INTEGER output dtypes only: normalization is affine and
+            // unbounded, so it routinely lands outside [0,255] / [-128,127], and a bare cast of a
+            // negative double to Rpp8u is undefined. The float dtypes are deliberately left
+            // unclamped -- a z-score is legitimately negative, so quantize_stored()'s [0,1] image
+            // range does not apply to them.
+            const bool integerOut = (dtOut == DType::U8 || dtOut == DType::I8);
+            dst[dstIdx] = from_double<Tout>(integerOut ? quantize_stored(v, dtOut) : v);
         });
     }
 }

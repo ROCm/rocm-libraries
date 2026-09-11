@@ -100,8 +100,9 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     std::vector<Tin> input(count);
     std::vector<Tout> golden(count), actual(count);
     fill_input_nd<Tin>(input.data(), *srcDesc, cfg.dtypeIn);
-    normalize_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc, p.axisMask,
-                                   mean.data(), stdDev.data(), p.computeMode, kScale, kShift);
+    normalize_reference<Tin, Tout>(input.data(), golden.data(), *srcDesc, *dstDesc, cfg.dtypeOut,
+                                   p.axisMask, mean.data(), stdDev.data(), p.computeMode, kScale,
+                                   kShift);
 
     // (2) Run RPP on the configured backend.
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
@@ -139,8 +140,12 @@ std::vector<Rpp32u> masks_for(Rpp32u nDim) {
 // axisMask validity depends on the rank, so the grid is built rank by rank rather than as a
 // flat cross product.
 std::vector<NdWithParams<NormalizeParams>> normalize_grid() {
-    const std::vector<DTypeConv> convs = {{DType::U8, DType::F32},
-                                          {DType::I8, DType::F32},
+    // The four conversions rppt_normalize actually implements. It dispatches on MATCHING src/dst
+    // dtypes only and has no else branch, so a mismatched pair (U8->F32, say) returns RPP_SUCCESS
+    // without writing dstPtr at all -- a case that compares against an untouched buffer and can
+    // never pass, rather than coverage of anything.
+    const std::vector<DTypeConv> convs = {{DType::U8, DType::U8},
+                                          {DType::I8, DType::I8},
                                           {DType::F16, DType::F16},
                                           {DType::F32, DType::F32}};
     std::vector<NdWithParams<NormalizeParams>> grid;
@@ -162,10 +167,10 @@ class NormalizeTest : public SkipListTest<NdWithParams<NormalizeParams>> {};
 TEST_P(NormalizeTest, Correctness) {
     const NdConfig cfg = GetParam().cfg;
     const NormalizeParams p = GetParam().op;
-    if (cfg.dtypeIn == DType::U8 && cfg.dtypeOut == DType::F32)
-        run_normalize<Rpp8u, Rpp32f>(cfg, p);
-    else if (cfg.dtypeIn == DType::I8 && cfg.dtypeOut == DType::F32)
-        run_normalize<Rpp8s, Rpp32f>(cfg, p);
+    if (cfg.dtypeIn == DType::U8 && cfg.dtypeOut == DType::U8)
+        run_normalize<Rpp8u, Rpp8u>(cfg, p);
+    else if (cfg.dtypeIn == DType::I8 && cfg.dtypeOut == DType::I8)
+        run_normalize<Rpp8s, Rpp8s>(cfg, p);
     else if (cfg.dtypeIn == DType::F16 && cfg.dtypeOut == DType::F16)
         run_normalize<Rpp16f, Rpp16f>(cfg, p);
     else if (cfg.dtypeIn == DType::F32 && cfg.dtypeOut == DType::F32)

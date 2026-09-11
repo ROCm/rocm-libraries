@@ -95,16 +95,21 @@ void run_spatter_identity(const TestConfig& cfg) {
     for (Rpp32u n = 0; n < cfg.size.n; ++n) roi[n] = roiVec[n];
 
     // A constant image at the spatter colour. PLN1 collapses the colour to its mean, which is
-    // exact here because all three components are equal. src and dst are each filled through
+    // exact here because all three components are equal. src and golden are each filled through
     // their own descriptor so the pattern lands correctly under either layout.
+    //
+    // The device destination is seeded from an UNRELATED pattern rather than from the golden: the
+    // expected output here is a constant at the spatter colour, so seeding it with that same
+    // constant would make golden, seed and expected byte-identical and a kernel that wrote nothing
+    // would pass. Only the ROI is compared, so the seeded remainder is free.
     std::vector<T> input(srcCount), dstInit(dstCount), golden(dstCount), actual(dstCount);
     for_each_image_element(srcDesc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
         input[idx] = from_double<T>(spatter_color_stored(kGreyColor, srcDesc.c, c, cfg.dtype));
     });
     for_each_image_element(dstDesc, [&](Rpp32u, Rpp32u c, Rpp32u, Rpp32u, std::size_t idx) {
-        dstInit[idx] = from_double<T>(spatter_color_stored(kGreyColor, dstDesc.c, c, cfg.dtype));
+        golden[idx] = from_double<T>(spatter_color_stored(kGreyColor, dstDesc.c, c, cfg.dtype));
     });
-    golden = dstInit;
+    fill_input<T>(dstInit.data(), dstCount, cfg.dtype, /*salt=*/1);
     spatter_identity_reference<T>(golden.data(), dstDesc, cfg.dtype, roi.data(), XYWH, kGreyColor);
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);

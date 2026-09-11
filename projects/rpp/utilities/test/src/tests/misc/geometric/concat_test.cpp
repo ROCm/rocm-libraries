@@ -78,8 +78,13 @@ Rpp32u concat_axis(AxisKind kind, Rpp32u nDim) {
 // src2 matches src1 on every axis except the concat axis, where it deliberately gets a *different*
 // extent so that a swapped operand or an off-by-one axis cannot pass by coincidence. Halving is
 // a no-op at extent 2 (the rank-4 extents include one), hence the second branch.
-NdDims concat_src2_dims(Rpp32u nDim, Rpp32u axis) {
-    NdDims dims = nd_extents(nDim);
+//
+// Derived from src1's extents rather than rebuilt from the rank, so the two operands agree on every
+// other axis by construction: rebuilding would take the shape axis's default and silently disagree
+// on the innermost extent too for every NdShape::Tail config, which sends the golden past the end
+// of src2.
+NdDims concat_src2_dims(const NdDims& dims1, Rpp32u axis) {
+    NdDims dims = dims1;
     const Rpp32u e1 = dims[axis + 1];
     dims[axis + 1] = (e1 > 2) ? e1 / 2 + 1 : e1 + 1;
     return dims;
@@ -96,7 +101,7 @@ template <typename T>
 void run_concat(const NdConfig& cfg, AxisKind kind) {
     const Rpp32u axis = concat_axis(kind, cfg.nDim);
     const NdDims dims1 = nd_extents(cfg);
-    const NdDims dims2 = concat_src2_dims(cfg.nDim, axis);
+    const NdDims dims2 = concat_src2_dims(dims1, axis);
     const NdDims outDims = concat_dst_dims(dims1, dims2, axis);
 
     // Descriptors are device-addressable for HIP: the ND kernels read dims/strides on device.
@@ -158,9 +163,10 @@ TEST_P(ConcatTest, Correctness) {
         cfg.dtypeIn, [&](auto tag) { run_concat<Element<decltype(tag)>>(cfg, kind); });
 }
 
-// 72 cases: U8/F16/F32/I8 (what the op accepts) x ranks 2/3/4 x 3 axis kinds x HOST/HIP.
+// 144 cases: U8/F16/F32/I8 (what the op accepts) x ranks 2/3/4 x 2 shapes x 3 axis kinds x
+// HOST/HIP.
 //
-// 32 green, 40 red against one documented kernel defect, identically on both backends and for every
+// 64 green, 80 red against one documented kernel defect, identically on both backends and for every
 // dtype: concat returns RPP_ERROR_INVALID_DIM_LENGTHS (-25) when the two operands' extents differ
 // along a non-final concat axis -- which is the axis concat exists to differ on
 // (issues/concat-rejects-unequal-extents-on-non-final-axis.md). Every AxisLast case is bit-exact,

@@ -81,12 +81,21 @@ void run_fog(const TestConfig& cfg) {
         roi[i] = roiVec[i];
     }
 
-    std::vector<T> input(count), actual(count);
+    // The destination is seeded so that each ROI element already holds ITS OWN source pixel, which
+    // is what makes "unchanged" mean a dead kernel below. A raw byte copy of the input is not that:
+    // under a partial ROI or the layout toggle the byte at dstIdx is some other pixel's value, so a
+    // kernel that wrote nothing would still read as changed.
+    std::vector<T> input(count), dstInit(count), actual(count);
     fill_input<T>(input.data(), count, cfg.dtype);
+    fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);  // outside-ROI: defined, unread
+    for_each_roi_io(srcDesc, dstDesc, roiVec.data(), XYWH,
+                    [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
+                        dstInit[dstIdx] = input[srcIdx];
+                    });
 
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(input.data(), bytes);
-    dst.write(input.data(), bytes);  // seeded from the source so "unchanged" means a dead kernel
+    dst.write(dstInit.data(), bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
     ASSERT_EQ(rppt_fog(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, intensity.data(), grey.data(),
