@@ -495,33 +495,35 @@ private:
                 uint64_t        amdSMIPCIID{};
                 amdsmi_status_t bdfStatus
                     = amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID);
-                if(isAmdsmiTelemetryUnavailable(bdfStatus))
+
+                BdfMatchDecision decision = decideBdfMatch(
+                    bdfStatus, smiIndex, amdSMIPCIID, hipPCIID, hipDeviceIndex, deviceCount);
+
+                if(decision.action == BdfMatchAction::Throw)
+                    AMDSMI_CHECK_EXC(bdfStatus);
+
+                if(decision.action == BdfMatchAction::ReturnIndex)
                 {
-                    // WSL2/DXG's paravirtualized GPU access does not expose a PCI BDF
-                    // to the guest, so AMD-SMI correctly reports NOT_SUPPORTED here
-                    // (ROCM-30983). There's no BDF to match against on this platform;
-                    // warn once and fall back to processor 0 instead of aborting.
-                    static bool warned = false;
-                    if(!warned)
+                    if(isAmdsmiTelemetryUnavailable(bdfStatus))
                     {
-                        hipblaslt_cerr
-                            << "Warning: AMD-SMI does not support PCI BDF queries on "
-                               "this platform (e.g. WSL/DXG); disabling BDF-based "
-                               "device matching for efficiency monitoring and using "
-                               "processor 0."
-                            << std::endl;
-                        warned = true;
+                        // No PCI BDF to match against on this platform; warn once
+                        // and use a best-effort processor index instead of aborting.
+                        static bool warned = false;
+                        if(!warned)
+                        {
+                            hipblaslt_cerr
+                                << "Warning: AMD-SMI does not support PCI BDF queries "
+                                   "on this platform (e.g. WSL/DXG); disabling "
+                                   "BDF-based device matching for efficiency "
+                                   "monitoring and using processor "
+                                << decision.index << "." << std::endl;
+                            warned = true;
+                        }
                     }
-                    return 0;
+                    return decision.index;
                 }
-                AMDSMI_CHECK_EXC(bdfStatus);
 
                 msg << smiIndex << ": " << amdSMIPCIID << std::endl;
-
-                if(hipPCIID == amdSMIPCIID)
-                {
-                    return smiIndex;
-                }
             }
         }
 
