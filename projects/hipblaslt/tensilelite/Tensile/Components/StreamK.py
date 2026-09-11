@@ -37,7 +37,8 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKMulticast
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKCluster, \
+    streamKMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -45,8 +46,27 @@ import abc
 
 from copy import deepcopy
 
+def _streamKPersistentCluster(kernel):
+    """ForceDPOnly=0 persistent cluster launch (persist DP tiles, then SK tail).
+
+    Launch geometry only: the persist pass covers ``skGrid`` tiles rather than the
+    ForceDPOnly=1 ``tilesM x tilesN`` space, so pad derivation and WG-id decode differ.
+    True on gfx1250 v0, which launches the cluster with no TDM multicast.
+    """
+    return bool(streamKCluster(kernel) and not kernel.get("StreamKForceDPOnly", 0))
+
+
 def _streamKPersistentMulticast(kernel):
-    """ForceDPOnly=0 spatial multicast (persist DP tiles, then SK tail)."""
+    """ForceDPOnly=0 spatial multicast (persist DP tiles, then SK tail).
+
+    ``_streamKPersistentCluster`` also gated on ``Multicast``. Everything downstream of
+    this predicate is the per-pass cluster ``-3`` arrive/wait machinery that keeps
+    broadcast peers in step -- the continue-SK mask clear, the last-DP-tile KernelEnd
+    suppression, the arrive itself and its persist-close wait. Those sites form
+    signal/wait pairs, so they share one predicate and switch off as a unit on a
+    cluster-without-multicast part; gating any half on ``_streamKPersistentCluster``
+    would leave a v0 pass waiting on an arrive that was never emitted.
+    """
     return bool(streamKMulticast(kernel) and not kernel.get("StreamKForceDPOnly", 0))
 
 
@@ -3331,10 +3351,17 @@ class StreamKTwoTileDPFirst(StreamK):
     def streamKMulticastPrologueSignal(self, writer, kernel, wait=False):
         """Elect wave 0 to arrive at the cluster split barrier once per workgroup.
 
+        Supplies the prologue ``s_barrier_signal -3`` that the gfx1250
+        cluster-barrier pass's first-load wait expects but that is otherwise
+        never anchored on the cluster path (GlobalSplitU == 0). One wave per
+        workgroup arrives (others branch over it), uniformly across peers,
+        keeping cluster-scope signal/wait counts balanced. Inert unless
+        ``streamKCluster``.
+
         ``wait=True`` completes the round before membership can change.
         """
         module = Module("StreamK multicast prologue signal")
-        if not streamKMulticast(kernel):
+        if not streamKCluster(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
@@ -3379,6 +3406,15 @@ class StreamKTwoTileDPFirst(StreamK):
 
         Mixed LoopCounter: LC==0 would skip skipPGR2. Save/restore SCC for
         ``longBranchScc1``. Persist PGR2 defers wait to persist close.
+
+        Gated on ``streamKMulticast``, NOT ``streamKCluster``: the round this
+        completes is the PGR>=2 prefetch ``-3`` emitted by
+        ``streamKMulticastProloguePrefetchHandshake`` (LC>0 branches over this
+        arrive precisely because skipPGR2 / LDS1 is the matching round). Both
+        halves of a signal/wait pair must share one predicate, or a v0 kernel
+        with the cluster but no TDM multicast arrives without a matching wait
+        and deadlocks. develop gates this on ``streamKCluster`` because there it
+        pairs with the prologue arrive instead.
         """
         module = Module("StreamK multicast zero-iteration cluster wait")
         if not streamKMulticast(kernel) or kernel.get("PrefetchGlobalRead", 1) < 2:
@@ -3424,7 +3460,7 @@ class StreamKTwoTileDPFirst(StreamK):
         tile-index fold overwrites ``WorkGroup0``.
         """
         module = Module("StreamK cluster pad early-exit")
-        if not streamKMulticast(kernel):
+        if not streamKCluster(kernel):
             return module
         assert clusterEnabled(kernel["ClusterDim"]), \
             "streamKClusterPadEarlyExit requires an enabled cluster"
@@ -3438,7 +3474,11 @@ class StreamKTwoTileDPFirst(StreamK):
                              comment="padded if WorkGroup0 (M-tile) >= tilesM"))
         module.add(SCMovB32(dst=sgpr(padFlagSgpr), src=1, comment="padded: M-tile beyond tilesM"))
         with writer.allocTmpSgpr(1, tag="skClusterPad_tmpSgpr") as padTmp:
-            if _streamKPersistentMulticast(kernel):
+            # Cluster-gated, not multicast-gated: this picks the launch extent, and the
+            # persist launch covers skGrid tiles whether or not the part broadcasts.
+            # Taking the ForceDPOnly=1 tilesN form on a v0 persist pass would mark the
+            # wrong peers padded and unbalance the handshake below.
+            if _streamKPersistentCluster(kernel):
                 sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
                 if writer.isStreamKConstantsToVgprEnabled(kernel):
                     module.add(VReadfirstlaneB32(
@@ -3533,15 +3573,21 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
-        # Spatial-multicast cluster: predicate padded M/N peers (do not s_endpgm
-        # yet). ForceDPOnly=0 and ForceDPOnly=1 cluster multicast share this path.
+        # Spatial cluster: predicate padded M/N peers (do not s_endpgm yet).
+        # ForceDPOnly=0 and ForceDPOnly=1 cluster launches share this path.
         padFlag = None
-        if streamKMulticast(kernel):
+        if streamKCluster(kernel):
             padFlag = writer.sgprPool.checkOut(1, "SKClusterPadFlag")
             module.add(self.streamKClusterPadEarlyExit(writer, kernel, padFlag))
 
-        # Cluster multicast: fold M/N/batch HW coords into linear DP StreamKIdx.
-        if streamKMulticast(kernel):
+        # Cluster: fold the 2-D (+batch) HW workgroup coords into the
+        # linear DP tile index the DP decode expects. WorkGroup0 = global M-tile
+        # (Cs B-peers M-adjacent), WorkGroup1 = global N-tile (Ck A-peers
+        # N-adjacent), WorkGroup2 = batch, so (M-fastest, matching skIndexToWG):
+        #   StreamKIdx = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
+        # written into WorkGroup0 so the save below copies the final index. A 1-D
+        # [Cs, 1] cluster launches the same 2-D grid, so it folds identically.
+        if streamKCluster(kernel):
             with writer.allocTmpSgpr(2, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
                 t1 = tRes.idx + 1
@@ -3563,12 +3609,20 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
 
-        # Cluster multicast: every launched member including pads signal+wait
-        # -3 (prologue round). Pads then s_endpgm on an idle barrier.
+        # Cluster: every launched member including pads signal+wait -3 (prologue
+        # round), pairing the cluster-barrier pass's first-load wait. Pads then
+        # s_endpgm on an idle barrier.
+        #
+        # develop deferred the FDPO=0 arrive past the StreamK work-check, because
+        # its no-work peers only revealed themselves there and arriving early
+        # over-counted the -3. streamKClusterPadEarlyExit above now predicates
+        # those peers for FDPO=0 as well, so both settings arrive here and the
+        # pads are retired by streamKClusterPadPostHandshakeExit.
+        #
         # ForceDPOnly=1 uses this as the only prologue arrive (first-load /
         # zero-iter waits dropped). ForceDPOnly=0 [Cs,Ck] still emits a later
         # per-pass arrive in graWorkGroup after pads have exited.
-        if streamKMulticast(kernel):
+        if streamKCluster(kernel):
             module.add(self.streamKMulticastPrologueSignal(writer, kernel, wait=True))
             module.add(self.streamKClusterPadPostHandshakeExit(writer, kernel, padFlag))
             writer.sgprPool.checkIn(padFlag)

@@ -369,20 +369,49 @@ def isPow2(n):
     """True when ``n`` is a positive power of two."""
     return n > 0 and (n & (n - 1)) == 0
 
-def streamKClusterFactors(d):
-    """Return (Cs, Ck, C, ckGt1) for ClusterDim = [Cs, Ck]. C = Cs*Ck."""
-    cd = d.get("ClusterDim", [1, 1])
-    cs, ck = cd[0], cd[1]
-    return cs, ck, cs * ck, (ck > 1)
+def streamKCluster(d):
+    """True when the StreamK=3 cluster launch path is active.
 
-def streamKMulticast(d):
-    """True when StreamK=3 and ClusterDim is not [1, 1] (DP spatial multicast).
+    Single source of truth derived from ClusterDim: on StreamK=3 any spatial
+    cluster IS the cluster launch path, so there is no separate state key to
+    store or serialize. ``[Cs, 1]`` pairs B across M-adjacent tiles, ``[1, Ck]``
+    pairs A across N-adjacent tiles, and ``[Cs, Ck]`` does both.
 
-    ``[Cs, 1]`` is B-only (M-adjacent peers), ``[1, Ck]`` is A-only
-    (N-adjacent peers), and ``[Cs, Ck]`` multicasts both. ForceDPOnly does
-    not change this: the DP section is the same for 0 and 1.
+    StreamKForceDPOnly is NOT part of the condition. FDPO=1 launches over the
+    real M x N tile space directly; FDPO=0 persists that same DP tile space and
+    only then runs an SK tail, so the mask derivation, the tile-index fold and
+    the padded-peer exit apply to both. The FDPO=0 differences (masks held live
+    past the prologue, the DP->SK boundary clear, the skipPGR2 self-only skip)
+    are handled at their own call sites rather than by excluding FDPO=0 here.
+
+    TDM-multicast waits are ``streamKMulticast``.
+
+    ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
+    and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
+    construct a dict without a StreamK / ClusterDim key.
     """
     return d.get("StreamK", 0) == 3 and clusterEnabled(d.get("ClusterDim", [1, 1]))
+
+def streamKMulticast(d):
+    """True when ``streamKCluster`` also issues TDM-multicast loads.
+
+    Requires ``d["Multicast"]``. Missing key defaults True so pre-derivation
+    call sites match ``streamKCluster``.
+    """
+    return streamKCluster(d) and bool(d.get("Multicast", True))
+
+def streamK2DCluster(d):
+    """True when the cluster has both axes > 1, i.e. Ck > 1.
+
+    ClusterDim = [Cs, Ck] with BOTH axes > 1: Cs/X peers share B on M-adjacent
+    tiles and Ck/Y peers share A on N-adjacent tiles. A 1-D [Cs, 1] cluster is
+    the Ck == 1 degenerate of the same shape -- A simply has no peers there.
+
+    ``d`` may be a kernel or a solution ``state`` dict; uses ``.get`` for
+    partial-state derivation call sites.
+    """
+    clusterDim = d.get("ClusterDim", [1, 1])
+    return clusterDim[0] > 1 and clusterDim[1] > 1
 
 def log2(x):
     return int(log(x, 2) + 0.5)

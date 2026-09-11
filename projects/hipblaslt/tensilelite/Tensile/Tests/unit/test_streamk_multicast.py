@@ -33,8 +33,9 @@ import pytest
 pytestmark = pytest.mark.unit
 
 # The cluster multicast is derived from ClusterDim (StreamK==3 and
-# ClusterDim not [1, 1]) via this helper rather than stored as a state key.
-from Tensile.Common import streamKClusterFactors, streamKMulticast
+# ClusterDim not [1, 1]) via streamKCluster rather than stored as a state key;
+# streamKMulticast adds the TDM-broadcast (Multicast) gate on top of it.
+from Tensile.Common import streamKCluster, streamKMulticast
 
 _DESIGNED = os.path.join(
     os.path.dirname(__file__), "characterization",
@@ -139,6 +140,7 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, f"ForceDPOnly={fdpo} {cluster_dim} must derive as cluster multicast"
         for st in states:
+            assert streamKCluster(st)
             assert streamKMulticast(st)
             assert st["Multicast"] is True
             assert list(st["ClusterDim"]) == cluster_dim
@@ -180,20 +182,59 @@ class TestValidation:
         states = _derive_states(cfg)
         assert states, "expected the XCC=3 config to be accepted with XCC coerced to 0"
         for st in states:
+            assert streamKCluster(st)
             assert streamKMulticast(st)
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
-    def test_cluster_factors(self):
-        assert streamKClusterFactors({"ClusterDim": [4, 1]}) == (4, 1, 4, False)
-        assert streamKClusterFactors({"ClusterDim": [1, 4]}) == (1, 4, 4, True)
-        assert streamKClusterFactors({"ClusterDim": [2, 2]}) == (2, 2, 4, True)
+    def test_cluster_predicate(self):
+        """streamKCluster is the SK3 cluster *launch* path: no Multicast term.
+
+        It must admit every enabled ClusterDim shape, including the [1, Ck]
+        A-only shape, and at both StreamKForceDPOnly settings.
+        """
+        assert streamKCluster({"StreamK": 3, "ClusterDim": [2, 1]})
+        assert streamKCluster({"StreamK": 3, "ClusterDim": [2, 2]})
+        assert streamKCluster({"StreamK": 3, "ClusterDim": [1, 2]})
+        assert not streamKCluster({"StreamK": 3, "ClusterDim": [1, 1]})
+        assert not streamKCluster({"StreamK": 0, "ClusterDim": [2, 2]})
+        for fdpo in (0, 1):
+            assert streamKCluster(
+                {"StreamK": 3, "ClusterDim": [2, 2], "StreamKForceDPOnly": fdpo})
 
     def test_multicast_predicate(self):
+        """streamKMulticast == streamKCluster AND Multicast.
+
+        gfx1250 v0 launches the cluster with no TDM broadcast, so it is the
+        Multicast=False column below: cluster True, multicast False.
+        """
         assert streamKMulticast({"StreamK": 3, "ClusterDim": [2, 1]})
         assert streamKMulticast({"StreamK": 3, "ClusterDim": [2, 2]})
         assert streamKMulticast({"StreamK": 3, "ClusterDim": [1, 2]})
         assert not streamKMulticast({"StreamK": 3, "ClusterDim": [1, 1]})
         assert not streamKMulticast({"StreamK": 0, "ClusterDim": [2, 2]})
+        # Explicit Multicast=False (gfx1250 v0) splits the two predicates apart.
+        for fdpo in (0, 1):
+            v0 = {"StreamK": 3, "ClusterDim": [2, 2],
+                  "StreamKForceDPOnly": fdpo, "Multicast": False}
+            assert streamKCluster(v0)
+            assert not streamKMulticast(v0)
+        # A missing Multicast key defaults True so pre-derivation call sites
+        # (clusterPeersShareTiles derives Multicast) match streamKCluster.
+        assert streamKMulticast({"StreamK": 3, "ClusterDim": [2, 2]})
+
+    def test_ck_greater_than_one_also_multicasts_a(self, tmp_path):
+        # ClusterDim = [2, 2] adds Ck = 2 N-axis peers on top of the Cs = 2 M-axis
+        # peers, so A is multicast as well as B. It is the same cluster shape with
+        # Ck > 1, accepted by the same validator.
+        from Tensile.Common import streamK2DCluster
+        cfg = _write_variant(tmp_path, "cd22.yaml",
+                             fork_overrides={"ClusterDim": [[2, 2]]})
+        states = _derive_states(cfg)
+        assert states, "[2,2] must derive as a cluster multicast solution"
+        for st in states:
+            assert st["ClusterDim"] == [2, 2]
+            assert streamKMulticast(st)
+            assert streamK2DCluster(st)
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",
@@ -218,6 +259,7 @@ class TestValidation:
         # reconciliation (cluster support is SK3-only), not by this validator.
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(StreamK=4)
+        assert streamKCluster(st) is False
         assert streamKMulticast(st) is False
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
 
@@ -260,6 +302,32 @@ class TestTDMInstValidation:
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         st = _mc_state(TDMInst=3)
         assert _validateStreamKMulticast(st, False, _isa_map()) is True
+
+
+class TestMulticastGate:
+    """TDM-multicast waits follow streamKMulticast, not the cluster alone."""
+
+    def test_multicast_defaults_on_when_flag_unspecified(self):
+        st = _mc_state()
+        assert streamKCluster(st)
+        assert streamKMulticast(st)
+
+    def test_multicast_off_when_flag_false(self):
+        st = _mc_state(Multicast=False)
+        assert streamKCluster(st)
+        assert streamKMulticast(st) is False
+
+    def test_multicast_on_when_flag_true(self):
+        st = _mc_state(Multicast=True)
+        assert streamKMulticast(st)
+
+    def test_prefetch_handshake_inert_without_multicast(self):
+        from Tensile.Components.StreamK import StreamKTwoTileDPFirst
+        sk = StreamKTwoTileDPFirst()
+        mod = sk.streamKMulticastProloguePrefetchHandshake(
+            writer=None, kernel=_mc_state(Multicast=False))
+        items = mod.flatitems() if hasattr(mod, "flatitems") else mod.items()
+        assert list(items) == []
 
 
 # --- emitted assembly ------------------------------------------------------

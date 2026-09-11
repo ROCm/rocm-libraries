@@ -10,7 +10,7 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled, streamKMulticast
+from ..Common import clusterEnabled, streamKCluster, streamKMulticast
 from typing import Mapping
 from rocisa.code import Module, Label
 from rocisa.container import sgpr
@@ -36,7 +36,7 @@ class ClusterLoadTDM(ClusterLoad):
         and B along different cluster axes), so the combined parity mask applies
         only to the wave-separated dense case.
         """
-        if streamKMulticast(kernel):
+        if streamKCluster(kernel):
             return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
@@ -51,7 +51,7 @@ class ClusterLoadTDM(ClusterLoad):
         ``f"MulticastMask{tc}"`` (any ``MXS`` prefix stripped) so B never resolves
         to the never-declared combined SGPR.
         """
-        if waveSeparated and not subtile and not streamKMulticast(kernel):
+        if waveSeparated and not subtile and not streamKCluster(kernel):
             return "MulticastMask"
         return f"MulticastMask{tc.removeprefix('MXS')}"
 
@@ -96,6 +96,11 @@ class ClusterLoadTDM(ClusterLoad):
         Restricted to ``StreamKForceDPOnly=1``. Under ForceDPOnly=0
         ``persistSkKeepsMasks`` holds both masks live for the skipPGR2 self-only
         comparison, so neither can be freed whatever ``ClusterDim`` is.
+
+        Replaces develop's ``not streamK2DCluster(kernel)``: that form drops A
+        whenever either axis is 1, which is wrong for ``[1, Ck]`` (A has Ck peers
+        there, B has none). The explicit per-axis test below is symmetric with
+        ``papDropsSelfOnlyMaskB``.
         """
         return (self.papRefreshesMask(kernel)
                 and kernel.get("ClusterDim", [1, 1])[1] <= 1

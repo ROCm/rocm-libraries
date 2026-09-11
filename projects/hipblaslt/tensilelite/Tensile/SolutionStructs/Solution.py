@@ -36,7 +36,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, swizzleGeometry
+                    streamKCluster, swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
@@ -256,8 +256,21 @@ def _validateStreamKClusterShape(cs, ck):
 
 
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
-  """Validate gfx1250 StreamK cluster multicast: SK3 + ClusterDim, TDM, no atomic, XCC=0."""
-  if not streamKMulticast(state):
+  """Validate the gfx1250 StreamK cluster cooperative-load (multicast) path.
+
+  The cluster co-locates ClusterDim = [Cs, Ck] StreamK workgroups: the Cs
+  M-adjacent peers share the same B over full K and the Ck N-adjacent peers
+  share the same A, so each operand is TDM-multicast across the peers that reuse
+  it. Sizes that are not a cluster multiple need no build-time check: the launch
+  rounds the grid up, the padded boundary peers s_endpgm before the -3 cluster
+  barrier, and the broadcast masks are trimmed to the peers actually present.
+
+  The path is auto-derived from StreamK=3 + ClusterDim != [1, 1], so the checks
+  below reject an unusable cluster rather than an explicit opt-in. They apply at
+  both StreamKForceDPOnly settings: FDPO=0 persists the same DP tile space
+  before its SK tail, so it needs the same constraints.
+  """
+  if not streamKCluster(state):
     return True
 
   # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
@@ -1164,11 +1177,13 @@ class Solution(collections.abc.Mapping):
               "Currently ClusterDim = 16x1 and 1x16 are not supported")
 
     # Multicast uses a mask fixed to the physical cluster position. Stream-K
-    # remaps tiles per iteration except where streamKMulticast (SK3, ClusterDim
+    # remaps tiles per iteration except where streamKCluster (SK3, ClusterDim
     # not [1, 1]) keeps DP peers as spatial ClusterDim neighbours. ForceDPOnly
-    # is orthogonal and does not gate this.
+    # is orthogonal and does not gate this. This must stay on streamKCluster,
+    # not streamKMulticast: it derives state["Multicast"] two lines below, so
+    # reading that key here would be circular.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
-                                  and (state["StreamK"] == 0 or streamKMulticast(state)))
+                                  and (state["StreamK"] == 0 or streamKCluster(state)))
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles
@@ -1862,9 +1877,15 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
                  "(cluster support is SK3-only)")
-        # Stream-K clustering is multicast-only: SK3 plus ClusterDim not [1, 1].
-        # Cs == 1 is A-only (N-adjacent peers); Ck == 1 is B-only.
-        elif not streamKMulticast(state):
+        # Stream-K clustering is cluster-launch-only: SK3 plus ClusterDim not
+        # [1, 1]. Cs == 1 is A-only (N-adjacent peers); Ck == 1 is B-only.
+        #
+        # develop additionally rejected a Y-extent > 1 unless StreamKForceDPOnly=1,
+        # because the Ck rank is folded back into a unique tile index in
+        # StreamK.preLoop and that fold only existed on the FDPO=1 launch. FDPO=0
+        # now performs the same fold over the persisted DP tile space, so the
+        # restriction is lifted rather than carried forward.
+        elif not streamKCluster(state):
           reject(state, printRejectionReason,
                  "Stream-K + ClusterDim requires StreamK=3 cluster multicast "
                  "(got StreamK=%s ClusterDim=%s)"
@@ -5386,6 +5407,11 @@ class Solution(collections.abc.Mapping):
       # SkPrefetchPrimed, which cannot name three buffers. PAP implies StreamK==3,
       # so plain StreamK keeps the extra buffer and only PAP falls back to two.
       if state["PrefetchAcrossPersistent"]:
+        state["TDMPlusLdsBuf"] = 0
+      if state["_ScheduleIterAlg"] != 0:
+        if  state["TDMPlusLdsBuf"] == 1:
+          reject(state, printRejectionReason, "TDMPlusLdsBuf is not supported with ScheduleIterAlg != 0")
+          return
         state["TDMPlusLdsBuf"] = 0
 
     # Here, 1LDSBuffer == -1 is not resolved yet.
