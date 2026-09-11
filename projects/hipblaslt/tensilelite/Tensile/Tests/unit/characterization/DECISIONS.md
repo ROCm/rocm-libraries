@@ -308,7 +308,15 @@ available where this change was authored.
 
 **Decision:** Re-recorded only the 3 affected snapshot nodes via `--snapshot-update`; verified locally beforehand that both old and new basenames refer to the same 6 vendored solutions per fixture (no solution added/dropped/reordered-in-or-out of the capped set), and that assembly still emits cleanly (`err == 0`) for all of them.
 
-## D23 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
+## D23 — Canonical code-object linker input order
+
+**ADR:** [`adr/0013-canonical-code-object-link-order.md`](adr/0013-canonical-code-object-link-order.md)
+
+**Decision:** Sort every code object's input paths immediately before linking,
+so default and explicitly grouped code objects share one deterministic physical
+kernel order even though their inputs originate from different collection types.
+
+## D24 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
 
 **ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
 
@@ -352,7 +360,7 @@ directly).
 surfaced 12 pre-existing failures unrelated to this file. Triaged and closed
 in D24 below.
 
-## D24 — Triage of the 12 failures D23 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
+## D25 — Triage of the 12 failures D23 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
 
 **Context:** D23 fixed a pytest *collection* error that had aborted the entire
 `-m unit` run before any test executed, on this branch's diff, since it

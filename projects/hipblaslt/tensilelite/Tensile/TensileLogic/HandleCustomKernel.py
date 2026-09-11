@@ -31,7 +31,6 @@ from Tensile.Common import print1, print2, printWarning, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
 from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
-from Tensile import CUSTOM_KERNEL_PATH
 
 
 def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:
@@ -54,9 +53,8 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         name = ck["name"]
     else:
         name = sol.get("CustomKernelName", "")
-    dir = CUSTOM_KERNEL_PATH
     try:
-        config = getCustomKernelConfig(name, {}, dir)
+        config = getCustomKernelConfig(name, {})
     except (RuntimeError, KeyError, TypeError) as e:
         printWarning(f"Skipping custom kernel '{name}': missing or invalid custom.config ({e})")
         return sol, False

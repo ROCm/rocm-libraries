@@ -34,7 +34,6 @@ from Tensile.Common import ensurePath, print1, print2, printWarning
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.CustomKernels import validateCustomKernelMetadata
-from Tensile import CUSTOM_KERNEL_PATH
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -52,7 +51,7 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
    return AssemblyToolchain(compiler, linker, bundler)
 
 
-def validateCustomKernelMetadataAtBuild(kernels, directory=CUSTOM_KERNEL_PATH):
+def validateCustomKernelMetadataAtBuild(kernels, directory=None):
     """Validates embedded metadata for all custom kernels in the build.
 
     Logs warnings for kernels with missing or invalid custom.config and a
@@ -139,7 +138,8 @@ def buildAssemblyCodeObjectFiles(
           coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
       for coFileRaw, objFiles in coFileMap.items():
-        linker(objFiles, str(coFileRaw))
+        # Canonicalize both the default-list and explicit-set linker input paths.
+        linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
           bundler.compress(str(coFileRaw), str(coFile), gfx)

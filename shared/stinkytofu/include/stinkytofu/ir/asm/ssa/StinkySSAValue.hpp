@@ -28,8 +28,8 @@
 #include <string>
 #include <vector>
 
-#include "stinkytofu/Export.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 
 namespace stinkytofu {
 
@@ -39,12 +39,23 @@ struct StinkyInstruction;
 class StinkyOpOperand;
 class SSAArena;
 
+/// Index of a value within its SSAArena. Zero is reserved, so a default-built
+/// ID names nothing and the arena can use index 0 as a hole.
+using SSAValueID = uint32_t;
+inline constexpr SSAValueID kInvalidSSAValueID = 0;
+
+/// Shape of SSA that was built by hand rather than lifted, and whose agreement
+/// with a function therefore cannot be checked. Lives with the field it
+/// initialises, SSAArena::shape(); the stamp itself is computed by
+/// computeFunctionShape() in analysis/asm/ssa/SSAFunctionShape.hpp.
+inline constexpr uint64_t kUnstampedShape = 0;
+
 /// SSA identity object. Allocated only in a Function-owned SSAArena.
 ///
 /// Distinct from copyable StinkyRegister, which is the physical spelling in
 /// srcRegs / destRegs. Kind distinguishes instruction results from block
 /// arguments; both may carry a PhysicalBinding.
-class STINKYTOFU_EXPORT StinkySSAValue {
+class StinkySSAValue {
    public:
     enum class Kind : uint8_t {
         Register,
@@ -84,7 +95,7 @@ class STINKYTOFU_EXPORT StinkySSAValue {
     const TypeInfo& type() const {
         return type_;
     }
-    uint32_t valueId() const {
+    SSAValueID valueId() const {
         return valueId_;
     }
     StinkyInstruction* defOp() const {
@@ -132,13 +143,13 @@ class STINKYTOFU_EXPORT StinkySSAValue {
     void removeUse(StinkyOpOperand* use);
     void bindDef(StinkyInstruction* defOp, uint16_t resultIndex);
     void unbindDef();
-    void setValueId(uint32_t id) {
+    void setValueId(SSAValueID id) {
         valueId_ = id;
     }
 
     Kind kind_;
     TypeInfo type_;
-    uint32_t valueId_ = 0;
+    SSAValueID valueId_ = kInvalidSSAValueID;
     StinkyInstruction* defOp_ = nullptr;
     uint16_t resultIndex_ = 0;
     std::vector<StinkyOpOperand*> uses_;
@@ -149,7 +160,7 @@ class STINKYTOFU_EXPORT StinkySSAValue {
 
 /// Function-owned storage for SSA values. Pointers remain stable until
 /// `clear()` or Function destruction.
-class STINKYTOFU_EXPORT SSAArena {
+class SSAArena {
    public:
     explicit SSAArena(Function* owner);
     ~SSAArena();
@@ -168,16 +179,30 @@ class STINKYTOFU_EXPORT SSAArena {
         return storage_.size();
     }
 
-    StinkySSAValue* get(uint32_t valueId) const;
+    StinkySSAValue* get(SSAValueID valueId) const;
     std::span<StinkySSAValue* const> values() const;
 
-    /// Fingerprint of the function this arena was lifted from, or 0 when the
-    /// SSA was built by hand and cannot be checked against a program shape.
+    /// Fingerprint of the function this arena was lifted from, or
+    /// kUnstampedShape when the SSA was built by hand and cannot be checked
+    /// against a program shape. computeFunctionShape() produces the stamp.
     uint64_t shape() const {
         return shape_;
     }
     void setShape(uint64_t shape) {
         shape_ = shape;
+    }
+
+    /// Register classes this arena's SSA was lifted from.
+    ///
+    /// Every walker that steps through srcRegs/destRegs alongside AttachedSSA
+    /// must use this, because the slot layout depends on it. The shape
+    /// fingerprint cannot stand in: it hashes the physical program, which is
+    /// identical whichever classes were lifted.
+    const RegClassSet& liftedClasses() const {
+        return liftedClasses_;
+    }
+    void setLiftedClasses(const RegClassSet& classes) {
+        liftedClasses_ = classes;
     }
 
     void clear();
@@ -188,7 +213,8 @@ class STINKYTOFU_EXPORT SSAArena {
     Function* owner_ = nullptr;
     std::vector<std::unique_ptr<StinkySSAValue>> storage_;
     std::vector<StinkySSAValue*> byId_;
-    uint64_t shape_ = 0;
+    uint64_t shape_ = kUnstampedShape;
+    RegClassSet liftedClasses_ = RegClassSet::all();
 };
 
 }  // namespace stinkytofu

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from . import CUSTOM_KERNEL_PATH
+from .resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
 import re
@@ -123,7 +123,8 @@ def supportsUserSgprKernargPreload(rocmVersion):
     return rocmVersion.major > 6 or (
         rocmVersion.major == 6 and rocmVersion.patch >= 32650
     )
-def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
+
+def getCustomKernelFilepath(name, directory=None):
     flat = os.path.join(directory, (name + ".s"))
     if os.path.isfile(flat):
         return flat
@@ -132,7 +133,7 @@ def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
             return path
     return flat
 
-def iterCustomKernelFiles(directory=CUSTOM_KERNEL_PATH):
+def iterCustomKernelFiles(directory=None):
     """Yield custom kernel assembly files using the same recursive discovery as the loader."""
     for root, dirs, files in os.walk(directory):
         dirs.sort()
@@ -140,17 +141,39 @@ def iterCustomKernelFiles(directory=CUSTOM_KERNEL_PATH):
             if fname.endswith(".s"):
                 yield os.path.join(root, fname)
 
-def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
+def getAllCustomKernelNames(directory=None):
+    if directory is None:
+        return custom_kernel_names()
+    # Sorted in alphabetical order so that custom-kernel enumeration (notably the CustomKernels: ["*"]
+    # wildcard) does not depend on os.listdir order, which varies with the
+    # filesystem and with how the package was installed.
     return sorted(os.path.basename(path)[:-2] for path in iterCustomKernelFiles(directory))
 
-def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelContents(name, directory=None):
+    if directory is None:
+        try:
+            return custom_kernel_text(name)
+        except ValueError:
+            raise
+        except Exception as error:
+            raise RuntimeError(f"Failed to find custom kernel: {name}") from error
     try:
-        with open(getCustomKernelFilepath(name, directory)) as f:
+        with open(os.path.join(directory, f"{name}.s")) as f:
             return f.read()
     except OSError as e:
         raise RuntimeError("Failed to find custom kernel: {}".format(os.path.join(directory, name))) from e
 
-def _readEmbeddedYaml(name, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelSource(name, rocmVersion, directory=None):
+    contents = getCustomKernelContents(name, directory)
+    if supportsUserSgprKernargPreload(rocmVersion):
+        return contents
+    return "".join(
+        line
+        for line in contents.splitlines(keepends=True)
+        if "amdhsa_user_sgpr_kernarg_preload" not in line
+    )
+
+def _readEmbeddedYaml(name, directory=None):
     """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
 
     The .s files emitted under this branch contain exactly one such block;
@@ -173,7 +196,7 @@ def _readEmbeddedYaml(name, directory=CUSTOM_KERNEL_PATH):
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
-def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
+def readCustomKernelConfig(name, directory=None):
     parsed = _readEmbeddedYaml(name, directory)
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
@@ -332,7 +355,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     }
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = CUSTOM_KERNEL_PATH
+    kernelName: str, internalSupportParams: dict, directory: str = None
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -340,7 +363,8 @@ def getCustomKernelConfig(
     Args:
         kernelName: The name of the custom kernel.
         internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
-        directory: The directory where custom kernel files are located. Defaults to CUSTOM_KERNEL_PATH.
+        directory: Optional directory where custom kernel files are located.
+            Defaults to bundled package resources.
 
     Returns:
         dict: The validated configuration dictionary for the custom kernel.
@@ -422,7 +446,7 @@ def _missingMetadataMessage(kind, name, filepath, missing):
         f"{hint}"
     )
 
-def validateCustomKernelMetadata(name, directory=CUSTOM_KERNEL_PATH):
+def validateCustomKernelMetadata(name, directory=None):
     """Validates that a kernel has an embedded custom.config with required fields.
 
     Tensile-generated kernels (no Source.Origin) only need
