@@ -81,6 +81,28 @@ inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nu
     return value;
 }
 
+/// Windows counterpart of the Linux AT_SECURE query. Windows has no notion of a set-uid
+/// exec handing a privileged image an attacker-controlled environment -- privilege is
+/// acquired by creating a new process with a different token, whose environment its
+/// creator supplies deliberately -- so there is no equivalent bit to consult and this is
+/// always false.
+inline bool isSecureExecution()
+{
+    return false;
+}
+
+/// getEnv() for values that steer what code the process loads or executes. See the Linux
+/// header for the contract; because isSecureExecution() is always false here, this is
+/// getEnv().
+inline std::string getSecureEnv(const char* var, const char* defaultValue = nullptr)
+{
+    if(isSecureExecution())
+    {
+        return defaultValue != nullptr ? defaultValue : "";
+    }
+    return getEnv(var, defaultValue);
+}
+
 inline void setEnv(const char* var, const char* value)
 {
     if(value != nullptr)
@@ -210,6 +232,33 @@ inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& librar
         return nullptr;
     }
     return handle;
+}
+
+/// The directory an already-loaded module was loaded from, asked of the handle rather
+/// than of an address or a name: GetModuleFileNameW() answers for exactly the module
+/// @p handle names, so it cannot drift to a different module the way a by-name lookup
+/// can, and it works for a module the caller has no address inside. Counterpart of the
+/// Linux dlinfo(RTLD_DI_ORIGIN) form.
+inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
+{
+    if(handle == nullptr)
+    {
+        throw std::runtime_error("Failed to get library origin: null handle");
+    }
+
+    std::array<wchar_t, MAX_PATH> result{};
+    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
+    if(length == 0 || length >= result.size())
+    {
+        throw std::runtime_error(
+            "Failed to get library origin (Error Code: " + std::to_string(GetLastError()) + ")");
+    }
+
+    // Canonicalized so a module reached through a symlink answers with the directory its
+    // siblings actually sit in, same as the Linux form.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
+    return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();
 }
 
 inline void closeLibrary(SharedLibraryHandle handle)

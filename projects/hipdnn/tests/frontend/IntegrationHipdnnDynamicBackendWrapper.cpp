@@ -23,15 +23,30 @@ class IntegrationHipdnnDynamicBackendWrapper : public testing::Test
 protected:
     void SetUp() override
     {
+        // This suite forwards every call through the runtime-loaded backend, so an absent
+        // backend is the whole subject rather than an environmental excuse. When the build
+        // produced one -- HIPDNN_TEST_EXPECT_BACKEND_LIBRARY, set by this suite's
+        // CMakeLists -- a failure to load it is a defect in backend resolution and must be
+        // reported as one. Skipping here is what let this suite stay green through the
+        // ASan bare-soname dlopen failure that the private runtime-load suite caught.
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+        ASSERT_NE(hipdnn_frontend::detail::backendLibraryHandle(), nullptr)
+            << "the hipDNN backend library was built, but could not be loaded";
+#else
         if(hipdnn_frontend::detail::backendLibraryHandle() == nullptr)
         {
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
         }
+#endif
 
         _backend = hipdnn_frontend::detail::hipdnnBackend();
         if(_backend->versionString()[0] == '\0')
         {
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+            FAIL() << "hipDNN backend library was found, but runtime symbol loading failed";
+#else
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
+#endif
         }
     }
 

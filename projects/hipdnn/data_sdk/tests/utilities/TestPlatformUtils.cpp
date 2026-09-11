@@ -10,6 +10,7 @@
 #if defined(__linux__)
 #include <array>
 #include <climits>
+#include <link.h>
 #include <unistd.h>
 #endif
 
@@ -407,3 +408,86 @@ TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
 }
 
 #endif // defined(__linux__) / defined(_WIN32)
+
+// isSecureExecution / getSecureEnv tests
+
+TEST(TestPlatformUtils, IsSecureExecutionFalseForAnOrdinaryProcess)
+{
+    // A test binary is launched by the same user that owns it, with no set-uid/set-gid
+    // bit and no inherited capabilities, which is the whole of what AT_SECURE reports.
+    EXPECT_FALSE(hipdnn_data_sdk::utilities::isSecureExecution());
+}
+
+// Regression guard for ordinary processes only: it shows that routing a variable through
+// getSecureEnv() does not change what an unprivileged caller sees. It says nothing about
+// the hardening itself, which only takes effect when isSecureExecution() is true.
+TEST(TestPlatformUtils, GetSecureEnvMatchesGetEnvOutsideSecureExecution)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
+        "HIPDNN_TEST_PLATFORMUTILS_SECURE", "secure_value");
+
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getSecureEnv("HIPDNN_TEST_PLATFORMUTILS_SECURE"),
+              hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_PLATFORMUTILS_SECURE"));
+}
+
+TEST(TestPlatformUtils, GetSecureEnvReturnsDefaultWhenUnset)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_PLATFORMUTILS_SECURE_UNSET");
+
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getSecureEnv("HIPDNN_TEST_PLATFORMUTILS_SECURE_UNSET",
+                                                       "default_value"),
+              "default_value");
+}
+
+// getLoadedLibraryOrigin tests
+
+TEST(TestPlatformUtils, GetLoadedLibraryOriginRejectsNullHandle)
+{
+    EXPECT_THROW(hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(nullptr), std::runtime_error);
+}
+
+#if defined(__linux__)
+
+namespace
+{
+
+/// Absolute path of some shared object already mapped into this process.
+std::filesystem::path anyLoadedLibraryPath()
+{
+    std::filesystem::path found;
+    dl_iterate_phdr(
+        [](struct dl_phdr_info* info, [[maybe_unused]] size_t size, void* data) -> int {
+            if(info->dlpi_name == nullptr || info->dlpi_name[0] == '\0')
+            {
+                return 0;
+            }
+            std::error_code failed;
+            if(!std::filesystem::is_regular_file(info->dlpi_name, failed) || failed)
+            {
+                return 0;
+            }
+            *static_cast<std::filesystem::path*>(data) = info->dlpi_name;
+            return 1;
+        },
+        &found);
+    return found;
+}
+
+} // namespace
+
+TEST(TestPlatformUtils, GetLoadedLibraryOriginReportsTheDirectoryTheLibraryCameFrom)
+{
+    const std::filesystem::path library = anyLoadedLibraryPath();
+    ASSERT_FALSE(library.empty()) << "no loaded shared object to interrogate";
+
+    const auto handle = hipdnn_data_sdk::utilities::openLibrary(library);
+    ASSERT_NE(handle, nullptr);
+
+    const auto origin = hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(handle);
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
+
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(
+        origin, std::filesystem::weakly_canonical(library).parent_path()));
+}
+
+#endif // defined(__linux__)

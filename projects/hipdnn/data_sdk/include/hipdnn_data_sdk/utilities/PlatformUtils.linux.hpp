@@ -5,12 +5,14 @@
 
 #if defined(__linux__)
 #include <array>
+#include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <sys/auxv.h>
 #include <system_error>
 #include <unistd.h>
 
@@ -34,6 +36,42 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
     }
 
     return result;
+}
+
+/// Whether the kernel flagged this process as a secure execution environment -- a
+/// set-user-ID or set-group-ID binary, or one that gained capabilities across the
+/// `execve()`. Reads `AT_SECURE` from the auxiliary vector, which is precisely the bit
+/// glibc's `secure_getenv()` consults; going to the auxiliary vector directly keeps this
+/// header buildable against glibc, musl and bionic alike and needs no `_GNU_SOURCE`.
+///
+/// Fails closed: if `getauxval()` cannot report the entry it sets `errno`, and an
+/// unanswerable question is answered as "secure".
+inline bool isSecureExecution()
+{
+    // getauxval() reports "no such entry" as a 0 return with errno set, so errno must be
+    // cleared first to tell that apart from a genuine AT_SECURE of 0.
+    errno = 0;
+    const unsigned long secure = getauxval(AT_SECURE);
+    if(secure == 0 && errno != 0)
+    {
+        return true;
+    }
+    return secure != 0;
+}
+
+/// getEnv() for values that steer what code the process loads or executes.
+///
+/// In a secure execution environment (see isSecureExecution()) the environment is under
+/// the control of whoever invoked the binary rather than whoever owns its privileges, so
+/// @p var is not read at all and @p defaultValue stands. Equivalent to `secure_getenv()`
+/// with hipDNN's empty-string-for-unset convention.
+inline std::string getSecureEnv(const char* var, const char* defaultValue = nullptr)
+{
+    if(isSecureExecution())
+    {
+        return defaultValue != nullptr ? defaultValue : "";
+    }
+    return getEnv(var, defaultValue);
 }
 
 inline void setEnv(const char* var, const char* value)
@@ -113,6 +151,35 @@ inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
 inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& libraryPath)
 {
     return dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+}
+
+/// The directory an already-open library was loaded from, asked of the handle rather than
+/// of an address or a symbol: `dlinfo(RTLD_DI_ORIGIN)` answers for exactly the module
+/// @p handle names, so it cannot drift to a different module the way a default-scope
+/// symbol lookup can, and it works for a module the caller has no address inside.
+///
+/// The buffer is `PATH_MAX + 1` because glibc copies the module's origin into it with no
+/// length argument -- the size is the contract, not a guess.
+inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
+{
+    if(handle == nullptr)
+    {
+        throw std::runtime_error("Failed to get library origin: null handle");
+    }
+
+    std::array<char, PATH_MAX + 1> origin{};
+    if(dlinfo(handle, RTLD_DI_ORIGIN, origin.data()) != 0)
+    {
+        const char* error = dlerror();
+        throw std::runtime_error("Failed to get library origin ("
+                                 + (error != nullptr ? std::string(error) : "Unknown error") + ")");
+    }
+
+    // error_code overload: an origin that cannot be canonicalized is still better answered
+    // as-is than by throwing out of a lookup the caller treats as best-effort.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(origin.data(), failed);
+    return failed ? std::filesystem::path(origin.data()) : resolved;
 }
 
 inline void closeLibrary(SharedLibraryHandle handle)
