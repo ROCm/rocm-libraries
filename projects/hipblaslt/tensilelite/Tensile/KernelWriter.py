@@ -10674,7 +10674,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if self.states.lrvwTileMXSA > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"]
-            numMXSA = numMXSA // int(tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Keep the tiles-per-read ratio exact: a read narrower than one MX
+            # unit covers a fraction of a tile and needs proportionally more reads.
+            tilePerReadMXSA = tensorParametersA["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSA = int(numMXSA / tilePerReadMXSA)
           else:
             numMXSA = numMXSA // kernel["VectorWidthA"]
 
@@ -10712,7 +10715,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if self.states.lrvwTileMXSB > 1:
           if self.states.asmCaps["HasWMMA_V3"]:
             mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
-            numMXSB = numMXSB // int(tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 // mxUnit)
+            # Keep the tiles-per-read ratio exact: a read narrower than one MX
+            # unit covers a fraction of a tile and needs proportionally more reads.
+            tilePerReadMXSB = tensorParametersB["MX"]["localReadInstruction"].blockWidth * 4 / mxUnit
+            numMXSB = int(numMXSB / tilePerReadMXSB)
           else:
             numMXSB = numMXSB // kernel["VectorWidthB"]
 

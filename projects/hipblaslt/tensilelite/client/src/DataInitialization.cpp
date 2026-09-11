@@ -114,8 +114,11 @@ namespace TensileLite
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
         // Cache key includes tensor index (size_t) to prevent A and B from
-        // sharing cached permuted data when they have the same shape.
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size, size_t>;
+        // sharing cached permuted data when they have the same shape. MiK and
+        // PackK follow from the data type today, so they are redundant with the
+        // bit width; they are part of the key so that a permuted layout is never
+        // reused across geometries should that stop being true.
+        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size, size_t, size_t, size_t>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
@@ -2789,8 +2792,8 @@ namespace TensileLite
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
-                    auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize, i);
+                    auto swizzleKey = std::make_tuple(
+                        toBitWidth(desc.dataType()), unrolledSize, tiledSize, i, MiK, PackK);
 
                     if(g_swizzleCache.count(swizzleKey))
                     {

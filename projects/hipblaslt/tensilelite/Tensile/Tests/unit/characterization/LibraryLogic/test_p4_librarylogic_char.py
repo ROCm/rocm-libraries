@@ -88,6 +88,9 @@ class _MockProblemType(dict):
             "IndexAssignmentsB":  [3, 1, 2],
             "IndexAssignmentsLD": [],
             "DataType":       _MockDataType(),
+            # A real ProblemType always derives this from DataType; LogicAnalyzer
+            # reads it to compute flopsPerMac.
+            "MacDataTypeA":   _MockDataType(),
             "OperationType":  "GEMM",
             "TileAwareSelection": False,
             "GroupedGemm":    False,

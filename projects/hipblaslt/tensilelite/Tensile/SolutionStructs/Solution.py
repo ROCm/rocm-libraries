@@ -3879,7 +3879,7 @@ class Solution(collections.abc.Mapping):
             ldsNumBytesMetadata = (state["_DepthUMetadata"] + state["LdsPadMetadata"]) * state["MacroTileMetadata"]
           else:
             ldsNumBytesMetadata = state["_DepthUMetadata"] * (state["MacroTileMetadata"] + state["LdsPadMetadata"])
-          ldsNumBytesMetadata = roundUp(ldsNumBytesMetadata / bpeA) # metadata is in byte type. so divide ldsNumBytesMetadata by A,B's bpe
+          ldsNumBytesMetadata = roundUp(ldsNumBytesMetadata / bpeAB) # metadata is in byte type. so divide ldsNumBytesMetadata by A,B's bpe
           padInterval = state["LdsBlockSizePerPadMetadata"]
           if padInterval != 0:
             ldsNumBytesMetadata = int(roundUp(state["_DepthUMetadata"] * state["MacroTileMetadata"] / bpeAB) / padInterval * (padInterval + state["LdsPadMetadata"]))

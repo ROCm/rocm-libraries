@@ -79,6 +79,7 @@ def _kernel_ab(macroTileA=128, macroTileB=128, depthUA=64, depthUB=64,
         "_DepthUB":    depthUB,
         "MIWaveGroup": list(miwavegroup),
         "WavefrontSize": 64,
+        "ProblemType": {},
     }
 
 

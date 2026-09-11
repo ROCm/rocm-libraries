@@ -15,13 +15,6 @@
 add_library(tensilelite-client-common STATIC)
 add_library(tensilelite::client-common ALIAS tensilelite-client-common)
 
-if(TARGET roc::mxDataGenerator)
-    target_compile_definitions(tensilelite-client PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
-    target_compile_definitions(cpu-gemm-driver PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_link_libraries(cpu-gemm-driver PRIVATE roc::mxDataGenerator)
-endif()
-
 if(NOT WIN32)
     find_package(amd_smi REQUIRED)
 else()
@@ -98,6 +91,16 @@ target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
+
+# Must follow the add_executable calls above: these settings name the
+# executables directly, so configuring them earlier fails whenever the
+# roc::mxDataGenerator target exists.
+if(TARGET roc::mxDataGenerator)
+    target_compile_definitions(tensilelite-client PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
+    target_compile_definitions(cpu-gemm-driver PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(cpu-gemm-driver PRIVATE roc::mxDataGenerator)
+endif()
 
 # rocprofiler-sdk is only used by tensilelite-client (in-process counters).
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)

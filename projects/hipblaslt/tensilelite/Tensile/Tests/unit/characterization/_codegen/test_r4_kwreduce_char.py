@@ -99,6 +99,7 @@ def test_r4_reduction_header_content():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("s"),          # float32
+        "MacDataTypeA": DataType("s"),      # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),   # float32
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),
@@ -138,6 +139,7 @@ def test_r4_reduction_kernel_name():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("s"),
+        "MacDataTypeA": DataType("s"),      # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),
@@ -203,6 +205,7 @@ def test_r4_betaonly_bias_functionSignature():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("s"),
+        "MacDataTypeA": DataType("s"),      # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),
@@ -251,6 +254,7 @@ def test_r4_betaonly_bias_header():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("s"),
+        "MacDataTypeA": DataType("s"),      # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),
@@ -286,6 +290,7 @@ def test_r4_betaonly_nobias_emit():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("s"),
+        "MacDataTypeA": DataType("s"),      # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),
@@ -331,6 +336,7 @@ def test_r4_reduction_int8_hpa_datatype():
         "Index0": 0,
         "Index1": 1,
         "DataType": DataType("i8"),         # int8
+        "MacDataTypeA": DataType("i8"),     # a real ProblemType derives this from DataType
         "ComputeDataType": DataType("s"),   # float32 / single
         "DestDataType": DataType("s"),
         "BiasDataType": DataType("s"),

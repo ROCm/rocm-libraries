@@ -155,8 +155,10 @@ def test_vgpr_lrpacking_disabled_low_plr(real_state, isa_info_map):
 
 
 def test_vgpr_lrpacking_disabled_wide_dtype(real_state, isa_info_map):
-    # numRegisters >= 1 (single) -> not doable.
+    # numRegisters >= 1 (single) -> not doable. The packing check reads the mac
+    # data type, so widen that alongside DataType to keep the state coherent.
     real_state["ProblemType"]["DataType"] = DataType("s")
+    real_state["ProblemType"]["MacDataTypeA"] = DataType("s")
     assert Solution.isVgprForLocalReadPackingDoable(real_state, isa_info_map) is False
 
 

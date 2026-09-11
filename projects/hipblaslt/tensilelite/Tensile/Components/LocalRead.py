@@ -622,13 +622,15 @@ class LocalReadMFMA(LocalRead):
         vectorWidth      = kernel["VectorWidth%s"%tc]
         mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
         stridePerRead    = instruction.blockWidth * bpr
-        tilePerRead      = stridePerRead // mxUnit
+        # Narrow reads (e.g. ds_load_u8) cover a fraction of an MX unit, so this
+        # ratio must stay exact; flooring it here rounds sub-unit reads to zero.
+        tilePerRead      = stridePerRead / mxUnit
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
         mxsTileSpan = tileSpanInfo is not None
         numVectorsPerTile = tileSpanInfo["numGroups"] if mxsTileSpan else kernel["MIWaveTile"][tile01] // vectorWidth
-        numReadsPerVector = int(vectorWidth // tilePerRead)
+        numReadsPerVector = int(vectorWidth / tilePerRead)
         numVgpr           = int(ceil(instruction.blockWidth))
 
         valufIdx = 0

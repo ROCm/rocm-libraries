@@ -603,6 +603,7 @@ def test_r7_compute_tail_tile_state_multi_partition():
         "_DepthUA": 64, "_DepthUB": 64,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {},
     }
     writer = _MockWriter()
     tiA = TileInfo(AB_B16, "A", writer, kernel)
@@ -713,6 +714,7 @@ def test_r7_get_partition_candidates_n_ge_m():
         "_DepthUA": 64, "_DepthUB": 64,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {},
     }
     writer = _Writer()
     tiA = TileInfo(AB_B16, "A", writer, kernel)
@@ -757,6 +759,7 @@ def test_r7_get_partition_candidates_m_gt_n():
         "_DepthUA": 64, "_DepthUB": 64,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
         "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {},
     }
     writer = _Writer()
     tiA = TileInfo(AB_B16, "A", writer, kernel)
