@@ -2603,6 +2603,13 @@ double compute_total_latency(const problem_t& problem,
                              bool non_temporal_b_available) {
   assert(config.is_valid());
 
+  // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
+  // When a matching heuristic marks the config as rejected, report the maximum
+  // latency so rank_configs() drops the kernel from selection entirely.
+  if (get_heuristic_params(problem, hardware, config).reject) {
+    return std::numeric_limits<double>::max();
+  }
+
   // ANALYTICAL_GEMM_PICK: force a specific MT size for solution selection.
   {
     const auto& pick = runtime_options::get().gemm_pick;
