@@ -356,6 +356,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE_XOR,
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
+    ROCKE_OP_TILE_QUAD_PERM,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -1109,6 +1110,9 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
                                   rocke_value_t* src2,
                                   bool fi,
                                   bool bound_ctrl);
+/* quad_perm: each pN selects source lane 0..3 for destination lane N. */
+rocke_value_t*
+    rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,

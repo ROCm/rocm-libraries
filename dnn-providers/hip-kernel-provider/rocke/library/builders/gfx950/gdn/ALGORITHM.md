@@ -35,6 +35,7 @@
   - [4.5 State pool addressing](#45-state-pool-addressing)
   - [4.6 Tile selection by batch](#46-tile-selection-by-batch)
   - [4.7 The reference path](#47-the-reference-path)
+  - [4.8 Spec validation](#48-spec-validation)
 - [5. Prefill kernel](#5-prefill-kernel)
   - [5.1 Chunkwise factorization](#51-chunkwise-factorization)
   - [5.2 The triangular solve](#52-the-triangular-solve)
@@ -65,6 +66,19 @@
 Ownership vocabulary: a **workgroup** is one thread block; a **wave** is 64 lanes; a **lane** is
 one thread. `WTK = warp_threads_k`, `WTV = wave_size / WTK`, `NW = num_warps`,
 `BPV = blocks_per_v_dim`, `VPT = STATE_VEC = 8` (the 16-byte bf16 vector width).
+
+Both kernels are Python **emitters**, not GPU code: `build_gdn_decode(spec, arch)` and the KDA
+chunkwise builders use rocKE's `IRBuilder` to construct a target-neutral `KernelDef`. Python loops
+in an emitter run at build time and unroll into IR; they are not runtime loops unless the emitter
+creates explicit control flow. The path from a request to a running kernel is
+
+```
+request → dispatch picks a spec → builder emits KernelDef → rocKE lowers to LLVM IR
+        → comgr compiles a gfx950 code object → launcher packs kernargs and launches
+```
+
+so a spec is the unit that dispatch selects, that the golden test pins, and that the validators
+in §4.8 accept or reject.
 
 ---
 
@@ -325,7 +339,8 @@ group, so only lane 0 of each group stores it.
 
 Precision: every load is promoted to `f32` and all arithmetic — gates, norms, dot products, the
 rank-1 update — is `f32`. Only the final `out` and the state write pack back to the storage type.
-Transcendentals are synthesised from the hardware base-2 primitives rather than called.
+Transcendentals are synthesised from the hardware base-2 primitives rather than called, and the
+normalisations use `NORM_EPS = 1e-6` to keep a zero-norm row finite.
 
 ### 4.4 Cross-lane reduction
 
@@ -375,6 +390,18 @@ A second, simpler emitter exists in which one thread owns an entire state row, m
 product thread-local and requiring no cross-lane traffic at all. It is register-heavy by
 construction and is **not reachable through dispatch** — it is the correctness baseline for the
 warp-tiled path, selected only by naming the spec directly.
+
+### 4.8 Spec validation
+
+`is_valid_spec(spec, arch)` rejects a configuration before any IR is built. It refuses an
+unsupported activation or state dtype, `num_v_heads` not divisible by `num_k_heads`, a head
+dimension that is not a multiple of `VPT = 8`, a workgroup over the target's thread limit, a
+`wave_size` not divisible by `WTK`, a `DK` that is not a multiple of the warp's key tile
+(`WTK × VPT`), a `BPV` that does not divide `DV`, and a resulting value tile that does not divide
+across the workgroup's value lanes.
+
+The dispatcher's support check ends by calling this same validator, so "the spec the kernel can
+emit" and "the spec dispatch may select" are one rule rather than two copies that can drift.
 
 ---
 

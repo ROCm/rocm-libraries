@@ -1,0 +1,101 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "default": {
+          "bytes": 26447,
+          "sha256": "f6a04a554dc7baed20399d6cc47d54dd7027bbe5c7fb2dd0a5329372ca523e2e"
+        },
+        "no_l2norm": {
+          "bytes": 22916,
+          "sha256": "76c369452ad43847e12928d2e6d5c112093eae4325846d0c66a924a59d949650"
+        },
+        "simple": {
+          "bytes": 153817,
+          "sha256": "54a121586fd63fd87c8f2f449ee13fd940843cd65c7734709d71bf231e5aba7c"
+        },
+        "tuned_b128": {
+          "bytes": 206019,
+          "sha256": "5368a7be2ea8a75304436348e72eaae4e2fb9d5af9eaacf843668138ca71f6ac"
+        },
+        "tuned_b32": {
+          "bytes": 62111,
+          "sha256": "5163e83b3b12e398e1095ed5302ab10e23c25c71d26a07b3dbb7d303874cccb6"
+        },
+        "tuned_b4": {
+          "bytes": 19128,
+          "sha256": "01f1d7184b0ff388e70673fe6ac3e11ea9e829297608551c8b603606d1083840"
+        },
+        "tuned_b_large": {
+          "bytes": 41095,
+          "sha256": "6a56f3ca1f141ea6c970cb7dbeb72c372caa4b46c9794a50dd4c2e641b8afa80"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "default": {
+          "bytes": 26454,
+          "sha256": "0175e10611a6b42bbf6b0c09ca22a1b71ad3993519c64c70ca28a5d3278512b1"
+        },
+        "no_l2norm": {
+          "bytes": 22923,
+          "sha256": "9e17bce060ba6a8dc45d084ad41e6a34792fd0a7bc55026075bfa2e3eb6a74f5"
+        },
+        "simple": {
+          "bytes": 153824,
+          "sha256": "a3332ca02098690341ff803ddfcdd8da05bf49fdcd3e64bc06654975b74f2eaa"
+        },
+        "tuned_b128": {
+          "bytes": 206026,
+          "sha256": "0e1c5304262c03c7e09cf1662b27cc94846076c8e3017b10314dd1bcd43215c3"
+        },
+        "tuned_b32": {
+          "bytes": 62118,
+          "sha256": "0759c4e4a785e32edcf98d6ff10de0145a669d4a51f7010c377c8258b02fed3a"
+        },
+        "tuned_b4": {
+          "bytes": 19135,
+          "sha256": "cdd518724e862405347e171d0c33549b67d96dccd73851019f9af440394f39ff"
+        },
+        "tuned_b_large": {
+          "bytes": 41102,
+          "sha256": "6a589f5c20b34bd90747375283d8c28130a7405f954441dd74a9cb27d3e392af"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "default": {
+          "bytes": 26458,
+          "sha256": "b004e3eeef40676b32dd8efce915f675ae38ae5c42945cf7a2c661a1df03a1a8"
+        },
+        "no_l2norm": {
+          "bytes": 22927,
+          "sha256": "16d8042b31a2f4735d96c35bf5a133f5f43a412e1566ec55adf255a2039c966c"
+        },
+        "simple": {
+          "bytes": 153828,
+          "sha256": "b02083570119dfc06c3d32062ecc7fbc6ded99242d954ef6adbcbd906dd8094c"
+        },
+        "tuned_b128": {
+          "bytes": 206030,
+          "sha256": "f8c955ba6a4c9daa9285e877d670125ae4bc8197c5817221067adfecea619c16"
+        },
+        "tuned_b32": {
+          "bytes": 62122,
+          "sha256": "84256b577a105a6717dfe0cd8f27768d01e767d1e4d96f7a04e310be1e20a358"
+        },
+        "tuned_b4": {
+          "bytes": 19139,
+          "sha256": "cae60670f0b2d749cb457cbf176928a871274cb7f0bec54b746a544238c43dcd"
+        },
+        "tuned_b_large": {
+          "bytes": 41106,
+          "sha256": "79d38e186e13a5c3a51ba3c808b2d622bff0e8ecbd7ba9a928035af63a96725c"
+        }
+      }
+    }
+  },
+  "schema": "gdn_decode_gfx950.ir_golden_sha256/v1"
+}

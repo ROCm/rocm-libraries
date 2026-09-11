@@ -33,6 +33,28 @@ from kernels.gfx950.kda_chunkwise import (
 ARCH = "gfx950"
 
 
+def test_gdn_fused_l2norm_requires_head_k_128():
+    """The fused q/k l2norm reduces a fixed 16-lane x 8 = 128-element row, so the
+    validator must reject non-128 head_k for that mode and admit head_k==128."""
+    import dataclasses as dc
+
+    bad = KdaChunkPrepSpec(
+        head_k=64,
+        tile=KdaTileSpec(chunk=32, block_size=128),
+        raw_inputs=True,
+        fuse_qk_l2norm=True,
+        fuse_gate=True,
+        fuse_beta_sigmoid=True,
+        has_dt_bias=True,
+        gate_kind="gdn",
+    )
+    ok, why = is_valid_spec(bad, arch=ARCH)
+    assert not ok and "head_k == 128" in why
+    good = dc.replace(bad, head_k=128, tile=KdaTileSpec(chunk=32, block_size=256))
+    ok2, why2 = is_valid_spec(good, arch=ARCH)
+    assert ok2, why2
+
+
 def _compile_or_skip(kernel, *, arch: str = ARCH):
     """Compile through comgr, skipping only when the toolchain is missing.
 
@@ -351,3 +373,60 @@ class TestSpecNaming:
             "wpe2",
         ):
             assert needle in fused_h0.kernel_name()
+
+
+class TestGdnFlags:
+    def test_default_prep_kernel_name_unchanged(self):
+        # Byte-identity name guard: the default (KDA) spec name must not shift.
+        assert (
+            KdaChunkPrepSpec().kernel_name()
+            == "rocke_kda_chunk_prep_dk128_dv128_bf16_c32_b256_sb8"
+        )
+
+    def test_default_flags_are_kda_mha(self):
+        s = KdaChunkPrepSpec()
+        assert s.gate_kind == "kda" and s.kv_group == 1
+
+    def test_gdn_prep_kernel_name_has_suffix(self):
+        spec = KdaChunkPrepSpec(
+            raw_inputs=True,
+            fuse_gate=True,
+            fuse_qk_l2norm=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+            kv_group=2,
+        )
+        name = spec.kernel_name()
+        assert "gdn" in name and "g2" in name
+
+    def _gdn(self, **over):
+        base = dict(
+            raw_inputs=True,
+            fuse_gate=True,
+            fuse_qk_l2norm=True,
+            fuse_beta_sigmoid=True,
+            has_dt_bias=True,
+            gate_kind="gdn",
+        )
+        base.update(over)
+        return KdaChunkPrepSpec(**base)
+
+    def test_gdn_requires_all_fuses(self):
+        ok, why = is_valid_spec(
+            KdaChunkPrepSpec(raw_inputs=True, fuse_gate=True, gate_kind="gdn"),
+            arch=ARCH,
+        )
+        assert not ok and "fuse_qk_l2norm" in why
+
+    def test_gdn_valid_when_all_fuses_on(self):
+        ok, why = is_valid_spec(self._gdn(), arch=ARCH)
+        assert ok, why
+
+    def test_kda_gqa_rejected_in_v1(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(kv_group=2), arch=ARCH)
+        assert not ok and "kv_group" in why
+
+    def test_bad_gate_kind_rejected(self):
+        ok, why = is_valid_spec(KdaChunkPrepSpec(gate_kind="banana"), arch=ARCH)
+        assert not ok and "gate_kind" in why

@@ -49,6 +49,18 @@ reconstructs the ratio exactly. Every exponential is additionally clamped to the
 fp32 exp2 range. The cumulative sum is kept scaled by ``log2(e)`` throughout so
 the hardware ``v_exp_f32`` (base 2) is used directly with no extra multiply.
 
+The ``gate_kind="gdn"`` gate (``-exp(A_log) * softplus(a + dt_bias)``) is
+**unbounded**, unlike the KDA gate (``lower_bound * sigmoid(...)``, always in
+``(lower_bound, 0)``). If a head's per-token decay is steeper than the reference
+``gate_lower_bound = -5`` (~160 nats over a 32-token chunk), the midpoint
+factoring above exceeds the clamped fp32 ``exp2`` range and no longer
+reconstructs the ratio, so that single (steepest-decay) head's output degrades.
+This is the accepted supported envelope: trained GDN keeps ``exp(A_log) * dt``
+small (real ``dt = softplus(...)`` ~1e-3..1e-1, so <~1.6/token), well inside it,
+and the split-path GDN parity is validated within it. Decay steeper than -5/token
+is out of range by design (accepted 2026-09-04); covering it would need nested
+chunking or per-token rescaling. See the vault "KNOWN NUMERICAL LIMIT" note.
+
 Layout
 ------
 Inputs arrive already packed by chunk: ``tile = bh * NC + n`` indexes a chunk of
@@ -94,6 +106,9 @@ LOG2E = 1.4426950408889634
 # v_exp_f32 saturates past this; the clamp keeps a saturated gate finite instead
 # of turning a whole chunk into NaN.
 EXP2_CLAMP = 126.0
+LN2 = 0.6931471805599453
+# softplus(x)=log1p(exp(x)); above this x, softplus(x) ~= x (avoids exp2 overflow).
+SOFTPLUS_THRESHOLD = 20.0
 
 _DTYPE_IR = {"bf16": BF16}
 # Declared coverage, exported so a dispatch candidate can state what it serves
@@ -269,13 +284,15 @@ class KdaTileSpec:
     # solve_block: row-block size of the triangular solve. The solve's arithmetic
     # splits into per-block substitution (serial, scalar VALU) and the rank
     # update against already-solved blocks (a matmul, so MFMA). Only the
-    # substitution part is irreducibly scalar, and it shrinks as the square of
-    # the block size, so smaller blocks move more of the O(C^3) work onto the
-    # MFMA pipe -- at the cost of one more block step. ``solve_block == chunk``
-    # is the degenerate single-block case: one unblocked scalar substitution and
-    # no MFMA. Must be a multiple of 8 (the accumulator holds a contiguous run
-    # of 8 output rows per group of 4 slots, which is what lets a block step
-    # write back only its own rows) and must divide ``chunk``.
+    # substitution part is irreducibly scalar. One block of size b costs O(b^2),
+    # but there are C/b of them, so the total scalar work is ~C*b/2 -- linear in
+    # solve_block, not quadratic: halving it halves the scalar work and moves
+    # more of the O(C^3) work onto the MFMA pipe, at the cost of one more block
+    # step. ``solve_block == chunk`` is the degenerate single-block case: one
+    # unblocked scalar substitution and no MFMA. Must be a multiple of 8 (the
+    # accumulator holds a contiguous run of 8 output rows per group of 4 slots,
+    # which is what lets a block step write back only its own rows) and must
+    # divide ``chunk``.
     solve_block: int = 8
     # M/N extent of the atom the *state scan* uses, which need not be the tile
     # phase's. The C x C tile products want an atom as wide as the chunk, but the
@@ -333,6 +350,13 @@ class KdaChunkPrepSpec:
     fuse_beta_sigmoid: bool = False
     has_dt_bias: bool = False
     lower_bound: float = -5.0
+    # GDN mode (default-off, split/raw-prep path only). "kda" = existing
+    # per-channel sigmoid gate; "gdn" = scalar per-(token,head) softplus gate
+    # -exp(A_log)*softplus(a+dt_bias), broadcast across DK.
+    gate_kind: str = "kda"
+    # GQA group size: value-heads per key-head. 1 = MHA (KDA). >1 gathers q/k
+    # from key-head (head // kv_group); only valid with gate_kind="gdn".
+    kv_group: int = 1
 
     @property
     def atom(self) -> MfmaAtom:
@@ -388,6 +412,10 @@ class KdaChunkPrepSpec:
                 parts.append("db")
             if self.lower_bound != -5.0:
                 parts.append(f"lb{self.lower_bound:g}")
+        if self.gate_kind != "kda":
+            parts.append(self.gate_kind)
+        if self.kv_group != 1:
+            parts.append(f"g{self.kv_group}")
         return kernel_name_join(*parts)
 
 
@@ -411,6 +439,17 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     if spec.dtype not in _DTYPE_IR:
         return False, f"unsupported dtype {spec.dtype!r} (bf16 only)"
 
+    if spec.gate_kind not in ("kda", "gdn"):
+        return False, f"gate_kind must be 'kda' or 'gdn' (got {spec.gate_kind!r})"
+    if spec.gate_kind == "gdn":
+        for _flag in ("raw_inputs", "fuse_gate", "fuse_qk_l2norm", "fuse_beta_sigmoid"):
+            if not getattr(spec, _flag):
+                return False, f"gate_kind='gdn' requires {_flag}=True"
+    if spec.kv_group < 1:
+        return False, f"kv_group must be >= 1 (got {spec.kv_group})"
+    if spec.kv_group > 1 and spec.gate_kind != "gdn":
+        return False, "kv_group>1 (GQA) is only valid with gate_kind='gdn' in v1"
+
     if spec.has_dt_bias and not spec.fuse_gate:
         return False, "has_dt_bias requires fuse_gate"
     for flag, name in (
@@ -420,6 +459,11 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
     ):
         if flag and not spec.raw_inputs:
             return False, f"{name} requires raw_inputs=True"
+    if spec.fuse_qk_l2norm and spec.head_k != 128:
+        return False, (
+            f"fuse_qk_l2norm reduces a fixed 16-lane x 8 = 128-element row, so it "
+            f"requires head_k == 128 (got {spec.head_k})"
+        )
     if spec.raw_inputs:
         if not (spec.fuse_qk_l2norm or spec.fuse_gate or spec.fuse_beta_sigmoid):
             return False, (
@@ -538,9 +582,25 @@ def _apply_gate_fused(
     *,
     has_dt_bias: bool,
     dk: int,
+    gate_kind: str = "kda",
 ):
-    """``lower_bound * sigmoid(exp(A_log[h]) * (g + dt_bias[h,d]))``."""
+    """Per-(row,channel) natural-log-domain decay contribution.
+
+    kda: ``lower_bound * sigmoid(exp(A_log[h]) * (g + dt_bias[h,d]))``
+    gdn: ``-exp(A_log[h]) * softplus(a + dt_bias[h])``  (channel-independent;
+         ``raw_g`` carries the per-(token,head) input ``a``, ``dt_bias`` is [H]).
+    """
     g = b.cast_to_f32(raw_g)
+    if gate_kind == "gdn":
+        x = g
+        if has_dt_bias:
+            x = b.fadd(x, b.global_load_f32(dt_bias, head))
+        ex = b.exp2(b.fmul(x, b.const_f32(LOG2E)))
+        sp_small = b.fmul(b.log2(b.fadd(b.const_f32(1.0), ex)), b.const_f32(LN2))
+        sp = b.select(b.fcmp("ogt", x, b.const_f32(SOFTPLUS_THRESHOLD)), x, sp_small)
+        a = b.global_load_f32(a_log, head)
+        neg_expalog = b.fneg(b.exp2(b.fmul(a, b.const_f32(LOG2E))))
+        return b.fmul(neg_expalog, sp)
     if has_dt_bias:
         g = b.fadd(
             g,
@@ -555,7 +615,17 @@ class _RawTokenAddr:
     """Token-major [B,T,H,D] / [B,T,H] addressing for one chunk tile."""
 
     def __init__(
-        self, b: IRBuilder, *, heads, tseq, nc, chunk, dk, a_log=None, dt_bias=None
+        self,
+        b: IRBuilder,
+        *,
+        heads,
+        tseq,
+        nc,
+        chunk,
+        dk,
+        a_log=None,
+        dt_bias=None,
+        kv_group=1,
     ):
         self.b = b
         self.H = heads
@@ -565,7 +635,11 @@ class _RawTokenAddr:
         self.DK = dk
         self.a_log = a_log
         self.dt_bias = dt_bias
-        self.stride_token_qk = b.mul(heads, b.const_i32(dk))
+        self.KVG = kv_group
+        # GQA: q/k have Hk = heads // kv_group key-heads. kv_group==1 -> Hk == heads,
+        # so the stride is the same IR value and KDA addressing is unchanged.
+        hk = heads if kv_group == 1 else b.div(heads, b.const_i32(kv_group))
+        self.stride_token_qk = b.mul(hk, b.const_i32(dk))
         self.stride_batch_qk = b.mul(tseq, self.stride_token_qk)
         self.stride_token_beta = heads
         self.stride_batch_beta = b.mul(tseq, heads)
@@ -582,12 +656,13 @@ class _RawTokenAddr:
     def qk_off(self, tile, row, col):
         b = self.b
         batch, head, token = self._parts(tile, row)
+        khead = head if self.KVG == 1 else b.div(head, b.const_i32(self.KVG))
         return b.add(
             b.add(
                 b.mul(batch, self.stride_batch_qk),
                 b.mul(token, self.stride_token_qk),
             ),
-            b.add(b.mul(head, b.const_i32(self.DK)), col),
+            b.add(b.mul(khead, b.const_i32(self.DK)), col),
         )
 
     def beta_off(self, tile, row):
@@ -600,6 +675,10 @@ class _RawTokenAddr:
             ),
             head,
         )
+
+    def a_off(self, tile, row):
+        # GDN gate input `a` is [B,T,H]: same token-major layout as beta.
+        return self.beta_off(tile, row)
 
     def v_off(self, tile, chunk_row, ev, ev_dim):
         b = self.b
@@ -914,8 +993,11 @@ def _emit_stage_issue(ctx: _ChunkCtx, ch):
         row = b.div(off, b.const_i32(DK))
         col4 = b.mod(off, b.const_i32(DK))
         if raw is not None:
-            gidx = raw.qk_off(tile, row, col4)
-            gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
+            if ctx.spec.gate_kind == "gdn":
+                gval = b.global_load_f32(ctx.g_ptr, raw.a_off(tile, row))
+            else:
+                gidx = raw.qk_off(tile, row, col4)
+                gval = b.global_load_vN(ctx.g_ptr, gidx, ELEM, 4)
             staged.append((ctx.g_lds, row, col4, gval, 4, valid, "g"))
         else:
             staged.append(
@@ -973,21 +1055,39 @@ def _emit_stage_commit(ctx: _ChunkCtx, issued) -> None:
     for lds, row, col, value, n, valid, kind in staged:
         with b.scf_if(valid) if valid is not None else nullcontext():
             if kind == "g" and raw is not None and spec.fuse_gate:
-                for j in range(4):
-                    raw_g = b.vec_extract(value, j)
-                    col_j = b.add(col, b.const_i32(j))
+                if spec.gate_kind == "gdn":
+                    # GDN: one scalar `a` per row -> gate is channel-independent.
                     gate = _apply_gate_fused(
                         b,
-                        raw_g,
+                        value,
                         raw.a_log,
                         raw.dt_bias,
                         head,
-                        col_j,
+                        b.const_i32(0),
                         spec.lower_bound,
                         has_dt_bias=spec.has_dt_bias,
                         dk=ctx.DK,
+                        gate_kind="gdn",
                     )
-                    _st(b, lds, row, col_j, value=gate, n=1)
+                    for j in range(4):
+                        _st(b, lds, row, b.add(col, b.const_i32(j)), value=gate, n=1)
+                else:
+                    for j in range(4):
+                        raw_g = b.vec_extract(value, j)
+                        col_j = b.add(col, b.const_i32(j))
+                        gate = _apply_gate_fused(
+                            b,
+                            raw_g,
+                            raw.a_log,
+                            raw.dt_bias,
+                            head,
+                            col_j,
+                            spec.lower_bound,
+                            has_dt_bias=spec.has_dt_bias,
+                            dk=ctx.DK,
+                            gate_kind=spec.gate_kind,
+                        )
+                        _st(b, lds, row, col_j, value=gate, n=1)
             elif kind in ("k", "q") and raw is not None and spec.fuse_qk_l2norm:
                 vals = [b.cast_to_f32(b.vec_extract(value, j)) for j in range(8)]
                 inv = _l2norm_scale8(b, vals)
@@ -1616,7 +1716,10 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
 
     q_ptr = b.param("q_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
     k_ptr = b.param("k_ptr", PtrType(ELEM, "global"), readonly=True, align=16)
-    g_elem = ELEM if spec.raw_inputs else F32
+    # GDN raw prep reads the f32 gate ``a`` (global_load_f32); KDA raw reads a
+    # bf16 ``g`` vector. The declared pointer type must match, or the HIP/C++
+    # backend indexes at the wrong stride (LLVM opaque pointers hide it).
+    g_elem = F32 if spec.gate_kind == "gdn" else (ELEM if spec.raw_inputs else F32)
     g_ptr = b.param("g_ptr", PtrType(g_elem, "global"), readonly=True, align=16)
     beta_ptr = b.param("beta_ptr", PtrType(F32, "global"), readonly=True, align=4)
     a_ptr = b.param("a_ptr", PtrType(ELEM, "global"), writeonly=True, align=16)
@@ -1646,6 +1749,7 @@ def build_kda_chunk_prep(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Kernel
             dk=spec.head_k,
             a_log=a_log_ptr,
             dt_bias=dt_bias_ptr,
+            kv_group=spec.kv_group,
         )
 
     ctx = _ChunkCtx(b, spec, (q_ptr, k_ptr, g_ptr, beta_ptr, scale, raw))
@@ -2853,7 +2957,14 @@ def kda_chunk_prep_signature(spec: KdaChunkPrepSpec):
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
-        .ptr("g_ptr", "bf16" if spec.raw_inputs else "f32")
+        .ptr(
+            "g_ptr",
+            (
+                "f32"
+                if spec.gate_kind == "gdn"
+                else ("bf16" if spec.raw_inputs else "f32")
+            ),
+        )
         .ptr("beta_ptr", "f32")
         .ptr("a_ptr", spec.dtype)
         .ptr("gk_ptr", spec.dtype)

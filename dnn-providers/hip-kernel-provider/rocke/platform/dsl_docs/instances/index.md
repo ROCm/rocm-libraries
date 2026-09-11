@@ -102,6 +102,15 @@ Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
 builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
 Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
 fused kernel and keeps the split halves opt-in.
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gdn_decode.py` | `GdnDecodeSpec` (gated delta rule; single-token decode over a paged recurrent state) | `instances/gdn_decode.md` |
+
+Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token decode) and `dispatch_gdn_prefill(GdnPrefillRequest(...))` (split, chunkwise prefill — the KDA chunkwise kernels in `gate_kind="gdn"` mode).
+
+Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships both a single-token decode kernel and a split (chunkwise) prefill mode built on the shared KDA chunkwise kernels; gfx950.
+
+Tile selection is tuned per decode batch band, because the knob that splits a head's value dimension across workgroups buys occupancy at small batch and costs overhead at large batch.
 
 ## Small Ops
 

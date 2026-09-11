@@ -201,6 +201,12 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    # KDA chunkwise + GDN decode: every field is defaulted; the problem shape
+    # travels in the spec, so a descriptor names no mandatory field.
+    "kernels.gfx942.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaTileSpec": (),
     # Every gfx950-only codegen knob is defaulted.
     "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": (
         "batch",
@@ -238,6 +244,11 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
 }
