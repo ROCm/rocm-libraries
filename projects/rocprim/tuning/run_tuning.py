@@ -88,7 +88,8 @@ def get_available_algorithms() -> List[str]:
         "device_select_predicate",
         "device_select_unique",
         "device_radix_sort_onesweep",
-        "device_segmented_radix_sort"
+        "device_segmented_radix_sort",
+        "device_find_first_of"
     ])
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
