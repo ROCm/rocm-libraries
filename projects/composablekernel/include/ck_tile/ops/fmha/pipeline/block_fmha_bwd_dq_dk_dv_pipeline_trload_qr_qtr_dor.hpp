@@ -611,6 +611,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
                 {
                     dropout.template Run<decltype(gemm_0), RandValOutputDataType>(
                         0, seqlen_kv_step, p, randval_dram_window);
+                    if constexpr(FmhaDropout::IsStoreRandval)
+                    {
+                        // Run leaves the window one M block on, the step the regular
+                        // pipeline wants. Here kv is the loop axis instead, so undo
+                        // that and step N. The window origin already accounts for the
+                        // swap -- MakeRandvalDramWindow above is called with IsFwd.
+                        move_tile_window(randval_dram_window, {-kM0, kN0});
+                    }
                 }
                 const auto p_gemm = [&]() { // dropout / type conversion
                     if constexpr(FmhaDropout::IsDropout)
@@ -779,8 +787,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         main_body(std::false_type{}, std::true_type{});
         seqlen_kv_step += kN0;
 
-        const auto k_length         = k_dram_block_window_tmp.get_window_lengths();
-        const auto seqlen_kv_length = k_length.at(number<0>{});
+        // The bound is seqlen_k, which lives on the bottom tensor view -- not on
+        // get_window_lengths(), which is the tile extent kN0 as the static_assert
+        // above states. With kN0 the loop was dead and every kv block past the
+        // causal diagonal kept whatever dK/dV was already in memory.
+        const auto seqlen_kv_length =
+            k_dram_block_window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_length(
+                number<0>{});
         for(; seqlen_kv_step < seqlen_kv_length; seqlen_kv_step += kN0)
         {
             dk_epilogue(dk_dram_window, decltype(gemm_3.MakeCBlockTile()){0}, nullptr);
