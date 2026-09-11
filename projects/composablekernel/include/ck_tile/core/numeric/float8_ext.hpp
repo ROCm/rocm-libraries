@@ -286,8 +286,16 @@ CK_TILE_HOST_DEVICE VDstT from_float8x8(fp8x8_storage_t x, float scale)
 
     return res.v8;
 #elif defined(__gfx125__)
+    // This serves the float-scale conversions;
+    // Scale_sel 0 reads byte 0 of lanes 0-15 and Scale_sel 1 reads byte 0 of lanes 16-31.
+    // Running each half under its own Scale_sel, with the other masked off, leaves
+    // every lane reading byte 0 of its own register.
     Packed4Scale_E8M0 pkscale(0, 0, 0, scale);
-    return impl::cast_from_f8x8_scaled<VDstT, interpret>(x, pkscale.data());
+
+    if(__lane_id() < 16)
+        return impl::cast_from_f8x8_scaled<VDstT, interpret, 0>(x, pkscale.data());
+    else
+        return impl::cast_from_f8x8_scaled<VDstT, interpret, 1>(x, pkscale.data());
 #else
     using DstT = typename vector_traits<VDstT>::scalar_type;
     union
