@@ -1638,14 +1638,6 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
 
 
 
-    def fp32Gfx115X = 'Fp32 Hip Install All gfx115X'
-    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx115X), fp32Gfx115X) {
-        node(rocmnodeFn("strix")) {
-            try {
-                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
-            } finally { cleanWs() }
-        }
-    }
 
     return stages
 }
