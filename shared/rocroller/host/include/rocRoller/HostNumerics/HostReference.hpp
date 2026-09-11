@@ -117,14 +117,11 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller output storage does not match the matrix dimensions.");
         return roc::host_numerics::Tensor::copyEncodedBackingStorage(
-            HostReferenceDetail::outputScalarType<T>(),
-            layout,
-            std::as_bytes(values));
+            HostReferenceDetail::outputScalarType<T>(), layout, std::as_bytes(values));
     }
 
     template <typename Output>
-    roc::host_numerics::Tensor
-        convertHostReferenceTensor(roc::host_numerics::Tensor floatOutput)
+    roc::host_numerics::Tensor convertHostReferenceTensor(roc::host_numerics::Tensor floatOutput)
     {
         static_assert(
             std::is_same_v<
@@ -136,15 +133,14 @@ namespace rocRoller::HostNumerics
             throw std::invalid_argument(
                 "rocRoller output conversion requires a rank-two F32 tensor.");
 
-        const size_t rows    = floatOutput.shape()[0];
-        const size_t columns = floatOutput.shape()[1];
+        const size_t                                rows    = floatOutput.shape()[0];
+        const size_t                                columns = floatOutput.shape()[1];
         roc::host_numerics::ScalarConversionOptions conversion;
         if constexpr(std::is_same_v<Output, BFloat16>)
             conversion.bfloat16Rounding = roc::host_numerics::BFloat16Rounding::Truncate;
-        return floatOutput.copyConvertedTo(
-            HostReferenceDetail::outputScalarType<Output>(),
-            hostOutputLayout(rows, columns),
-            conversion);
+        return floatOutput.copyConvertedTo(HostReferenceDetail::outputScalarType<Output>(),
+                                           hostOutputLayout(rows, columns),
+                                           conversion);
     }
 
     template <typename Output>
@@ -154,7 +150,7 @@ namespace rocRoller::HostNumerics
             = convertHostReferenceTensor<Output>(std::move(floatOutput));
         const size_t rows    = converted.shape()[0];
         const size_t columns = converted.shape()[1];
-        const auto storage = converted.rawEncodedBackingStorage();
+        const auto   storage = converted.rawEncodedBackingStorage();
         if(storage.size() != rows * columns * sizeof(Output))
             throw std::invalid_argument(
                 "rocRoller output conversion requires contiguous column-major storage.");

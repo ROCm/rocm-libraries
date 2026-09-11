@@ -66,9 +66,9 @@ namespace rocRoller::HostNumerics
     {
         using roc::host_numerics::Layout;
         using roc::host_numerics::ScalarCategory;
+        using roc::host_numerics::scalarTypeInfo;
         using roc::host_numerics::Shape;
         using roc::host_numerics::Tensor;
-        using roc::host_numerics::scalarTypeInfo;
         auto const scalarType = hostScalarType(type);
         if(scalarTypeInfo(scalarType).category != ScalarCategory::Scale)
             throw std::invalid_argument("rocRoller runtime scale requires a scale data type.");
@@ -90,9 +90,9 @@ namespace rocRoller::HostNumerics
     {
         using roc::host_numerics::Layout;
         using roc::host_numerics::ScalarCategory;
-        using roc::host_numerics::Tensor;
         using roc::host_numerics::scalarTypeInfo;
         using roc::host_numerics::storageBytesForLayout;
+        using roc::host_numerics::Tensor;
 
         auto const layout     = hostScaleLayout(dataDescriptor, blockedDimension, blockSize);
         auto const scalarType = hostScalarType(type);
@@ -119,13 +119,13 @@ namespace rocRoller::HostNumerics
                              float                                     alpha,
                              float                                     beta)
     {
+        using roc::host_numerics::add;
         using roc::host_numerics::Layout;
         using roc::host_numerics::MatmulOptions;
+        using roc::host_numerics::matmulWithBlasBackend;
         using roc::host_numerics::ScalarType;
         using roc::host_numerics::Shape;
         using roc::host_numerics::Tensor;
-        using roc::host_numerics::add;
-        using roc::host_numerics::matmulWithBlasBackend;
 
         if(a.shape().rank() != 2 || b.shape().rank() != 2 || c.shape().rank() != 2)
             throw std::invalid_argument(
@@ -199,9 +199,9 @@ namespace rocRoller::HostNumerics
                                               roc::host_numerics::Tensor expected,
                                               AcceptableGEMMError        acceptableError)
     {
+        using roc::host_numerics::compare;
         using roc::host_numerics::ComparisonOptions;
         using roc::host_numerics::ComparisonReport;
-        using roc::host_numerics::compare;
 
         ComparisonOptions options;
         options.allClose                               = false;
