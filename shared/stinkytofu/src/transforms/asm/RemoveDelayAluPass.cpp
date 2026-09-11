@@ -39,9 +39,6 @@ class RemoveDelayAluPassImpl : public Pass {
    public:
     static char ID;
 
-    explicit RemoveDelayAluPassImpl(std::vector<Function*> functions)
-        : functions(std::move(functions)) {}
-
     const char* getName() const override {
         return "RemoveDelayAluPass";
     }
@@ -51,15 +48,7 @@ class RemoveDelayAluPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        // Whole-kernel: strip the entry function and every callable function.
-        // Falls back to the single pipeline Function when no function list is given.
-        if (!functions.empty()) {
-            for (Function* f : functions) {
-                if (f) removeInFunction(*f, passCtx);
-            }
-        } else {
-            removeInFunction(func, passCtx);
-        }
+        removeInFunction(func, passCtx);
         return preserveCFGAnalyses();
     }
 
@@ -78,8 +67,6 @@ class RemoveDelayAluPassImpl : public Pass {
             }
         }
     }
-
-    std::vector<Function*> functions;
 };
 
 char RemoveDelayAluPassImpl::ID = 0;
@@ -87,7 +74,7 @@ char RemoveDelayAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createRemoveDelayAluPass(std::vector<Function*> functions) {
-    return std::make_unique<RemoveDelayAluPassImpl>(std::move(functions));
+std::unique_ptr<Pass> createRemoveDelayAluPass() {
+    return std::make_unique<RemoveDelayAluPassImpl>();
 }
 }  // namespace stinkytofu

@@ -65,7 +65,6 @@ rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            
         = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
 
     _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                               A->analysed,
                                A->batch_count,
                                A->rows,
                                A->cols,

@@ -2481,3 +2481,119 @@ class TestExtraDataTypeFieldsPacker:
         assert (
             "HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT" in rendered
         ), "packer must reference the correct attribute identifier"
+
+
+class TestMissingRequiredInputTestsAreParameterized:
+    """The two missing-required-input error families must render as TEST_P suites.
+
+    A template that emits one TEST_F per required input invites a hand
+    refactor into TEST_P downstream, which the next regeneration would
+    silently undo. These assertions pin the parameterized shape for both the
+    mode-rule branch (``moe_grouped_matmul``) and the plain branch
+    (``matmul``).
+    """
+
+    def test_descriptor_finalize_failures_use_test_p(self, matmul_config, generator):
+        """A config without mode rules renders FinalizeFailsWithout as TEST_P."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "TEST_P(TestMatmulOperationDescriptorFinalizeFailsWithout, "
+            "FinalizeFailsWithout)" in rendered
+        ), "finalize-failure cases must be a TEST_P suite"
+        assert (
+            "INSTANTIATE_TEST_SUITE_P(\n    RequiredAttributes," in rendered
+        ), "the TEST_P suite must be instantiated under RequiredAttributes"
+        assert (
+            "        HIPDNN_ATTR_OPERATION_MATMUL_ADESC,\n" in rendered
+        ), "each required tensor must contribute a case"
+        assert "FinalizeFailsWithoutATensor" not in rendered, (
+            "the template must not also emit a TEST_F per tensor -- that is the "
+            "unparameterized form this suite replaces"
+        )
+
+    def test_descriptor_mode_rule_config_also_uses_test_p(
+        self, load_test_config, generator
+    ):
+        """A config with mode rules renders the same TEST_P shape."""
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rendered = generator._render_template("test_descriptor.cpp.j2", config)
+
+        assert (
+            "TEST_P(TestMoeGroupedMatmulOperationDescriptorFinalizeFailsWithout, "
+            "FinalizeFailsWithout)" in rendered
+        ), "finalize-failure cases must be a TEST_P suite"
+        assert (
+            "setModeRuleAttributes(HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER, GetParam())"
+            in rendered
+        ), "the mode-rule branch must forward the excluded attribute"
+        assert (
+            "        HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC,\n" in rendered
+        ), "each required tensor must contribute a case"
+
+    def test_descriptor_fixture_setters_accept_excluded_attribute(
+        self, matmul_config, generator
+    ):
+        """The TEST_P body needs setters that can skip one attribute."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "void setTensors(std::optional<hipdnnBackendAttributeName_t> excluded "
+            "= std::nullopt) const" in rendered
+        ), "setTensors must accept an optional excluded attribute"
+        assert (
+            "setTensors(excluded);" in rendered
+        ), "setRequiredAttributes must forward the excluded attribute to setTensors"
+        assert (
+            "if(!excluded || *excluded != HIPDNN_ATTR_OPERATION_MATMUL_ADESC)"
+            in rendered
+        ), "each tensor's setAttribute call must be guarded by the exclusion check"
+
+    def test_descriptor_compute_type_joins_the_parameterized_suite(
+        self, matmul_config, generator
+    ):
+        """Compute type is a required attribute, so it is a case, not a TEST_F."""
+        rendered = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+
+        assert (
+            "        HIPDNN_ATTR_MATMUL_COMP_TYPE\n" in rendered
+        ), "compute type must contribute a case"
+        assert (
+            "if(!excluded || *excluded != HIPDNN_ATTR_MATMUL_COMP_TYPE)" in rendered
+        ), "the compute-type setAttribute call must be guarded by the exclusion check"
+        assert "FinalizeFailsWithoutComputeType" not in rendered, (
+            "compute type must not also get a standalone TEST_F -- it belongs in "
+            "the RequiredAttributes suite"
+        )
+
+    def test_from_node_missing_tensor_uses_test_p(self, matmul_config, generator):
+        """fromNode missing-tensor cases render as a TEST_P suite."""
+        rendered = generator._render_template("test_from_node.cpp.j2", matmul_config)
+
+        assert (
+            "TEST_P(TestMatmulOperationFromNodeMissingTensor, FailsWithMissingTensor)"
+            in rendered
+        ), "missing-tensor cases must be a TEST_P suite"
+        assert (
+            "INSTANTIATE_TEST_SUITE_P(\n    RequiredTensors," in rendered
+        ), "the TEST_P suite must be instantiated under RequiredTensors"
+        assert (
+            "        K_MATMUL_TENSOR_A_UID,\n" in rendered
+        ), "each required tensor must contribute a case"
+        assert "FailsWithMissingATensor" not in rendered, (
+            "the template must not also emit a TEST_F per tensor -- that is the "
+            "unparameterized form this suite replaces"
+        )
+
+    def test_test_p_suites_take_a_bare_parameter(self, matmul_config, generator):
+        """Cases are the attribute enumerator or tensor UID, not a wrapper struct."""
+        descriptor = generator._render_template("test_descriptor.cpp.j2", matmul_config)
+        assert (
+            "public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>"
+            in descriptor
+        )
+        assert "MissingAttributeCase" not in descriptor
+
+        from_node = generator._render_template("test_from_node.cpp.j2", matmul_config)
+        assert "public ::testing::WithParamInterface<int64_t>" in from_node
+        assert "MissingTensorCase" not in from_node

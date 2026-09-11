@@ -5,34 +5,21 @@ cmake_minimum_required(VERSION 3.25.2)
 
 project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(ORIGAMI_STANDALONE ON)
-else()
-    set(ORIGAMI_STANDALONE OFF)
-endif()
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-# Set cpack license file here to avoid rocm-cmake warning
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
 include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
-option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
+option(ORIGAMI_BUILD_SHARED_LIBS "Build Origami libraries as shared vs static." ON)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
-if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
-    set(ORIGAMI_LIBRARY_TYPE SHARED)
-else()
-    set(ORIGAMI_LIBRARY_TYPE STATIC)
-endif()
-add_library(origami ${ORIGAMI_LIBRARY_TYPE})
+set(BUILD_SHARED_LIBS "${ORIGAMI_BUILD_SHARED_LIBS}")
+add_library(origami)
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
@@ -52,7 +39,7 @@ generate_export_header(origami
     EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
     STATIC_DEFINE ORIGAMI_STATIC
 )
-if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
+if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
 endif()
 
@@ -141,26 +128,3 @@ rocm_export_targets(
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)
 endif()
-
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" @ONLY
-)
-
-rocm_install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
-    "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
-)
-
-set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
-set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-    CACHE PATH "Path placed into ldconfig file"
-)
-
-rocm_create_package(
-    NAME origami
-    DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
-    MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
-)

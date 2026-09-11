@@ -5,7 +5,10 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
+
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "Handle.hpp"
 #include "compilation/IKernelCompiler.hpp"
@@ -35,12 +38,20 @@ public:
     // copied. Returns: Total number of available engines (regardless of maxEngines value).
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
+    // The plugin SDK detects this member by callability and exports
+    // hipdnnEnginePluginGetEngineName on its behalf; a signature it cannot call reads as
+    // opting out and every engine falls back to a hexadecimal rendering of its ID.
+    // Returns: BAD_PARAM if name is null, NOT_APPLICABLE for an unrecognized engineId, and
+    // SUCCESS with *name pointing at a NUL-terminated name valid for the library's lifetime.
+    static hipdnnPluginStatus_t getEngineName(int64_t engineId, const char** name);
+
     hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& getEngineManager();
 
 private:
     struct EngineDefinition
     {
         int64_t id;
+        std::string name;
         std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>>(
             const device::IDevicePropertyProvider&)>
             createEngine;

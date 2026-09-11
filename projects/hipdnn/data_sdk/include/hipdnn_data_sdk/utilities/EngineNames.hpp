@@ -149,7 +149,7 @@ inline std::string formatEngineIdHex(int64_t id)
     return oss.str();
 }
 
-// Helper function to get engine name from ID (returns empty if not found)
+// Helper function to get engine name from ID (throws std::out_of_range if not found)
 inline std::string_view getEngineNameFromId(int64_t id)
 {
     auto& idToName = getEngineIdToNameMap();
@@ -161,6 +161,27 @@ inline std::string_view getEngineNameFromId(int64_t id)
 
     throw std::out_of_range("Engine ID " + formatEngineIdHex(id)
                             + " not found in registered engines");
+}
+
+/**
+ * @brief Names an engine ID from the static registry, falling back to hexadecimal
+ *
+ * Returns the registered name for @p id, or its zero-padded uppercase
+ * hexadecimal rendering when unregistered. Never empty.
+ *
+ * @param id The engine ID to name
+ * @return std::string The registered name, or the hexadecimal rendering of the ID
+ */
+inline std::string engineNameOrHex(int64_t id)
+{
+    try
+    {
+        return std::string(getEngineNameFromId(id));
+    }
+    catch(const std::out_of_range&)
+    {
+        return formatEngineIdHex(id);
+    }
 }
 
 struct EngineRegistrar
@@ -235,6 +256,7 @@ HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE)
 HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE_DETERMINISTIC)
 HIPDNN_REGISTER_ENGINE(ASM_SDPA_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIP_FLASH2_ENGINE)
 HIPDNN_REGISTER_ENGINE(ROCKE_ENGINE)
 
 // NOLINTEND(bugprone-throwing-static-initialization)

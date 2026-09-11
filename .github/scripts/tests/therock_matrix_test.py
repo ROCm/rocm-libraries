@@ -22,8 +22,31 @@ class TheRockMatrixTest(unittest.TestCase):
         )
         self.assertTrue(blas_entry["run_rocjitsu_race_check"])
 
+    def test_collect_projects_to_run_for_nested_tensilelite_subtree(self):
+        # projects/hipblaslt/tensilelite is a registered nested subtree
+        # (repos-config.json), distinct from projects/hipblaslt in change
+        # detection, but must still behave like a hipblaslt change here: same
+        # "blas" bucket, same sparselt activation, same rocjitsu selection.
+        subtrees = ["projects/hipblaslt/tensilelite"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        blas_entry = project_to_run[0]
+        self.assertIn(
+            "hipsparselt",
+            blas_entry["projects_to_test"].split(","),
+        )
+        self.assertTrue(blas_entry["run_rocjitsu_race_check"])
+
     def test_rocjitsu_race_check_does_not_run_for_rocblas_only(self):
         project_to_run = therock_matrix.collect_projects_to_run(["projects/rocblas"])
+        self.assertEqual(len(project_to_run), 1)
+        self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
+
+    def test_rocjitsu_race_check_accepts_explicit_disable(self):
+        project_to_run = therock_matrix.collect_projects_to_run(
+            ["projects/hipblaslt"], run_rocjitsu_race_check=False
+        )
         self.assertEqual(len(project_to_run), 1)
         self.assertFalse(project_to_run[0]["run_rocjitsu_race_check"])
 
@@ -111,6 +134,26 @@ class TheRockMatrixTest(unittest.TestCase):
         self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
         self.assertNotIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
 
+    def test_collect_projects_to_run_rpp_linux(self):
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(len(project_to_run), 1)
+        rpp_entry = project_to_run[0]
+        options = rpp_entry["cmake_options"].split(" ")
+        self.assertEqual(rpp_entry["projects_to_test"], "rpp")
+        self.assertIn("-DTHEROCK_ENABLE_RPP=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_ALL=OFF", options)
+        # The platform restriction is a matrix-selection detail and must not
+        # leak into the row consumed by the workflow.
+        self.assertNotIn("platforms", rpp_entry)
+
+    def test_collect_projects_to_run_rpp_windows(self):
+        # RPP is experimental on Windows in TheRock and its test job is
+        # Linux-only, so the Windows matrix must not carry an rpp row at all.
+        with mock.patch.dict(os.environ, {"PLATFORM": "windows"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(project_to_run, [])
+
     def test_collect_projects_to_run_dependency_graph(self):
         subtrees = ["projects/miopen", "projects/hipblaslt"]
 
@@ -143,6 +186,8 @@ class TheRockMatrixTest(unittest.TestCase):
             ["projects/miopen", "projects/hipblaslt"]
         )
         therock_matrix.collect_projects_to_run(["projects/miopen", "projects/rocwmma"])
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            therock_matrix.collect_projects_to_run(["projects/rpp"])
 
         self.assertEqual(therock_matrix.project_map, project_map_before)
         self.assertEqual(therock_matrix.additional_options, additional_options_before)

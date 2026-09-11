@@ -2,7 +2,17 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM 5.0.0 for ROCm 10.0.0
+## rocPRIM 4.7.0 for ROCm 10.1.0
+
+### Changed 
+
+* SPIR-V support is no longer experimental. `ROCPRIM_EXPERIMENTAL_SPIRV` no longer needs to be defined to build with SPIR-V support; to build with SPIR-V, set `--offload-arch` to `amdgcnspirv`.
+
+### Resolved Issues
+
+* Kernel tuner leaking defines and polluting header libraries.
+
+## rocPRIM 4.6.0 for ROCm 10.0.0
 
 ### Added
 

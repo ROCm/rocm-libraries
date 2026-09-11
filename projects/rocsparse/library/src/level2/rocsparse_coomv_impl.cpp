@@ -157,7 +157,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                     const rocsparse_mat_descr descr,
                                                     const void*               coo_val_,
                                                     const void*               coo_row_ind_,
-                                                    const void*               coo_col_ind_)
+                                                    const void*               coo_col_ind_,
+                                                    rocsparse_coomv_info*     coomv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -187,6 +188,13 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ENUM(1, trans);
 
     ROCSPARSE_CHECKARG_ENUM(2, alg);
+
+    // Allocate the coomv info on first analysis so the computed max nnz-per-row
+    // can be cached for reuse by the compute stage.
+    if(coomv_info[0] == nullptr)
+    {
+        coomv_info[0] = new _rocsparse_coomv_info();
+    }
 
     switch(alg)
     {
@@ -245,12 +253,11 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                csr_row_ptr,
                                                max_nnz);
 
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
-                                                         max_nnz,
-                                                         sizeof(I),
-                                                         hipMemcpyDeviceToHost,
-                                                         handle->stream));
+            I max_nnz_host = 0;
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &max_nnz_host, max_nnz, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+            coomv_info[0]->max_nnz_per_row = static_cast<int64_t>(max_nnz_host);
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -280,7 +287,7 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                 csr_row_ptr,
                 max_nnz);
 
-            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&coomv_info[0]->max_nnz_per_row,
                                                          max_nnz,
                                                          sizeof(int64_t),
                                                          hipMemcpyDeviceToHost,
@@ -318,7 +325,8 @@ namespace rocsparse
                                                   const I*                  coo_col_ind,
                                                   const X*                  x,
                                                   const T*                  beta_device_host,
-                                                  Y*                        y)
+                                                  Y*                        y,
+                                                  int64_t                   max_nnz_per_row)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -335,7 +343,7 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            if(descr->max_nnz_per_row <= 10 * 256)
+            if(max_nnz_per_row <= 10 * 256)
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 1>),
@@ -605,7 +613,8 @@ namespace rocsparse
                                     const I*                  coo_col_ind,
                                     const X*                  x,
                                     const T*                  beta_device_host,
-                                    Y*                        y)
+                                    Y*                        y,
+                                    int64_t                   max_nnz_per_row)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -643,7 +652,8 @@ namespace rocsparse
                                                                        coo_col_ind,
                                                                        x,
                                                                        beta_device_host,
-                                                                       y));
+                                                                       y,
+                                                                       max_nnz_per_row));
             return rocsparse_status_success;
         }
         }
@@ -666,12 +676,17 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                            const void*               coo_val_,
                                            const void*               coo_row_ind_,
                                            const void*               coo_col_ind_,
+                                           rocsparse_coomv_info      coomv_info,
                                            const void*               x_,
                                            const void*               beta_device_host_,
                                            void*                     y_,
                                            bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // The atomic algorithm selects its kernel launch configuration from the
+    // max nnz-per-row computed during analysis; other algorithms ignore it.
+    const int64_t max_nnz_per_row = (coomv_info != nullptr) ? coomv_info->max_nnz_per_row : 0;
 
     const I  m                 = static_cast<I>(m_);
     const I  n                 = static_cast<I>(n_);
@@ -712,7 +727,8 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                                            coo_col_ind,
                                                            x,
                                                            beta_device_host,
-                                                           y));
+                                                           y,
+                                                           max_nnz_per_row));
 
     return rocsparse_status_success;
 }
@@ -804,6 +820,7 @@ namespace rocsparse
                                                                   coo_val,
                                                                   coo_row_ind,
                                                                   coo_col_ind,
+                                                                  nullptr,
                                                                   x,
                                                                   beta_device_host,
                                                                   y,
@@ -822,7 +839,8 @@ namespace rocsparse
                                                                        const rocsparse_mat_descr, \
                                                                        const void*,               \
                                                                        const void*,               \
-                                                                       const void*);              \
+                                                                       const void*,               \
+                                                                       rocsparse_coomv_info*);    \
     template rocsparse_status rocsparse::coomv_template<T, I, T, T, T>(rocsparse_handle,          \
                                                                        rocsparse_operation,       \
                                                                        rocsparse_coomv_alg,       \
@@ -834,6 +852,7 @@ namespace rocsparse
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        const void*,               \
+                                                                       rocsparse_coomv_info,      \
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        void*,                     \
@@ -859,7 +878,8 @@ INSTANTIATE(rocsparse_double_complex, int64_t);
                                                                        const rocsparse_mat_descr, \
                                                                        const void*,               \
                                                                        const void*,               \
-                                                                       const void*)
+                                                                       const void*,               \
+                                                                       rocsparse_coomv_info*)
 
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int8_t);
@@ -883,6 +903,7 @@ INSTANTIATE_MIXED_ANALYSIS(int64_t, rocsparse_bfloat16);
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        const void*,               \
+                                                                       rocsparse_coomv_info,      \
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        void*,                     \

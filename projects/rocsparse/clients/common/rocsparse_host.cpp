@@ -1269,8 +1269,9 @@ void host_bsrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1288,9 +1289,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1308,6 +1308,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose)
@@ -1330,8 +1331,9 @@ void host_bsrsv(rocsparse_operation  trans,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1349,9 +1351,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1369,6 +1370,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -2192,8 +2194,9 @@ void host_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2206,9 +2209,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2221,6 +2223,7 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -2251,8 +2254,9 @@ void host_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2265,9 +2269,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2280,6 +2283,109 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
+        }
+    }
+
+    *numeric_pivot = std::min(*numeric_pivot, *struct_pivot);
+
+    *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
+    *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
+}
+
+template <typename I, typename T>
+void host_ellsv(I                    M,
+                I                    N,
+                T                    alpha,
+                const I*             ell_col_ind,
+                const T*             ell_val,
+                I                    ell_width,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                I*                   struct_pivot,
+                I*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // Initialize pivots
+    *struct_pivot  = M + 1;
+    *numeric_pivot = M + 1;
+
+    // The right-hand side is accumulated in-place in y.
+    for(I row = 0; row < M; ++row)
+    {
+        y[row] = alpha * x[x_inc * row];
+    }
+
+    // Accessors over the ELL storage (column-major with leading dimension M).
+    auto get_col = [&](I row, I p) -> I { return ell_col_ind[(int64_t)p * M + row] - base; };
+    auto get_val = [&](I row, I p) -> T { return ell_val[(int64_t)p * M + row]; };
+
+    // Direct forward/backward substitution over the ELL rows.
+    const bool forward = (fill_mode == rocsparse_fill_mode_lower);
+
+    for(I r = 0; r < M; ++r)
+    {
+        const I row = forward ? r : (M - 1 - r);
+
+        T    sum      = y[row];
+        bool has_diag = false;
+        T    diag_val = static_cast<T>(0);
+
+        for(I p = 0; p < ell_width; ++p)
+        {
+            const I col = get_col(row, p);
+
+            // Skip padded (out-of-range) entries.
+            if(col < 0 || col >= N)
+            {
+                continue;
+            }
+
+            T val = get_val(row, p);
+
+            if(col == row)
+            {
+                if(diag_type == rocsparse_diag_type_non_unit)
+                {
+                    // Numerical zero pivot, avoid division by zero.
+                    if(val == static_cast<T>(0))
+                    {
+                        *numeric_pivot = std::min(*numeric_pivot, row + base);
+                        val            = static_cast<T>(1);
+                    }
+
+                    has_diag = true;
+                    diag_val = static_cast<T>(1) / val;
+                }
+
+                continue;
+            }
+
+            // Only entries on the active triangular side are already solved.
+            const bool below = (col < row);
+            if((forward && below) || (!forward && !below))
+            {
+                sum = std::fma(-val, y[col], sum);
+            }
+        }
+
+        if(diag_type == rocsparse_diag_type_non_unit)
+        {
+            if(!has_diag)
+            {
+                *struct_pivot = std::min(*struct_pivot, row + base);
+            }
+
+            y[row] = sum * diag_val;
+        }
+        else
+        {
+            y[row] = sum;
         }
     }
 
@@ -3901,8 +4007,9 @@ void host_csrsm(J                    M,
 
         if(transA == rocsparse_operation_none)
         {
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3917,9 +4024,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3934,6 +4040,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
         else if(transA == rocsparse_operation_transpose
@@ -3964,8 +4071,9 @@ void host_csrsm(J                    M,
                 }
             }
 
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3980,9 +4088,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3997,6 +4104,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
 
@@ -4075,6 +4183,107 @@ void host_cscsm(J                    M,
                         base,
                         struct_pivot,
                         numeric_pivot);
+}
+
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csr(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csr_row_ptr,
+                             const J*             csr_col_ind,
+                             const T*             csr_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const bool conj     = (trans == rocsparse_operation_conjugate_transpose);
+    const bool absolute = (modifier == 1);
+
+    J sp = M + 1;
+    J np = M + 1;
+
+    for(J row = 0; row < M; ++row)
+    {
+        T    d     = static_cast<T>(0);
+        bool found = false;
+        for(I j = csr_row_ptr[row] - base; j < csr_row_ptr[row + 1] - base; ++j)
+        {
+            if(csr_col_ind[j] - base == row)
+            {
+                d     = csr_val[j];
+                found = true;
+                break;
+            }
+        }
+
+        const bool pivot = (!found || d == static_cast<T>(0));
+        if(!found)
+        {
+            sp = std::min(sp, static_cast<J>(row + base));
+        }
+        else if(d == static_cast<T>(0))
+        {
+            np = std::min(np, static_cast<J>(row + base));
+        }
+
+        const T denom
+            = absolute ? static_cast<T>(rocsparse_abs(d)) : (conj ? rocsparse_conj(d) : d);
+        for(J col = 0; col < nrhs; ++col)
+        {
+            const int64_t idx
+                = (order == rocsparse_order_column) ? (row + ld * col) : (ld * row + col);
+            const T xv = alpha * B[idx];
+            C[idx]     = pivot ? xv : (xv / denom);
+        }
+    }
+
+    np             = std::min(np, sp);
+    *struct_pivot  = (sp == M + 1) ? -1 : sp;
+    *numeric_pivot = (np == M + 1) ? -1 : np;
+}
+
+template <typename I, typename J, typename T>
+void host_diagonal_solve_csc(rocsparse_operation  trans,
+                             J                    M,
+                             J                    nrhs,
+                             T                    alpha,
+                             const I*             csc_col_ptr,
+                             const J*             csc_row_ind,
+                             const T*             csc_val,
+                             const T*             B,
+                             T*                   C,
+                             int64_t              ld,
+                             rocsparse_order      order,
+                             rocsparse_index_base base,
+                             int32_t              modifier,
+                             J*                   struct_pivot,
+                             J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    host_diagonal_solve_csr<I, J, T>(trans,
+                                     M,
+                                     nrhs,
+                                     alpha,
+                                     csc_col_ptr,
+                                     csc_row_ind,
+                                     csc_val,
+                                     B,
+                                     C,
+                                     ld,
+                                     order,
+                                     base,
+                                     modifier,
+                                     struct_pivot,
+                                     numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -4178,8 +4387,9 @@ void host_bsrsm(rocsparse_int       mb,
 
     if(transA == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -4197,9 +4407,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -4217,6 +4426,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(transA == rocsparse_operation_transpose)
@@ -4239,8 +4449,9 @@ void host_bsrsm(rocsparse_int       mb,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -4258,9 +4469,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -4278,6 +4488,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -7503,8 +7714,8 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
 }
 
 template <typename T>
-void host_prune_dense2csr(rocsparse_int               m,
-                          rocsparse_int               n,
+void host_prune_dense2csr(int64_t                     m,
+                          int64_t                     n,
                           const std::vector<T>&       A,
                           int64_t                     lda,
                           rocsparse_index_base        base,
@@ -7522,9 +7733,9 @@ void host_prune_dense2csr(rocsparse_int               m,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(rocsparse_int i = 0; i < m; i++)
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7533,7 +7744,7 @@ void host_prune_dense2csr(rocsparse_int               m,
         }
     }
 
-    for(rocsparse_int i = 1; i <= m; i++)
+    for(int64_t i = 1; i <= m; i++)
     {
         csr_row_ptr[i] += csr_row_ptr[i - 1];
     }
@@ -7543,10 +7754,10 @@ void host_prune_dense2csr(rocsparse_int               m,
     csr_col_ind.resize(nnz);
     csr_val.resize(nnz);
 
-    rocsparse_int index = 0;
-    for(rocsparse_int i = 0; i < m; i++)
+    int64_t index = 0;
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7560,8 +7771,8 @@ void host_prune_dense2csr(rocsparse_int               m,
 }
 
 template <typename T>
-void host_prune_dense2csr_by_percentage(rocsparse_int               m,
-                                        rocsparse_int               n,
+void host_prune_dense2csr_by_percentage(int64_t                     m,
+                                        int64_t                     n,
                                         const std::vector<T>&       A,
                                         int64_t                     lda,
                                         rocsparse_index_base        base,
@@ -7573,15 +7784,15 @@ void host_prune_dense2csr_by_percentage(rocsparse_int               m,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    rocsparse_int nnz_A = m * n;
-    rocsparse_int pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
-    pos                 = std::min(pos, nnz_A - 1);
-    pos                 = std::max(pos, static_cast<rocsparse_int>(0));
+    int64_t nnz_A = m * n;
+    int64_t pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
+    pos           = std::min(pos, nnz_A - 1);
+    pos           = std::max(pos, static_cast<int64_t>(0));
 
     std::vector<T> sorted_A(m * n);
-    for(rocsparse_int i = 0; i < n; i++)
+    for(int64_t i = 0; i < n; i++)
     {
-        for(rocsparse_int j = 0; j < m; j++)
+        for(int64_t j = 0; j < m; j++)
         {
             sorted_A[m * i + j] = std::abs(A[lda * i + j]);
         }
@@ -9890,8 +10101,8 @@ template struct rocsparse_host<rocsparse_double_complex,
         rocsparse_index_base              csr_base_A,                                          \
         rocsparse_index_base              csr_base_C,                                          \
         TYPE                              percentage);                                                                      \
-    template void host_prune_dense2csr<TYPE>(rocsparse_int               m,                    \
-                                             rocsparse_int               n,                    \
+    template void host_prune_dense2csr<TYPE>(int64_t                     m,                    \
+                                             int64_t                     n,                    \
                                              const std::vector<TYPE>&    A,                    \
                                              int64_t                     lda,                  \
                                              rocsparse_index_base        base,                 \
@@ -9901,8 +10112,8 @@ template struct rocsparse_host<rocsparse_double_complex,
                                              std::vector<rocsparse_int>& csr_row_ptr,          \
                                              std::vector<rocsparse_int>& csr_col_ind);         \
     template void host_prune_dense2csr_by_percentage<TYPE>(                                    \
-        rocsparse_int               m,                                                         \
-        rocsparse_int               n,                                                         \
+        int64_t                     m,                                                         \
+        int64_t                     n,                                                         \
         const std::vector<TYPE>&    A,                                                         \
         int64_t                     lda,                                                       \
         rocsparse_index_base        base,                                                      \
@@ -10022,191 +10233,235 @@ template struct rocsparse_host<rocsparse_double_complex,
                                           TTYPE*               y,             \
                                           const TTYPE*         c,             \
                                           const TTYPE*         s,             \
-                                          rocsparse_index_base base);
+                                          rocsparse_index_base base);         \
+    template void host_ellsv<ITYPE, TTYPE>(ITYPE                M,            \
+                                           ITYPE                N,            \
+                                           TTYPE                alpha,        \
+                                           const ITYPE*         ell_col_ind,  \
+                                           const TTYPE*         ell_val,      \
+                                           ITYPE                ell_width,    \
+                                           const TTYPE*         x,            \
+                                           int64_t              x_inc,        \
+                                           TTYPE*               y,            \
+                                           rocsparse_diag_type  diag_type,    \
+                                           rocsparse_fill_mode  fill_mode,    \
+                                           rocsparse_index_base base,         \
+                                           ITYPE*               struct_pivot, \
+                                           ITYPE*               numeric_pivot);
 
-#define INSTANTIATE_IJT(ITYPE, JTYPE, TTYPE)                                                 \
-    template void host_csr_to_csc<ITYPE, JTYPE, TTYPE>(JTYPE                M,               \
-                                                       JTYPE                N,               \
-                                                       ITYPE                nnz,             \
-                                                       const ITYPE*         csr_row_ptr,     \
-                                                       const JTYPE*         csr_col_ind,     \
-                                                       const TTYPE*         csr_val,         \
-                                                       std::vector<JTYPE>&  csc_row_ind,     \
-                                                       std::vector<ITYPE>&  csc_col_ptr,     \
-                                                       std::vector<TTYPE>&  csc_val,         \
-                                                       rocsparse_action     action,          \
-                                                       rocsparse_index_base base);           \
-    template void host_csrsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
-                                                  JTYPE                M,                    \
-                                                  ITYPE                nnz,                  \
-                                                  TTYPE                alpha,                \
-                                                  const ITYPE*         csr_row_ptr,          \
-                                                  const JTYPE*         csr_col_ind,          \
-                                                  const TTYPE*         csr_val,              \
-                                                  const TTYPE*         x,                    \
-                                                  int64_t              x_inc,                \
-                                                  TTYPE*               y,                    \
-                                                  rocsparse_diag_type  diag_type,            \
-                                                  rocsparse_fill_mode  fill_mode,            \
-                                                  rocsparse_index_base base,                 \
-                                                  JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);                     \
-    template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
-                                                  JTYPE                M,                    \
-                                                  ITYPE                nnz,                  \
-                                                  TTYPE                alpha,                \
-                                                  const ITYPE*         csc_col_ptr,          \
-                                                  const JTYPE*         csc_row_ind,          \
-                                                  const TTYPE*         csc_val,              \
-                                                  const TTYPE*         x,                    \
-                                                  int64_t              x_inc,                \
-                                                  TTYPE*               y,                    \
-                                                  rocsparse_diag_type  diag_type,            \
-                                                  rocsparse_fill_mode  fill_mode,            \
-                                                  rocsparse_index_base base,                 \
-                                                  JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);                     \
-    template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
-                                                  JTYPE                nrhs,                 \
-                                                  ITYPE                nnz,                  \
-                                                  rocsparse_operation  transA,               \
-                                                  rocsparse_operation  transB,               \
-                                                  TTYPE                alpha,                \
-                                                  const ITYPE*         csr_row_ptr,          \
-                                                  const JTYPE*         csr_col_ind,          \
-                                                  const TTYPE*         csr_val,              \
-                                                  TTYPE*               B,                    \
-                                                  int64_t              ldb,                  \
-                                                  rocsparse_order      order_B,              \
-                                                  rocsparse_diag_type  diag_type,            \
-                                                  rocsparse_fill_mode  fill_mode,            \
-                                                  rocsparse_index_base base,                 \
-                                                  JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);                     \
-    template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
-                                                  JTYPE                nrhs,                 \
-                                                  ITYPE                nnz,                  \
-                                                  rocsparse_operation  transA,               \
-                                                  rocsparse_operation  transB,               \
-                                                  TTYPE                alpha,                \
-                                                  const ITYPE*         csc_col_ptr,          \
-                                                  const JTYPE*         csc_row_ind,          \
-                                                  const TTYPE*         csc_val,              \
-                                                  TTYPE*               B,                    \
-                                                  int64_t              ldb,                  \
-                                                  rocsparse_order      order_B,              \
-                                                  rocsparse_diag_type  diag_type,            \
-                                                  rocsparse_fill_mode  fill_mode,            \
-                                                  rocsparse_index_base base,                 \
-                                                  JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);                     \
-    template void host_csrgeam_nnz<TTYPE, ITYPE, JTYPE>(JTYPE                M,              \
-                                                        JTYPE                N,              \
-                                                        const TTYPE*         alpha,          \
-                                                        const ITYPE*         csr_row_ptr_A,  \
-                                                        const JTYPE*         csr_col_ind_A,  \
-                                                        const TTYPE*         beta,           \
-                                                        const ITYPE*         csr_row_ptr_B,  \
-                                                        const JTYPE*         csr_col_ind_B,  \
-                                                        ITYPE*               csr_row_ptr_C,  \
-                                                        ITYPE*               nnz_C,          \
-                                                        rocsparse_index_base base_A,         \
-                                                        rocsparse_index_base base_B,         \
-                                                        rocsparse_index_base base_C);        \
-    template void host_csrgeam<TTYPE, ITYPE, JTYPE>(JTYPE                M,                  \
-                                                    JTYPE                N,                  \
-                                                    const TTYPE*         alpha,              \
-                                                    const ITYPE*         csr_row_ptr_A,      \
-                                                    const JTYPE*         csr_col_ind_A,      \
-                                                    const TTYPE*         csr_val_A,          \
-                                                    const TTYPE*         beta,               \
-                                                    const ITYPE*         csr_row_ptr_B,      \
-                                                    const JTYPE*         csr_col_ind_B,      \
-                                                    const TTYPE*         csr_val_B,          \
-                                                    const ITYPE*         csr_row_ptr_C,      \
-                                                    JTYPE*               csr_col_ind_C,      \
-                                                    TTYPE*               csr_val_C,          \
-                                                    rocsparse_index_base base_A,             \
-                                                    rocsparse_index_base base_B,             \
-                                                    rocsparse_index_base base_C);            \
-    template void host_bsrgemm_nnzb<TTYPE, ITYPE, JTYPE>(JTYPE                Mb,            \
-                                                         JTYPE                Nb,            \
-                                                         JTYPE                Kb,            \
-                                                         JTYPE                block_dim,     \
-                                                         const TTYPE*         alpha,         \
-                                                         const ITYPE*         bsr_row_ptr_A, \
-                                                         const JTYPE*         bsr_col_ind_A, \
-                                                         const ITYPE*         bsr_row_ptr_B, \
-                                                         const JTYPE*         bsr_col_ind_B, \
-                                                         const TTYPE*         beta,          \
-                                                         const ITYPE*         bsr_row_ptr_D, \
-                                                         const JTYPE*         bsr_col_ind_D, \
-                                                         ITYPE*               bsr_row_ptr_C, \
-                                                         ITYPE*               nnzb_C,        \
-                                                         rocsparse_index_base base_A,        \
-                                                         rocsparse_index_base base_B,        \
-                                                         rocsparse_index_base base_C,        \
-                                                         rocsparse_index_base base_D);       \
-    template void host_bsrgemm<TTYPE, ITYPE, JTYPE>(rocsparse_direction  dir,                \
-                                                    JTYPE                Mb,                 \
-                                                    JTYPE                Nb,                 \
-                                                    JTYPE                Kb,                 \
-                                                    JTYPE                block_dim,          \
-                                                    const TTYPE*         alpha,              \
-                                                    const ITYPE*         bsr_row_ptr_A,      \
-                                                    const JTYPE*         bsr_col_ind_A,      \
-                                                    const TTYPE*         bsr_val_A,          \
-                                                    const ITYPE*         bsr_row_ptr_B,      \
-                                                    const JTYPE*         bsr_col_ind_B,      \
-                                                    const TTYPE*         bsr_val_B,          \
-                                                    const TTYPE*         beta,               \
-                                                    const ITYPE*         bsr_row_ptr_D,      \
-                                                    const JTYPE*         bsr_col_ind_D,      \
-                                                    const TTYPE*         bsr_val_D,          \
-                                                    const ITYPE*         bsr_row_ptr_C,      \
-                                                    JTYPE*               bsr_col_ind_C,      \
-                                                    TTYPE*               bsr_val_C,          \
-                                                    rocsparse_index_base base_A,             \
-                                                    rocsparse_index_base base_B,             \
-                                                    rocsparse_index_base base_C,             \
-                                                    rocsparse_index_base base_D);            \
-    template void host_csrgemm_nnz<TTYPE, ITYPE, JTYPE>(JTYPE                M,              \
-                                                        JTYPE                N,              \
-                                                        JTYPE                K,              \
-                                                        const TTYPE*         alpha,          \
-                                                        const ITYPE*         csr_row_ptr_A,  \
-                                                        const JTYPE*         csr_col_ind_A,  \
-                                                        const ITYPE*         csr_row_ptr_B,  \
-                                                        const JTYPE*         csr_col_ind_B,  \
-                                                        const TTYPE*         beta,           \
-                                                        const ITYPE*         csr_row_ptr_D,  \
-                                                        const JTYPE*         csr_col_ind_D,  \
-                                                        ITYPE*               csr_row_ptr_C,  \
-                                                        ITYPE*               nnz_C,          \
-                                                        rocsparse_index_base base_A,         \
-                                                        rocsparse_index_base base_B,         \
-                                                        rocsparse_index_base base_C,         \
-                                                        rocsparse_index_base base_D);        \
-    template void host_csrgemm<TTYPE, ITYPE, JTYPE>(JTYPE                M,                  \
-                                                    JTYPE                N,                  \
-                                                    JTYPE                L,                  \
-                                                    const TTYPE*         alpha,              \
-                                                    const ITYPE*         csr_row_ptr_A,      \
-                                                    const JTYPE*         csr_col_ind_A,      \
-                                                    const TTYPE*         csr_val_A,          \
-                                                    const ITYPE*         csr_row_ptr_B,      \
-                                                    const JTYPE*         csr_col_ind_B,      \
-                                                    const TTYPE*         csr_val_B,          \
-                                                    const TTYPE*         beta,               \
-                                                    const ITYPE*         csr_row_ptr_D,      \
-                                                    const JTYPE*         csr_col_ind_D,      \
-                                                    const TTYPE*         csr_val_D,          \
-                                                    const ITYPE*         csr_row_ptr_C,      \
-                                                    JTYPE*               csr_col_ind_C,      \
-                                                    TTYPE*               csr_val_C,          \
-                                                    rocsparse_index_base base_A,             \
-                                                    rocsparse_index_base base_B,             \
-                                                    rocsparse_index_base base_C,             \
+#define INSTANTIATE_IJT(ITYPE, JTYPE, TTYPE)                                                      \
+    template void host_csr_to_csc<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
+                                                       JTYPE                N,                    \
+                                                       ITYPE                nnz,                  \
+                                                       const ITYPE*         csr_row_ptr,          \
+                                                       const JTYPE*         csr_col_ind,          \
+                                                       const TTYPE*         csr_val,              \
+                                                       std::vector<JTYPE>&  csc_row_ind,          \
+                                                       std::vector<ITYPE>&  csc_col_ptr,          \
+                                                       std::vector<TTYPE>&  csc_val,              \
+                                                       rocsparse_action     action,               \
+                                                       rocsparse_index_base base);                \
+    template void host_csrsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                     \
+                                                  JTYPE                M,                         \
+                                                  ITYPE                nnz,                       \
+                                                  TTYPE                alpha,                     \
+                                                  const ITYPE*         csr_row_ptr,               \
+                                                  const JTYPE*         csr_col_ind,               \
+                                                  const TTYPE*         csr_val,                   \
+                                                  const TTYPE*         x,                         \
+                                                  int64_t              x_inc,                     \
+                                                  TTYPE*               y,                         \
+                                                  rocsparse_diag_type  diag_type,                 \
+                                                  rocsparse_fill_mode  fill_mode,                 \
+                                                  rocsparse_index_base base,                      \
+                                                  JTYPE*               struct_pivot,              \
+                                                  JTYPE*               numeric_pivot);                          \
+    template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                     \
+                                                  JTYPE                M,                         \
+                                                  ITYPE                nnz,                       \
+                                                  TTYPE                alpha,                     \
+                                                  const ITYPE*         csc_col_ptr,               \
+                                                  const JTYPE*         csc_row_ind,               \
+                                                  const TTYPE*         csc_val,                   \
+                                                  const TTYPE*         x,                         \
+                                                  int64_t              x_inc,                     \
+                                                  TTYPE*               y,                         \
+                                                  rocsparse_diag_type  diag_type,                 \
+                                                  rocsparse_fill_mode  fill_mode,                 \
+                                                  rocsparse_index_base base,                      \
+                                                  JTYPE*               struct_pivot,              \
+                                                  JTYPE*               numeric_pivot);                          \
+    template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                         \
+                                                  JTYPE                nrhs,                      \
+                                                  ITYPE                nnz,                       \
+                                                  rocsparse_operation  transA,                    \
+                                                  rocsparse_operation  transB,                    \
+                                                  TTYPE                alpha,                     \
+                                                  const ITYPE*         csr_row_ptr,               \
+                                                  const JTYPE*         csr_col_ind,               \
+                                                  const TTYPE*         csr_val,                   \
+                                                  TTYPE*               B,                         \
+                                                  int64_t              ldb,                       \
+                                                  rocsparse_order      order_B,                   \
+                                                  rocsparse_diag_type  diag_type,                 \
+                                                  rocsparse_fill_mode  fill_mode,                 \
+                                                  rocsparse_index_base base,                      \
+                                                  JTYPE*               struct_pivot,              \
+                                                  JTYPE*               numeric_pivot);                          \
+    template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                         \
+                                                  JTYPE                nrhs,                      \
+                                                  ITYPE                nnz,                       \
+                                                  rocsparse_operation  transA,                    \
+                                                  rocsparse_operation  transB,                    \
+                                                  TTYPE                alpha,                     \
+                                                  const ITYPE*         csc_col_ptr,               \
+                                                  const JTYPE*         csc_row_ind,               \
+                                                  const TTYPE*         csc_val,                   \
+                                                  TTYPE*               B,                         \
+                                                  int64_t              ldb,                       \
+                                                  rocsparse_order      order_B,                   \
+                                                  rocsparse_diag_type  diag_type,                 \
+                                                  rocsparse_fill_mode  fill_mode,                 \
+                                                  rocsparse_index_base base,                      \
+                                                  JTYPE*               struct_pivot,              \
+                                                  JTYPE*               numeric_pivot);                          \
+    template void host_diagonal_solve_csr<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,        \
+                                                               JTYPE                M,            \
+                                                               JTYPE                nrhs,         \
+                                                               TTYPE                alpha,        \
+                                                               const ITYPE*         csr_row_ptr,  \
+                                                               const JTYPE*         csr_col_ind,  \
+                                                               const TTYPE*         csr_val,      \
+                                                               const TTYPE*         B,            \
+                                                               TTYPE*               C,            \
+                                                               int64_t              ld,           \
+                                                               rocsparse_order      order,        \
+                                                               rocsparse_index_base base,         \
+                                                               int32_t              modifier,     \
+                                                               JTYPE*               struct_pivot, \
+                                                               JTYPE*               numeric_pivot);             \
+    template void host_diagonal_solve_csc<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,        \
+                                                               JTYPE                M,            \
+                                                               JTYPE                nrhs,         \
+                                                               TTYPE                alpha,        \
+                                                               const ITYPE*         csc_col_ptr,  \
+                                                               const JTYPE*         csc_row_ind,  \
+                                                               const TTYPE*         csc_val,      \
+                                                               const TTYPE*         B,            \
+                                                               TTYPE*               C,            \
+                                                               int64_t              ld,           \
+                                                               rocsparse_order      order,        \
+                                                               rocsparse_index_base base,         \
+                                                               int32_t              modifier,     \
+                                                               JTYPE*               struct_pivot, \
+                                                               JTYPE*               numeric_pivot);             \
+    template void host_csrgeam_nnz<TTYPE, ITYPE, JTYPE>(JTYPE                M,                   \
+                                                        JTYPE                N,                   \
+                                                        const TTYPE*         alpha,               \
+                                                        const ITYPE*         csr_row_ptr_A,       \
+                                                        const JTYPE*         csr_col_ind_A,       \
+                                                        const TTYPE*         beta,                \
+                                                        const ITYPE*         csr_row_ptr_B,       \
+                                                        const JTYPE*         csr_col_ind_B,       \
+                                                        ITYPE*               csr_row_ptr_C,       \
+                                                        ITYPE*               nnz_C,               \
+                                                        rocsparse_index_base base_A,              \
+                                                        rocsparse_index_base base_B,              \
+                                                        rocsparse_index_base base_C);             \
+    template void host_csrgeam<TTYPE, ITYPE, JTYPE>(JTYPE                M,                       \
+                                                    JTYPE                N,                       \
+                                                    const TTYPE*         alpha,                   \
+                                                    const ITYPE*         csr_row_ptr_A,           \
+                                                    const JTYPE*         csr_col_ind_A,           \
+                                                    const TTYPE*         csr_val_A,               \
+                                                    const TTYPE*         beta,                    \
+                                                    const ITYPE*         csr_row_ptr_B,           \
+                                                    const JTYPE*         csr_col_ind_B,           \
+                                                    const TTYPE*         csr_val_B,               \
+                                                    const ITYPE*         csr_row_ptr_C,           \
+                                                    JTYPE*               csr_col_ind_C,           \
+                                                    TTYPE*               csr_val_C,               \
+                                                    rocsparse_index_base base_A,                  \
+                                                    rocsparse_index_base base_B,                  \
+                                                    rocsparse_index_base base_C);                 \
+    template void host_bsrgemm_nnzb<TTYPE, ITYPE, JTYPE>(JTYPE                Mb,                 \
+                                                         JTYPE                Nb,                 \
+                                                         JTYPE                Kb,                 \
+                                                         JTYPE                block_dim,          \
+                                                         const TTYPE*         alpha,              \
+                                                         const ITYPE*         bsr_row_ptr_A,      \
+                                                         const JTYPE*         bsr_col_ind_A,      \
+                                                         const ITYPE*         bsr_row_ptr_B,      \
+                                                         const JTYPE*         bsr_col_ind_B,      \
+                                                         const TTYPE*         beta,               \
+                                                         const ITYPE*         bsr_row_ptr_D,      \
+                                                         const JTYPE*         bsr_col_ind_D,      \
+                                                         ITYPE*               bsr_row_ptr_C,      \
+                                                         ITYPE*               nnzb_C,             \
+                                                         rocsparse_index_base base_A,             \
+                                                         rocsparse_index_base base_B,             \
+                                                         rocsparse_index_base base_C,             \
+                                                         rocsparse_index_base base_D);            \
+    template void host_bsrgemm<TTYPE, ITYPE, JTYPE>(rocsparse_direction  dir,                     \
+                                                    JTYPE                Mb,                      \
+                                                    JTYPE                Nb,                      \
+                                                    JTYPE                Kb,                      \
+                                                    JTYPE                block_dim,               \
+                                                    const TTYPE*         alpha,                   \
+                                                    const ITYPE*         bsr_row_ptr_A,           \
+                                                    const JTYPE*         bsr_col_ind_A,           \
+                                                    const TTYPE*         bsr_val_A,               \
+                                                    const ITYPE*         bsr_row_ptr_B,           \
+                                                    const JTYPE*         bsr_col_ind_B,           \
+                                                    const TTYPE*         bsr_val_B,               \
+                                                    const TTYPE*         beta,                    \
+                                                    const ITYPE*         bsr_row_ptr_D,           \
+                                                    const JTYPE*         bsr_col_ind_D,           \
+                                                    const TTYPE*         bsr_val_D,               \
+                                                    const ITYPE*         bsr_row_ptr_C,           \
+                                                    JTYPE*               bsr_col_ind_C,           \
+                                                    TTYPE*               bsr_val_C,               \
+                                                    rocsparse_index_base base_A,                  \
+                                                    rocsparse_index_base base_B,                  \
+                                                    rocsparse_index_base base_C,                  \
+                                                    rocsparse_index_base base_D);                 \
+    template void host_csrgemm_nnz<TTYPE, ITYPE, JTYPE>(JTYPE                M,                   \
+                                                        JTYPE                N,                   \
+                                                        JTYPE                K,                   \
+                                                        const TTYPE*         alpha,               \
+                                                        const ITYPE*         csr_row_ptr_A,       \
+                                                        const JTYPE*         csr_col_ind_A,       \
+                                                        const ITYPE*         csr_row_ptr_B,       \
+                                                        const JTYPE*         csr_col_ind_B,       \
+                                                        const TTYPE*         beta,                \
+                                                        const ITYPE*         csr_row_ptr_D,       \
+                                                        const JTYPE*         csr_col_ind_D,       \
+                                                        ITYPE*               csr_row_ptr_C,       \
+                                                        ITYPE*               nnz_C,               \
+                                                        rocsparse_index_base base_A,              \
+                                                        rocsparse_index_base base_B,              \
+                                                        rocsparse_index_base base_C,              \
+                                                        rocsparse_index_base base_D);             \
+    template void host_csrgemm<TTYPE, ITYPE, JTYPE>(JTYPE                M,                       \
+                                                    JTYPE                N,                       \
+                                                    JTYPE                L,                       \
+                                                    const TTYPE*         alpha,                   \
+                                                    const ITYPE*         csr_row_ptr_A,           \
+                                                    const JTYPE*         csr_col_ind_A,           \
+                                                    const TTYPE*         csr_val_A,               \
+                                                    const ITYPE*         csr_row_ptr_B,           \
+                                                    const JTYPE*         csr_col_ind_B,           \
+                                                    const TTYPE*         csr_val_B,               \
+                                                    const TTYPE*         beta,                    \
+                                                    const ITYPE*         csr_row_ptr_D,           \
+                                                    const JTYPE*         csr_col_ind_D,           \
+                                                    const TTYPE*         csr_val_D,               \
+                                                    const ITYPE*         csr_row_ptr_C,           \
+                                                    JTYPE*               csr_col_ind_C,           \
+                                                    TTYPE*               csr_val_C,               \
+                                                    rocsparse_index_base base_A,                  \
+                                                    rocsparse_index_base base_B,                  \
+                                                    rocsparse_index_base base_C,                  \
                                                     rocsparse_index_base base_D);
 
 #define INSTANTIATE_IJT_2(ITYPE, JTYPE, TTYPE)                                                     \

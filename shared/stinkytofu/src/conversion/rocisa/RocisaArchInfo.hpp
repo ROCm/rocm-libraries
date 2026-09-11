@@ -33,6 +33,11 @@
 #include "Gfx1250RocisaArchInfo.hpp"
 #endif
 
+// GFX1250V0
+#ifdef STINKYTOFU_ARCH_GFX1250V0
+#include "Gfx1250v0RocisaArchInfo.hpp"
+#endif
+
 /* End of architecture-specific ArchInfo headers */
 
 namespace {

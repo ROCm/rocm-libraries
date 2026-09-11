@@ -146,6 +146,7 @@ Datatypes:
         rocsparse_itilu0_alg_async_inplace: 1
         rocsparse_itilu0_alg_async_split: 2
         rocsparse_itilu0_alg_sync_split: 3
+        rocsparse_itilu0_alg_sync_split_fusion: 4
   - rocsparse_sddmm_alg:
       bases: [c_int ]
       attr:
@@ -172,6 +173,16 @@ Datatypes:
       bases: [c_int ]
       attr:
         rocsparse_sptrsv_alg_default: 0
+  - rocsparse_solve_mode:
+      bases: [c_int ]
+      attr:
+        rocsparse_solve_mode_triangular: 0
+        rocsparse_solve_mode_diagonal: 1
+  - rocsparse_diagonal_modifier:
+      bases: [c_int ]
+      attr:
+        rocsparse_diagonal_modifier_none: 0
+        rocsparse_diagonal_modifier_absolute: 1
   - rocsparse_spitsv_alg:
       bases: [c_int ]
       attr:
@@ -617,6 +628,8 @@ Arguments:
   - skip_hardware: c_char*32
   - host_memory_gb: c_uint
   - device_memory_gb: c_uint
+  - solve_mode: rocsparse_solve_mode
+  - diagonal_modifier: rocsparse_diagonal_modifier
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -734,6 +747,8 @@ Defaults:
   dense_to_sparse_alg: rocsparse_dense_to_sparse_alg_default
   gtsv_interleaved_alg: rocsparse_gtsv_interleaved_alg_default
   gpsv_interleaved_alg: rocsparse_gpsv_interleaved_alg_default
+  solve_mode: rocsparse_solve_mode_triangular
+  diagonal_modifier: rocsparse_diagonal_modifier_none
   matrix: rocsparse_matrix_random
   matrix_init_kind: rocsparse_matrix_init_kind_default
   unit_check: 1

@@ -141,3 +141,119 @@ TEST(Test{{ op.frontend.attributes_class }}, SetTensorsConstRef)
     EXPECT_NE({{ tensor.camel_name }}Tensor, nullptr);
 {% endfor %}
 }
+
+{% if op.frontend.all_tensors %}
+TEST(Test{{ op.frontend.attributes_class }}, LogicalAndStrictEquality)
+{
+    {{ op.frontend.attributes_class }} attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attr1", df, value) }}
+{% elif df.is_mode or df.is_enum %}
+{% if df.effective_frontend_type and df.test_enum_value %}
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attr1", df, value) }}
+{% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attr1", df, value) }}
+{% endif %}
+{% endfor %}
+{% for tensor in op.frontend.all_tensors %}
+{% set pascal = tensor.name | replace('_', ' ') | title | replace(' ', '') %}
+    auto {{ tensor.camel_name }}1 = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}1->set_uid({{ loop.index }}).set_name("{{ pascal }}").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}1);
+{% endfor %}
+
+    {{ op.frontend.attributes_class }} attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+    {{ assign_frontend_data_field("attr2", df, value) }}
+{% elif df.is_mode or df.is_enum %}
+{% if df.effective_frontend_type and df.test_enum_value %}
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+    {{ assign_frontend_data_field("attr2", df, value) }}
+{% endif %}
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+    {{ assign_frontend_data_field("attr2", df, value) }}
+{% endif %}
+{% endfor %}
+{% for tensor in op.frontend.all_tensors %}
+{% set pascal = tensor.name | replace('_', ' ') | title | replace(' ', '') %}
+    auto {{ tensor.camel_name }}2 = std::make_shared<TensorAttributes>();
+    {{ tensor.camel_name }}2->set_uid({{ loop.index }}).set_name("{{ pascal }}").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.{{ tensor.effective_setter_name }}({{ tensor.camel_name }}2);
+{% endfor %}
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+{% set first_tensor = op.frontend.all_tensors[0] %}
+{% set first_pascal = first_tensor.name | replace('_', ' ') | title | replace(' ', '') %}
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatch{{ first_pascal }} = std::make_shared<TensorAttributes>();
+    structuralMismatch{{ first_pascal }}->set_uid(9999).set_name("Mismatched{{ first_pascal }}");
+    attr2.{{ first_tensor.effective_setter_name }}(structuralMismatch{{ first_pascal }});
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.{{ first_tensor.effective_setter_name }}({{ first_tensor.camel_name }}2); // Revert
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+{% set value = '{' ~ (op.test_data.field_values.get(df.name, [1, 1]) | join(', ')) ~ '}' %}
+
+    // {{ df.name }} mismatch: semantic, must fail both checks
+    {{ assign_frontend_data_field("attr2", df, "std::vector<int64_t>{}") }}
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    {{ assign_frontend_data_field("attr2", df, value) }} // Revert
+{% elif (df.is_mode or df.is_enum) and df.effective_frontend_type and df.test_enum_value and df.test_alt_enum_value %}
+{% set value = df.effective_frontend_type ~ '::' ~ df.test_enum_value %}
+{% set alt_value = df.effective_frontend_type ~ '::' ~ df.test_alt_enum_value %}
+
+    // {{ df.name }} mismatch: semantic, must fail both checks
+    {{ assign_frontend_data_field("attr2", df, alt_value) }}
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    {{ assign_frontend_data_field("attr2", df, value) }} // Revert
+{% elif df.type == "bool" %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, false) %}
+
+    // {{ df.name }} mismatch: semantic, must fail both checks
+    {{ assign_frontend_data_field("attr2", df, (not value) | lower) }}
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    {{ assign_frontend_data_field("attr2", df, value | lower) }} // Revert
+{% elif df.is_scalar %}
+{% set value = df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0) %}
+
+    // {{ df.name }} mismatch: semantic, must fail both checks
+    {{ assign_frontend_data_field("attr2", df, (value | float + 1) if df.type == "scalar_float" else (value | int + 1)) }}
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    {{ assign_frontend_data_field("attr2", df, value) }} // Revert
+{% endif %}
+{% endfor %}
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatch{{ first_pascal }} = std::make_shared<TensorAttributes>();
+    logicalMatch{{ first_pascal }}
+        ->set_uid(555) // Diverges from attr1's {{ first_tensor.camel_name }}1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's {{ first_tensor.camel_name }}1 ("{{ first_pascal }}")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.{{ first_tensor.effective_setter_name }}(logicalMatch{{ first_pascal }});
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}
+{% endif %}

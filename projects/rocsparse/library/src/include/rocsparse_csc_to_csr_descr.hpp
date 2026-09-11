@@ -45,10 +45,16 @@ namespace rocsparse
     static inline void build_csr_descr_from_csc(const _rocsparse_mat_descr& csc_descr,
                                                 _rocsparse_mat_descr&       csr_descr)
     {
-        csr_descr           = csc_descr;
-        csr_descr.fill_mode = (csc_descr.fill_mode == rocsparse_fill_mode_lower)
-                                  ? rocsparse_fill_mode_upper
-                                  : rocsparse_fill_mode_lower;
+        csr_descr = csc_descr;
+        switch(csc_descr.fill_mode)
+        {
+        case rocsparse_fill_mode_lower:
+            csr_descr.fill_mode = rocsparse_fill_mode_upper;
+            break;
+        case rocsparse_fill_mode_upper:
+            csr_descr.fill_mode = rocsparse_fill_mode_lower;
+            break;
+        }
     }
 
     //

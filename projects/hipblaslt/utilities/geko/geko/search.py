@@ -25,14 +25,15 @@ from threading import Lock
 from pathlib import Path
 from typing import Sequence, List
 from geko import bench
+from geko.bench.utils import is_built_custom_library
 from geko.constants import GEMM_LOG_FIELDS, GEMM_FIELDS
 from geko.utils import parse_devices
 from geko.concurrency.runner import Runner, Worker
 
 logger = logging.getLogger("GEKO")
 
-
 def _normalize_compute_type(v: str) -> str:
+    # Normalize legacy values so downstream joins always use c_* compute_type keys.
     v = str(v)
     return v if v.startswith("c_") else f"c_{v}"
 
@@ -134,11 +135,11 @@ def configure(
     return configs
 
 
-# TODO take also custom library
 def run(
     hipblaslt_path: str | Path,
     configs: List[dict],
     output_dir: str | Path,
+    custom_lib_dir: str | Path | None = None,
     devices: Sequence[int] | None = None,
     bench_freq: bool = False,
     max_chunk_size: int = 25,
@@ -151,6 +152,9 @@ def run(
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
         configs (List[dict]): List of GEMM benchmarking configurations.
+        custom_lib_dir (str | Path | None, optional): Optional built custom
+            library directory used by hipblaslt-bench for dense search.
+            Defaults to None.
         devices (Sequence[int], optional): List of GPU device IDs to use for
             optimization. Defaults to None, which is interpreted as all available 
             devices [0, 1, 2, 3, 4, 5, 6, 7].
@@ -161,7 +165,8 @@ def run(
             Defaults to 25.
 
     Raises:
-        FileNotFoundError: If hipBLASLt path does not exist or max_chunk_size is invalid.
+        FileNotFoundError: If hipBLASLt path does not exist.
+        ValueError: If max_chunk_size is invalid or custom_lib_dir is not built.
 
     Note:
         - Uses multiprocessing and threading for parallel optimization.
@@ -179,6 +184,14 @@ def run(
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
+
+    if custom_lib_dir is not None:
+        custom_lib_dir = Path(custom_lib_dir)
+        if not is_built_custom_library(custom_lib_dir):
+            raise ValueError(
+                f"Custom library in '{custom_lib_dir}' is not built. "
+                "Expected files matching 'library/**/TensileLibrary_lazy_gfx*.dat'."
+            )
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +271,7 @@ def run(
                     hipblaslt_path,
                     self.bench_file,
                     self.log_file,
+                    custom_lib_dir=custom_lib_dir,
                     devices=[self.device],
                     cache=False,
                     bench_freq=bench_freq,

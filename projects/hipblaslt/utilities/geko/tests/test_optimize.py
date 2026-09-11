@@ -35,7 +35,7 @@ from geko.pipeline import run_optimize
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# Configure step matches test_configure.py; optimize can take much longer (Tensile / GA).
+# Configure step matches test_configure.py; optimize can take much longer (Tensile / Ductile).
 _CONFIGURE_TIMEOUT_S = 600
 _OPTIMIZE_TIMEOUT_S = 7200
 

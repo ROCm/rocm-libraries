@@ -72,6 +72,7 @@ BenchmarkProblems:
     - # BenchmarkProblemSizeGroup
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # Two MI shapes: 16x16x128 and 32x32x64, each with 2x2 wave-group
         # (matching valid MX.yaml shapes for gfx950)
