@@ -92,7 +92,9 @@ def _spec(idx: int):
         )
         return (
             "32c",
-            DirectConv32cSpec(problem=p, block_q=32, block_groups=4, double_buffer=True),
+            DirectConv32cSpec(
+                problem=p, block_q=32, block_groups=4, double_buffer=True
+            ),
             "gfx950",
         )
     if idx == 8:
