@@ -41,10 +41,12 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -395,10 +397,12 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -749,10 +753,12 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -998,10 +1004,12 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -1352,10 +1360,11 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -1706,10 +1715,11 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -2060,10 +2070,11 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = int64_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -2414,10 +2425,11 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+        transform_config_params>
 {
     // Based on value_type = double, output_type = rocprim::int128_t
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
@@ -2768,10 +2780,12 @@ constexpr auto upper_bound_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type, class output_type>
-constexpr auto upper_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto upper_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+        transform_config_params>
 {
     return upper_bound_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
