@@ -184,9 +184,12 @@ KDA (Kimi Delta Attention) and GDN are the same gated delta rule. The operator d
 | KDA | per key channel | a `DK`-wide vector — each state column fades by its own amount |
 | GDN | per (token, head) | one scalar, broadcast across `DK` |
 
-Their functional forms differ too — KDA's gate is `lower_bound * sigmoid(exp(A_log) * (g + dt_bias))`
-and is therefore bounded in `(lower_bound, 0)`; GDN's is `-exp(A_log) * softplus(a + dt_bias)` and is
-**unbounded**. §8 records the consequence.
+Their functional forms differ too. Both are stated in **log space** — the domain of the gate
+value itself, related to §1.2's multiplier by `decay = exp(gate)`, so `0` means no forgetting and
+more negative means faster forgetting. There, KDA's gate is
+`lower_bound * sigmoid(exp(A_log) * (g + dt_bias))`, bounded in `(lower_bound, 0)`; GDN's is
+`-exp(A_log) * softplus(a + dt_bias)`, which is `≤ 0` but **unbounded below** (`g` and `a` are the
+raw per-token inputs, not the gate). §8 records the consequence.
 
 ### 2.2 Why that makes the chunkwise machinery reusable
 
