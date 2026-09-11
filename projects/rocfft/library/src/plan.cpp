@@ -3891,10 +3891,6 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
 }
 #endif
 
-// Shared handler for the Build*MultiDevicePlan function-try-blocks: log the
-// in-flight exception and discard any partial plan state so plan creation can
-// fall back to another path.  `except_what` is null for unknown
-// (non-std::exception) throws.
 void rocfft_plan_t::discard_failed_multi_device_plan(const std::string& calling_func,
                                                      const char*        except_what)
 {
@@ -3957,6 +3953,9 @@ try
         return false;
 
     const auto elem_size = element_size(precision, desc.inArrayType);
+
+    // Past this point any failure must throw (not return false) so that mutated plan's
+    // members are cleared (in a catch block) before attempting an alternative strategy.
 
     // transform contiguous input dims
 
