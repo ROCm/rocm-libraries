@@ -262,6 +262,93 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     EXPECT_GT(scoreFor(256), scoreFor(64));
 }
 
+/// A two-layer artifact, written by the tool and grouped by the runtime.
+///
+/// The adapter's own tests build grouped models by hand, and the trainer's tests check it
+/// writes the fields -- neither says the two agree. This trains one, loads it the way the
+/// runtime does, and asserts the grouping takes effect: candidates outside the group layer 1
+/// chose come back unusable, and inside it layer 2 still orders.
+///
+/// The corpus makes group 1 strictly better than group 0, so layer 1's choice is not a
+/// coin flip, and makes tflops rise with tile_m inside each group, so layer 2 has an
+/// ordering to find that layer 1 alone could not produce.
+TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_grouped");
+
+    const auto csv = dir.path() / "corpus.csv";
+    {
+        std::ofstream out(csv);
+        out << "q.M,kernel.group,kernel.tile_m,tflops\n";
+        for(const int64_t group : {0, 1})
+        {
+            for(const int64_t tileM : {64, 128, 256})
+            {
+                // Enough distinct problems that layer 1 -- fitted on one row per
+                // (problem, group) -- has something to split on. At 25 it early-stopped
+                // into a single constant leaf, scored every candidate alike, and "chose" a
+                // group by tie-breaking on position.
+                for(int row = 0; row < 120; ++row)
+                {
+                    const double m = 1024.0 + (row * 128.0);
+                    const double base = (group == 1) ? 400.0 : 10.0;
+                    out << static_cast<int64_t>(m) << "," << group << "," << tileM << ","
+                        << (base + static_cast<double>(tileM) / 4.0 + m / 4096.0) << "\n";
+                }
+            }
+        }
+    }
+
+    const auto outputDir = dir.path() / "out";
+    const std::string command
+        = std::string(HIPDNN_UHD_GEN_PYTHON) + " -m uhd_gen train"
+          + " --input " + csv.string()
+          + " --features q.M kernel.group kernel.tile_m"
+          + " --group-by-feature kernel.group"
+          // Layer 1 is fitted per (problem, group), so the problem key is required.
+          + " --group-by q.M"
+          + " --target tflops"
+          + " --output-dir " + outputDir.string()
+          + " --name 'uhd_gen grouped test'"
+          + " --num-boost-round 40 --early-stopping 10 1>&2";
+    ASSERT_EQ(std::system(("cd " + std::string(HIPDNN_UHD_GEN_TOOLS_DIR) + " && " + command).c_str()),
+              0);
+
+    const auto path = outputDir / "heuristic.uhd.json";
+    std::ifstream file(path);
+    const auto document = nlohmann::json::parse(file);
+    const auto config = hipdnn_plugin_sdk::ingestor::UhdKernelHeuristic::configFrom(
+        hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(document, path));
+
+    const auto adapter = makeUhdAdapter(config);
+    ASSERT_NE(adapter, nullptr) << "the grouped artifact did not load against its descriptor";
+
+    const FeatureExtractor extractor(config.featuresSignature, config.derived);
+    const auto row = [&](int64_t group, int64_t tileM) {
+        FeatureExtractionContext ctx;
+        ctx.bindQueryVars({{"M", int64_t{2048}}});
+        ctx.bindKernelVars({{"group", group}, {"tile_m", tileM}});
+        return extractor.extract(ctx);
+    };
+
+    // Order matters to nothing here: the adapter groups by the value in the slot, not by
+    // position, so the losing group is listed first deliberately.
+    const auto scores = adapter->scoreBatch({row(0, 256), row(1, 64), row(1, 256), row(0, 64)});
+    ASSERT_EQ(scores.size(), 4U);
+
+    // Group 0 is the worse family, so nothing in it survives layer 1 -- including its
+    // largest tile, which would outrank group 1's smallest under a single flat model.
+    EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity());
+    EXPECT_EQ(scores[3], -std::numeric_limits<double>::infinity());
+
+    // Inside the chosen group layer 2 still ranks, which is the half a group decision alone
+    // cannot supply.
+    EXPECT_TRUE(std::isfinite(scores[1]));
+    EXPECT_TRUE(std::isfinite(scores[2]));
+    EXPECT_GT(scores[2], scores[1]);
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor::uhd
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

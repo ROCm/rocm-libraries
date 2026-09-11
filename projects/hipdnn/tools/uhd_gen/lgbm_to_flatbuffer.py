@@ -25,6 +25,7 @@ import lightgbm as lgb
 # Importing the package puts `_generated/` on sys.path; see uhd_gen/__init__.py.
 import uhd_gen  # noqa: F401
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+from hipdnn_flatbuffers_sdk.data_objects.GbdtGroup import GbdtGroupT
 from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ def convert(
     num_training_samples: int | None = None,
     training_arches: list[str] | None = None,
     model_version: str | None = None,
+    group_by_feature_index: int = -1,
+    group_models: list[tuple[float, "lgb.Booster"]] | None = None,
 ) -> None:
     """Convert LightGBM model to FlatBuffer GbdtModel.
 
@@ -61,6 +64,10 @@ def convert(
         num_training_samples,
         training_arches=training_arches,
         model_version=model_version,
+        group_by_feature_index=group_by_feature_index,
+        groups=None
+        if not group_models
+        else [(value, booster.dump_model()) for value, booster in group_models],
     )
 
     with open(output_path, "wb") as f:
@@ -81,6 +88,8 @@ def build_gbdt_model(
     num_training_samples: int | None = None,
     training_arches: list[str] | None = None,
     model_version: str | None = None,
+    group_by_feature_index: int = -1,
+    groups: list[tuple[float, dict[str, Any]]] | None = None,
 ) -> bytes:
     """Build FlatBuffer GbdtModel from LightGBM model JSON.
 
@@ -117,6 +126,19 @@ def build_gbdt_model(
         model.trainingArches = list(training_arches)
     if model_version:
         model.modelVersion = model_version
+
+    # Layer 2, when the caller trained one ensemble per group. Absent, the artifact is
+    # exactly what this tool has always written and the runtime reads it as single-layer.
+    if groups:
+        model.groupByFeatureIndex = group_by_feature_index
+        model.groups = []
+        for value, group_json in groups:
+            group = GbdtGroupT()
+            group.value = float(value)
+            group.trees = [
+                _build_tree(info["tree_structure"]) for info in group_json["tree_info"]
+            ]
+            model.groups.append(group)
 
     builder = flatbuffers.Builder(1024 * 1024)
     builder.Finish(model.Pack(builder), file_identifier=GBDT_MODEL_FILE_IDENTIFIER)

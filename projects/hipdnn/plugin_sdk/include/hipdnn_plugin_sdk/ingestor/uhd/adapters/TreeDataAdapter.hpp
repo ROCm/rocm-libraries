@@ -70,6 +70,13 @@ public:
 
     double score(const std::vector<double>& features) const override;
 
+    /// Score a whole catalog at once, which is what a grouped model needs.
+    ///
+    /// A single-layer model answers per row, so the base implementation's loop is right for
+    /// it and this override reduces to that. A grouped model cannot: picking the group is a
+    /// decision across rows, and no per-row call can express it.
+    std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override;
+
     UhdAdapterType type() const override
     {
         return UhdAdapterType::TREE_DATA;
@@ -332,6 +339,81 @@ inline double TreeDataAdapter::score(const std::vector<double>& features) const
     // We do NOT multiply by learning_rate again here.
     // The _learningRate field is kept for metadata/documentation purposes only.
     return _baseScore + sum;
+}
+
+inline std::vector<double>
+    TreeDataAdapter::scoreBatch(const std::vector<std::vector<double>>& batch) const
+{
+    const auto groupIndex = _model == nullptr ? -1 : _model->group_by_feature_index();
+    if(_model == nullptr || groupIndex < 0 || _model->groups() == nullptr
+       || _model->groups()->empty())
+    {
+        return IUhdAdapter::scoreBatch(batch);
+    }
+
+    // Layer 1 ranks the groups. Its score for a row stands for the group that row belongs
+    // to, so the group's standing is the best its members achieve -- the same "achievable
+    // when tuned" quantity layer 1 was trained on.
+    const auto slot = static_cast<size_t>(groupIndex);
+    double bestGroupScore = -std::numeric_limits<double>::infinity();
+    double chosenGroup = 0.0;
+    bool chosen = false;
+    for(const auto& row : batch)
+    {
+        if(slot >= row.size())
+        {
+            continue;
+        }
+        const double groupScore = score(row);
+        if(!chosen || groupScore > bestGroupScore)
+        {
+            bestGroupScore = groupScore;
+            chosenGroup = row[slot];
+            chosen = true;
+        }
+    }
+
+    std::vector<double> scores(batch.size(), -std::numeric_limits<double>::infinity());
+    if(!chosen)
+    {
+        return scores;
+    }
+
+    // Layer 2 ranks within the chosen group. Everything outside it keeps -infinity, which
+    // rankScored already treats as unusable, so a rejected group sorts last without needing
+    // a new concept -- and cannot be picked by a tie.
+    const hipdnn_flatbuffers_sdk::data_objects::GbdtGroup* within = nullptr;
+    for(const auto* candidate : *_model->groups())
+    {
+        if(candidate != nullptr && candidate->value() == chosenGroup)
+        {
+            within = candidate;
+            break;
+        }
+    }
+
+    for(size_t i = 0; i < batch.size(); ++i)
+    {
+        if(slot >= batch[i].size() || batch[i][slot] != chosenGroup)
+        {
+            continue;
+        }
+        // A group layer 1 picked but layer 2 does not describe: rank it by layer 1 rather
+        // than discarding it, so a partially trained artifact degrades instead of refusing
+        // the only group it chose.
+        if(within == nullptr || within->trees() == nullptr)
+        {
+            scores[i] = score(batch[i]);
+            continue;
+        }
+        double sum = 0.0;
+        for(const auto* tree : *within->trees())
+        {
+            sum += evaluateTree(tree, batch[i]);
+        }
+        scores[i] = _baseScore + sum;
+    }
+    return scores;
 }
 
 inline double TreeDataAdapter::evaluateTree(const fb::GbdtTree* tree, const std::vector<double>& features)

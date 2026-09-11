@@ -74,6 +74,22 @@ public:
         return *this;
     }
 
+    /// Add layer 2 for one group value (RFC 0019 grouped tree_data).
+    ///
+    /// Without a grouping index the model stays single-layer, so a fixture opts in by
+    /// naming both: which feature slot carries the group, and the trees for each value.
+    GbdtModelTestBuilder& setGroupByFeatureIndex(int32_t index)
+    {
+        _groupByFeatureIndex = index;
+        return *this;
+    }
+
+    GbdtModelTestBuilder& addGroup(double value, const std::vector<TreeSpec>& trees)
+    {
+        _groups.emplace_back(value, trees);
+        return *this;
+    }
+
     GbdtModelTestBuilder& addTree(const TreeSpec& tree)
     {
         _trees.push_back(tree);
@@ -123,8 +139,39 @@ public:
             versionOffset = fbb.CreateString(_modelVersion);
         }
 
+        // Groups are serialised before GbdtModelBuilder opens: nested tables cannot be
+        // created while a table is under construction.
+        std::vector<flatbuffers::Offset<fb::GbdtGroup>> groupOffsets;
+        for(const auto& [value, trees] : _groups)
+        {
+            std::vector<flatbuffers::Offset<fb::GbdtTree>> inner;
+            for(const auto& tree : trees)
+            {
+                inner.push_back(fb::CreateGbdtTreeDirect(fbb,
+                                                         &tree.featureIndices,
+                                                         &tree.thresholds,
+                                                         &tree.leftChildren,
+                                                         &tree.rightChildren,
+                                                         &tree.leafValues,
+                                                         &tree.defaultLeft));
+            }
+            groupOffsets.push_back(fb::CreateGbdtGroup(fbb, value, fbb.CreateVector(inner)));
+        }
+        const auto groupsVector
+            = groupOffsets.empty() ? 0 : fbb.CreateVector(groupOffsets).o;
+
         fb::GbdtModelBuilder modelBuilder(fbb);
         modelBuilder.add_trees(treesVector);
+        if(_groupByFeatureIndex >= 0)
+        {
+            modelBuilder.add_group_by_feature_index(_groupByFeatureIndex);
+        }
+        if(groupsVector != 0)
+        {
+            modelBuilder.add_groups(
+                flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fb::GbdtGroup>>>(
+                    groupsVector));
+        }
         modelBuilder.add_num_features(_numFeatures);
         modelBuilder.add_features_hash(hashOffset);
         modelBuilder.add_base_score(_baseScore);
@@ -165,6 +212,8 @@ private:
     double _baseScore = 0.0;
     double _learningRate = 1.0;
     std::vector<TreeSpec> _trees;
+    int32_t _groupByFeatureIndex = -1;
+    std::vector<std::pair<double, std::vector<TreeSpec>>> _groups;
     std::vector<std::string> _trainingArches;
     std::string _modelVersion;
 };

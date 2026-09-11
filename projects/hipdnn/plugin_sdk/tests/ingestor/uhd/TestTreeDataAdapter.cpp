@@ -1167,3 +1167,91 @@ TEST_F(TestTreeDataAdapter, AWellFormedTreeStillLoads)
     ASSERT_NE(adapter, nullptr);
     EXPECT_GT(adapter->score({2.0}), 0.0);
 }
+
+// ---- Grouped models: solver first, then kernel, inside one artifact -------------------
+
+namespace
+{
+/// Slot 0 carries the group; slot 1 is what layer 2 splits on.
+GbdtModelBuilder groupedBuilder()
+{
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2).setFeaturesHash("sha256:grouped").setGroupByFeatureIndex(0);
+    // Layer 1: a stump on slot 0, so group 1.0 outranks group 0.0.
+    GbdtModelBuilder::TreeSpec layerOne;
+    layerOne.featureIndices = {0, 0, 0};
+    layerOne.thresholds = {0.5, 0.0, 0.0};
+    layerOne.leftChildren = {1, -1, -1};
+    layerOne.rightChildren = {2, -1, -1};
+    layerOne.leafValues = {0.0, 1.0, 9.0};
+    layerOne.defaultLeft = {1, 1, 1};
+    builder.addTree(layerOne);
+    // Layer 2 per group: a constant, so a score identifies which ensemble ran.
+    builder.addGroup(0.0, {makeLeafTree(100.0)});
+    builder.addGroup(1.0, {makeLeafTree(200.0)});
+    return builder;
+}
+} // namespace
+
+TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
+{
+    const auto buffer = groupedBuilder().build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    // Group 1.0 wins layer 1 (leaf 9.0 against 1.0), so only its rows keep a score.
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}});
+    ASSERT_EQ(scores.size(), 3u);
+    EXPECT_DOUBLE_EQ(scores[1], 200.0);
+    EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity());
+    EXPECT_EQ(scores[2], -std::numeric_limits<double>::infinity());
+}
+
+TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
+{
+    // Only group 0.0 is present, so layer 1 has one choice and layer 2 must be the group's
+    // own ensemble rather than layer 1's score.
+    const auto buffer = groupedBuilder().build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {0.0, 1.0}});
+    ASSERT_EQ(scores.size(), 2u);
+    EXPECT_DOUBLE_EQ(scores[0], 100.0);
+    EXPECT_DOUBLE_EQ(scores[1], 100.0);
+}
+
+TEST(TestTreeDataAdapterGrouped, ScoreStillAnswersWithLayerOne)
+{
+    // A single row cannot express a group decision, so score() gives the coarse answer
+    // rather than a wrong one -- and callers that only rank engines still get a number.
+    const auto buffer = groupedBuilder().build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
+    ASSERT_NE(adapter, nullptr);
+
+    EXPECT_DOUBLE_EQ(adapter->score({1.0, 0.0}), 9.0);
+    EXPECT_DOUBLE_EQ(adapter->score({0.0, 0.0}), 1.0);
+}
+
+TEST(TestTreeDataAdapterGrouped, AnUngroupedModelBatchesExactlyAsItScores)
+{
+    // The compatibility claim: every artifact written before grouping existed carries no
+    // grouping index, so scoreBatch must reduce to the per-row loop.
+    GbdtModelBuilder builder;
+    builder.setNumFeatures(2).setFeaturesHash("sha256:plain").addTree(makeLeafTree(3.5));
+    const auto buffer = builder.build();
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:plain");
+    ASSERT_NE(adapter, nullptr);
+
+    const std::vector<std::vector<double>> rows = {{0.0, 0.0}, {1.0, 2.0}};
+    const auto batched = adapter->scoreBatch(rows);
+    ASSERT_EQ(batched.size(), rows.size());
+    for(size_t i = 0; i < rows.size(); ++i)
+    {
+        EXPECT_DOUBLE_EQ(batched[i], adapter->score(rows[i]));
+    }
+}

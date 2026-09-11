@@ -516,8 +516,11 @@ private:
             // candidate, so they are evaluated once and the kernel slots overwritten.
             const std::vector<double> sharedRow = _extractor->extractSharedRow(ctx);
 
-            std::vector<Ranked> scored;
-            scored.reserve(catalog.entries.size());
+            // Rows first, then one scoring call. A grouped model decides which group wins by
+            // comparing candidates against each other, which no per-row call can express; for a
+            // single-layer model the adapter's default scoreBatch is the loop this replaces.
+            std::vector<std::vector<double>> rows;
+            rows.reserve(catalog.entries.size());
             for(const auto& entry : catalog.entries)
             {
                 ctx.clearKernelVars();
@@ -525,7 +528,16 @@ private:
 
                 std::vector<double> row = sharedRow;
                 _extractor->extractKernelInto(ctx, row);
-                scored.push_back({scoreCandidate(row), &entry});
+                rows.push_back(std::move(row));
+            }
+
+            const auto raw = _adapter->scoreBatch(rows);
+
+            std::vector<Ranked> scored;
+            scored.reserve(catalog.entries.size());
+            for(size_t index = 0; index < catalog.entries.size(); ++index)
+            {
+                scored.push_back({scoreFromRaw(raw[index]), &catalog.entries[index]});
             }
 
             const auto outOfRange = static_cast<size_t>(
@@ -669,7 +681,14 @@ private:
     /// the one caller that reads the value is estimateTflops, which reports 0 for this case too.
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
-        const double raw = _adapter->score(row);
+        return scoreFromRaw(_adapter->score(row));
+    }
+
+    /// The half of scoring that does not touch the adapter: transform inversion, the range
+    /// check, orientation. Split out so a batched ranking applies exactly the same rules to
+    /// a score the adapter produced for a whole catalog at once.
+    CandidateScore scoreFromRaw(const double raw) const
+    {
         const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
 
         // `recovered` is a physical quantity before any orientation is applied: throughput for
