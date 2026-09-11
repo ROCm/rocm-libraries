@@ -38,6 +38,8 @@ struct InsertWaitAluOptions {
     bool enableESM2TrackValuVsrc = false;
     /// Count a CSMACC producer's followers across the VA order, and retire it at the shared floor.
     bool sharedOrderCountFollowers = false;
+    /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
+    bool xdlCountFromNextWmma = false;
 };
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
