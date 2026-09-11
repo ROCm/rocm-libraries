@@ -51,9 +51,10 @@
 #     numIter%G groups getting an extra iteration). Each group is verified
 #     against its *own* chunk rather than aggregated, so a group landing on the
 #     wrong K slice fails. The group index is fed from the grid z axis rather
-#     than split out of workgroup y as production does; see build_kernel. The
-#     GSU configs run without a cluster, since the default launch does not give
-#     a cluster's workgroups a shared GSU group; see the GSU block in CONFIGS.
+#     than split out of workgroup y as production does; see build_kernel. Both
+#     workgroup mappings are covered: ClusterDim [1,1] for the default mapping,
+#     where a cluster's workgroups cannot share a group, and GSU x cluster for
+#     GSUWGMRR=1, where they can; see the GSU block in CONFIGS.
 #   - Non-power-of-2 MacroTile (e.g. 384 for A/B, 192/96 for MX scales): exercises
 #     MT offset, non-POT gl2ncc (vectorStaticDivideAndRemainder), and non-POT
 #     perpendicular/coalesced extents. DepthU remains a multiple of MatrixInstK.
@@ -409,20 +410,22 @@ CONFIGS = [
     # slice of K fails. DepthU stays a power of 2 and the thread count a whole
     # number of waves (see the asserts in build_kernel).
     #
-    # These all run ClusterDim [1,1], deliberately. Pairing GSU with a cluster
-    # here would assert a fan-out that the default launch does not produce: the
-    # cluster owns ClusterDim[1] *consecutive raw* WorkGroup1 values (the WG-id
-    # decode sets WorkGroup1 = cluster_y*nwg_y + wg_y), and GSUOn.graWorkGroup
-    # then splits that raw value with WorkGroup1 /= GSU, GSUSumIdx = wg1 % GSU.
-    # With GlobalSplitUWorkGroupMappingRoundRobin off -- the default -- GSU is
-    # therefore the *fast* axis of raw y, so cluster peers get different
-    # GSUSumIdx and their post-divide WorkGroup1 collapses onto one tile. The
-    # cooperative slot is taken from that divided value (WorkGroup{i} % ClusterDim
-    # in calculateStartAddr), so peers would compute the same slot and prefetch
-    # the same slice. Only GSUWGMRR=1 makes a cluster share one group, which is
-    # the arrangement a z-driven group index reproduces. Keeping these at [1,1]
-    # tests the chunk math on a launch shape that is actually generated; the
-    # cooperative fan-out is covered on its own by the cluster configs above. ----
+    # Whether a cluster may be paired with GSU depends on the workgroup mapping,
+    # so both arrangements are covered. A cluster owns ClusterDim[1] *consecutive
+    # raw* WorkGroup1 values (the WG-id decode sets WorkGroup1 = cluster_y*nwg_y +
+    # wg_y) and GSUOn.graWorkGroup then splits that raw value. With
+    # GlobalSplitUWorkGroupMappingRoundRobin off -- the default -- the split is
+    # WorkGroup1 /= GSU, GSUSumIdx = wg1 % GSU, so GSU is the *fast* axis of raw
+    # y: cluster peers land on different groups and their divided WorkGroup1
+    # collapses onto one tile, which would make the cooperative slot
+    # (WorkGroup{i} % ClusterDim in calculateStartAddr) repeat across peers. The
+    # configs in this block therefore run ClusterDim [1,1]. GSUWGMRR=1 instead
+    # splits GSUSumIdx = wg1 / NumWorkGroups1, making GSU the *slow* axis, so a
+    # cluster shares one group and spans distinct tiles; that is the arrangement
+    # the GSU x cluster block below covers. The prefetch itself only ever consumes
+    # GSUSumIdx -- neither calculateGSUIterOffset nor calculateLoopNumIterOffsetGsu
+    # looks at the mapping bit -- so what the mapping changes is which workgroups
+    # cooperate, not the chunk arithmetic. ----
     # gsu=1: the identity case. The GSU paths are emitted but there is one group,
     # so startIter==0 and the stride is unscaled -- guards the GSU codegen against
     # perturbing a single-group launch.
@@ -467,6 +470,37 @@ CONFIGS = [
     # only ever have one side that way).
     GL2Config("gsu4_tlu", [_A(True, 256), _B(True, 256)], cluster=(1, 1),
               gsu=4, k_iters=12),
+
+    # ---- GSU x workgroup cluster, i.e. the GSUWGMRR=1 launch where a cluster's
+    # workgroups share one group and span distinct tiles (see the mapping note
+    # above). Holding the group constant across the cluster is what this harness
+    # already does by driving it from grid z, so these configs model that launch
+    # directly. They are not a second copy of the chunk math: the per-iteration
+    # increment is built from the *cluster-folded* leading extent (mt *
+    # ClusterDim, via _data_coal/free_dim_size), so the chunk offset startIter*inc
+    # is scaled by the cluster, and the folded mt_tiles block has to translate as
+    # one piece while the cooperative threads still tile it exactly once. ----
+    # Interleaved chunks on a plain [2,2]: mixed layouts so the cluster-scaled
+    # increment is checked on both K axes (A's stride grows with the cluster, B's
+    # non-TLU K increment stays DepthU*bpe).
+    GL2Config("gsu4_interleaved_cluster", [_A(True, 256), _B(False, 256)],
+              cluster=(2, 2), gsu=4, k_iters=10),
+    # Widest fan-out [4,4] with contiguous chunks and an uneven split: 10
+    # iterations over 3 groups is q=3 r=1, so group 0 owns 4 and starts at 0 while
+    # groups 1/2 own 3 and start at 4/7. 4096 cooperative threads share one group
+    # here, and A's increment is folded over 4 macro-tiles.
+    GL2Config("gsu3_contiguous_cluster44", [_A(True, 256), _B(False, 256)],
+              cluster=(4, 4), gsu=3, gsuc=True, k_iters=10),
+    # Non-POT cluster extents on both axes with the chunk offset live: every
+    # scalarStaticRemainder in the fan-out takes the non-POT path while the
+    # footprint is translated onto group 1's chunk (7 = 2*3 + 1, so starts 0/4).
+    GL2Config("gsu2_cluster_nonpot", [_A(False, 384), _B(False, 384)],
+              cluster=(3, 3), gsu=2, gsuc=True, k_iters=7),
+    # MX scales under GSU x cluster: MXSA/MXSB derive their increment from the
+    # cluster-folded free dim (SizeFree*(DepthU/MXBlock)) while A/B use their own
+    # folded stride, so one shared chunk shift across tensors fails here.
+    GL2Config("gsu2_mx_cluster", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), gsu=2, gsuc=True, k_iters=7),
 ]
 
 
