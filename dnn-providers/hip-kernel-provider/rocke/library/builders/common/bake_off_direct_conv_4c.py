@@ -53,6 +53,7 @@ def main() -> int:
 
     if args.isa is not None:
         from rocke.core.arch import arch_from_isa
+
         arch = arch_from_isa(args.isa) or args.arch
         kernel = build_direct_conv_4c(spec, arch=arch)
         artifact = compile_kernel(kernel, isa=args.isa)
