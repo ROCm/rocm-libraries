@@ -139,10 +139,10 @@ Key derived properties:
 
 ## Generic Dispatcher — `DirectConvSpec`
 
-`DirectConvSpec` is the recommended entry point when writing new benchmarks or
-dispatch code.  It accepts any `cpg` that is a positive multiple of 4 and
-selects the matching specialised spec internally.
-
+`DirectConvSpec` is a convenient entry point when writing new benchmarks or dispatch
+code. It accepts any `cpg` that is a positive multiple of 4 and builds a parametric
+kernel using `mfma_f32_16x16x16_f16` with a runtime K-atom loop.
+For the specialised fixed-`cpg` kernels (4/8/16/32), use the corresponding `DirectConv*cSpec` classes.
 ```python
 from rocke.instances.common.conv_direct_grouped import (
     DirectConvProblem,
