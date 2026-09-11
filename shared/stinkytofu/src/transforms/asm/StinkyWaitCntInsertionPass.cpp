@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -125,6 +126,27 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
     }
 
+    /// Record on the emitted s_wait_dscnt that it covers the loop-carried WAR its
+    /// anchor names. Nothing else in the output says why a rotating LDS buffer
+    /// needs draining here: the reads it guards carry a different memtoken, one
+    /// trip back, so the assembly alone gives a reader no way to reconstruct it.
+    ///
+    /// Always accurate: computeRequiredWaits takes the MIN over every dependency
+    /// at the anchor, so a ds wait emitted here is at least as strict as the WAR
+    /// scan asked for, whichever dep ended up binding.
+    void annotateLoopCarriedWar(StinkyInstruction* wait, const StinkyInstruction* anchor) {
+        const auto* war = anchor ? anchor->getModifier<LoopCarriedWarData>() : nullptr;
+        if (war == nullptr || war->tokens.empty()) return;
+
+        std::string text = "covers loop-carried WAR on LDS";
+        for (size_t i = 0; i < war->tokens.size(); ++i) {
+            if (i > 0) text += ",LDS";
+            text += std::to_string(war->tokens[i]);
+        }
+        text += " (" + std::to_string(war->distance) + " trip back)";
+        wait->addModifier<CommentData>(CommentData{text});
+    }
+
     void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,
                      const WaitCountSpec& spec) {
         if (spec.dsCount != WaitCountSpec::kUnused) {
@@ -133,6 +155,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitCntData d;
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
+            annotateLoopCarriedWar(w, anchor);
         }
         if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);

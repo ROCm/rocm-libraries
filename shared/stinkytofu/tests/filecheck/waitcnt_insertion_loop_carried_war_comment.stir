@@ -1,0 +1,43 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --emit-asm --preserve-comments
+#
+# The emitted s_wait_dscnt records which loop-carried WAR it covers.
+#
+# Same loop as waitcnt_insertion_loop_carried_war_annotated.stir, checked at the
+# assembly level instead of the IR level: mod.loopcarriedwar does not survive
+# into the .s, so without this comment nothing in the output explains why a
+# rotating LDS buffer needs draining here. The reads being guarded carry a
+# different memtoken and ran a trip earlier, so a reader of the assembly alone
+# has no way to reconstruct the reason.
+#
+# The comment rides only the wait at the annotated anchor. The later
+# s_wait_dscnt 1, which exists for the wmma's operands, must stay bare -- see
+# the CHECK-NOT below.
+#
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt 2
+# CHECK-SAME: covers loop-carried WAR on LDS0 (1 trip back)
+# CHECK-NEXT: s_barrier_signal
+# CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: tensor_load_to_lds
+# An unrelated drain stays unannotated.
+# CHECK-NEXT: s_wait_dscnt 1
+# CHECK-NOT: covers loop-carried WAR
+# CHECK: v_wmma_f32_16x16x32_bf16
+
+st.func @waitcnt_insertion_loop_carried_war_comment() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
