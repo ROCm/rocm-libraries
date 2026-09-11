@@ -1071,7 +1071,13 @@ class FmhaBwdApiPool:
             per_dtypes = ""
             for i_dtype, (dtype, pool_by_dtype) in enumerate(pool_by_arch.items()):
                 per_hdim_case = ""
-                for i_hdim, (hdim, pool_by_hdim) in enumerate(pool_by_dtype.items()):
+                # Ascending hdim, because hdim_cond emits `hdim_q <= N` and a
+                # smaller hdim also satisfies every larger bound. Insertion
+                # order happened to be ascending until a tile was added whose
+                # headdim bucket was not reached in ascending order, which put
+                # `<= 64` ahead of `<= 32` and sent hdim 32 shapes to the padded
+                # 64 kernel.
+                for i_hdim, (hdim, pool_by_hdim) in enumerate(sorted(pool_by_dtype.items())):
                     traits = sorted(pool_by_hdim, key=self.max_seq_q_sort_key)
                     inners = self._api_inners(traits)
                     per_hdim_case += FMHA_BWD_API_COND_STATEMENT(
