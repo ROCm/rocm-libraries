@@ -3146,6 +3146,17 @@
              "IF_TENSORLoadToLds",
              2},
 
+                                    {"TensorStoreFromLds",
+             "TensorStoreFromLds: Stores tensor data from LDS to global",
+             4,
+             false,
+             "Tensor Memory",
+             false,
+             false,
+             false,
+             "IF_TENSORStoreFromLds",
+             2},
+
                                     {"SLoadB32",
              "SLoadB32",
              2,
