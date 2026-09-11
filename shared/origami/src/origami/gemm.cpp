@@ -280,13 +280,13 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
 
   // Batch case
   if (batch > 1) {
-    auto numMTs_total = numMTs * batch;
+    const size_t numMTs_total = numMTs * batch;
     if (numMTs == 1 || numMTs_total <= NUM_XCD)
       return {0, 0, 0, 1};
-    else
-      return {0, (cus_per_xcd / numMTs) * numMTs, NUM_XCD,
-        grid_m > 1 ?
-        std::min(static_cast<int32_t>(std::ceil(std::sqrt(cus_per_xcd))), static_cast<int32_t>(grid_n)) : 1};
+    const int32_t default_wgm = static_cast<int32_t>(std::ceil(std::sqrt(cus_per_xcd)));
+    const int32_t wgm = (grid_m > 1 && grid_n > 1)
+        ? std::min(default_wgm, static_cast<int32_t>(grid_n)) : 1;
+    return {0, (cus_per_xcd / numMTs) * numMTs, NUM_XCD, wgm};
   }
 
 
@@ -304,15 +304,6 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
       return {0, out_chunk, out_wgmxcc, use_wgmxcc ? static_cast<int32_t>(grid_n) : 1};
     else if (nta < 4 && ntb > 3)
       return {0, out_chunk, out_wgmxcc, use_wgmxcc ? -static_cast<int32_t>(grid_m) : 1};
-    else
-      return {0, 0, NUM_XCD, 1};
-  }
-
-  // Batch case
-  if (batch > 1) {
-    auto numMTs_total = numMTs * batch;
-    if (numMTs == 1 || numMTs_total <= NUM_XCD || numMTs % NUM_XCD == 0)
-      return {0, 0, 0, 1};
     else
       return {0, 0, NUM_XCD, 1};
   }
