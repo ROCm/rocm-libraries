@@ -15,6 +15,7 @@
   - [1.1 Why a fixed-size state can stand in for the past](#11-why-a-fixed-size-state-can-stand-in-for-the-past)
   - [1.2 The gated delta rule](#12-the-gated-delta-rule)
   - [1.3 Operator dimensions](#13-operator-dimensions)
+  - [1.4 Target geometries](#14-target-geometries)
 - [2. GDN is a special case of KDA](#2-gdn-is-a-special-case-of-kda)
   - [2.1 The single operator difference](#21-the-single-operator-difference)
   - [2.2 Why that makes the chunkwise machinery reusable](#22-why-that-makes-the-chunkwise-machinery-reusable)
@@ -132,6 +133,42 @@ state is per *value* head:
 
 Value head `h` reads key/query head `h // kv_group`. `kv_group = 1` is the MHA case and is the
 KDA configuration.
+
+### 1.4 Target geometries
+
+Every constant in this document is sized for these deployments. Values are from each model's
+published `config.json`.
+
+| Model | `Hv` | `Hk` | `DK` | `DV` | `kv_group` | gate |
+| --- | --- | --- | --- | --- | --- | --- |
+| Qwen3-Next-80B-A3B (36 of 48 layers) | 32 | 16 | 128 | 128 | 2 | scalar — GDN |
+| Kimi-Linear-48B-A3B (20 of 27 layers) | 32 | 32 | 128 | 128 | 1 | per-channel — KDA |
+
+Qwen3-Next reads `linear_num_value_heads`, `linear_num_key_heads` and
+`linear_key_head_dim = linear_value_head_dim`; Kimi Linear reads `linear_attn_config.num_heads`
+and `linear_attn_config.head_dim`, and KDA has no head grouping, so `Hk = Hv`.
+
+> **Out of scope: Qwen3-Next's other 12 layers.** The same model interleaves gated *full*
+> attention every fourth layer (`full_attention_interval = 4`), and those layers are
+> `head_dim = 256` with `num_attention_heads = 16` / `num_key_value_heads = 2` — no recurrent
+> state, so no value of `kv_group` makes them servable here. They belong to the attention
+> family, not this one.
+
+Three things the table pins down that the rest of the document assumes:
+
+- **`DK == DV` on every supported row.** The tile table and the `DV × DK` state shape both rely
+  on it. A target with `DK ≠ DV` needs the tile geometry re-derived.
+- **`kv_group = 2` is the only shipping GDN grouping.** The `(Hv, Hk) = (32, 8)` case in §7 —
+  `kv_group = 4` — is a validation stress point, not a deployment.
+- **Where these models land in the tuned tables.** Both have `Hv = 32`, so `BH = 32 × batch`.
+  Prefill's `value_splits` bands on `BH` (`≤64 → 8`, `≤128 → 2`, else `1`), which means batch 1-2
+  gets 8 splits, batch 3-4 gets 2, and batch 5 and up runs unsplit; batches 2 and 4 sit exactly
+  on band edges. Decode's tile table bands on *batch* directly (`≤4`, `≤32`, `≤128`, larger), so a
+  serving batch crosses all four.
+
+This also fixes the scope of §2.3's reuse-over-fork argument. A target that keeps the gated delta
+rule but changes the gate's *formula* stays a `gate_kind`, not a fork. A target that changes `C`,
+forces a different tile set, or makes the decay non-separable across `Γ_i / Γ_j` is a fork.
 
 ---
 
@@ -342,8 +379,11 @@ warp-tiled path, selected only by naming the spec directly.
 GDN prefill is the KDA chunkwise kernel in `gate_kind="gdn"` mode, so the factorization is KDA's,
 unchanged: see `../kda/ALGORITHM.md` for the six state-independent tiles (`A`, `GK`, `GQ`, `Aqk`,
 `Kt`, `dec`), the chunk-parallel / state-serial split, and the midpoint-factored decay that keeps
-`Γ_i / Γ_j` inside the `f32 exp2` range. That doc states the recurrence transposed (`S_kda = Sᵀ`,
-§5.3) and names the log-domain values `Gc` / `Gref`, which this doc calls `L` / `L_ref`.
+`Γ_i / Γ_j` inside the `f32 exp2` range. Two conventions differ there: that doc states the
+recurrence transposed (`S_kda = Sᵀ`, §5.3), and it carries the cumulative gate in the **log**
+domain — its `Gc` / `Gref` are `log Γ` at the current and midpoint rows, which is why
+`exp(Gc − Gref)` there reconstructs the ratio `Γ_i / Γ_j` here. (The `log2`/`exp2` the emitter
+actually issues is a hardware detail: the cumulative sum is pre-scaled by `log₂(e)`.)
 
 What GDN changes is only the gate's shape. The scalar per-`(token, head)` gate is broadcast across
 all `DK` channels, so `Γ` is channel-constant and `dec` is a `DK` vector whose entries are equal.
