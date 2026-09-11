@@ -14,8 +14,7 @@ def hip_source_relpath(rel_dir, source):
     one's bytes for both. The root-relative path is what actually distinguishes
     the inputs.
 
-    Flat layouts (`rel_dir == "."`) reduce to `source` unchanged, so their keys
-    are byte-identical to the pre-nesting keys.
+    Flat layouts (`rel_dir == "."`) reduce to `source` unchanged.
     """
     return (Path(rel_dir) / source).as_posix().removeprefix("./")
 

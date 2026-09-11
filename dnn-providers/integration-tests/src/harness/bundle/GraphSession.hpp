@@ -65,7 +65,8 @@ struct RankedEngines
 /// re-derives it and nothing caches it on the harness: one `from_binary`, one
 /// heuristic query, one applicability answer, all visible in the call chain.
 ///
-/// `graph` is null when the build failed (see `buildError`) and in the deviceless
+/// `buildFailed` is true when from_binary failed; `graph` may still be non-null in that
+/// case (it was allocated before the call). In the deviceless
 /// unit harnesses, which supply a canned `engines` and never execute anything.
 struct GraphSession
 {
@@ -78,7 +79,8 @@ struct GraphSession
     GraphSession& operator=(const GraphSession&) = delete;
 
     std::unique_ptr<hipdnn_frontend::graph::Graph> graph;
-    std::string buildError; ///< non-empty when from_binary failed
+    bool buildFailed = false;
+    std::string buildError;
     RankedEngines engines;
 };
 
