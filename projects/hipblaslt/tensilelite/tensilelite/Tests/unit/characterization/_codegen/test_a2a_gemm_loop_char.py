@@ -614,6 +614,82 @@ class TestA2AGemmTransitionPhase:
         )
 
 
+class TestA2AGemmFeatureShardIndex:
+    """A is indexed by feature shard (my_rank + r) mod W, B by gathered segment r."""
+
+    _SHIFT = (
+        r"s_mul_i32 s(\d+), s\d+, s\[sgpr%s\][^\n]*\n"
+        r"s_lshl_b64 s\[\d+:\d+\][^\n]*\n"
+        r"s_add_u32 s\[sgprSrd%s\+0\], s\[sgprSrd%s\+0\], s\1"
+    )
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _prologue(self, src):
+        return src[:src.index("label_A2AShardLoopBegin:")]
+
+    def _body(self, src):
+        return src[src.index("A2A_TRANSITION begin"):src.index("A2A_TRANSITION end")]
+
+    def test_round_zero_seeds_the_index_from_my_rank(self):
+        import re
+
+        from Tensile.Components.Signature import fusedA2AKernArgLayout
+
+        prologue = self._prologue(self._src())
+        loads = dict(
+            re.findall(
+                r"s_load_dword s\[sgpr(A2AShardCounter|A2AFeatIdx)\], "
+                r"s\[sgprKernArgAddress:sgprKernArgAddress\+1\], (0x[0-9a-f]+)",
+                prologue,
+            )
+        )
+        assert "A2AFeatIdx" in loads, "round 0 never reads FusedMyRank"
+        layout = fusedA2AKernArgLayout()
+        delta = layout["FusedW"] - layout["FusedMyRank"]
+        assert int(loads["A2AShardCounter"], 16) - int(loads["A2AFeatIdx"], 16) == delta, (
+            "the feature shard is seeded from some kernarg other than FusedMyRank"
+        )
+
+    def test_round_zero_shifts_srda_by_the_feature_shard(self):
+        import re
+
+        prologue = self._prologue(self._src())
+        assert re.search(self._SHIFT % ("A2AFeatIdx", "A", "A"), prologue), (
+            "round 0 reads feature shard 0 instead of this rank's own"
+        )
+
+    def test_the_index_wraps_at_w_before_the_rebind(self):
+        import re
+
+        body = self._body(self._src())
+        m = re.search(
+            r"s_add_u32 s\[sgprA2AFeatIdx\], s\[sgprA2AFeatIdx\], 1[^\n]*\n"
+            r"s_waitcnt[^\n]*\n"
+            r"s_sub_u32 s(\d+), s\[sgprA2AFeatIdx\], s\1[^\n]*\n"
+            r"s_min_u32 s\[sgprA2AFeatIdx\], s\[sgprA2AFeatIdx\], s\1",
+            body,
+        )
+        assert m, "the feature shard advances without wrapping at W"
+        assert m.end() < body.index("s[sgprSrdA+0], s[sgprSrdA+0]"), (
+            "srdA is rebound before the feature shard wraps"
+        )
+
+    def test_transition_splits_the_two_indices(self):
+        import re
+
+        body = self._body(self._src())
+        assert re.search(self._SHIFT % ("A2AFeatIdx", "A", "A"), body), (
+            "srdA steps by the gathered segment instead of the feature shard"
+        )
+        assert re.search(self._SHIFT % ("A2AShardIdx", "B", "B"), body), (
+            "srdB no longer steps by the gathered segment"
+        )
+
+
 class TestA2AGemmFlagSpin:
     """The consumer's wait on the local arrival flag, one per shard boundary."""
 
