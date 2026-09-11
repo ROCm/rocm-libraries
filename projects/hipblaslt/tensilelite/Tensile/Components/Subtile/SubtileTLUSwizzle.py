@@ -94,13 +94,10 @@ def _buildColScatter(stackM: int, instM: int, instK: int, bpe: float,
                      waveSize: int) -> TLUColScatter:
     """Derive the col_scatter parameters for one TLU fp4 stack (all from N)."""
     N = stackM
-    # 8 and 16 always reach here; 2 and 4 do as well on a shared strip, where
-    # the XOR is unusable.  32 is the one that must not: cgDelta = 16 // N below
-    # is 0 there, so readStrideBytes comes out 0 and the LR read stops stepping
-    # in K, which is a wrong-answer kernel rather than a rejected one.
-    # _SUBTILE_STACK_SIZES tops out at 16, but that is one tuple edit away.
-    assert N in (2, 4, 8, 16), \
-        "col_scatter is only derived for stacks 2, 4, 8 and 16, got %u" % N
+    # At 32 the cgDelta below is 0, so readStrideBytes comes out 0 and the LR
+    # read stops stepping in K: a wrong-answer kernel, not a rejected one.
+    assert N in _SHARED_STRIP_COL_SCATTER_STACKS, \
+        "col_scatter derives stacks %s, got %u" % (sorted(_SHARED_STRIP_COL_SCATTER_STACKS), N)
     logN = int(math.log2(N))
     cpc = int(stackM * instM * bpe) // 16          # chunks per K-column
     gGroups = instK // N                            # col_groups per load
@@ -190,8 +187,12 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
 
 
 
-# Stacks that use the column-scatter layout instead of a single-bit XOR.
+# Stacks that use the column-scatter layout instead of a single-bit XOR.  On a
+# shared strip the XOR is unusable (see _sharedStrip) and the short stacks route
+# here too, which the bank model reaches 1-way at just as well; the XOR wins
+# elsewhere only on VALU cost.
 _COL_SCATTER_STACKS = frozenset({8, 16})
+_SHARED_STRIP_COL_SCATTER_STACKS = _COL_SCATTER_STACKS | frozenset(_SWIZZLE_BY_STACK)
 
 
 def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
@@ -203,13 +204,9 @@ def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
     stack = _stackOf(tileInfo)
     if stack is None:
         return None
-    if _sharedStrip(tileInfo):
-        # A shared strip rules out the XOR (see _sharedStrip), so every stack
-        # falls here; the bank model reaches 1-way at 2, 4, 8 and 16 alike (the
-        # XOR wins elsewhere only on VALU cost).
-        if stack not in (2, 4, 8, 16):
-            return None
-    elif stack not in _COL_SCATTER_STACKS:
+    supported = (_SHARED_STRIP_COL_SCATTER_STACKS if _sharedStrip(tileInfo)
+                 else _COL_SCATTER_STACKS)
+    if stack not in supported:
         return None
     instM = int(tileInfo.mmaTileShape[0])
     instK = int(tileInfo.mmaTileShape[1])

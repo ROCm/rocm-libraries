@@ -323,24 +323,27 @@ AB_B16_TLU1_16x1 = ABTilePair(
 )
 
 # Column-major FP4 (TLU=1, NT): the MFMA-K layout is recovered on the LDS read
-# via ds_read_b64_tr_b4.  Taller stacks below pack more MFMA-M tiles per
-# contiguous strip at the same b128 load width.
-AB_B4_TLU1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 2 MFMA-M tiles = 32 fp4 = 16 B contiguous along M, 1 b128 GR load
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=32, k=1)),                                   # 128-bit LR: 32 fp4 along M
-)
-AB_B4_TLU1_4x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 4 MFMA-M tiles = 64 fp4 = 32 B contiguous along M, 2 b128 GR loads
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=32, k=1)),
-)
-AB_B4_TLU1_8x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 8 MFMA-M tiles = 128 fp4 = 64 B contiguous along M, 4 b128 GR loads
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=32, k=1)),
-)
-AB_B4_TLU1_16x1 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),  # 16 MFMA-M tiles = 256 fp4 = 128 B contiguous along M, 8 b128 GR loads
-    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=32, k=1)),
-)
+# via ds_read_b64_tr_b4.  A stack of N packs N MFMA-M tiles into one contiguous
+# strip (N * 16 fp4 = N * 8 bytes) at the same b128 load width, so N also fixes
+# the GR load count per strip.  Everything else is identical across stacks, so
+# the geometries are built rather than written out.
+AB_B4_TLU1_STACKS = (2, 4, 8, 16)
+_AB_B4_TLU1_UNSUFFIXED_STACK = 2
+
+
+def abB4Tlu1Name(stack: int) -> str:
+  """AB_GEOMETRY_MAP key for the fp4 TLU=1 geometry with this stack height."""
+  if stack == _AB_B4_TLU1_UNSUFFIXED_STACK:
+    return "AB_B4_TLU1"
+  return "AB_B4_TLU1_%ux1" % stack
+
+
+def _abB4Tlu1(stack: int) -> ABTilePair:
+  shape = (stack, 1)
+  return ABTilePair(
+      gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=shape, subtileCount=1, subtileStride=0, loadShape=LoadShape(m=32, k=1)),
+      lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=shape, loadShape=LoadShape(m=32, k=1)),
+  )
 
 
 # MX scale factor inputs (one scale per mxBlock data elements)
@@ -379,10 +382,7 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
-  "AB_B4_TLU1":  AB_B4_TLU1,
-  "AB_B4_TLU1_4x1": AB_B4_TLU1_4x1,
-  "AB_B4_TLU1_8x1": AB_B4_TLU1_8x1,
-  "AB_B4_TLU1_16x1": AB_B4_TLU1_16x1,
+  **{abB4Tlu1Name(stack): _abB4Tlu1(stack) for stack in AB_B4_TLU1_STACKS},
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -417,12 +417,9 @@ class TileInfo:
     kernel:   Kernel configuration dictionary.
   """
 
-  # GR cooperative-spread state, filled in below for A and B only: D and the MX
-  # scale tiles take no part in the spread.  These are class defaults rather
-  # than absent attributes because the consumers select behaviour from them --
-  # SubtileTLUSwizzle picks the swizzle off grWavesPerStrip and grKSplit -- and
-  # reading them through getattr(..., 1) would turn a rename into a silently
-  # wrong swizzle instead of an AttributeError.
+  # GR cooperative-spread defaults for the tiles that take no part in it (D and
+  # the MX scales).  Real attributes rather than getattr fallbacks at the call
+  # sites, so a rename raises instead of silently selecting another swizzle.
   grWavesPerStrip  = 1
   grCoopWaves      = 1
   grKSplit         = 1
