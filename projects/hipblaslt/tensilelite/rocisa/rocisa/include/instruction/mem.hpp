@@ -1919,6 +1919,44 @@ namespace rocisa
         }
     };
 
+    struct BufferAtomicPkAddBF16 : public MUBUFStoreInstruction
+    {
+        // srcData is a single dword holding two packed BF16 lanes; the hardware
+        // performs both adds in BF16. The old value is returned only when the
+        // temporal hint asks for it, so leave mubuf unset for fire-and-forget.
+        BufferAtomicPkAddBF16(const std::shared_ptr<RegisterContainer>& src,
+                              const std::shared_ptr<RegisterContainer>& vaddr,
+                              const std::shared_ptr<RegisterContainer>& saddr,
+                              const InstructionInput&                   soffset,
+                              std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                              const std::string&                        comment = "")
+            : MUBUFStoreInstruction(InstType::INST_BF16, src, vaddr, saddr, soffset, mubuf, comment)
+        {
+            setInst("buffer_atomic_pk_add_bf16");
+        }
+
+        BufferAtomicPkAddBF16(const BufferAtomicPkAddBF16& other)
+            : MUBUFStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferAtomicPkAddBF16>(*this);
+        }
+
+        // Deliberately no getDstParams() override: srcData is read-only. The
+        // hardware only returns the pre-add value when a temporal hint asks for
+        // it, and we never do, so modelling vdata as a destination would make
+        // the emitter append th:TH_ATOMIC_RETURN and clobber a register the
+        // store code has already reused.
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+    };
+
     struct BufferAtomicCmpswapB32 : public MUBUFStoreInstruction
     {
         BufferAtomicCmpswapB32(const std::shared_ptr<RegisterContainer>& src,

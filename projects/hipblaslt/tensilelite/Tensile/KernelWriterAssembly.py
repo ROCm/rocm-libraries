@@ -14803,6 +14803,9 @@ class KernelWriterAssembly(KernelWriter):
   def getVectorAtomicWidth(self, kernel):
     if kernel["ProblemType"]["DataType"].isHalf() and (not kernel["_GlobalAccumulation"]):
       return 2
+    if kernel.get("_GSUAtomicDestBF16", False):
+      # buffer_atomic_pk_add_bf16 consumes one dword = two packed BF16 elements.
+      return 2
     return 1
 
   ##############################################################################
@@ -15265,7 +15268,12 @@ class KernelWriterAssembly(KernelWriter):
     currentInstLength = 0
     for betaIdx in reversed(range(len(betas))):
       beta = betas[betaIdx]
-      if beta and kernel["_GlobalAccumulation"] == "SingleBuffer" and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
+      # beta*C is seeded into the output by the beta-only pre-pass before the GSU
+      # slices atomically accumulate on top, so a slice must not apply beta again
+      # or beta*C lands in the result once per slice. Both pre-seeding reductions
+      # behave this way: SingleBuffer into the fp32 workspace, AtomicDest into D.
+      if beta and (kernel["_GlobalAccumulation"] == "SingleBuffer" or self.states.useAtomicPkAddBF16) \
+         and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
 
@@ -15965,7 +15973,10 @@ class KernelWriterAssembly(KernelWriter):
       if gsuLimit > 1:
         betas = betasBackup
         if gsuLimitIdx == 0:
-          self.states.bpeCexternal = self.states.bpeCinternal
+          # useAtomicPkAddBF16 atomically accumulates into the real BF16 D, so
+          # the GSU>1 store keeps the dest element size rather than the fp32 one.
+          if not self.states.useAtomicPkAddBF16:
+            self.states.bpeCexternal = self.states.bpeCinternal
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":
@@ -16584,6 +16595,8 @@ class KernelWriterAssembly(KernelWriter):
             globalWriteModes = ["OptNLL_MBSK"] if noGSUBranch else ["MBSK"]
           elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
             globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+          elif kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
+            globalWriteModes = ["OptNLL_AD"] if noGSUBranch else ["AD"]
         else:
           if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
             # StreamK and dot2 cannot be enabled with MBSK
@@ -16614,6 +16627,9 @@ class KernelWriterAssembly(KernelWriter):
             hasMultipleGlobalWriteModes = False if noGSUBranch else True
           elif kernel["GlobalSplitUAlgorithm"] == "SingleBuffer":
             globalWriteModes = ["OptNLL_SB"] if noGSUBranch else ["SB"]
+            hasMultipleGlobalWriteModes = False
+          elif kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
+            globalWriteModes = ["OptNLL_AD"] if noGSUBranch else ["AD"]
             hasMultipleGlobalWriteModes = False
       else:
         globalWriteModes = ["GSU1"]

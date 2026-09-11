@@ -67,6 +67,11 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         storeVectorWidths = []
         storeVectorWidth  = kernel["StoreVectorWidth"] if kernel["_VectorStore"] else 1
         storeVectorWidth  = min(storeVectorWidth, writer.maxGwvw(kernel))
+        # A packed bf16 atomic always writes an element pair, so the edge
+        # variant cannot narrow to 1. AF0EM>=2 keeps every pair inside a column,
+        # which is what makes the wider edge store safe.
+        minStoreVectorWidth = 2 if (kernel.get("_GSUAtomicDestBF16", False) and \
+            (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1)) else 1
 
         # handle mfma 4x4 instruction
         matrixInstM  = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
@@ -85,7 +90,7 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         vectorWidth0 = kernel["VectorWidthA"]        if kernel["SourceSwap"] else kernel["VectorWidthA"] * kernel["MIOutputVectorWidth"]
         vectorWidth1 = kernel["VectorWidthB"] * kernel["MIOutputVectorWidth"] if kernel["SourceSwap"] else kernel["VectorWidthB"]
 
-        while storeVectorWidth > 0:
+        while storeVectorWidth >= minStoreVectorWidth:
             elements_temp = []
             for tt1 in range(0, ceil(totalTT1//vectorWidth1)):
                 for vc1 in range(0, vectorWidth1):

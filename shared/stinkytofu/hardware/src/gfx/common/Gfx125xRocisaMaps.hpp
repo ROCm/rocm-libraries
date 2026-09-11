@@ -152,6 +152,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"BufferStoreB64", "buffer_store_b64"},
         {"BufferStoreB128", "buffer_store_b128"},
         {"BufferAtomicAddF32", "buffer_atomic_add_f32"},
+        {"BufferAtomicPkAddBF16", "buffer_atomic_pk_add_bf16"},
         {"BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32"},
         {"BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64"},
         {"FlatStoreD16HIB16", "flat_store_d16_hi_b16"},

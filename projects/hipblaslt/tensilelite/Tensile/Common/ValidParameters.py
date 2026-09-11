@@ -443,7 +443,9 @@ validParameters = { # we need to make sure this matches develop
     # 1: use atomic operation to accumulate on one buffer
     # 2: each GSU group write to each own buffer and accumulate by another kernel
     # 3: each GSU group write to each own buffer and accumulate by same kernel
-    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel"],
+    # 4: no buffer at all - every GSU group atomically accumulates into D in the
+    #    dest precision, so neither a staging buffer nor a conversion kernel exists
+    "GlobalSplitUAlgorithm": ["SingleBuffer", "MultipleBuffer", "MultipleBufferSingleKernel", "AtomicDest"],
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
