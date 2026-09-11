@@ -88,9 +88,9 @@ namespace TensileLite
             // uniformSummationOrderSupported() is the same kind of filter:
             // under USO it admits only kernels this problem can launch
             // (Synchronizer allocation is the remaining solve()-only clause).
-            // Sites that gained this conjunction in #10941 reach it through
-            // selectionPredicate(), which with USO off falls back to the narrower
-            // problemPredicate && taskPredicate it subsumes.
+            // Sites that gained this conjunction with the per-tile split mapping
+            // reach it through selectionPredicate(), which with USO off falls back
+            // to the narrower problemPredicate && taskPredicate it subsumes.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware);
@@ -107,8 +107,8 @@ namespace TensileLite
         return false;
     }
 
-    // With USO off this applies the pre-#10941 conjunction: problemPredicate &&
-    // taskPredicate && hardwarePredicate. With USO on, softwarePredicate() adds
+    // With USO off this applies only problemPredicate && taskPredicate &&
+    // hardwarePredicate. With USO on, softwarePredicate() adds
     // streamKDynamicQueueSupported() and uniformSummationOrderSupported(), both
     // live filters on that arm. hardwarePredicate keeps each arm's original
     // position -- last off, first on -- because taskPredicate can warn via

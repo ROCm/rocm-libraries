@@ -5043,7 +5043,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         // Under USO, the same predicate findTopSolutions uses: problem, task,
         // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
         // is checked only at launch, which throws if it is missing). With USO
-        // off, check as before #10941: problemPredicate && taskPredicate.
+        // off, selection must not widen: problemPredicate && taskPredicate only.
         bool swMatch;
         if(tensile_prob.getParams().uniformSummationOrder())
         {
@@ -5134,9 +5134,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             tensile_prob.gemms[i].setWorkspaceSize(algo->max_workspace_bytes);
             tensile_prob.gemms[i].setWorkspaceSizeGroupedGemm(problemWs);
             tensile_prob.gemms[i].setGroupedGemmCount(tensile_prob.gemms.size());
-            // #10941 added setGroupedGemm(true) for the grouped-GEMM branch of
-            // uniformSummationOrderSupported(); it persists on the caller's
-            // problem, so guard it to keep USO-off selection at pre-#10941.
+            // setGroupedGemm(true) feeds the grouped-GEMM branch of
+            // uniformSummationOrderSupported(), but it persists on the caller's
+            // problem, so guard it to leave USO-off selection unchanged.
             if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
                 tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
@@ -5145,7 +5145,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
             TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
-            // With uniform summation order off, check as before #10941:
+            // With uniform summation order off, the filter stays
             // hardwarePredicate && problemPredicate, no taskPredicate.
             bool match = (*solution->hardwarePredicate)(*hardware);
             if(match)
@@ -5380,9 +5380,9 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         {
             data->problem.gemms[i].setWorkspaceSize(workspaceBytes);
             data->problem.gemms[i].setGroupedGemmCount(data->problem.gemms.size());
-            // #10941 added setGroupedGemm(true) for the grouped-GEMM branch of
-            // uniformSummationOrderSupported(); it persists on data->problem,
-            // so guard it to keep USO-off selection at pre-#10941.
+            // setGroupedGemm(true) feeds the grouped-GEMM branch of
+            // uniformSummationOrderSupported(), but it persists on data->problem,
+            // so guard it to leave USO-off selection unchanged.
             if(data->problem.gemms[i].getParams().uniformSummationOrder())
                 data->problem.gemms[i].setGroupedGemm(true);
         }

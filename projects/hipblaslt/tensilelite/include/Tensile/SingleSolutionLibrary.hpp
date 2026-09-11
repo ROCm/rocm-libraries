@@ -160,7 +160,7 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    // With uniform summation order off, filter as before #10941:
+                    // With uniform summation order off, the filter stays
                     // problemPredicate && taskPredicate. setGroupedGemm(true) is load-bearing for
                     // uniformSummationOrderSupported(), but it also re-aims GroupedGemmEqual /
                     // SynchronizerSizeCheck / LeadingFree1SizesGreaterOrEqual on this local
@@ -276,7 +276,7 @@ namespace TensileLite
                         problem.setGroupedGemmCount(problems.size());
                         // See findBestSolution(): setGroupedGemm(true) and the
                         // softwarePredicate() widening stay behind the USO check, so with USO off
-                        // this is the pre-#10941 problemPredicate && taskPredicate filter.
+                        // this stays the problemPredicate && taskPredicate filter.
                         bool swMatch;
                         if(problem.getParams().uniformSummationOrder())
                         {

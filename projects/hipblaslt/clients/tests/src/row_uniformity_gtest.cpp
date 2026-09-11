@@ -2349,8 +2349,8 @@ namespace
         const size_t selectedGrid
             = solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree);
 
-        // Pinned, not derived. These are the pre-#10941 baseline (f4caa56e6ee) values
-        // for this shape on the synthetic 256-CU / 8-XCD gfx950 device.
+        // Pinned, not derived. Baseline values for this shape on the synthetic
+        // 256-CU / 8-XCD gfx950 device, from before the per-tile split mapping.
         ASSERT_EQ(tiles, 1248u);
         ASSERT_EQ(selectedGrid, 256u);
         // Under tree reduction the workspace guard in resolveStreamKSettings() runs

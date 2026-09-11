@@ -53,11 +53,11 @@ from copy import deepcopy
 # USO is host-side runtime state and defaults OFF. The kernel therefore carries
 # BOTH Stream-K K-split mappings and picks one at runtime:
 #
-#   USO off -> historical global "first-E" mapping, identical to the pre-#10941
-#              baseline (f4caa56e6ee, the parent of 3a558b0d4d4): a flat split
-#              of skTiles*itersPerTile iterations across skGrid WGs where the
-#              first E workgroups get one extra iteration. WG ranges may
-#              straddle a tile boundary.
+#   USO off -> historical global "first-E" mapping, identical to the baseline
+#              before the per-tile split mapping: a flat split of
+#              skTiles*itersPerTile iterations across skGrid WGs where the first
+#              E workgroups get one extra iteration. WG ranges may straddle a
+#              tile boundary.
 #   USO on  -> per-tile extra-iters mapping: each tile's iterations are split
 #              among exactly F = skGrid/skTiles workgroups, so no range straddles
 #              a tile boundary (required for row-uniform summation order).
@@ -1025,9 +1025,9 @@ class StreamK(Component):
 
         Divergence site 1 of 3. When USO is on AND skTiles != 0 AND
         skGrid % skTiles == 0, distribute extras within each tile; otherwise
-        keep the historical global first-E mapping. USO off must reproduce the
-        pre-#10941 baseline exactly, so the USO test is outermost: a USO-off run
-        reads neither skTiles nor skGrid and never executes the gate divide.
+        keep the historical global first-E mapping. USO off must reproduce that
+        global mapping exactly, so the USO test is outermost: a USO-off run reads
+        neither skTiles nor skGrid and never executes the gate divide.
 
         Runs once per tile transition, never per K-iteration.
 

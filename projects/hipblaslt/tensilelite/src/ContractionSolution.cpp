@@ -3949,8 +3949,8 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            // Deliberate deviation from the pre-#10941 baseline (f4caa56e6ee),
-            // which called computeStreamKDecisions() ahead of the guard and used
+            // Deliberate deviation from the previous ordering, which called
+            // computeStreamKDecisions() ahead of the guard and used
             // skDecisions.isDynamic as the predicate. Here the predicate is
             // derived inline from the cheap SK5 sub-mode query, so the XCD
             // support guard runs BEFORE any grid / reduction / workspace work:
@@ -4013,8 +4013,8 @@ namespace TensileLite
             // it so a future path that bypasses that demotion fails loudly
             // rather than launching an inexpressible reduction.
             //
-            // Deliberate deviation from the pre-#10941 baseline: tiles == 0 throws
-            // here instead of dividing by zero (grouped-GEMM callers report 0 tiles).
+            // Deliberate behavior change: tiles == 0 throws here instead of
+            // dividing by zero (grouped-GEMM callers report 0 tiles).
             if(sk.reduction == origami::reduction_t::parallel && (tiles == 0 || sk.grid / tiles < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
@@ -4642,10 +4642,10 @@ namespace TensileLite
             // Custom kernels currently only support single-kernel (tree)
             // reduction. Both spellings are checked, though today the second is
             // implied by the first: customKernel.name is only ever the copy of
-            // sizeMapping.customKernelName the loader makes
-            // (Serialization/ContractionSolution.hpp:71-72), and nothing sets
-            // customKernel.generated. Kept for a future path that populates
-            // customKernel directly.
+            // sizeMapping.customKernelName made by the ContractionSolution
+            // MappingTraits in Serialization/ContractionSolution.hpp, and
+            // nothing sets customKernel.generated. Kept for a future path that
+            // populates customKernel directly.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
@@ -4931,12 +4931,12 @@ namespace TensileLite
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it: the kernel builds SrdWS solely
-            // from AddressWS (StreamK.py:1852) while the queue counters are
-            // addressed off AddressFlags (layout documented at
-            // StreamK.py:537-543). A per-queue-stride reservation here would
-            // therefore have reserved bytes nothing ever addresses, and would
-            // have made this launch-path threshold disagree with the two
-            // workspace-size queries (requiredWorkspaceSize() and
+            // from AddressWS (computeWorkspaceSrd() in StreamK.py) while the
+            // queue counters are addressed off AddressFlags (layout documented
+            // above _wsQueueConstants() in StreamK.py). A per-queue-stride
+            // reservation here would therefore have reserved bytes nothing ever
+            // addresses, and would have made this launch-path threshold disagree
+            // with the two workspace-size queries (requiredWorkspaceSize() and
             // computeStreamKDecisions()), which carry no such term.
             size_t idealWorkspace = partialTileSize(sk.grid);
             // If given workspace is less than ideal, we can fall back to DP mode

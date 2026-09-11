@@ -165,11 +165,11 @@ namespace TensileLite
                 {
                     auto const& solution = *it->second;
                     Task        task(hardware, problem, *solution);
-                    // #10941 added the hardwarePredicate and softwarePredicate() checks here.
-                    // softwarePredicate(DEFAULT) subsumes problemPredicate and adds taskPredicate
-                    // plus the StreamK dynamic-queue check, both of which reject kernels the
-                    // pre-#10941 baseline (f4caa56e6ee) accepted. With uniform summation order
-                    // off, restore that baseline: problemPredicate alone.
+                    // The uniform-summation-order arm adds hardwarePredicate plus
+                    // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
+                    // taskPredicate and the StreamK dynamic-queue check -- both reject
+                    // kernels accepted before the per-tile split mapping was added. With
+                    // that mode off, restore the narrower filter: problemPredicate alone.
                     bool accept;
                     if(problem.getParams().uniformSummationOrder())
                     {
