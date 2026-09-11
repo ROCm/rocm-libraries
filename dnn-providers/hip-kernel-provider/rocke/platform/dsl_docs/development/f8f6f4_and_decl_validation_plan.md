@@ -90,7 +90,7 @@ Notes:
 | # | Location | Problem |
 |---|---|---|
 | **B9** | `ds.read.tr16.b128` (`lower_llvm.py`, `ir.py:3060`, `lower_hip.py:143`) | **Intrinsic does not exist.** LLVM 23 has `ds.read.tr16.b64` and `ds.load.tr16.b128`, but **no `ds.read.tr16.b128`**. This is a *live* path — public op `ir.ds_read_tr16_b128`, an LLVM handler at `:3997`, and a HIP `__asm` alias at `lower_hip.py:145` naming the same fictional symbol. Fails at link on this toolchain. Likely a rename to `ds.load.tr16.b128` (which rocke already declares under two other keys). |
-| **B10** | `global.atomic.fadd.v2f16` / `.v2bf16` | **Removed from LLVM 23.** The declare is auto-upgraded *away entirely* into `atomicrmw fadd ... syncscope("agent") seq_cst`. Semantics look preserved, but the emitted IR no longer contains what rocke thinks it emits. Both entries have **zero `_need()` call sites** — dead table entries; delete rather than allowlist. |
+| **B10** | `global.atomic.fadd.v2f16` / `.v2bf16` | **Removed from LLVM 23.** The declare is auto-upgraded *away entirely* into `atomicrmw fadd ... syncscope("agent") seq_cst`. Semantics look preserved, but the emitted IR no longer contains what rocke thinks it emits. ~~Both entries have zero `_need()` call sites~~ — **corrected, see §4.9**: only `.v2bf16` is dead. |
 | **B11** | `amdgcn.cvt.scalef32.pk.fp8.f32` / `.bf8.f32` | The previous revision left these *unresolved* (LLVM 20 reported a misleading `Attribute after last parameter!`). LLVM 23 gives a precise diagnosis and the drift is **two-dimensional**: repo declares `i32 f(i32, <2 x float>, float, i1)`; LLVM 23 wants a **`<2 x i16>` return** *and* **5 arguments**. Also zero `_need()` call sites. |
 
 **Why none of this has blown up in production:** the shipping fp8 path
@@ -390,6 +390,28 @@ allowlist entries.
 The gate's own initial `KNOWN_BAD` has nothing to do with this document's bug
 list: it is `attention/gfx942/3d_{bf16,fp16}_d128_b64`, an LLVM 23 backend fatal
 error that the first sweep discovered.
+
+### 4.9 Dead-entry deletion — what the call-site audit actually found
+
+§4.5 step 2 said "delete B10's two dead entries" and §4.5 step 3 "B11's two dead
+entries". Auditing the call sites before deleting showed **three** of those four
+are dead and one is not:
+
+| key | verdict |
+|---|---|
+| `global.atomic.fadd.v2bf16` | **dead, deleted.** Zero `_need()` sites. `_op_memref_global_atomic_add_pk_bf16` lowers to a generic `atomicrmw fadd <2 x bfloat>` with the fine/remote-memory metadata, and its own docstring says the intrinsic does not exist in shipping ROCm. The table entry was left behind by that fix. |
+| `amdgcn.cvt.scalef32.pk.fp8.f32` | **dead, deleted.** Zero `_need()` sites, and no lowering handler in either engine — the op name is registered in `ir.py` / `core_types.cpp` but unreachable. Deleting the (wrong, per B11) declare means whoever wires the op up has to write a correct one. |
+| `amdgcn.cvt.scalef32.pk.bf8.f32` | **dead, deleted.** Same. |
+| `global.atomic.fadd.v2f16` | **LIVE — kept.** B10's "zero `_need()` call sites" is wrong for this one: `lower_llvm.py` `_op_memref_global_atomic_add_pk_f16` sets `_needs_intrin["global.atomic.fadd.v2f16"]` and `cpp/core/lower_llvm/mem.cpp` calls `rocke_ll_need` for it. The B10 *observation* still holds — LLVM auto-upgrades the declare away — but auto-upgrade is why it keeps compiling, so this is a latent-divergence item, not a deletion. |
+
+The registered-but-unreachable op names (`arith.cvt_scalef32_pk_{fp8,bf8}_f32`)
+were deliberately **not** removed: they sit in index-parallel arrays that the IR
+serializer keys off, so removing them is a separate, riskier change.
+
+Follow-up left open: decide whether `_op_memref_global_atomic_add_pk_f16` should
+follow the bf16 path onto a generic `atomicrmw fadd <2 x half>`, so rocke emits
+what the backend actually consumes instead of relying on auto-upgrade. That is an
+emission change and needs a golden re-bless, so it is not folded in here.
 
 ## 5. Verification / test surface
 
