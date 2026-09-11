@@ -40,23 +40,30 @@ from rocke.core.arch import ArchTarget  # noqa: E402
 from rocke.core.lower_hip import lower_kernel_to_hip  # noqa: E402
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
+from kernels.common.conv_implicit_gemm import (
+    ConvProblem,
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from kernels.common.conv_direct_grouped import (
+    DirectConv16cSpec,
+    DirectConv4cSpec,
+    DirectConvProblem,
+    build_direct_conv_16c,
+    build_direct_conv_4c,
+)
+from kernels.common.img2col import Img2ColSpec, build_img2col
 from rocke.instances import (
     AddRmsnorm2DRdquantSpec,
     BatchedContractionSpec,
     BatchedGemmSpec,
     BatchedTranspose2DSpec,
     BlockScaleGemmSpec,
-    ConvProblem,
-    DirectConv16cSpec,
-    DirectConv4cSpec,
-    DirectConvProblem,
     ElementwiseSpec,
     FlatMMSpec,
     FusedMoeSpec,
     GemmMultiAbdSpec,
     GemmMultiDSpec,
-    Img2ColSpec,
-    ImplicitGemmConvSpec,
     LayerNorm2DSpec,
     MfmaGemmSpec,
     MoeSmoothQuantSpec,
@@ -79,14 +86,10 @@ from rocke.instances import (
     build_batched_gemm,
     build_batched_transpose2d,
     build_block_scale_gemm,
-    build_direct_conv_16c,
-    build_direct_conv_4c,
     build_elementwise,
     build_flatmm,
     build_gemm_multi_abd,
     build_gemm_multi_d,
-    build_img2col,
-    build_implicit_gemm_conv,
     build_layernorm2d,
     build_mfma_gemm,
     build_moe_gather,

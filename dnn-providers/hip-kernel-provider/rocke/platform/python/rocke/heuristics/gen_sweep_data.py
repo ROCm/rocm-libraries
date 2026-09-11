@@ -162,8 +162,7 @@ _CONV_EPILOGUES = ("default", "cshuffle")
 def _conv_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
     import itertools
 
-    from ..instances import ConvProblem, ImplicitGemmConvSpec
-    from ..instances.common.conv_implicit_gemm import is_valid_spec
+    from kernels.common.conv_implicit_gemm import ConvProblem, ImplicitGemmConvSpec, is_valid_spec
 
     shapes = _CONV_SHAPES
     if max_shapes is not None and max_shapes > 0:
