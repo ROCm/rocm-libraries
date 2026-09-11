@@ -101,9 +101,4 @@ test data which never passes through `DescriptorLoader.hpp`, so a tree copied
 from it can pack cleanly and still fail to load.
 
 gfx942 rather than gfx950 because `hipdnn-linux-superbuild` — the lane that can
-gate this — builds gfx942. That agreement is load-bearing, not incidental: the
-lane names this tree as its production source root, and a pack whose requested
-arches prune away every KDP fails the build rather than skipping quietly. So
-retargeting that lane's `GPU_TARGET` requires widening the two `"arch":
-["gfx942"]` lists here in the same change, and the lane carries a comment saying
-so beside its `GPU_TARGETS`.
+gate this — builds gfx942.
