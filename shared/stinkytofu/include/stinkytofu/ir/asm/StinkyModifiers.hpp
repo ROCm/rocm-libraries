@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        LOOP_CARRIED_WAR,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1086,6 +1087,26 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+/// A loop-carried write-after-read that the barrier carrying this guards.
+///
+/// Under a rotating LDS ring a memtoken names a physical buffer only for the trip
+/// it was emitted from, so the reads that alias the write this barrier protects
+/// carry a different tag -- which is why plain token overlap cannot see the hazard.
+/// TensileLite owns the relabelling (`_ldsTokenBackEdgeMap`) and emits the finished
+/// relation; WaitDataflow supplies only the count. The barrier orders the waves; the
+/// derived s_wait_dscnt drains this wave's own outstanding reads.
+struct LoopCarriedWarData : public TypedModifier<LoopCarriedWarData> {
+    static constexpr Modifier::Type Type = Modifier::Type::LOOP_CARRIED_WAR;
+
+    /// Tags the aliasing reads carried `distance` trips ago.
+    std::vector<int> tokens;
+    /// Trips back. Always >= 1; distance 0 is an ordinary same-trip anti-dep.
+    int distance = 1;
+
+    LoopCarriedWarData(const std::vector<int>& tokens = {}, int distance = 1)
+        : TypedModifier<LoopCarriedWarData>(), tokens(tokens), distance(distance) {}
 };
 
 /// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.
