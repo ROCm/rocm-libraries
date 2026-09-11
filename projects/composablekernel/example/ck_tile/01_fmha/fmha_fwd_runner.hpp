@@ -841,12 +841,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        q_descale_host = ck_tile::HostTensor<QScaleDataType>(
-            std::array<ck_tile::index_t, 2>{shape_batch, nhead});
-        k_descale_host = ck_tile::HostTensor<KScaleDataType>(
-            std::array<ck_tile::index_t, 2>{shape_batch, nhead_k});
-        v_descale_host = ck_tile::HostTensor<VScaleDataType>(
-            std::array<ck_tile::index_t, 2>{shape_batch, nhead_k});
+        // one scale per (batch, head): group mode needs the batch axis too, not shape_batch
+        q_descale_host =
+            ck_tile::HostTensor<QScaleDataType>(std::array<ck_tile::index_t, 2>{batch, nhead});
+        k_descale_host =
+            ck_tile::HostTensor<KScaleDataType>(std::array<ck_tile::index_t, 2>{batch, nhead_k});
+        v_descale_host =
+            ck_tile::HostTensor<VScaleDataType>(std::array<ck_tile::index_t, 2>{batch, nhead_k});
     }
 
     // batch mode of lse data layout is [batch, nhead, seqlen_q]
@@ -1051,26 +1052,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
         float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
         float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
-        float qkv_max = 3.f;
+        float qkv_max       = 3.f;
+        float max_descale_q = qkv_max / q_dtype_max;
+        float max_descale_k = qkv_max / k_dtype_max;
+        float max_descale_v = qkv_max / v_dtype_max;
 
-        // A descale is dequantized_max/dtype_max, so these are anchored on qkv_max/dtype_max
-        // like the other granularities. Neighbouring entries differ; no mantissa is a power
-        // of two.
-        constexpr int kCycle = 8;
-        auto fill_perhead    = [](auto& t, int e_top, int phase) {
-            const auto lens = t.get_lengths();
-            t.ForEach([&](auto& self, auto i) {
-                const int flat   = static_cast<int>(i[0] * lens[1] + i[1]);
-                const int step   = (flat + phase) % kCycle;
-                const float mant = 1.f + static_cast<float>(2 * step + 1) / 16.f;
-                self(i)          = std::ldexp(mant, e_top + step % 2 - 1);
-            });
-        };
-        auto top_exp = [](float v) { return static_cast<int>(std::floor(std::log2(v))); };
-
-        fill_perhead(q_descale_host, top_exp(qkv_max / q_dtype_max), 0);
-        fill_perhead(k_descale_host, top_exp(qkv_max / k_dtype_max), 3);
-        fill_perhead(v_descale_host, top_exp(qkv_max / v_dtype_max), 5);
+        ck_tile::FillUniformDistribution<float>{max_descale_q * 0.8f, max_descale_q, next_seed()}(
+            q_descale_host);
+        ck_tile::FillUniformDistribution<float>{max_descale_k * 0.8f, max_descale_k, next_seed()}(
+            k_descale_host);
+        ck_tile::FillUniformDistribution<float>{max_descale_v * 0.8f, max_descale_v, next_seed()}(
+            v_descale_host);
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);
@@ -1886,7 +1878,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     nhead,
                     nhead_k,
                     group_size_opt.value(),
-                    qscale.type == quant_scale_enum::blockscale,
+                    qscale.type == quant_scale_enum::blockscale ||
+                        qscale.type == quant_scale_enum::perhead,
                     [&](const auto& traits, auto& args, const auto& sc) {
                         return fmha_fwd(traits, args, sc);
                     });
@@ -2310,8 +2303,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::idx_identity{},
                     ck_tile::idx_identity{},
                     [&](auto idx, auto value) {
-                        return value * scale_s * q_descale_host(b_idx, std::get<0>(idx)) *
-                               k_descale_host(b_idx, std::get<0>(idx) / nr);
+                        return value * scale_s * q_descale_host(wb, std::get<0>(idx)) *
+                               k_descale_host(wb, std::get<0>(idx) / nr);
                     });
             }
             else
@@ -2694,7 +2687,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::idx_identity{},
                     ck_tile::idx_identity{},
                     [&](auto idx, auto value) {
-                        const float scaled = value * v_descale_host(b_idx, std::get<0>(idx) / nr);
+                        const float scaled = value * v_descale_host(wb, std::get<0>(idx) / nr);
                         if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
                             return ck_tile::saturates<ck_tile::fp8_t>{}(scaled);
                         else
@@ -2712,7 +2705,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         ck_tile::idx_identity{},
                         ck_tile::idx_identity{},
                         [&](auto idx, auto value) {
-                            return value * v_descale_host(b_idx, std::get<0>(idx) / nr);
+                            return value * v_descale_host(wb, std::get<0>(idx) / nr);
                         });
                     have_absmag = true;
                 }
