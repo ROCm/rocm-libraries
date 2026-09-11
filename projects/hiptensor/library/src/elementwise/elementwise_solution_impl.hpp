@@ -113,7 +113,10 @@ namespace hiptensor
                 deviceOutputStrides;
             for(int i = 0; i < deviceOutputStrides.size(); i++)
             {
-                auto stides = hiptensor::stridesFromLengths(outLengthsArray[i], isColMajorStrides);
+                auto strides
+                    = (outStridesArray.empty() || outStridesArray[i].empty())
+                          ? hiptensor::stridesFromLengths(outLengthsArray[i], isColMajorStrides)
+                          : outStridesArray[i];
                 std::map<int32_t, int> modeToIndex;
                 for(int j = 0; j < Traits::NDim; j++)
                 {
@@ -121,7 +124,7 @@ namespace hiptensor
                 }
                 for(int j = 0; j < Traits::NDim; j++)
                 {
-                    deviceOutputStrides[i][j] = stides[modeToIndex[inModesArray[i][j]]];
+                    deviceOutputStrides[i][j] = strides[modeToIndex[inModesArray[i][j]]];
                 }
             }
 
