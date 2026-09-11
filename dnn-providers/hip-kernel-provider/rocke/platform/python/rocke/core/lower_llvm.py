@@ -718,14 +718,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i32 @llvm.amdgcn.update.dpp.i32("
         "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
     ),
-    # Packed bf16 atomic add (gfx940+). Two bf16 lanes per atomic transaction.
-    # Used by FMHA-bwd's dQ accumulate path when the caller wants to
-    # land bf16 directly in HBM rather than running a separate f32 -> bf16
-    # cast pass on the workspace.
-    "global.atomic.fadd.v2bf16": (
-        "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-        "ptr addrspace(1), <2 x bfloat>)"
-    ),
     # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
     "global.atomic.fadd.v2f16": (
         "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
@@ -865,17 +857,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "amdgcn.cvt.scalef32.pk.f32.bf8": (
         "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"
-    ),
-    # Reverse direction: <2 x f32> + scale -> 2 fp8 bytes packed into i32.
-    # First call (i1=false) fills bytes 0,1; second call (i1=true with
-    # the first call's i32 result as the accumulator) fills bytes 2,3.
-    # Saves the host-side rescale + cvt_pk_fp8 + bitshift dance for
-    # output FP8 quantisation paths.
-    "amdgcn.cvt.scalef32.pk.fp8.f32": (
-        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"
-    ),
-    "amdgcn.cvt.scalef32.pk.bf8.f32": (
-        "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"
     ),
     # gfx950 ``ds_swizzle_b32`` — single-instruction intra-32-lane
     # permute. We use it for the softmax XOR-butterfly reduction; the
