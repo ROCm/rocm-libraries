@@ -57,9 +57,22 @@ protected:
         auto graph = buildSdpaFwdGraph(testCase);
 
         auto validationResult = graph->validate();
+
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
+
+        {
+            auto supportStatus = graph->is_supported_ext(this->_handle);
+            ASSERT_EQ(supportStatus.code, ErrorCode::OK)
+                << "No engines applicable for config: " << testCase.name << " - "
+                << supportStatus.get_message();
+        }
+
+        if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
+        {
+            GTEST_SKIP() << "Group mode kernels not supported by CPU validation";
+        }
 
         // Register output tensor validator
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
