@@ -82,7 +82,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -2421,7 +2421,7 @@ class KernelWriterAssembly(KernelWriter):
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
     if not ((cx > 1 or cy > 1)
-            and (kernel["StreamK"] == 0 or streamKMulticast(kernel))):
+            and (kernel["StreamK"] == 0 or streamKCluster(kernel))):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")
@@ -9973,8 +9973,8 @@ class KernelWriterAssembly(KernelWriter):
             # cluster-scope wait on that skip edge so the prologue cluster arrive
             # is consumed on every control-flow path (whole-cluster barrier
             # symmetry). scc (from checkLastIter) is preserved for the branch
-            # below. No-op unless StreamKMulticast.
-            if streamKMulticast(kernel):
+            # below. No-op unless streamKCluster.
+            if streamKCluster(kernel):
               skComponent = Component.StreamK.find(self)
               module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump
