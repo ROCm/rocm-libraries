@@ -50,23 +50,14 @@ from ...Common.DataType import DataType
 def useDirectToVgprPreSwizzledB(kernel):
   """Whether the non-replicating subtile DTVB implementation applies.
 
-  Small wave tiles retain three complete B register sets for PGR2.  The
-  MT256x256 1x4-wave geometry uses PGR1 so its 256 accumulators, A operands,
-  and two rolling B register sets fit the gfx950 unified register file.
+  Small wave tiles retain three complete B register sets for PGR2.
   """
   pt = kernel["ProblemType"]
   dtypeB = pt["DataTypeB"]
   waveGroup = tuple(kernel.get("MIWaveGroup", (0, 0)))
   waveTile = tuple(kernel.get("MIWaveTile", ()))
   pgr = kernel.get("PrefetchGlobalRead")
-  supportedSchedule = (
-      (waveTile in ((2, 2), (6, 2), (2, 4)) and pgr == 2)
-      or (waveTile == (16, 4)
-          and waveGroup == (1, 4)
-          and kernel.get("MacroTileA") == 256
-          and kernel.get("MacroTileB") == 256
-          and pgr == 1)
-  )
+  supportedSchedule = waveTile in ((2, 2), (6, 2), (2, 4)) and pgr == 2
   return (
       kernel.get("UseSubtileImpl", False)
       and pt.get("SwizzleTensorB", False)
