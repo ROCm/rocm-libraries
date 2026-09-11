@@ -156,6 +156,17 @@ struct MxGemmKernel
                        remove_cvref_t<std::tuple_element_t<0, AsLayout>>> &&
         std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
 
+    // The shift leaves ds_ptr at its base while clamping kargs.M, so the D windows would be built
+    // at origin 0 and every workgroup would read D rows [0, MPerBlock). Before enabling D here,
+    // shift ds_ptr alongside e_ptr and fold the Ds layouts into kOffsetPtrsByTileCoords.
+    static_assert(!kOffsetPtrsByTileCoords || NumDTensor == 0,
+                  "MX GEMM: the per-M-tile base-pointer shift does not offset the D pointers.");
+
+    // The shift shifts every A pointer by stride_As[i], which is a row offset only for RowMajor A,
+    // but the predicate above inspects AsLayout[0] alone.
+    static_assert(!kOffsetPtrsByTileCoords || NumATensor == 1,
+                  "MX GEMM: the per-M-tile base-pointer shift assumes a single RowMajor A.");
+
     CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported()
     {
         return kOffsetPtrsByTileCoords;
