@@ -168,6 +168,70 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         return Policy::template GetSmemSize<Problem>();
     }
 
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
+    // Fold the gemm_4 accumulator so one dQ atomic covers one whole cache line.
+    //
+    // The wmma C fragment hands a wave two rows 8 apart, 16 columns each, so a
+    // buffer_atomic_add_f32 built from it straddles two 128 B lines. With
+    // PackMNIter on, the two registers of an N-adjacent pair hold the same two
+    // rows over adjacent 16-column blocks:
+    //
+    //   A : lanes 0-15 = row r   cols c..c+15  | lanes 16-31 = row r+8 cols c..c+15
+    //   B : lanes 0-15 = row r   cols c+16..   | lanes 16-31 = row r+8 cols c+16..
+    //
+    // v_permlane16_swap_b32 exchanges A's odd 16-lane row with B's even one,
+    // which is precisely the transpose of that 2x2 block:
+    //
+    //   A': lanes 0-31 = row r   cols c..c+31   -> 128 B, one line
+    //   B': lanes 0-31 = row r+8 cols c..c+31   -> 128 B, one line
+    //
+    // The thread-buffer index of every value is unchanged -- only which (M, N)
+    // it stands for -- so this is a relabelling plus one VALU op per register
+    // pair, and MakeQGradStoreBlockDistribution is the new label.
+    template <typename QGradAccTensor>
+    CK_TILE_DEVICE static auto FoldQGradForAtomic(const QGradAccTensor& dq_acc)
+    {
+        auto dq_out = make_static_distributed_tensor<AccDataType>(
+            Policy::template MakeQGradStoreBlockDistribution<Problem>());
+
+        static_assert(QGradAccTensor::get_thread_buffer_size() ==
+                          decltype(dq_out)::get_thread_buffer_size(),
+                      "the fold must not change how many values a lane holds");
+
+        constexpr index_t kWarpSize = get_warp_size();
+        constexpr index_t kMPerLane =
+            BlockFmhaShape::Gemm4WarpTile::at(number<0>{}) *
+            BlockFmhaShape::Gemm4WarpTile::at(number<1>{}) / kWarpSize;
+        // One pair-group is two consecutive N iterations, i.e. two runs of
+        // kMPerLane values in the thread buffer.
+        constexpr index_t kPairGroups =
+            QGradAccTensor::get_thread_buffer_size() / (2 * kMPerLane);
+        static_assert(kPairGroups * 2 * kMPerLane == QGradAccTensor::get_thread_buffer_size(),
+                      "accumulator does not split into N-adjacent pairs");
+
+        const auto& src = dq_acc.get_thread_buffer();
+        auto& dst       = dq_out.get_thread_buffer();
+
+        static_for<0, kPairGroups, 1>{}([&](auto i_pair) {
+            static_for<0, kMPerLane, 1>{}([&](auto i_e) {
+                constexpr auto i_lo = number<i_pair * 2 * kMPerLane + i_e>{};
+                constexpr auto i_hi = number<i_pair * 2 * kMPerLane + kMPerLane + i_e>{};
+
+                const int32x2_t s =
+                    __builtin_amdgcn_permlane16_swap(bit_cast<int32_t>(src[i_lo]),
+                                                     bit_cast<int32_t>(src[i_hi]),
+                                                     false,
+                                                     false);
+
+                dst(i_lo) = bit_cast<AccDataType>(s[0]);
+                dst(i_hi) = bit_cast<AccDataType>(s[1]);
+            });
+        });
+
+        return dq_out;
+    }
+#endif
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -1064,14 +1128,19 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             {
                 tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
             }
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
+            const auto dq_out = FoldQGradForAtomic(dq_acc);
+#else
+            const auto& dq_out = dq_acc;
+#endif
             if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                          memory_operation_enum::set)
             {
-                store_tile(dq_dram_window, dq_acc);
+                store_tile(dq_dram_window, dq_out);
             }
             else
             {
-                update_tile(dq_dram_window, dq_acc);
+                update_tile(dq_dram_window, dq_out);
             }
             move_tile_window(dq_dram_window, {kM0, 0});
 
@@ -1337,14 +1406,19 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dk_acc);
         }
 
+#if CK_TILE_FMHA_BWD_DQ_ATOMIC_FOLD
+        const auto dq_out = FoldQGradForAtomic(dq_acc);
+#else
+        const auto& dq_out = dq_acc;
+#endif
         if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
                      memory_operation_enum::set)
         {
-            store_tile(dq_dram_window, dq_acc);
+            store_tile(dq_dram_window, dq_out);
         }
         else
         {
-            update_tile(dq_dram_window, dq_acc);
+            update_tile(dq_dram_window, dq_out);
         }
 
         return make_tuple(dk_acc, dv_acc);
