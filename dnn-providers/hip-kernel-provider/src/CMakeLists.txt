@@ -185,6 +185,15 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
         )
+        # Phase 1 host-ASAN is intentionally applied only to the unit binary.
+        # The integration binary shares the regular tier YAML but requires a GPU.
+        apply_test_category_labels(
+            hip_kernel_provider_tests
+            "${HIPKERNELPROVIDER_HOST_ASAN_CATEGORIES_YAML}"
+            "${PROJECT_BINARY_DIR}/staging"
+            "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
+        )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
         # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
         # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by

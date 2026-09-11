@@ -35,6 +35,11 @@ catch_discover_tests(origami-tests
     DISCOVERY_MODE PRE_TEST
 )
 
+# Phase 1 host-ASAN coverage. Register an explicit negative Catch2 tag filter so
+# CPU CI does not depend on hardware tests noticing the missing device and skipping.
+add_test(NAME origami-host-asan-tests COMMAND origami-tests "~[hardware]")
+set_tests_properties(origami-host-asan-tests PROPERTIES LABELS "host-asan")
+
 # Install CTestTestfile.cmake for installed Origami tests
 set(_ctest_content [=[
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
@@ -44,6 +49,12 @@ set(_ctest_content [=[
 add_test(origami-tests "../origami-tests")
 set_tests_properties(origami-tests PROPERTIES
     LABELS "cpp"
+)
+
+# GPU-independent C++ coverage for the CPU-only host-ASAN lane.
+add_test(origami-host-asan-tests "../origami-tests" "~[hardware]")
+set_tests_properties(origami-host-asan-tests PROPERTIES
+    LABELS "host-asan"
 )
 
 ]=])

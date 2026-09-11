@@ -3,9 +3,11 @@
 
 # Multi-Arch CI ASAN for rocm-libraries
 #
-# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Phase-1 presubmit and on-demand ASAN builds. TheRock's
+# configure_multi_arch_ci.py automatically selects host-asan for pull_request
+# events and full asan for workflow_dispatch. Presubmit is intentionally
+# label-gated by the existing ci:host-asan/ci:asan opt-in while the CPU-only
+# component scope is proven in CI.
 #
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
@@ -18,6 +20,7 @@ on:
       - synchronize
       - reopened
       - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -56,11 +59,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  configure:
+    name: Configure Changed Projects
+    runs-on: ubuntu-24.04
+    outputs:
+      changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      test_projects: ${{ steps.configure.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+    steps:
+      - name: Checkout repository config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/repos-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout TheRock for configure script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+          path: _therock
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Configure CI
+        id: configure
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+            --event-name "${{ github.event_name }}" \
+            --github-repo "${{ github.repository }}" \
+            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
+            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
+            --config-path ".github/repos-config.json"
+
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+    needs: configure
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7860a48221aa7e856cdd46ab98b102f9338b9195
     with:
       build_variant: "asan"
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
+      # Host instrumentation is architecture-independent, so presubmit builds
+      # one canonical family. Manual full-ASAN keeps the broader matrix.
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || (github.event_name == 'pull_request' && 'gfx94X') || 'gfx94X,gfx950,gfx125X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
@@ -70,18 +112,20 @@ jobs:
       build_pytorch: false
       build_jax: false
       repository: ROCm/TheRock
-      ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+      ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
+      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: setup
+    needs: [configure, setup]
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7860a48221aa7e856cdd46ab98b102f9338b9195
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -91,8 +135,11 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      # Empty means run all; otherwise intersect changed-project consumers with
+      # the explicit Phase-1 host-ASAN admission list in TheRock.
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
-      ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+      ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
     permissions:
       contents: read
       id-token: write
@@ -102,6 +149,7 @@ jobs:
     if: always()
     needs:
       - setup
+      - configure
       - linux_build_and_test
     runs-on: ubuntu-24.04
     steps:
@@ -109,7 +157,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+          ref: 7860a48221aa7e856cdd46ab98b102f9338b9195
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
