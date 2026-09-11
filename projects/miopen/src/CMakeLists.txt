@@ -296,6 +296,7 @@ set( MIOpen_Source
     solver/softmarginloss/forward_softmarginloss.cpp
     solver/softmax/attn_softmax.cpp
     solver/softmax/softmax.cpp
+    solver/softmax/softmax_noncontiguous.cpp
     solver/tensorOp/Op1dTensorGeneric.cpp
     solver/tensorOp/Op2dTensorGeneric.cpp
     solver/tensorOp/Op2dTensorLite.cpp
@@ -580,6 +581,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenSoftMarginLoss.cpp
         kernels/MIOpenSoftmax.cpp
         kernels/MIOpenSoftmaxAttn.cpp
+        kernels/MIOpenSoftmaxNoncontiguous.cpp
         kernels/MIOpenSubSample.cpp
         kernels/MIOpenT5LayerNorm.cpp
         kernels/MIOpenUpSample.cpp
