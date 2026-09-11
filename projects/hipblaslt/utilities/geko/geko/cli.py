@@ -184,6 +184,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target seconds per cold and per timed phase when using --bench",
     )
     parser.add_argument(
+        "--custom-lib-src",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Source library directory (.yaml logic files) used to build a "
+            "reference custom library. Used by --bench and --search."
+        ),
+    )
+    parser.add_argument(
+        "--custom-lib-dir",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Pre-built custom library directory containing "
+            "library/**/TensileLibrary_lazy_gfx*.dat. Used by --bench."
+        ),
+    )
+    parser.add_argument(
         "--no_retry",
         action="store_true",
         help="Do not retry failed operations (used with --tune)",
@@ -224,6 +244,8 @@ class CliArgs:
     up_thr: float
     duration: float
     benchmark_duration: float
+    custom_lib_src: str | None
+    custom_lib_dir: str | None
     retry: bool
     bench_freq: bool
 
@@ -290,6 +312,8 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         up_thr=ns.up_thr,
         duration=ns.duration,
         benchmark_duration=ns.benchmark_duration,
+        custom_lib_src=ns.custom_lib_src,
+        custom_lib_dir=ns.custom_lib_dir,
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
     )
@@ -351,6 +375,8 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             devices=args.devices,
             benchmark_duration=args.benchmark_duration,
             bench_freq=args.bench_freq,
+            custom_lib_src=args.custom_lib_src,
+            custom_lib_dir=args.custom_lib_dir,
         )
     if args.search:
         run_search(
@@ -363,6 +389,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             verbose=args.verbose,
             duration=args.duration,
             bench_freq=args.bench_freq,
+            custom_lib_src=args.custom_lib_src,
         )
         logger.info(f"Search outputs under '{run_root_str}'")
         return 0
