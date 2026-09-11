@@ -4323,14 +4323,6 @@ namespace TensileLite
                     // work-queue counters live at the base of the flag buffer
                     // (AddressFlags), not here, so they need no room in it.
                     size_t idealWorkspace = partialTileSize(skGrid);
-                    // Pre-uniform-summation-order sizing reserved the work-queue
-                    // region here as well. Nothing addresses those bytes, but
-                    // dropping them lowers the DP-fallback threshold, so the
-                    // reservation is kept on the non-uniform path. Mirrored in
-                    // resolveStreamKSettings() and computeStreamKDecisions().
-                    if(!problem.getParams().uniformSummationOrder()
-                       && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
-                        idealWorkspace += streamKQueueRegionBytes(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -4468,12 +4460,12 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernelName.empty())
+        if(!sizeMapping.customKernelName.empty() || handwrittenCustomKernel())
         {
             // Custom kernels currently only support single-kernel (tree)
-            // reduction. handwrittenCustomKernel() is not tested here: its
-            // customKernel.name is copied from sizeMapping.customKernelName at
-            // deserialization, so it can never widen this condition.
+            // reduction. Both spellings are checked: a handwritten kernel can
+            // carry customKernel.name without sizeMapping.customKernelName
+            // being set.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
@@ -4762,11 +4754,6 @@ namespace TensileLite
             // workspace-size queries (requiredWorkspaceSize() and
             // computeStreamKDecisions()), which carry no such term.
             size_t idealWorkspace = partialTileSize(sk.grid);
-            // Threshold parity with the pre-uniform-summation-order launch path,
-            // which reserved the work-queue region here too.
-            if(!problem.getParams().uniformSummationOrder()
-               && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
-                idealWorkspace += streamKQueueRegionBytes(hardware);
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
@@ -5824,10 +5811,6 @@ namespace TensileLite
             // counters live at the base of the flag buffer (AddressFlags), not
             // here, so they need no room in it.
             idealWorkspace = partialTileSize(grid);
-            // Threshold parity with the pre-uniform-summation-order sizing,
-            // which reserved the work-queue region here too.
-            if(!problem.getParams().uniformSummationOrder() && isDynamic)
-                idealWorkspace += streamKQueueRegionBytes(hardware);
             if(idealWorkspace > problem.workspaceSize())
             {
                 reduction                  = origami::reduction_t::tree;
