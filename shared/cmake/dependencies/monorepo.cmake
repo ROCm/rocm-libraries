@@ -67,7 +67,7 @@ macro(fetch_monorepo_dep)
   set(args PACKAGE VERSION)
   cmake_parse_arguments(arg_fetch "" "${args}" "" ${ARGN})
 
-  string(TOUPPER "FETCH_${arg_fetch_PACKAGE}_METHOD" fetch_method_name)
+  string(TOUPPER "${arg_fetch_PACKAGE}_FETCH_METHOD" fetch_method_name)
   set(
     ${fetch_method_name} "PACKAGE"
     CACHE STRING
