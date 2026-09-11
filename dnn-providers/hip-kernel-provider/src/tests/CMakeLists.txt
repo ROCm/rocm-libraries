@@ -134,7 +134,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # These binaries also run from a packaged artifact that carries no checkout, so the
     # offset is the only form that resolves there. install(DIRECTORY) on that tree ships
     # the archive with the descriptors.
-    set(_hkp_vendored_kpack_subdir "fixtures")
+    set(_hkp_vendored_kpack_subdir "test_kpack_binary")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
         "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_vendored_kpack_subdir}/test_zstd.kpack"
