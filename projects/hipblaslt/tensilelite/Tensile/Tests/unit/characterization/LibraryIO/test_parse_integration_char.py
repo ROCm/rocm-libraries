@@ -90,6 +90,9 @@ def test_parse_library_logic_file(assembler, isa_info_map, snapshot):
         str(_FIXTURE), assembler, False, False, False, isa_info_map, False
     )
     assert _summarize_logic(logic) == snapshot
+    assert logic.solutions
+    assert all(solution.srcName == str(_FIXTURE) for solution in logic.solutions)
+    assert all(solution.splitGSU is False for solution in logic.solutions)
 
 
 def test_parse_library_logic_data_dict_path(assembler, isa_info_map, snapshot):
@@ -118,7 +121,7 @@ def test_parse_library_logic_data_no_cucount_with_datatypes(assembler, isa_info_
     assert _summarize_logic(logic) == snapshot
 
 
-def test_parse_library_logic_data_version_warning(assembler, isa_info_map, snapshot):
+def test_parse_library_logic_data_version_warning(assembler, isa_info_map, capsys, snapshot):
     # Incompatible MinimumRequiredVersion -> printWarning path (not a reject).
     data = L.read(str(_FIXTURE), True)
     data = copy.deepcopy(data)
@@ -126,6 +129,14 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, snaps
     logic = L.parseLibraryLogicData(
         data, str(_FIXTURE), assembler, False, False, False, isa_info_map, False
     )
+    warnings = [
+        line for line in capsys.readouterr().out.splitlines()
+        if "Tensile::WARNING:" in line
+    ]
+    assert warnings == [
+        "Tensile::WARNING: Version = {} in library logic file 1.0.0 "
+        "does not match Tensile version = {}".format(_FIXTURE, L.__version__)
+    ]
     assert _summarize_logic(logic) == snapshot
 
 
@@ -155,7 +166,7 @@ def test_parse_library_logic_data_custom_kernel_bad_mi(assembler, isa_info_map, 
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="MatrixInstruction can only be of length 4"):
         L.parseLibraryLogicData(
             data, str(_FIXTURE), assembler, False, False, False, isa_info_map, False
         )
@@ -185,6 +196,8 @@ def test_parse_solutions_file_roundtrip(written_solutions, assembler, isa_info_m
         "n_solutions": len(solutions),
         "problem_sizes_type": type(problemSizes).__name__,
     } == snapshot
+    assert all(solution.srcName == str(written_solutions) for solution in solutions)
+    assert all(solution.splitGSU is False for solution in solutions)
 
 
 def test_parse_solutions_data_with_bias_activation(written_solutions, assembler, isa_info_map, snapshot):
@@ -204,25 +217,37 @@ def test_parse_solutions_data_with_bias_activation(written_solutions, assembler,
     } == snapshot
 
 
-def test_parse_solutions_data_version_warning(written_solutions, assembler, isa_info_map, snapshot):
+def test_parse_solutions_data_version_warning(written_solutions, assembler, isa_info_map, capsys, snapshot):
     # Incompatible MinimumRequiredVersion -> printWarning path in parseSolutionsData.
     data = L.read(str(written_solutions))
     data[0]["MinimumRequiredVersion"] = "1.0.0"
     problemSizes, solutions = L.parseSolutionsData(
         data, str(written_solutions), assembler, False, False, False, isa_info_map
     )
+    warnings = [
+        line for line in capsys.readouterr().out.splitlines()
+        if "Tensile::WARNING:" in line
+    ]
+    assert warnings == [
+        "Tensile::WARNING: Version = {} in solution file 1.0.0 "
+        "does not match Tensile version = {}".format(written_solutions, L.__version__)
+    ]
     assert {
         "n_solutions": len(solutions),
         "problem_sizes_type": type(problemSizes).__name__,
     } == snapshot
 
 
-def test_parse_solutions_data_too_short(assembler, isa_info_map):
+def test_parse_solutions_data_too_short(assembler, isa_info_map, capsys):
     with pytest.raises(SystemExit):
         L.parseSolutionsData(
             [{"MinimumRequiredVersion": "5.0.0"}, {"ProblemSizes": []}],
             "tiny.yaml", assembler, False, False, False, isa_info_map,
         )
+    assert capsys.readouterr().out == (
+        "Tensile::FATAL: Solution file tiny.yaml is missing required fields "
+        "(len = 2 < 3\n"
+    )
 
 
 def test_parse_solutions_data_missing_problem_sizes(assembler, isa_info_map):
@@ -231,3 +256,34 @@ def test_parse_solutions_data_missing_problem_sizes(assembler, isa_info_map):
             [{"MinimumRequiredVersion": "5.0.0"}, {"NotProblemSizes": []}, {"SolutionIndex": 0}],
             "bad.yaml", assembler, False, False, False, isa_info_map,
         )
+
+
+def test_parse_solutions_data_resets_derived_flags(
+    written_solutions, assembler, isa_info_map
+):
+    data = L.read(str(written_solutions))
+    for entry in data[2:]:
+        entry["AssignedProblemIndependentDerivedParameters"] = True
+        entry["AssignedDerivedParameters"] = True
+
+    L.parseSolutionsData(
+        data, str(written_solutions), assembler, False, False, False, isa_info_map
+    )
+
+    for entry in data[2:]:
+        assert entry["AssignedProblemIndependentDerivedParameters"] is False
+        assert entry["AssignedDerivedParameters"] is False
+
+
+def test_parse_solutions_data_bias_header_advances_one_entry(
+    written_solutions, assembler, isa_info_map
+):
+    original = L.read(str(written_solutions))
+    expected_solutions = len(original) - 2
+    data = original[:2] + [{"BiasTypeArgs": [0]}] + original[2:]
+
+    _, solutions = L.parseSolutionsData(
+        data, str(written_solutions), assembler, False, False, False, isa_info_map
+    )
+
+    assert len(solutions) == expected_solutions
