@@ -10,6 +10,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "codegen"))
 
 from fmha.validation import validate_config, load_arch_specs
 
+try:
+    # instance_gen pulls in dispatcher/python/fmha_utils, which needs numpy
+    from fmha.instance_gen import (
+        _supported_hdims,
+        generate_fwd_tiles,
+        get_pipelines_for_config,
+    )
+
+    HAVE_INSTANCE_GEN = True
+except ImportError:
+    HAVE_INSTANCE_GEN = False
+
 SPECS = load_arch_specs()
 
 
@@ -151,6 +163,107 @@ class TestValidateConfig(unittest.TestCase):
         for mask in ["no", "top_left", "bottom_right", "generic"]:
             r = validate_config(_base_config(mask=mask), SPECS)
             self.assertTrue(r.valid, f"mask={mask}: {r.errors}")
+
+
+def _hdim512_config(**overrides):
+    """fwd/qr/hdim 512 on gfx942 with the shipped 64-row, 4-warp tile (gemm1 16x16x16)."""
+    cfg = _base_config(arch="gfx942", pipeline="qr", hdim_q=512, hdim_v=512)
+    cfg["algorithm"]["tile"] = [64, 128, 32, 512, 32, 512]
+    cfg["algorithm"]["wave"] = [4, 1, 1, 4, 1, 1, 1, 1, 1]
+    cfg["algorithm"]["warp"] = [16, 16, 32, 16, 16, 16, 16, 16, 16]
+    for section, values in overrides.items():
+        cfg[section].update(values)
+    return cfg
+
+
+class TestWideHdim(unittest.TestCase):
+    """hdim 512 is served by the fwd family's qr pipeline only, with <= 16 rows per warp."""
+
+    def test_qr_hdim512_64_row_tile_valid(self):
+        r = validate_config(_hdim512_config(), SPECS)
+        self.assertTrue(r.valid, r.errors)
+
+    def test_qr_hdim512_128_row_8_warp_tile_valid(self):
+        cfg = _hdim512_config(
+            algorithm={
+                "tile": [128, 128, 32, 512, 32, 512],
+                "wave": [8, 1, 1, 8, 1, 1, 1, 1, 1],
+            }
+        )
+        r = validate_config(cfg, SPECS)
+        self.assertTrue(r.valid, r.errors)
+
+    def test_qr_hdim512_128_row_4_warp_tile_rejected(self):
+        # 32 rows per warp: Q + f32 O accumulator no longer fit the register file
+        cfg = _hdim512_config(
+            algorithm={
+                "tile": [128, 128, 32, 512, 32, 512],
+                "warp": [32, 32, 16, 32, 32, 16, 16, 16, 16],
+            }
+        )
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("num_warps" in e for e in r.errors), r.errors)
+
+    def test_qr_hdim512_gemm1_warp_k32_rejected(self):
+        # 16x16x32 as the P*V warp tile drops keys 4..7 of every 8 at kN1=512
+        cfg = _hdim512_config(algorithm={"warp": [16, 16, 32, 16, 16, 32, 16, 16, 16]})
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("gemm1 warp" in e for e in r.errors), r.errors)
+
+    def test_qr_async_hdim512_rejected(self):
+        r = validate_config(_hdim512_config(algorithm={"pipeline": "qr_async"}), SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("qr pipeline" in e for e in r.errors), r.errors)
+
+    def test_splitkv_hdim512_rejected(self):
+        r = validate_config(_hdim512_config(signature={"family": "fwd_splitkv"}), SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("qr pipeline" in e for e in r.errors), r.errors)
+
+    def test_fp32_hdim512_valid(self):
+        cfg = _hdim512_config(
+            signature={"data_type": "fp32"},
+            algorithm={
+                "tile": [64, 64, 32, 512, 16, 512],
+                "warp": [16, 16, 16, 16, 16, 16, 16, 16, 16],
+            },
+        )
+        r = validate_config(cfg, SPECS)
+        self.assertTrue(r.valid, r.errors)
+
+    def test_hdim512_listed_for_fp16_bf16_fp32(self):
+        from fmha.validation import SUPPORTED_HDIMS
+
+        for dtype in ("fp16", "bf16", "fp32"):
+            self.assertIn((512, 512), SUPPORTED_HDIMS[dtype])
+
+    @unittest.skipUnless(HAVE_INSTANCE_GEN, "fmha.instance_gen needs numpy")
+    def test_tile_engine_only_emits_qr_16_row_tiles(self):
+        tags = {s.tag for s in get_pipelines_for_config("gfx942", "fp16", 512, 512, 0)}
+        self.assertEqual(tags, {"qr"})
+
+        self.assertEqual(
+            generate_fwd_tiles("gfx942", "fp16", 512, 512, pipeline="qr_async"), []
+        )
+        tiles = generate_fwd_tiles("gfx942", "fp16", 512, 512, pipeline="qr")
+        self.assertTrue(tiles)
+        for t in tiles:
+            self.assertLessEqual(t.bm0 // t.rm0, 16, t)
+            self.assertIn(t.bm0, (64, 128), t)
+            self.assertEqual(t.bn1, 512, t)
+            self.assertEqual(t.wk1, 16, t)
+
+    @unittest.skipUnless(HAVE_INSTANCE_GEN, "fmha.instance_gen needs numpy")
+    def test_non_fwd_families_skip_hdim512(self):
+        self.assertIn((512, 512), _supported_hdims("fp16", family="fwd"))
+        for family in ("fwd_splitkv", "fwd_pagedkv", "fwd_appendkv", "batch_prefill"):
+            self.assertNotIn((512, 512), _supported_hdims("fp16", family=family))
+        self.assertEqual(
+            _supported_hdims("fp16", restrict_hdims=[(512, 512)], family="fwd_splitkv"),
+            [],
+        )
 
 
 class TestMaskDistinction(unittest.TestCase):

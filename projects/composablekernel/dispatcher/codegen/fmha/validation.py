@@ -151,6 +151,23 @@ VALID_BN0: List[int] = _tile_ranges["valid_bn0"]
 VALID_BK0: List[int] = _tile_ranges["valid_bk0"]
 K0_MAX_SUBMAX_MAP: Dict[int, int] = _build_k0max_map()
 
+# Head dims above this are accepted only by the fwd family's qr pipeline
+# (block_fmha_pipeline_qr_ks_vs.hpp); every other pipeline static-asserts hdim <= 256.
+MAX_HDIM_NON_FWD_QR: int = _specs["global_rules"].get("max_hdim_non_fwd_qr", 256)
+# For those wide head dims qr keeps Q and the f32 O accumulator in registers, so the
+# pipeline additionally static-asserts bm0 / num_warps <= this value.
+WIDE_HDIM_MAX_ROWS_PER_WARP: int = _specs["global_rules"].get(
+    "wide_hdim_max_rows_per_warp", 16
+)
+# For those wide head dims the P*V (gemm1) warp tile must have K = 16: the 16x16x32 warp
+# gemm drops keys 4..7 of every 8 from the P*V sum at kN1 = 512 on gfx942.
+WIDE_HDIM_GEMM1_WARP_K: int = _specs["global_rules"].get("wide_hdim_gemm1_warp_k", 16)
+
+
+def is_wide_hdim(hdim_q: int, hdim_v: int) -> bool:
+    """True when (hdim_q, hdim_v) needs the fwd-only qr wide-hdim path."""
+    return max(hdim_q, hdim_v) > MAX_HDIM_NON_FWD_QR
+
 
 # =============================================================================
 # 3. Tile constraints
@@ -172,11 +189,16 @@ def check_gfx9_tile_constraints(
     Applies to gfx90a, gfx942, gfx950 for pipelines in {qr, qr_async, qs}.
     Note: CK factory is stricter (bm0==128 only for non-128 hdims); we allow
     {64, 128, 192, 256} to let the tile engine explore more configurations.
+    Wide hdims (> MAX_HDIM_NON_FWD_QR) are exempt from the bm0==128 rule in CK
+    because Q and the f32 O accumulator live in registers there; the tiles that
+    exist for them are bm0 in {64, 128} (4 and 8 warps of 16 rows).
     """
     if dtype == "fp32":
         return True
     if pipeline not in ("qr", "qr_async", "qs"):
         return True
+    if is_wide_hdim(hdim_q, hdim_v):
+        return pipeline == "qr" and bm0 in (64, 128)
     if (hdim_q, hdim_v) == (128, 128) and bn0 != 128:
         return False
     if (hdim_q, hdim_v) == (128, 128) and pipeline == "qr_async" and bm0 != 128:
@@ -259,6 +281,16 @@ def tile_passes_all_constraints(
     """Master constraint check — returns True if the tile is valid."""
     elem_size = ELEMENT_SIZES.get(dtype, 2)
     lds_limit = LDS_LIMITS.get(pipeline, 65536)
+
+    # Wide hdim: only qr compiles, and it static-asserts bm0 / num_warps <= 16 because
+    # the Q tile and the f32 O accumulator (bm0 x hdim each) are held in registers
+    # (block_fmha_pipeline_qr_ks_vs.hpp). num_warps = bm0 / wm0 in this generator.
+    if is_wide_hdim(hdim_q, hdim_v):
+        if pipeline != "qr":
+            return False
+        num_warps = bm0 // wm0 if wm0 > 0 else 0
+        if num_warps <= 0 or bm0 // num_warps > WIDE_HDIM_MAX_ROWS_PER_WARP:
+            return False
 
     # LDS capacity check (pipeline-dependent formula)
     if pipeline in ("qr_async", "qr_async_trload", "qr_async_trload_v3"):
@@ -827,6 +859,38 @@ def validate_config(
             result.add_warning(
                 "hdim (192,128) with bias/dropout has limited tile support"
             )
+
+    # Wide hdim (> 256): only block_fmha_pipeline_qr_ks_vs.hpp accepts it, and only when
+    # bm0 / num_warps <= 16 (Q tile and f32 O accumulator are register resident).
+    max_hdim_non_fwd_qr = global_rules.get("max_hdim_non_fwd_qr", MAX_HDIM_NON_FWD_QR)
+    if max(hdim_q, hdim_v) > max_hdim_non_fwd_qr:
+        if family != "fwd" or pipeline != "qr":
+            result.add_error(
+                f"hdim > {max_hdim_non_fwd_qr} is only supported by the fwd family's "
+                f"qr pipeline (got family={family}, pipeline={pipeline})"
+            )
+        else:
+            max_rows = global_rules.get(
+                "wide_hdim_max_rows_per_warp", WIDE_HDIM_MAX_ROWS_PER_WARP
+            )
+            wave = alg.get("wave", [])
+            tile = alg.get("tile", [])
+            warp = alg.get("warp", [])
+            if len(wave) >= 3 and len(tile) >= 1:
+                num_warps = wave[0] * wave[1] * wave[2]
+                if num_warps <= 0 or tile[0] // num_warps > max_rows:
+                    result.add_error(
+                        f"hdim > {max_hdim_non_fwd_qr} needs bm0 / num_warps <= "
+                        f"{max_rows} (got bm0={tile[0]}, num_warps={num_warps})"
+                    )
+            gemm1_warp_k = global_rules.get(
+                "wide_hdim_gemm1_warp_k", WIDE_HDIM_GEMM1_WARP_K
+            )
+            if len(warp) >= 6 and warp[5] != gemm1_warp_k:
+                result.add_error(
+                    f"hdim > {max_hdim_non_fwd_qr} needs a K={gemm1_warp_k} gemm1 warp "
+                    f"tile (got {warp[3]}x{warp[4]}x{warp[5]}); 16x16x32 miscomputes P*V"
+                )
 
     if global_rules.get("logits_requires_no_bias"):
         if bias != "no" and sig.get("logits", False):

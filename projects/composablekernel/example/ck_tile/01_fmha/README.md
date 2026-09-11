@@ -113,7 +113,7 @@ Example 4 (Batch mode with effective lengths): `./bin/tile_example_fmha_fwd -mod
 Currently we are still in rapid development stage, so more features/optimizations will be coming soon.
 
 ### hdim
-Currently we support `32/64/128/256` hdim for `fp16`/`bf16`, within which `64`/`128` is better optimized. hdim should be multiple of 8, while seqlen_s can be arbitrary. For hdim be arbitrary number, it can be support through padding kernel of `qr` pipeline (we didn't generate this in generate.py by default)
+Currently we support `32/64/128/256/512` hdim for `fp16`/`bf16`, within which `64`/`128` is better optimized. hdim `512` is served by the `qr` pipeline only (the async pipelines cannot fit K/V for it in LDS) and targets single-head attention such as VAE mid-blocks. hdim should be multiple of 8, while seqlen_s can be arbitrary. For hdim be arbitrary number, it can be support through padding kernel of `qr` pipeline (we didn't generate this in generate.py by default)
 
 ### group/batch mode
 Currently we support both `batch mode` and `group mode` (or `varlen`, in FA's term), by setting `-mode` = `0` or `1`. In `group mode` different kind of attention mask is also supported(see below)

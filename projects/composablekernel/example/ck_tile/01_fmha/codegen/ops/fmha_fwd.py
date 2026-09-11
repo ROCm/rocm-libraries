@@ -51,6 +51,7 @@ K0_MAX_SUBMAX_MAP = {
     128: 128,
     192: 192,
     256: 256,
+    512: 512,
 }
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
@@ -964,6 +965,10 @@ class CompatibilityRuleFactoryGfx9(CompatibilityRuleFactory):
         ) -> bool:
             # FIX: too confusing that it has to know about mx types
             if problem_ctx.dtype not in ("fp32", "mxfp8", "mxfp4"):
+                # hdim >= 512 keeps Q and the f32 O accumulator (kM0 x hdim each) in registers,
+                # so the km0=128 rule below inverts: km0 / num_warps must stay <= 16
+                # (see the static_asserts in block_fmha_pipeline_qr_ks_vs.hpp)
+                wide = problem_ctx.hdim >= 512
                 # TODO: update if >=gfx11 archs get qr_async and qr_async_trload support
                 if kernel_ctx.pipeline.tag in cls._AVAILABLE_PIPELINES and (
                     (
@@ -972,6 +977,7 @@ class CompatibilityRuleFactoryGfx9(CompatibilityRuleFactory):
                     )
                     or (
                         (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128)
+                        and not wide
                         and kernel_ctx.tile.F_bm0 != 128
                     )
                     or (
@@ -1064,6 +1070,8 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                               FmhaFwdTileSize(128,  64,  32, 128,  32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (192, 192) : [FmhaFwdTileSize( 64,  64,  32, 192,  32, 192,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32, 256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                # bk1=16 keeps the fp32 V tile (bk1 x 512 x 4 B) plus the K tile under the 64 KB LDS limit
+                (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  16, 512,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,   1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP16_BF16:
             return {
@@ -1082,6 +1090,19 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                 (192, 128) : [FmhaFwdTileSize(128, 128,  32, 128,  32, 192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
                 (192, 192) : [FmhaFwdTileSize(128, 128,  32, 192,  32, 192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,   1)],
                 (256, 256) : [FmhaFwdTileSize(128, 128,  32, 256,  32, 256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
+                # hdim 512 is qr-only: Q and the f32 O accumulator stay in registers, so both
+                # tiles keep kM0 / NumWarps <= 16 and both spill a few hundred bytes per lane
+                # on gfx942. The 128-row/8-warp tile is deliberately kept for its parallelism
+                # over long sequences; the 64-row tile is listed first and serves by default.
+                # Gemm1 must use the 16x16x16 warp tile: with 16x16x32 as the P*V B operand
+                # at kN1=512, keys 4..7 of every 8 drop out of the P*V sum on gfx942 (seqlen_k=8
+                # gives outputs at ~half the reference); 16x16x16 is bit-exact. See the
+                # matching static_assert in block_fmha_pipeline_qr_ks_vs.hpp.
+                # The 64-row tile only serves problems too small to keep the CUs busy with
+                # 128-row blocks; everything larger goes to the 8-warp tile (2 waves/SIMD,
+                # half the K/V traffic per query).
+                (512, 512) : [FmhaFwdTileSize( 64, 128,  32, 512,  32, 512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 16,   1, CppConstraint("get_num_blocks(128) < num_cus * min_cu_util_rate")),
+                              FmhaFwdTileSize(128, 128,  32, 512,  32, 512,  8, 1, 1,  8, 1, 1,  16, 16, 32,  16, 16, 16,   1)],
             }  # fmt: skip
         elif dtype in cls._DT_FP8 or dtype in cls._DT_FP8BF16:
             return {
@@ -1131,7 +1152,8 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                 ["t", "f"],
                 ["t", "f"],
             ):
-                if hdim == 256 and hdim_v == 256:
+                if hdim >= 256 and hdim == hdim_v:
+                    # qr only: qr_async triple-buffers K/V in LDS and cannot host these hdims
                     pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                     # the below two is used for hdim vectorize load
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
