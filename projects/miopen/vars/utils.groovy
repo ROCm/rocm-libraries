@@ -284,7 +284,7 @@ def buildTheRockDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:therock_cache"
 
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1201" // multiarch builds
 
     // Pin TheRock's build_tools (the install_rocm_from_artifacts.py installer) to the ref tracked
     // in the ci-env action, so the tooling that downloads the nightly tarball is reproducible.
@@ -512,7 +512,7 @@ def getDockerImage(Map conf=[:])
     def gpu_arch
     if (gpu_family == "ci")
     {
-        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101" // Builds docker image with subset of architectures that CI is run on.
     }
     else if (gpu_family == "gfx90X")
     {
@@ -532,7 +532,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (gpu_family == "navi")
     {
-        gpu_arch = "gfx1101;gfx1151"
+        gpu_arch = "gfx1101"
     }
     else
     {
@@ -1574,7 +1574,6 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
     def Bf16_flags      = pipelineEnv.Bf16_flags
     def Fp16_flags      = pipelineEnv.Fp16_flags
     def gfx908_flags    = pipelineEnv.gfx908_flags
-    def gfx1151_flags   = pipelineEnv.gfx1151_flags
     def Smoke_targets   = pipelineEnv.Smoke_targets
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
