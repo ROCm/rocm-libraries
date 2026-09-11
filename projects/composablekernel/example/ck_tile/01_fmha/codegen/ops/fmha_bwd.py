@@ -327,6 +327,12 @@ class FmhaBwdDQDKDVTileSize:
     # which is reachable only behind tr_load.
     dispatch_max_seq_q: int = 0
     dispatch_max_seq_k: int = 0
+    # Smallest batch*nhead this tile may be dispatched for. The QrQtrDor
+    # pipeline moves the kv axis from the grid into a loop, so its grid is
+    # batch*nhead alone where the regular pipeline's also spans kv tiles. Below
+    # this many workgroups the CUs sit idle and the regular pipeline wins, so
+    # the bound is deliberately conservative.
+    dispatch_min_grid: int = 0
     # Hold the dK/dV accumulators in LDS rather than registers. Frees
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
@@ -340,6 +346,7 @@ class FmhaBwdDQDKDVTileSize:
             + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}_o{self.F_occupancy}_maxq{self.max_seq_q}"
             + (f"_dmaxq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
             + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
+            + (f"_dmingrid{self.dispatch_min_grid}" if self.dispatch_min_grid else "")
             + ("_ldsacc" if self.lds_acc else "")
         )
 
@@ -567,7 +574,21 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     @staticmethod
     def get_dq_dk_dv_tiles(dtype: str, tr_load: str) -> List[FmhaBwdDQDKDVTileSize]:
         if tr_load == "t":
-            return []
+            if dtype not in ["fp16", "bf16"]:
+                return []
+            # Decode tile, ported from gfx950. max_seq_q swaps the loop axis:
+            # the whole q sequence fits one M tile, so the Q loop disappears and
+            # K/V stream instead. At seqlen_q <= 32 the regular pipeline runs a
+            # single Q iteration per workgroup, leaving its prologue/epilogue
+            # unamortised (measured 84.7% of wave time outside the WMMA window).
+            #
+            # Wider than the gfx950 decode tile: ds_load_tr16_b128 hands each
+            # lane 8 bf16, so the transposed reads need warp tile k=32, hence
+            # bk4=32 and bn0>=bk4.
+            return [
+                #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
+                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768),
+            ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
@@ -919,6 +940,8 @@ class FmhaBwdApiTrait:
             cond += f" && (t.{prefix}seqlen_q <= {self.tile.seq_q_limit})"
         if self.tile.dispatch_max_seq_k != 0:
             cond += f" && (t.{prefix}seqlen_k <= {self.tile.dispatch_max_seq_k})"
+        if self.tile.dispatch_min_grid != 0:
+            cond += f" && (t.batch * t.nhead_q >= {self.tile.dispatch_min_grid})"
         return cond
 
     @property
