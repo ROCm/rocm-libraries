@@ -1259,6 +1259,24 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::BufferAtomicAddF32(self);
         });
 
+    nb::class_<rocisa::BufferAtomicPkAddBF16, rocisa::MUBUFStoreInstruction>(
+        m_mem, "BufferAtomicPkAddBF16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("src"),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferAtomicPkAddBF16& self, const nb::dict&) {
+            return new rocisa::BufferAtomicPkAddBF16(self);
+        });
+
     nb::class_<rocisa::BufferAtomicCmpswapB32, rocisa::MUBUFStoreInstruction>(
         m_mem, "BufferAtomicCmpswapB32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,

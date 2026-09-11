@@ -891,6 +891,8 @@ namespace TensileLite
         if(internalArgsSupport.version < 3)
         {
             bool singleWSD = false;
+            // 1 is the fp32 staging workspace. AtomicDest keeps D as the atomic
+            // target and resolves to 0, so it never reaches this branch.
             if(resolvedGlobalAccumulation == 1
                && (problemType.computeType != problemType.dType
                    || problemType.activationType != ActivationType::None))
@@ -1391,6 +1393,8 @@ namespace TensileLite
             }
 
             bool singleWSD = false;
+            // 1 is the fp32 staging workspace. AtomicDest keeps D as the atomic
+            // target and resolves to 0, so it never reaches this branch.
             if(resolvedGlobalAccumulation == 1
                && (problemType.computeType != problemType.dType
                    || problemType.activationType != ActivationType::None))
@@ -2793,6 +2797,8 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
+        // The pre-pass seeds whatever the GSU slices then accumulate into: the
+        // staging workspace when there is one, D itself under AtomicDest.
         if(sizeMapping.globalAccumulation)
             rv.args.append<void*>("WS", inputs.ws);
         else if(problemType.stridedBatched)
@@ -2953,6 +2959,7 @@ namespace TensileLite
         else if(factorDim == 3)
             name += "_FDMN";
 
+        // Must track KernelWriterBetaOnly.kernelName.
         if(sizeMapping.globalAccumulation)
         {
             name += "_GA";
@@ -4052,6 +4059,8 @@ namespace TensileLite
         else
             rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
 
+        // AtomicDest resolves globalAccumulation to 0: the slices already produced
+        // the final D in place, so there is nothing to convert.
         if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)
         {
@@ -4528,6 +4537,8 @@ namespace TensileLite
         size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
         size_t tileSize
             = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+        // AtomicDest accumulates into D, so workspaceSizePerElemC (and
+        // therefore tileSize) is 0 for it and nothing is reserved here.
         size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
         size += bufSize;
 
