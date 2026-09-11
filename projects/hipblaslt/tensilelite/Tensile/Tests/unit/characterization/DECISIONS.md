@@ -431,3 +431,12 @@ codes; only the content-derived basenames change.
 run. The update raises 16 floors, adds 14 current files, removes two entries for
 files deleted by develop, and explicitly lowers the nine reproducibly stale
 floors listed in ADR 0018. The tolerance remains 1 percentage point.
+
+## D32 — Config-driven saved results include emitted assembly
+
+**ADR:** [`adr/0019-pin-config-driven-assembly.md`](adr/0019-pin-config-driven-assembly.md)
+
+**Decision:** Record a SHA-256 digest of the emitted opcode set next to each
+config-driven kernel's name and return code. This makes a change in instruction
+kinds observable while ignoring known register, label, count, and order
+variation.

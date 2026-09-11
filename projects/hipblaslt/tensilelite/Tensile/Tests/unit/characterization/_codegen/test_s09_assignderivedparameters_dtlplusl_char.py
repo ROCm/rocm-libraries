@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-from config_harness import assert_config_derives_golden
+from config_harness import assert_config_rejects
 
 pytestmark = pytest.mark.unit
 
@@ -37,6 +37,19 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s09_assignderivedparameters_dtlplusl_golden(snapshot):
-    """S09 golden: surviving-solution count pins the reachable-invalid reject."""
-    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=False)
+def test_s09_assignderivedparameters_dtlplusl_rejects_with_reason(monkeypatch, capsys):
+    """Every fork reports the expected DirectToLds, PGR, and LDS rejects."""
+    assert_config_rejects(
+        _CONFIG,
+        _ARCH,
+        monkeypatch,
+        capsys,
+        {
+            "reject: b128 DirectToLds not supported": 8,
+            "reject: DirectToLdsA not doable, but GNLCA enabled, rejecting": 4,
+            "reject: DirectToLdsB not doable, but GNLCB enabled, rejecting": 4,
+            "reject: PrefetchGlobalRead>=3 Supports only DirectToLdsA and DirectToLdsB": 1,
+            "reject: Kernel Uses 67584 > 65536 bytes of LDS": 1,
+            "reject: Kernel Uses 101376 > 65536 bytes of LDS": 1,
+        },
+    )

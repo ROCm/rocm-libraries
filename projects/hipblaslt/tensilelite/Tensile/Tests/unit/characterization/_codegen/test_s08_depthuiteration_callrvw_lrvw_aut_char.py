@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from config_harness import assert_config_derives_golden
+from config_harness import assert_config_rejects
 
 pytestmark = pytest.mark.unit
 
@@ -42,6 +42,15 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s08_depthuiteration_callrvw_lrvw_aut_golden(snapshot):
-    """S08 golden: surviving-solution count pins the reachable-invalid reject."""
-    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=False)
+def test_s08_depthuiteration_callrvw_lrvw_aut_rejects_with_reason(monkeypatch, capsys):
+    """Both explicit local-read widths report their intended rejection."""
+    assert_config_rejects(
+        _CONFIG,
+        _ARCH,
+        monkeypatch,
+        capsys,
+        [
+            "reject: gfx1250 requires lrvwA == 8 for datatype H, actual value: 4",
+            "reject: gfx1250 requires lrvwB == 8 for MacDataTypeB H, actual value: 4",
+        ],
+    )

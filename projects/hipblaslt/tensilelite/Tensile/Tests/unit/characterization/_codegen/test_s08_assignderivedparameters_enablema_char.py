@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from config_harness import assert_config_derives_golden
+from config_harness import assert_config_rejects
 
 pytestmark = pytest.mark.unit
 
@@ -42,6 +42,16 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s08_assignderivedparameters_enablema_golden(snapshot):
-    """S08 golden: surviving-solution count pins the reachable-invalid reject."""
-    assert_config_derives_golden(_CONFIG, _ARCH, snapshot, expect_solutions=False)
+def test_s08_assignderivedparameters_enablema_rejects_with_reason(monkeypatch, capsys):
+    """Both matrix-instruction forks report their intended rejection."""
+    assert_config_rejects(
+        _CONFIG,
+        _ARCH,
+        monkeypatch,
+        capsys,
+        [
+            "reject: MIWaveGroup[0]=3 must be a power of two "
+            "(LraTileAssignment vectorStaticRemainder fast path)",
+            "reject: Currently Matrix instructions [4,4,4,4] is disabled.",
+        ],
+    )

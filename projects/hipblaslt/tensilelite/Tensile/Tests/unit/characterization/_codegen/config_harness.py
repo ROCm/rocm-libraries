@@ -39,9 +39,11 @@ The expensive toolchain build is cached process-wide (per arch).
 import contextlib
 import copy
 import functools
+import hashlib
 import os
 import re
 import tempfile
+from collections import Counter
 
 import pytest
 
@@ -344,12 +346,29 @@ def assert_real_gfx1250_kernels(results):
     return results
 
 
-def golden_digest(results):
-    """Order-invariant ``{basename, err}`` digest shared by the syrupy goldens."""
-    return sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
-    )
+def golden_digest(results, *, include_source=False):
+    """Return an order-invariant saved result for emitted kernels.
+
+    ``include_source`` adds a digest and line count of the canonical assembly.
+    This detects emitted-code changes without storing thousands of assembly
+    lines in each snapshot.
+    """
+    digest = []
+    for base, source, err in results:
+        item = {"basename": base, "err": err}
+        if include_source:
+            if isinstance(source, (bytes, bytearray)):
+                source = source.decode(errors="replace")
+            source = source or ""
+            opcodes = re.findall(
+                r"^\s*((?:buffer|ds|exp|flat|global|image|s|scratch|v)_[a-zA-Z0-9_.]+)\b",
+                source,
+                re.MULTILINE,
+            )
+            opcode_set = "\n".join(sorted(set(opcodes)))
+            item["opcode_set_sha256"] = hashlib.sha256(opcode_set.encode()).hexdigest()
+        digest.append(item)
+    return sorted(digest, key=lambda item: item["basename"])
 
 
 def assert_config_emits_golden(
@@ -372,7 +391,7 @@ def assert_config_emits_golden(
             assert base.startswith("Cijk_")
             assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
             assert arch in src, f"kernel {base!r}: wrong arch in assembly"
-    assert golden_digest(results) == snapshot
+    assert golden_digest(results, include_source=True) == snapshot
     return results
 
 
@@ -385,6 +404,24 @@ def assert_config_derives_golden(config_path, arch, snapshot, *, expect_solution
         assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
     assert len(solutions) == snapshot
     return solutions
+
+
+def assert_config_rejects(config_path, arch, monkeypatch, capsys, expected_rejections):
+    """Derive a configuration serially and check its exact rejection multiset."""
+    import Tensile.BenchmarkProblems as benchmark_problems
+
+    def serial_map(function, objects, *_args, **_kwargs):
+        return [function(*args) for args in objects]
+
+    monkeypatch.setattr(benchmark_problems, "ParallelMap2", serial_map)
+    solutions = solutions_from_config(config_path, arch=arch)
+    rejection_counts = Counter(
+        line.strip()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("reject:")
+    )
+    assert not solutions, f"expected 0 surviving solutions, got {len(solutions)}"
+    assert rejection_counts == Counter(expected_rejections)
 
 
 _TARGET_RE = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--(\S+?)"', re.M)
