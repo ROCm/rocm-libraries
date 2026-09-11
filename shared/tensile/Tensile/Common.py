@@ -2424,20 +2424,24 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
   if not version_str:
     # Fallback: derive ROCm root from PATH (e.g. TheRock builds where
     # amdclang++ is on PATH but ROCM_PATH is not set and /opt/rocm doesn't exist).
+    # Walk up from the executable's directory: handles both dist/bin/ and
+    # dist/lib/llvm/bin/ layouts by trying each ancestor.
     import shutil
     for exe in ["amdclang++", "rocm-smi", "amd-smi"]:
       exe_path = shutil.which(exe)
-      if exe_path:
-        candidate_root = Path(exe_path).parent.parent
+      if not exe_path:
+        continue
+      candidate = Path(exe_path).parent
+      for _ in range(5):
         # Standard ROCm install layout: .info/version
         try:
-          version_str = (candidate_root / ".info" / "version").read_text().strip()
+          version_str = (candidate / ".info" / "version").read_text().strip()
           break
         except OSError:
           pass
         # TheRock component dist layout: include/hip/hip_version.h
         try:
-          hip_ver_h = (candidate_root / "include" / "hip" / "hip_version.h").read_text()
+          hip_ver_h = (candidate / "include" / "hip" / "hip_version.h").read_text()
           maj = re.search(r'#define\s+HIP_VERSION_MAJOR\s+(\d+)', hip_ver_h)
           min_ = re.search(r'#define\s+HIP_VERSION_MINOR\s+(\d+)', hip_ver_h)
           pat = re.search(r'#define\s+HIP_VERSION_PATCH\s+(\d+)', hip_ver_h)
@@ -2445,7 +2449,13 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
             version_str = f"{maj.group(1)}.{min_.group(1)}.{pat.group(1)}"
             break
         except OSError:
-          continue
+          pass
+        parent = candidate.parent
+        if parent == candidate:
+          break
+        candidate = parent
+      if version_str:
+        break
   if version_str:
     # Strip pre-release suffixes before storing (e.g. "0a20260813" -> "0")
     # so that nightly version strings like "10.1.0a20260813" are handled correctly.
