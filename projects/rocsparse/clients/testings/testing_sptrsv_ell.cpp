@@ -24,6 +24,73 @@
 #include "rocsparse_clients_sptrsv.hpp"
 #include "testing.hpp"
 
+static void check_sptrsv_ell_singularity(rocsparse_handle       handle,
+                                         rocsparse_sptrsv_descr sptrsv_descr,
+                                         rocsparse_error*       p_error,
+                                         int64_t                expected_position,
+                                         rocsparse_singularity  expected_type)
+{
+    hipStream_t stream{};
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
+    for(auto mode : {rocsparse_pointer_mode_host, rocsparse_pointer_mode_device})
+    {
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, mode));
+
+        int64_t               position = -2;
+        rocsparse_singularity type     = static_cast<rocsparse_singularity>(-1);
+
+        if(mode == rocsparse_pointer_mode_host)
+        {
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_sptrsv_get_output(handle,
+                                            sptrsv_descr,
+                                            rocsparse_sptrsv_output_singularity_position,
+                                            &position,
+                                            sizeof(position),
+                                            p_error));
+            CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_get_output(handle,
+                                                              sptrsv_descr,
+                                                              rocsparse_sptrsv_output_singularity,
+                                                              &type,
+                                                              sizeof(type),
+                                                              p_error));
+        }
+        else
+        {
+            device_dense_vector<int64_t>               dposition(1);
+            device_dense_vector<rocsparse_singularity> dtype(1);
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_sptrsv_get_output(handle,
+                                            sptrsv_descr,
+                                            rocsparse_sptrsv_output_singularity_position,
+                                            dposition,
+                                            sizeof(int64_t),
+                                            p_error));
+            CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_get_output(handle,
+                                                              sptrsv_descr,
+                                                              rocsparse_sptrsv_output_singularity,
+                                                              dtype,
+                                                              sizeof(rocsparse_singularity),
+                                                              p_error));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+            CHECK_HIP_ERROR(
+                hipMemcpy(&position, dposition, sizeof(position), hipMemcpyDeviceToHost));
+            CHECK_HIP_ERROR(hipMemcpy(&type, dtype, sizeof(type), hipMemcpyDeviceToHost));
+        }
+
+        if(position != expected_position || type != expected_type)
+        {
+            std::cout << "ELL SpTRSV singularity output mismatch in pointer mode " << mode
+                      << ": expected type " << expected_type << " position " << expected_position
+                      << ", got type " << type << " position " << position << std::endl;
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+    }
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+}
+
 template <typename I, typename T>
 void testing_sptrsv_ell_bad_arg(const Arguments& arg)
 {
@@ -175,6 +242,13 @@ void testing_sptrsv_ell(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
+    check_sptrsv_ell_singularity(handle,
+                                 sptrsv_descr,
+                                 p_error,
+                                 analysis_zero_pivot,
+                                 (analysis_zero_pivot == -1) ? rocsparse_singularity_none
+                                                             : rocsparse_singularity_symbolic);
+
     if(arg.unit_check)
     {
         host_dense_vector<T> hy(M);
@@ -236,6 +310,23 @@ void testing_sptrsv_ell(const Arguments& arg)
                       << ", calculated zero pivot position " << solve_zero_pivot << std::endl;
             CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
+
+        rocsparse_singularity expected_solve_type = rocsparse_singularity_none;
+        if(analysis_pivot == -1)
+        {
+            expected_solve_type = (solve_pivot == -1) ? rocsparse_singularity_none
+                                                      : rocsparse_singularity_numeric_exact;
+        }
+        else if(solve_pivot != -1 && solve_pivot < analysis_pivot)
+        {
+            expected_solve_type = rocsparse_singularity_numeric_exact;
+        }
+        else
+        {
+            expected_solve_type = rocsparse_singularity_symbolic;
+        }
+        check_sptrsv_ell_singularity(
+            handle, sptrsv_descr, p_error, solve_zero_pivot, expected_solve_type);
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {
@@ -327,4 +418,136 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
-void testing_sptrsv_ell_extra(const Arguments& arg) {}
+
+static void testing_sptrsv_ell_extra_case(const host_ell_matrix<float>& hA,
+                                          int64_t                       expected_analysis_position,
+                                          rocsparse_singularity         expected_analysis_type,
+                                          int64_t                       expected_solve_position,
+                                          rocsparse_singularity         expected_solve_type)
+{
+    const int32_t                   M           = hA.m;
+    const rocsparse_operation       trans_A     = rocsparse_operation_none;
+    const rocsparse_sptrsv_alg      alg         = rocsparse_sptrsv_alg_default;
+    const rocsparse_diag_type       diag        = rocsparse_diag_type_non_unit;
+    const rocsparse_fill_mode       uplo        = rocsparse_fill_mode_lower;
+    const rocsparse_matrix_type     matrix_type = rocsparse_matrix_type_general;
+    const rocsparse_analysis_policy apol        = rocsparse_analysis_policy_force;
+
+    rocsparse_local_handle   handle;
+    host_scalar<float>       halpha(1.0f);
+    host_dense_vector<float> hx(M);
+    rocsparse_init<float>(hx, M, 1, 1);
+
+    device_ell_matrix<float>   dA(hA);
+    device_dense_vector<float> dx(hx);
+    device_dense_vector<float> dy(M);
+
+    rocsparse_local_spmat A(dA);
+    rocsparse_local_dnvec x(dx);
+    rocsparse_local_dnvec y(dy);
+
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+        A, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)));
+
+    rocsparse_error        p_error[1] = {nullptr};
+    rocsparse_sptrsv_descr sptrsv_descr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsv_descr(&sptrsv_descr));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                     sptrsv_descr,
+                                                     rocsparse_sptrsv_input_operation,
+                                                     &trans_A,
+                                                     sizeof(trans_A),
+                                                     p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
+        handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), p_error));
+    {
+        const rocsparse_datatype ttype = get_datatype<float>();
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_scalar_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_compute_datatype,
+                                                         &ttype,
+                                                         sizeof(ttype),
+                                                         p_error));
+    }
+    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                     sptrsv_descr,
+                                                     rocsparse_sptrsv_input_analysis_policy,
+                                                     &apol,
+                                                     sizeof(apol),
+                                                     p_error));
+
+    rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
+    check_sptrsv_ell_singularity(
+        handle, sptrsv_descr, p_error, expected_analysis_position, expected_analysis_type);
+
+    rocsparse_clients::sptrsv_compute(
+        handle, sptrsv_descr, A, x, y, rocsparse_pointer_mode_host, halpha, p_error);
+    check_sptrsv_ell_singularity(
+        handle, sptrsv_descr, p_error, expected_solve_position, expected_solve_type);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
+}
+
+void testing_sptrsv_ell_extra(const Arguments& arg)
+{
+    (void)arg;
+
+    auto pad = [](host_ell_matrix<float>& hA) {
+        for(int32_t i = 0; i < hA.m * hA.width; ++i)
+        {
+            hA.ind[i] = static_cast<int32_t>(-1);
+            hA.val[i] = 0.0f;
+        }
+    };
+    auto set = [](host_ell_matrix<float>& hA, int32_t row, int32_t slot, int32_t col, float val) {
+        hA.ind[(int64_t)slot * hA.m + row] = col;
+        hA.val[(int64_t)slot * hA.m + row] = val;
+    };
+
+    {
+        host_ell_matrix<float> hA(3, 3, 2, rocsparse_index_base_zero);
+        pad(hA);
+        set(hA, 0, 0, 0, 2.0f);
+        set(hA, 1, 0, 0, 1.0f);
+        set(hA, 1, 1, 1, 3.0f);
+        set(hA, 2, 0, 2, 4.0f);
+        testing_sptrsv_ell_extra_case(
+            hA, -1, rocsparse_singularity_none, -1, rocsparse_singularity_none);
+    }
+
+    {
+        // Missing diagonal at row 1: symbolic singularity after analysis.
+        host_ell_matrix<float> hA(3, 3, 2, rocsparse_index_base_zero);
+        pad(hA);
+        set(hA, 0, 0, 0, 2.0f);
+        set(hA, 1, 0, 0, 1.0f);
+        set(hA, 2, 0, 1, 3.0f);
+        set(hA, 2, 1, 2, 4.0f);
+        testing_sptrsv_ell_extra_case(
+            hA, 1, rocsparse_singularity_symbolic, 1, rocsparse_singularity_symbolic);
+    }
+
+    {
+        // Explicit zero on the diagonal at row 1: numeric_exact after compute.
+        host_ell_matrix<float> hA(3, 3, 2, rocsparse_index_base_zero);
+        pad(hA);
+        set(hA, 0, 0, 0, 2.0f);
+        set(hA, 1, 0, 0, 1.0f);
+        set(hA, 1, 1, 1, 0.0f);
+        set(hA, 2, 0, 1, 3.0f);
+        set(hA, 2, 1, 2, 4.0f);
+        testing_sptrsv_ell_extra_case(
+            hA, -1, rocsparse_singularity_none, 1, rocsparse_singularity_numeric_exact);
+    }
+}
