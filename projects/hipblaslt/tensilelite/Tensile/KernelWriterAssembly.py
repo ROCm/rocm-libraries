@@ -91,7 +91,7 @@ from Tensile.Common.DataType import DataType
 from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
-  FusedA2AWgRemap
+  FusedA2AWgRemap, WGMBitSwizzle
 
 from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -3522,6 +3522,9 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment0("Start of Generic WGM algo")
       self.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
+    elif kernel.get("WGMBitSwizzle", False):
+      module.addComment0("Start of bit WGM swizzle")
+      module.add(WGMBitSwizzle(self, kernel, sgprWGM))
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
 
