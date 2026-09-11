@@ -1,0 +1,129 @@
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+engine:
+  name: hipkernel:Gfx950AttentionDense
+  knobs:
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - seqlen_q
+  - seqlen_kv
+  - batch
+  - causal
+  - block_m
+  - block_n
+  - waves_per_eu
+  - persistent
+  - num_persistent
+  - ragged
+  - sliding_window
+  - use_sinks
+  - lazy_rescale
+  - wide_lds_dma
+  - lds_v_row_pad
+kmd_fields:
+- name: dtype
+  type: string
+- name: batch
+  type: int
+  default_value: 1
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: seqlen_q
+  type: int
+  default_value: 256
+- name: seqlen_kv
+  type: int
+  default_value: 256
+- name: head_size
+  type: int
+  default_value: 128
+- name: causal
+  type: int
+  default_value: 0
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+- name: waves_per_eu
+  type: int
+  default_value: 2
+- name: persistent
+  type: int
+  default_value: 0
+- name: num_persistent
+  type: int
+  default_value: 256
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: use_sinks
+  type: int
+  default_value: 0
+- name: lazy_rescale
+  type: int
+  default_value: 1
+- name: varlen
+  type: int
+  default_value: 0
+- name: paged
+  type: int
+  default_value: 0
+- name: wide_lds_dma
+  type: int
+  default_value: 0
+- name: lds_v_row_pad
+  type: int
+  default_value: 32
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+packs:
+- name: gfx950_attention_dense
+  arch:
+  - gfx950
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx950/attention_dense.py
+    builder: build_attention_dense
+  variants:
+  - name: gfx950_attention_dense_ba{batch}_sq{seqlen_q}_sk{seqlen_kv}_nqh{num_query_heads}_nkh{num_kv_heads}_hs{head_size}_{tag}
+    metadata: [dtype, batch, num_query_heads, num_kv_heads, seqlen_q, seqlen_kv, head_size, causal, block_m, block_n, waves_per_eu, persistent, num_persistent, ragged, sliding_window, use_sinks, lazy_rescale, varlen, paged, wide_lds_dma, lds_v_row_pad]
+    spec_order: [batch, seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, head_size, causal, dtype, sliding_window, ragged, varlen, block_m, block_n, lds_v_row_pad, waves_per_eu, lds_k_group_pad, persistent, num_persistent, interleave, persist_decode, lazy_rescale, paged, block_size, num_kv_blocks, use_sinks, wide_lds_dma]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {sliding_window: 0, ragged: false, varlen: false, block_m: 256, block_n: 64, lds_v_row_pad: 32, waves_per_eu: 2, lds_k_group_pad: 8, persistent: true, num_persistent: 256, interleave: false, persist_decode: auto, lazy_rescale: true, paged: false, block_size: 0, num_kv_blocks: 0, use_sinks: false}
+    knob_sets:
+      knobs0:
+      - {tag: dtfp16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v0}
+      knobs1:
+      - {tag: dtfp16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v1}
+      knobs2:
+      - {tag: ca_dtbf16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v2}
+      knobs3:
+      - {tag: ca_dtbf16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v3}
+      knobs4:
+      - {tag: dtfp16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v4}
+      knobs5:
+      - {tag: ca_dtfp16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_wld_v5}
+      knobs6:
+      - {tag: ca_dtfp16_sw0_bm256_bn64_lvrp32_wpe2_lkgp8_pe_np256_pdauto_lr_bs0_nkb0_v6}
+    shapes:
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: false, dtype: fp16, wide_lds_dma: false, knobs: knobs0}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: false, dtype: fp16, wide_lds_dma: false, knobs: knobs1}
+    - {batch: 15, seqlen_q: 16384, seqlen_kv: 16384, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, wide_lds_dma: false, knobs: knobs2}
+    - {batch: 16, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: true, dtype: bf16, wide_lds_dma: false, knobs: knobs3}
+    - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: false, dtype: fp16, wide_lds_dma: false, knobs: knobs4}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: true, dtype: fp16, wide_lds_dma: true, knobs: knobs5}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 48, num_kv_heads: 48, head_size: 64, causal: true, dtype: fp16, wide_lds_dma: false, knobs: knobs6}

@@ -29,6 +29,31 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerGfx942AttentionDenseSymbols,
          true,
          &resetGfx942AttentionDenseModuleCache},
+        // Packaged/kpack, same shape as the gfx942 entry above and for the same
+        // reason: its module cache must be reachable by the reset sweep. The two
+        // packs never compete -- each declares a single, different `arch`, and packs
+        // arch-prune before the matcher runs -- so both are registered
+        // unconditionally and at most one can ever match on a given device.
+        {"hipkernel:Gfx950AttentionDense",
+         &registerGfx950AttentionDenseSymbols,
+         true,
+         &resetGfx950AttentionDenseModuleCache},
+        // Packaged/kpack. THE FIRST PAIR OF PACKS THAT SHARE AN ARCH: this and
+        // Gfx950AttentionDense both declare gfx950 alone, so unlike the gfx942/gfx950
+        // dense pair above they are NOT separated by arch-pruning and both reach the
+        // matcher on the same device.
+        //
+        // They still cannot both serve one graph, and the separation is structural
+        // rather than a priority tie-break: this engine REQUIRES page tables and
+        // per-sequence lengths (its 18-slot ABI declares block_tables_ptr and
+        // seq_lens_ptr unconditionally and it has no dense mode), while the dense
+        // engine DECLINES any graph carrying either. The two graph_match bodies are
+        // exact complements on that one axis, so every SDPA graph is claimed by at
+        // most one of them.
+        {"hipkernel:Gfx950AttentionTiled",
+         &registerGfx950AttentionTiledSymbols,
+         true,
+         &resetGfx950AttentionTiledModuleCache},
     };
     return s_packs;
 }

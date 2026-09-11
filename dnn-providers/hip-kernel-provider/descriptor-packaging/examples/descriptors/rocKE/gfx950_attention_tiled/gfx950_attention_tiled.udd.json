@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "4575675e-cd55-4829-9972-e3099caf9b71",
+  "name": "Gfx950AttentionTiled dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_attention_tiled.dispatch"
+}

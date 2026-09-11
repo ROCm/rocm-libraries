@@ -1,0 +1,176 @@
+{
+  "version": "1.0",
+  "id": "da53dd52-6672-4695-956f-9c97880229ed",
+  "name": "Gfx950AttentionTiled variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 2
+    },
+    {
+      "name": "num_seqs",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_warps",
+      "type": "int",
+      "default_value": 4
+    },
+    {
+      "name": "block_m_per_warp",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "tile_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int",
+      "default_value": 2
+    },
+    {
+      "name": "use_sinks",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_alibi",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "has_softcap",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_qq_bias",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_kq_lds_pad",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "kq_lds_pad_halves",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "use_mfma32_skip_legacy_qreg",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_k_single_buffer",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_q_direct_reg",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "softmax_interleave_mode",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "use_mask_phase_split",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_mfma_32x32",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_qk_32x32",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_scalar_state",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_mask_once",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_half_local_pv",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_mask_limit",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_fast_paged_kv_desc",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_i64_kv_addr",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_softmax_mfma_interleave",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_fp8_mfma_qk",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_fp8_mfma_pv",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_register_pv",
+      "type": "int",
+      "default_value": 0
+    }
+  ]
+}

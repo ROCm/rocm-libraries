@@ -1,0 +1,133 @@
+[
+ {
+  "batch": 4,
+  "nhead_q": 48,
+  "nhead_k": 48,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_wrong_rows",
+   "graph": "fp16_b4_hq48_kv48_sq4096_skv4096_d128_noncausal",
+   "max_abs": "0.001953125",
+   "max_rel": "0.003997802734375",
+   "why": "served-but-WRONG in 8e.2; A/B arm tests whether lazy_rescale accounts for it"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 48,
+  "nhead_k": 48,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_wrong_rows",
+   "graph": "fp16_b4_hq48_kv48_sq4096_skv4096_d64_noncausal",
+   "max_abs": "0.001953125",
+   "max_rel": "0.00397491455078125",
+   "why": "served-but-WRONG in 8e.2; A/B arm tests whether lazy_rescale accounts for it"
+  }
+ },
+ {
+  "batch": 15,
+  "nhead_q": 64,
+  "nhead_k": 8,
+  "seqlen_q": 16384,
+  "seqlen_k": 16384,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_wrong_rows",
+   "graph": "bf16_b15_hq64_kv8_sq16384_skv16384_d64_causal",
+   "max_abs": "0.021484375",
+   "max_rel": "0.0450819656252861",
+   "why": "served-but-WRONG in 8e.2; A/B arm tests whether lazy_rescale accounts for it"
+  }
+ },
+ {
+  "batch": 16,
+  "nhead_q": 64,
+  "nhead_k": 8,
+  "seqlen_q": 8192,
+  "seqlen_k": 8192,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "bf16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_wrong_rows",
+   "graph": "bf16_b16_hq64_kv8_sq8192_skv8192_d64_causal",
+   "max_abs": "0.0234375",
+   "max_rel": "0.04545454680919647",
+   "why": "served-but-WRONG in 8e.2; A/B arm tests whether lazy_rescale accounts for it"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 48,
+  "nhead_k": 48,
+  "seqlen_q": 8192,
+  "seqlen_k": 8192,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 0,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_control",
+   "why": "PASSED at sq8192 noncausal -- the control that killed the structural hypothesis"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 48,
+  "nhead_k": 48,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 128,
+  "hdim_v": 128,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_control",
+   "why": "PASSED at sq4096 CAUSAL -- same shape, other mask"
+  }
+ },
+ {
+  "batch": 4,
+  "nhead_q": 48,
+  "nhead_k": 48,
+  "seqlen_q": 4096,
+  "seqlen_k": 4096,
+  "hdim_q": 64,
+  "hdim_v": 64,
+  "dtype": "fp16",
+  "mask_type": 1,
+  "sliding_window": 0,
+  "use_sinks": false,
+  "_provenance": {
+   "source": "8e2_control",
+   "why": "PASSED at sq4096 d64 causal"
+  }
+ }
+]

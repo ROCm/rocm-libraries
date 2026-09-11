@@ -168,11 +168,28 @@ arch_spec:
 
 sweep:
   block_m:
-    values: [256]
-    verdict: >-
-      The source says the kernel FAULTS at values other than 256 -- the causal mask
-      and the P relayout both assume it. Not a knob; a baked constant with a
-      one-element domain, listed so nobody re-derives that from a crash.
+    values: [256, 128, 64]
+    # `hazard:`, not `verdict:` -- knob_sweep.py skips any knob carrying a verdict
+    # (Knob.settled, knob_sweep.py:77-79), and this question is open.
+    hazard: >-
+      CORRECTED 2026-09-04. This entry used to read `values: [256]` with the verdict
+      "the kernel FAULTS at values other than 256 -- the causal mask and the P relayout
+      both assume it. Not a knob; a baked constant." That claim is FALSE, and it was
+      load-bearing: it was cited on the gfx950 side as a reason not to test the axis.
+
+      The kernel itself contradicts it, by name
+      (kernels/gfx942/attention_dense.py:95-99): "contrary to the gfx950 sibling's
+      'kernel FAULTS at other values' comment, every BLOCK_M use in THIS body is
+      parametric (the invariant is BLOCK_M == 32 * WAVES)". And the SHIPPED set proves
+      it -- `gfx942_attention_dense_C_merged.yaml` already spreads block_m over 256 (37
+      knob_sets), 128 (19) and 64 (18). The axis was being swept while this file called
+      it a baked constant.
+
+      What the kernel actually says about the tradeoff, which is the useful part:
+      shrinking block_m "adds CTAs without adding a CTA/CU -- LDS is BLOCK_M-invariant --
+      and costs VGPRs on the K-side DMA addressing, so it is a modest win on two of four
+      shapes and a loss elsewhere". A per-shape split, not a single geomean, is the way
+      to read any sweep of it. Default stays 256.
 
   block_n:
     values: [64, 32]

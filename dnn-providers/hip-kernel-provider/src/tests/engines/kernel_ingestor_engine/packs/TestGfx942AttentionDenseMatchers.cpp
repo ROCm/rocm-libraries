@@ -528,6 +528,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, AcceptsTopLeftWhenDeprecatedCausalSetAn
     spec.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
+
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 {
     // hipDNN permits D_qk != D_v; the kernel has ONE head_size and would read V with

@@ -142,8 +142,76 @@ def _required(decl: dict, scope: str, *keys: str) -> list:
     return [decl[k] for k in keys]
 
 
-def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
-    """Ask the dispatcher for every shape, keeping both kinds of refusal apart."""
+def _retry_at_geometry(shape, fields, profile, retry_geometry, predicate, arch):
+    """Rebuild a REJECTED shape at an explicit tile, or None if still unservable.
+
+    The dispatcher resolves its tile from a geometry table; a tile absent from
+    that table cannot be requested, and the shape raises inside factory() before
+    a spec exists to override. This constructs the builder's spec class directly
+    with the alternate values, which is the only way to reach those shapes.
+
+    Every candidate combination is still put through the predicate. A recovered
+    shape has therefore cleared the same gate as a dispatcher-served one -- the
+    retry widens WHAT IS ASKED, never what is accepted.
+    """
+    if not retry_geometry:
+        return None
+    arch_decl = profile.get("arch_spec") or {}
+    if not arch_decl:
+        return None
+    try:
+        spec_cls = _import(*_required(arch_decl, "arch_spec", "module", "class"))
+    except Exception:
+        return None
+
+    # Map request-field names to spec-field names. The request speaks the
+    # dispatcher's vocabulary and the spec speaks the builder's; the profile
+    # already declares the translation for the matcher, so reuse it rather than
+    # inventing a second mapping that can drift.
+    base = {
+        "batch": fields.get("batch"),
+        "seqlen_q": fields.get("seqlen_q"),
+        "seqlen_kv": fields.get("seqlen_k", fields.get("seqlen_kv")),
+        "num_query_heads": fields.get("nhead_q", fields.get("num_query_heads")),
+        "num_kv_heads": fields.get("nhead_k", fields.get("num_kv_heads")),
+        "head_size": fields.get("hdim_q", fields.get("head_size")),
+        "dtype": fields.get("dtype"),
+        "causal": bool(fields.get("mask_type", 0)),
+        "sliding_window": fields.get("sliding_window", 0) or 0,
+    }
+    if any(v is None for k, v in base.items() if k != "sliding_window"):
+        return None
+
+    names = list(retry_geometry)
+    for combo in itertools.product(*(retry_geometry[n] for n in names)):
+        candidate = {**base, **dict(zip(names, combo))}
+        try:
+            spec = spec_cls(**candidate)
+        except Exception:
+            continue
+        if predicate is not None:
+            supported, _why = predicate(spec, arch=arch) if arch else predicate(spec)
+            if not supported:
+                continue
+        return Resolution(shape, spec=spec)
+    return None
+
+
+def resolve_shapes(
+    shapes: list[dict], profile: dict, retry_geometry: dict | None = None
+) -> list[Resolution]:
+    """Ask the dispatcher for every shape, keeping both kinds of refusal apart.
+
+    `retry_geometry` re-attempts REJECTED shapes with named spec fields forced to
+    an alternate value -- a coverage mechanism for tiles the dispatcher's geometry
+    table cannot express. It is deliberately confined to the rejected set: a shape
+    the dispatcher already serves must keep the tile the library would choose, or
+    the "parity" set stops being parity.
+
+    The retry builds the spec through the BUILDER's own class and re-runs the
+    predicate, so a recovered shape has cleared exactly the same gate as a served
+    one. Nothing here weakens a refusal; it only asks a second, explicit question.
+    """
     dispatch = profile.get("dispatch") or {}
     request_decl = profile.get("request") or {}
     predicate_decl = profile.get("predicate") or {}
@@ -178,8 +246,13 @@ def resolve_shapes(shapes: list[dict], profile: dict) -> list[Resolution]:
             request = request_cls(**fields)
             spec = factory(request)
         except Exception as exc:
+            recovered = _retry_at_geometry(
+                shape, fields, profile, retry_geometry, predicate, arch
+            )
             out.append(
-                Resolution(
+                recovered
+                if recovered is not None
+                else Resolution(
                     shape, reason=f"{type(exc).__name__}: {exc}", kind="rejected"
                 )
             )
@@ -499,6 +572,20 @@ def main(argv=None) -> int:
         "decisions and which are constant.",
     )
     parser.add_argument(
+        "--retry-geometry",
+        help="JSON mapping of spec field to alternate values, tried ONLY on shapes "
+        "the dispatcher REJECTED, e.g. '{\"block_n\": [32]}'. This is a COVERAGE "
+        "mechanism, not a tuning one, and the distinction matters: --knobs crosses "
+        "the SERVED set with extra values, so it can never reach a shape the "
+        "factory refused before returning a spec. A tile the dispatcher cannot "
+        "resolve -- because its geometry table has no such entry -- rejects the "
+        "shape inside factory(), and there is no spec left to override. Retrying "
+        "the REJECTED shapes at an explicit tile is the only way to serve them.\n"
+        "Each recovered shape is still validated by the predicate, so this widens "
+        "coverage without weakening the gate; a value the kernel refuses stays "
+        "rejected and is reported as such.",
+    )
+    parser.add_argument(
         "--report-gaps",
         action="store_true",
         help="Print every shape the dispatcher would not serve, with "
@@ -519,7 +606,17 @@ def main(argv=None) -> int:
         shapes = json.loads(Path(args.shapes).read_text())
         if not isinstance(shapes, list):
             raise ParityError("--shapes must be a JSON list of field mappings.")
-        resolutions = resolve_shapes(shapes, profile)
+        retry_geometry = None
+        if args.retry_geometry:
+            retry_geometry = json.loads(args.retry_geometry)
+            if not isinstance(retry_geometry, dict) or not all(
+                isinstance(v, list) and v for v in retry_geometry.values()
+            ):
+                raise ParityError(
+                    "--retry-geometry must be a JSON mapping of field to a "
+                    "non-empty list, e.g. '{\"block_n\": [32]}'."
+                )
+        resolutions = resolve_shapes(shapes, profile, retry_geometry)
     except ParityError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2

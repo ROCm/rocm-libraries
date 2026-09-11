@@ -31,6 +31,8 @@ from .layernorm import LayerNormOverride
 from .linear import LinearOverride
 from .rmsnorm import RmsNormOverride
 from .sdpa import SdpaOverride
+from .varlen import VarlenSdpaOverride
+from .varlen_aten import AtenVarlenRoute
 
 log = logging.getLogger("hipdnn_torch")
 log.addHandler(logging.NullHandler())  # library default: no output unless asked
@@ -45,14 +47,24 @@ _OVERRIDES = {
     "gelu": GeluOverride(),
     "conv2d": Conv2dFpropOverride(),
     "conv3d": Conv3dFpropOverride(),
+    "varlen": VarlenSdpaOverride(),
 }
 
-_ALL = tuple(_OVERRIDES)
+# Ops excluded from the default install set. ``varlen`` patches
+# ``torch.nn.attention.varlen``, which only exists on newer torch builds, so
+# installing it by default would turn a routine ``install()`` into an ImportError
+# on every older wheel. Ask for it explicitly: ``install(["varlen"])``.
+_OPTIONAL = ("varlen",)
+
+_ALL = tuple(o for o in _OVERRIDES if o not in _OPTIONAL)
 
 __all__ = [
     "install",
+    "AtenVarlenRoute",
     "uninstall",
     "reset",
+    "tuning",
+    "tuning_report",
     "report",
     "census",
     "enable_logging",
@@ -108,6 +120,42 @@ def report(ops=None) -> str:
         if ov.census() or ov.installed:
             chunks.append(ov.format_report())
     return "\n\n".join(chunks) if chunks else "hipdnn_torch: nothing installed"
+
+
+def tuning(ops=None) -> list:
+    """Every exhaustive sweep that actually ran, as a list of records.
+
+    A record carries the op, the winning engine, how many candidates were
+    benchmarked, the best ``robust_time_ms``, the top of the measured ranking,
+    and -- the field that matters -- ``outcome``: the
+    ``AutotuneCacheWriteOutcome`` name saying whether the ranking was persisted.
+    Anything other than ``WRITTEN``/``UNCHANGED`` means later runs will re-decide
+    from the heuristic rather than inherit this measurement.
+    """
+    out = []
+    for name in _selected(ops):
+        out.extend(_OVERRIDES[name]._tune_log)
+    return out
+
+
+def tuning_report(ops=None) -> str:
+    """Human-readable summary of :func:`tuning`; empty string when nothing swept."""
+    records = tuning(ops)
+    if not records:
+        return ""
+    lines = ["exhaustive sweeps (torch.backends.cudnn.benchmark / HIPDNN_TORCH_TUNE):"]
+    for rec in records:
+        best = rec["best_ms"]
+        lines.append(
+            f"  {rec['op']:32s} winner={rec['winner']:24s} "
+            f"benchmarked={rec['benchmarked']}/{rec['candidates']}  "
+            f"best={best:.4f} ms  cache={rec['outcome']}"
+            if best is not None else
+            f"  {rec['op']:32s} no candidate succeeded  cache={rec['outcome']}"
+        )
+        for engine, ms in rec["ranking"][:4]:
+            lines.append(f"      {engine:38s} {ms:8.4f} ms")
+    return "\n".join(lines)
 
 
 def overrides() -> dict:

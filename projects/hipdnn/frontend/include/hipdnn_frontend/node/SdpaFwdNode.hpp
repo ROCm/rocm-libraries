@@ -67,16 +67,52 @@ public:
                             ErrorCode::INVALID_VALUE,
                             "SdpaFwdNode: Value tensor V must be rank-4, got rank="
                                 + std::to_string(vDims.size()));
-        HIPDNN_RETURN_IF_NE(qDims[0],
-                            kDims[0],
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFwdNode: batch size mismatch between Q and K: "
-                                + std::to_string(qDims[0]) + " vs " + std::to_string(kDims[0]));
-        HIPDNN_RETURN_IF_NE(qDims[0],
-                            vDims[0],
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaFwdNode: batch size mismatch between Q and V: "
-                                + std::to_string(qDims[0]) + " vs " + std::to_string(vDims[0]));
+        // AXIS 0 IS NOT BATCH FOR A PAGED K/V, so the dense identity cannot be
+        // asserted uniformly. In the paged container, axis 0 is `num_blocks` --
+        // the physical page count of the KV cache, unrelated to batch. Batch
+        // lives in the page table's axis 0 (`num_seqs`), because the page table
+        // is what maps sequences onto pages.
+        //
+        // This is the ecosystem convention, not a hipDNN choice. PyTorch's cuDNN
+        // path (aten/src/ATen/native/cudnn/MHA.cpp, the is_paged branch)
+        // declares them with deliberately different axis 0:
+        //
+        //     Q_ = ... .set_dim({b,          h_q, s_q,        d_qk});  // batch
+        //     K_ = ... .set_dim({k.size(0),  h_k, k.size(1),  d_qk});  // PAGES
+        //
+        // and cuDNN accepts it. Our own shipped bundle
+        // (integration-tests quick/SdpaFwd/paged/.../Small) carries Q[1,...]
+        // against K[128,...] and passes its CTest -- it could never have been
+        // built through this node while the check was unconditional.
+        const bool isPaged = attributes.get_page_table_k() != nullptr
+                             || attributes.get_page_table_v() != nullptr;
+        if(!isPaged)
+        {
+            HIPDNN_RETURN_IF_NE(qDims[0],
+                                kDims[0],
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: batch size mismatch between Q and K: "
+                                    + std::to_string(qDims[0]) + " vs "
+                                    + std::to_string(kDims[0]));
+            HIPDNN_RETURN_IF_NE(qDims[0],
+                                vDims[0],
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: batch size mismatch between Q and V: "
+                                    + std::to_string(qDims[0]) + " vs "
+                                    + std::to_string(vDims[0]));
+        }
+        else
+        {
+            // K and V index the SAME cache through one page table, so they must
+            // still agree on the block count. A graph where they disagree is
+            // unservable, and saying so here beats failing at dispatch.
+            HIPDNN_RETURN_IF_NE(kDims[0],
+                                vDims[0],
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaFwdNode: paged K and V must share a block count: "
+                                    + std::to_string(kDims[0]) + " vs "
+                                    + std::to_string(vDims[0]));
+        }
         // Rule 2: head_dim: Q[-1] == K[-1]; V[-1] is independent (may differ)
         const auto headDimQ = qDims[3];
         const auto headDimK = kDims[3];

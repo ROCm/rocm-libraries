@@ -54,25 +54,33 @@ public:
     ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
     ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
     ///                         (descale_s / scale_o) are not modeled here.
+    /// @param sink             Optional per-query-head attention-sink logits, indexed
+    ///                         by head ([1, H, 1, 1] or any shape whose head axis is
+    ///                         H). A sink joins the softmax DENOMINATOR but has no key
+    ///                         and no value vector, so it absorbs attention mass
+    ///                         instead of contributing to the output. Pass nullptr
+    ///                         (default) to disable, which leaves the computation
+    ///                         bit-identical to before this parameter existed.
     template <class QDataType,
               class KDataType,
               class VDataType,
               class ODataType,
               class ComputeDataType = float>
-    static void forward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
-                        const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
-                        const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
-                        hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
-                        std::optional<float> attnScaleValue = std::nullopt,
-                        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
-                        = nullptr,
-                        int64_t leftBound = -1,
-                        int64_t rightBound = -1,
-                        bool topLeftAlignment = true,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+    static void
+        forward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                std::optional<float> attnScaleValue = std::nullopt,
+                const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask = nullptr,
+                int64_t leftBound = -1,
+                int64_t rightBound = -1,
+                bool topLeftAlignment = true,
+                hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+                const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+                const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* sink = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -223,8 +231,30 @@ public:
                 }
             }
 
-            // Step 4: Numerically stable softmax over skv
-            const auto maxVal = *std::max_element(scores.begin(), scores.end());
+            // Step 4: Numerically stable softmax over skv.
+            //
+            // ATTENTION SINKS. A sink is a per-query-head learned logit that joins the
+            // softmax DENOMINATOR but has no value vector: it absorbs attention mass
+            // that would otherwise be forced onto real tokens. So it participates in
+            // the max and in sumExp, and then contributes nothing to the O accumulation
+            // in step 5 -- which is exactly why it cannot be expressed as an extra KV
+            // column, and why every probs[] index below still means a real key.
+            //
+            // Equivalent to appending the sink logit to the score row, taking the
+            // softmax over the extended row, and dropping the sink's probability before
+            // the weighted sum. Written as an explicit extra term rather than by
+            // extending `scores` so that `probs` stays index-aligned with the KV axis
+            // and step 5's loop is untouched.
+            const bool hasSink = sink != nullptr;
+            const auto sinkLogit = hasSink ? static_cast<ComputeDataType>(sink->getHostValue(
+                                                 std::vector<int64_t>{0, h, 0, 0}))
+                                           : -std::numeric_limits<ComputeDataType>::infinity();
+
+            auto maxVal = *std::max_element(scores.begin(), scores.end());
+            if(hasSink)
+            {
+                maxVal = std::max(maxVal, sinkLogit);
+            }
             std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
             auto sumExp = static_cast<ComputeDataType>(0.0);
 
@@ -237,6 +267,12 @@ public:
                         = std::exp(scores[static_cast<size_t>(skv)] - maxVal);
                     sumExp += probs[static_cast<size_t>(skv)];
                 }
+                // The sink's own exp() enters the denominator and is never stored: it
+                // has no key and no value, so nothing downstream may index it.
+                if(hasSink)
+                {
+                    sumExp += std::exp(sinkLogit - maxVal);
+                }
                 for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
                     probs[static_cast<size_t>(skv)] /= sumExp;
@@ -248,6 +284,10 @@ public:
             // LSE = maxVal + log(sumExp) enables backward pass to recompute softmax
             // probabilities without storing the full [B, H, Sq, Skv] attention matrix.
             // For fully masked rows (sumExp = 0), log(0) = -inf which is correct.
+            //
+            // With a sink the LSE necessarily includes the sink term, because sumExp
+            // does: that is the correct normaliser for this row, and a backward pass
+            // recomputing probs from it reproduces the same values step 5 uses.
             if(lse != nullptr)
             {
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
@@ -304,6 +344,8 @@ public:
     ///                       overload); forwarded through unchanged.
     /// @param descaleK       Optional FP8 dequantization scale for K.
     /// @param descaleV       Optional FP8 dequantization scale for V.
+    /// @param sink           Optional per-query-head attention-sink logits (see the
+    ///                       primary overload); forwarded through unchanged.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -319,7 +361,9 @@ public:
                         hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
                         const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
-                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* sink
+                        = nullptr)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
@@ -337,7 +381,8 @@ public:
                 lse,
                 descaleQ,
                 descaleK,
-                descaleV);
+                descaleV,
+                sink);
     }
 
     /// SDPA backward convenience overload: accepts a simple causalMask flag.
