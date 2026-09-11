@@ -711,10 +711,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
     const int nhead_ratio = nhead / nhead_k;
     int pack_gqa_nhead    = nhead;
     int pack_gqa_seqlen_q = shape_seqlen_q;
+    // BLOCKSCALE's per-head q_descale addressing (fmha_fwd_kernel.hpp) indexes by the
+    // kernel-visible head and by position within seqlen_q, with no awareness that Pack-GQA
+    // merges multiple real heads into one kernel-visible head with their queries concatenated
+    // along seqlen_q. Every packed row would read real head 0's q_descale block regardless of
+    // which real head it belongs to. MX has the same per-block addressing issue and is already
+    // excluded below; BLOCKSCALE needs the same exclusion.
     if(pack_gqa && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
        bias.type == bias_enum::no_bias && i_perm && o_perm && mode == mode_enum::batch &&
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
-       qscale.type != quant_scale_enum::mx)
+       qscale.type != quant_scale_enum::mx && qscale.type != quant_scale_enum::blockscale)
     {
         pack_gqa_nhead    = nhead_k;
         pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;

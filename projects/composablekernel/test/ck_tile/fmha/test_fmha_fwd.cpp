@@ -45,6 +45,7 @@ struct TestConfigs
     static constexpr auto ModeValues        = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues = std::array{true};
     static constexpr auto qscale_str        = "n";
+    static constexpr auto QScaleValues      = std::array{qscale_str};
     static constexpr bool def_lse           = true;
     static constexpr bool def_is_v_rowmajor = true;
     static constexpr auto init_method       = "uf";
@@ -65,6 +66,9 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
     static constexpr auto qscale_str         = "pt";
+    // General/SplitKV also sweep BLOCKSCALE: split-K has a separate o_acc/v_descale
+    // accumulation path, and general correctness never exercised "bs" otherwise.
+    static constexpr auto QScaleValues       = std::array{"pt", "bs"};
     static constexpr bool def_lse            = false;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "3";
@@ -86,6 +90,7 @@ struct TestConfigs<FmhaFwdMxFp8>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -105,6 +110,7 @@ struct TestConfigs<FmhaFwdMxFp4>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{false};
     static constexpr auto qscale_str         = "mx";
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
@@ -135,6 +141,7 @@ struct TestConfigs<FmhaFwdFp32>
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
     static constexpr auto qscale_str         = "n";
+    static constexpr auto QScaleValues       = std::array{qscale_str};
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "uf";
@@ -147,6 +154,7 @@ static auto SplitKVHDimValues    = ValuesIn(TestConfigs<DataTypeConfig>::SplitKV
 static auto AppendKVHDimValues   = ValuesIn(TestConfigs<DataTypeConfig>::AppendKVHDimValues);
 static auto ModeValues           = ValuesIn(TestConfigs<DataTypeConfig>::ModeValues);
 static auto IsVRowmajorValues    = ValuesIn(TestConfigs<DataTypeConfig>::IsVRowmajorValues);
+static auto QScaleValues         = ValuesIn(TestConfigs<DataTypeConfig>::QScaleValues);
 constexpr static auto qscale_str = TestConfigs<DataTypeConfig>::qscale_str;
 constexpr bool def_lse           = TestConfigs<DataTypeConfig>::def_lse;
 constexpr bool def_is_v_rowmajor = TestConfigs<DataTypeConfig>::def_is_v_rowmajor;
@@ -374,7 +382,8 @@ class General
                                       bool,
                                       bool,
                                       mode_enum,
-                                      std::tuple<int, int, int, int, int, int, std::string>>>
+                                      std::tuple<int, int, int, int, int, int, std::string>,
+                                      const char*>>
 {
 };
 
@@ -390,11 +399,12 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{1, 2, 1, 1024, 256, -1, "2"},
                                         std::tuple{2, 1, -1, 3, 99, -1, "2"},
                                         std::tuple{1, 2, 1, 33, 0, -1, "2"},
-                                        std::tuple{1, 2, 1, 1, 10, 32, "2"})));
+                                        std::tuple{1, 2, 1, 1, 10, 32, "2"}),
+                                 QScaleValues));
 
 TEST_P(General, DataTypeConfig)
 {
-    auto [hdims, perm, is_v_rowmajor, mode, dims_mask]                      = GetParam();
+    auto [hdims, perm, is_v_rowmajor, mode, dims_mask, qscale]              = GetParam();
     auto [hdim_q, hdim_v]                                                   = hdims;
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, seqlen_kpad, mask_str] = dims_mask;
 
@@ -426,7 +436,7 @@ TEST_P(General, DataTypeConfig)
                                                0,             // drop_offset
                                                false,         // drop_prefs
                                                mask_str,      // mask_str
-                                               qscale_str,
+                                               qscale,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -901,7 +911,8 @@ class SplitKV : public TestWithParam<std::tuple<std::tuple<int, int>,
                                                 bool,
                                                 std::tuple<mode_enum, bool>,
                                                 int,
-                                                std::tuple<int, int, int, int, int, std::string>>>
+                                                std::tuple<int, int, int, int, int, std::string>,
+                                                const char*>>
 {
 };
 
@@ -919,11 +930,12 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(std::tuple{4, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
                                         std::tuple{2, 8, 2, 1, 1024, "0"},
-                                        std::tuple{3, 2, -1, 230, 899, "t:128,128"})));
+                                        std::tuple{3, 2, -1, 230, 899, "t:128,128"}),
+                                 QScaleValues));
 
 TEST_P(SplitKV, DataTypeConfig)
 {
-    auto [hdims, i_perm, is_v_rowmajor, mode_use_cache_batch_idx, num_splits, dims_mask] =
+    auto [hdims, i_perm, is_v_rowmajor, mode_use_cache_batch_idx, num_splits, dims_mask, qscale] =
         GetParam();
     auto [hdim_q, hdim_v]                                      = hdims;
     auto [mode, use_cache_batch_idx]                           = mode_use_cache_batch_idx;
@@ -957,7 +969,7 @@ TEST_P(SplitKV, DataTypeConfig)
                                                0,                   // drop_offset
                                                false,               // drop_prefs
                                                mask_str,            // mask_str
-                                               qscale_str,
+                                               qscale,
                                                true,       // is_rotary_interleaved
                                                num_splits, // num_splits
                                                COMMON_ARGS);
@@ -1504,6 +1516,103 @@ TEST_P(SinkWindowMask, DataTypeConfig)
         init_sink, // init_sink_value
         1,         // pack_gqa
         stream_config);
+    CHECK_RESULT(result);
+}
+
+// ============================================================================
+// GPT-OSS sink (init_sink_value) numerical correctness under BLOCKSCALE.
+// ----------------------------------------------------------------------------
+// The sink logit seeds the online-softmax running max `m` and denominator `l`
+// before the K-tile loop starts, as if it were tile zero. BLOCKSCALE rescales
+// every real tile's P/rowsum by a constant 2^SHIFT to keep values inside FP8's
+// accurate range (see OCP_FP8_SHIFT/FNUZ_FP8_SHIFT in the qr_ks_vs[_async]
+// pipelines); if the sink's `l` seed is not scaled by that same factor, the
+// sink's share of the softmax denominator is silently diluted relative to
+// every real token's contribution. init_method "3" (uniform [-max,max] fill)
+// is required to surface this - the old fixed [30,60] sink test value swamped
+// the softmax and hid the bug (see fmha_fwd_runner.hpp sink init comment).
+// Only meaningful for fp8bf16, the only config with a working BLOCKSCALE path.
+// ============================================================================
+
+// hdim, mask_str, qscale, nhead_k (-1 -> nhead_k=nhead, plain MHA)
+using SinkQuantParam = std::tuple<int, std::string, std::string, int>;
+
+static const std::vector<SinkQuantParam> kSinkQuantParams = {
+    {64, "1", "pt", -1},
+    {64, "1", "bs", -1},
+    {128, "1", "pt", -1},
+    {128, "1", "bs", -1},
+    {256, "1", "pt", -1},
+    {256, "1", "bs", -1},
+    {64, "2", "pt", -1},
+    {64, "2", "bs", -1},
+    {128, "2", "pt", -1},
+    {128, "2", "bs", -1},
+    {256, "2", "pt", -1},
+    {256, "2", "bs", -1},
+    // GQA (nhead_ratio=4): sink+blockscale must compose with shared-KV head mapping.
+    {128, "1", "pt", 2},
+    {128, "1", "bs", 2},
+    {128, "2", "pt", 2},
+    {128, "2", "bs", 2},
+};
+
+class SinkQuantMode : public TestWithParam<std::tuple<bool, mode_enum, SinkQuantParam>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SinkQuantMode);
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    SinkQuantMode,
+    Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+            ModeValues,
+            ValuesIn(kSinkQuantParams)));
+
+TEST_P(SinkQuantMode, DataTypeConfig)
+{
+    auto [_, mode, sink_param]              = GetParam();
+    auto [hdim, mask_str, qscale, nhead_k]  = sink_param;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                               2,       // batch
+                                               8,       // nhead
+                                               nhead_k, // nhead_k
+                                               {adjust_seqlen(1024)},
+                                               {adjust_seqlen(1024)},
+                                               adjust_hdim(hdim),
+                                               adjust_hdim(hdim),
+                                               0,        // seqlen_knew
+                                               {-1},     // seqlen_qpads
+                                               {-1},     // seqlen_kpads
+                                               {},       // q_eff_lens_per_batch
+                                               {},       // kv_eff_lens_per_batch
+                                               0,        // rotary_dim
+                                               true,     // i_perm
+                                               true,     // o_perm
+                                               0,        // scale_s
+                                               0,        // logits_soft_cap
+                                               def_is_v_rowmajor,
+                                               def_lse, // lse
+                                               0,       // page_block_size
+                                               false,   // use_cache_batch_idx
+                                               "n",     // bias_str
+                                               0.0f,    // p_drop
+                                               0,       // drop_seed
+                                               0,       // drop_offset
+                                               false,   // drop_prefs
+                                               mask_str,
+                                               qscale,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               init_method, // uniform, not the sink-swamping default
+                                               static_cast<uint32_t>(
+                                                   ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+                                               1, // do_validation
+                                               1, // init_sink_value
+                                               1, // pack_gqa
+                                               stream_config);
     CHECK_RESULT(result);
 }
 
