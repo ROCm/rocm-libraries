@@ -37,25 +37,31 @@ The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 (MI3
 
 ## LLVM Intrinsic Flavor
 
-A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22). The DSL picks the right flavor on first lower so the same source compiles on both toolchains:
+A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22; ROCm 7.13+ ships LLVM 23). The DSL picks the right flavor on first lower so the same source compiles on every toolchain. The ladder has three rungs — `llvm20`, `llvm22`, `llvm23` — enumerated once in `LLVM_FLAVORS` (`core/lower_llvm.py`) and mirrored by the C++ engine's flavor table (`cpp/core/lower_llvm/core.cpp`, readable from Python as `rocke_engine.llvm_flavors()`).
+
+The signature changes at the llvm20 → llvm21+ boundary:
 
 - `llvm.amdgcn.make.buffer.rsrc.p1` → `llvm.amdgcn.make.buffer.rsrc.p8.p1`, `num_records` widened from `i32` to `i64` (LLVM PR #126828).
 - `llvm.amdgcn.mfma.f32.{16x16x32,32x32x16}.{fp8,bf8}.{fp8,bf8}` A/B operands collapsed from `<2 x i32>` to scalar `i64`.
+
+`llvm23` is a distinct rung but not yet a distinct *shape*: `_INTRINSIC_DECLS_LLVM23_OVERRIDES` is currently a copy of the llvm22 table, and both share the `P8_INDEXED` datalayout, so the two emit identical IR for every wired target. The rung exists so that the first llvm23-only signature change is a one-table edit rather than a new flavor plumbed through both engines, and so a ROCm 7.13 host reports what it actually has.
 
 **The flavor is tied to the comgr-lib vintage that will actually load — the IR must match the library that compiles it.** The mismatch that matters is llvm22-shaped IR fed to a comgr `< 7.2`: comgr verifies top-level `declare`s BEFORE running the auto-upgrade pass, so a mismatched declare fails the verifier (historically a `SIGABRT`) even when LLVM would otherwise auto-upgrade the call site. So the detection keys off *the comgr library that runtime will dlopen*, not just the ambient ROCm version.
 
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
-1. `ROCKE_LLVM_FLAVOR` env var (`llvm20` or `llvm22`).
-2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. ROCm `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`).
+1. `ROCKE_LLVM_FLAVOR` env var (`llvm20`, `llvm22`, or `llvm23`).
+2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. The version is mapped through `_ROCM_FLAVOR_LADDER`: ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`). Teaching rocke about a newer ROCm is one row in that ladder.
 3. `torch.version.hip` / `/opt/rocm/.info/version` — fallbacks when the comgr-lib path cannot be resolved.
 4. Default: `llvm22`.
 
 Resolution is *lazy and import-order-robust*: `_LLVM_FLAVOR` stays `None` at module import; the first call to `lower_kernel_to_llvm(kernel)` runs `_resolve_llvm_flavor()`. The cache is **keyed on the resolved comgr-lib path** (the "basis"), not resolved-once-forever — so a torch-less early call that picks llvm20 no longer locks the process: once torch enters and the loadable comgr becomes the torch-bundled 7.2 lib, the flavor re-resolves to llvm22. This lets the caller import `rocke` and `torch` in either order (or only one of them) and still emit the matching IR.
 
-**Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` calls `_assert_ir_flavor_matches_lib` (same module), which reads the IR datalayout `p8` field (`p8:128:128:128:48` = llvm22, else llvm20) and compares it to the loaded comgr vintage. On a mismatched pair (llvm22 IR + comgr `< 7.2`) it raises a clean `ComgrError` that names the fix, instead of the bare `SIGABRT`. The guard is a no-op on matched pairs and protects **both** lowering engines (C-lowered `.ll` funnels through the same comgr path). Flavor outcomes are unchanged for the two common cases (torch-first → llvm22, torch-less → llvm20), so byte-identity is preserved.
+**Compile-time guard.** `runtime/comgr.py::build_hsaco_from_llvm_ir` calls `_assert_ir_flavor_matches_lib` (same module), which reads the IR datalayout `p8` field and compares its **generation** (`LlvmDatalayoutKind`: `p8:128:128:128:48` = `P8_INDEXED`, shared by llvm22/llvm23; `p8:128:128` = `P8_PLAIN` = llvm20) to the generation of the loaded comgr vintage. The comparison is on generation rather than flavor because the `p8` field cannot distinguish llvm22 from llvm23, and codegen only aborts across the generation boundary. On a mismatched pair (LLVM 21+ IR + comgr `< 7.2`) it raises a clean `ComgrError` that names the fix, instead of the bare `SIGABRT`. The guard is a no-op on matched pairs and protects **both** lowering engines (C-lowered `.ll` funnels through the same comgr path). Flavor outcomes are unchanged for the two common cases (torch-first → llvm22, torch-less → llvm20), so byte-identity is preserved.
 
-Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22`). Both constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES`, and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples).
+Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, llvm_flavor=LLVM_FLAVOR_LLVM20)` (or `LLVM_FLAVOR_LLVM22` / `LLVM_FLAVOR_LLVM23`). All three constants live in `core/lower_llvm.py`. Adding a new intrinsic that changes shape across versions: add the LLVM 20 signature to `_INTRINSIC_DECLS`, the LLVM 21+ override to `_INTRINSIC_DECLS_LLVM22_OVERRIDES` (and to `_INTRINSIC_DECLS_LLVM23_OVERRIDES` if LLVM 23 differs again — it currently just copies the llvm22 table), and branch on `self._flavor` inside the `_op_*` handler (see `_op_tile_buffer_rsrc` and `_lower_mfma_fp8_bf8` for working examples). Prefer `_is_modern_flavor(self._flavor)` over naming flavors in the branch: `test_no_hand_rolled_flavor_membership_lists` rejects a literal listing two or more flavor constants, because that is the shape that silently left `llvm23` out.
+
+The committed golden (`tests/golden/rocke_representative_ir_sha256.json`) holds one sub-document per flavor and `check_golden` verifies **all** of them from any host, so an llvm23 hash cannot go stale just because CI runs on ROCm 7.2.
 
 ## Wave Size
 

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -433,7 +433,8 @@ def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, sa
         data["BenchmarkProblems"][i][1]["BenchmarkFinalParameters"][0]["ProblemSizes"] = gemm_group[dtype_str]
         if "BiasDataTypeList" in dtype:
             data["BenchmarkProblems"][i][1]["BenchmarkFinalParameters"].append({"BiasTypeArgs": list(dtype["BiasDataTypeList"])})
-
+        if "GateResidualDataTypeList" in dtype:
+            data["BenchmarkProblems"][i][1]["BenchmarkFinalParameters"].append({"GateTypeArgs": list(dtype["GateResidualDataTypeList"])})
         # Add groupd here if needed
         group_params = [[]]
 

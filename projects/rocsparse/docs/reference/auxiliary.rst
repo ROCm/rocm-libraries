@@ -533,6 +533,11 @@ rocsparse_bsr_set_pointers
 
 .. doxygenfunction:: rocsparse_bsr_set_pointers
 
+rocsparse_bell_set_pointers
+---------------------------
+
+.. doxygenfunction:: rocsparse_bell_set_pointers
+
 rocsparse_spmat_get_size
 ------------------------
 
@@ -607,6 +612,11 @@ rocsparse_create_const_dnvec_descr
 ----------------------------------
 
 .. doxygenfunction:: rocsparse_create_const_dnvec_descr
+
+rocsparse_dnvec_descr_create_scalar
+-----------------------------------
+
+.. doxygenfunction:: rocsparse_dnvec_descr_create_scalar
 
 rocsparse_destroy_dnvec_descr
 -----------------------------

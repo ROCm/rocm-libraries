@@ -33,12 +33,21 @@
 #include <miopen/filesystem.hpp>
 
 #include <cstdlib>
+#include <string>
 #ifdef __linux__
 #include <dlfcn.h>
+#endif
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_SYSTEM_DB_PATH)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_USER_DB_PATH)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_DISABLE_USER_DB)
 
 namespace miopen {
 
@@ -61,27 +70,92 @@ fs::path GetLibPath()
 }
 #endif
 
+#ifdef _WIN32
+fs::path GetLibPath()
+{
+    // Mirrors GetOwningModuleDirectory() in src/solver/ck_impl_lib_loader.cpp: locate the module
+    // that owns a known MIOpen symbol, so the result follows MIOpen.dll rather than the process
+    // that loaded it.
+    HMODULE hmod = nullptr;
+    if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCWSTR>(miopenCreate),
+                          &hmod) != 0)
+    {
+        // Windows paths top out at 32767 wide characters even with long-path support, so the
+        // buffer never needs to grow past that. Capping it keeps a misbehaving
+        // GetModuleFileNameW (one that keeps reporting "buffer too small") from looping until
+        // the allocation fails, at the cost of giving up on a path that cannot exist.
+        constexpr size_t max_module_path = 32768;
+        std::wstring module_path(MAX_PATH, L'\0');
+        while(true)
+        {
+            const auto len = GetModuleFileNameW(
+                hmod, module_path.data(), static_cast<DWORD>(module_path.size()));
+            if(len == 0)
+                break;
+            if(len < module_path.size())
+            {
+                module_path.resize(len);
+                auto path = miopen::weakly_canonical(fs::path{module_path}).parent_path();
+                MIOPEN_LOG_I2("Lib Path: " << path);
+                return path;
+            }
+            if(module_path.size() >= max_module_path)
+            {
+                MIOPEN_LOG_W("Module path exceeds " << max_module_path << " characters");
+                break;
+            }
+            // Not std::min: this TU pulls in windows.h without NOMINMAX, so its min() macro
+            // breaks the std:: call.
+            const auto grown = module_path.size() * 2;
+            module_path.resize(grown < max_module_path ? grown : max_module_path);
+        }
+    }
+    return {};
+}
+#endif
+
 fs::path GetSystemDbPath()
 {
     auto p = env::value(MIOPEN_SYSTEM_DB_PATH);
-    if(p.empty())
-#if MIOPEN_BUILD_DEV || defined(_WIN32)
-    {
-        // Here, by default, MIOPEN_SYSTEM_DB_PATH is an empty path on Windows.
-        // MIOpen.dll will be searching for System DB files in local directory.
-        return "${MIOPEN_SYSTEM_DB_PATH}";
-    }
-#else
-    {
-        // Get the module path and construct the db path
-        static const auto lib_path = GetLibPath().parent_path() / "share/miopen/db";
-        return lib_path;
-    }
-#endif
-    else
-    {
+    if(!p.empty())
         return p;
-    }
+#if MIOPEN_BUILD_DEV
+    // Development builds read the databases straight out of the build tree.
+    return "${MIOPEN_SYSTEM_DB_PATH}";
+#elif defined(_WIN32)
+    // On Windows the databases are installed alongside MIOpen.dll (DATABASE_INSTALL_DIR is "bin"),
+    // so resolve them relative to the loaded module. Falling back to the configured value would
+    // make the lookup relative to the current working directory, which only finds the databases
+    // when the process happens to be started from the install directory.
+    static const auto lib_path = GetLibPath();
+    if(lib_path.empty())
+        return "${MIOPEN_SYSTEM_DB_PATH}";
+    return lib_path;
+#else
+    // Get the module path and construct the db path
+    static const auto lib_path = GetLibPath().parent_path() / "share/miopen/db";
+    return lib_path;
+#endif
+}
+
+/// \note env::enabled() reads the process environment exactly once, when the variable is first
+/// touched, so neither predicate follows a setenv() issued after that point. What remains mutable
+/// is the in-library override behind miopen::debug::env::UpdateEnvVariable(), which the tests use
+/// to toggle the switches. Database objects therefore latch the answer at construction
+/// (PlainTextDb::disable_file_io, SQLiteBase::disable_file_io) instead of re-querying it per
+/// operation, so that a single instance cannot change its mind between its constructor and its
+/// operations, nor in the middle of one.
+
+bool IsSystemDbDisabled()
+{
+    return MIOPEN_DISABLE_SYSDB || env::enabled(MIOPEN_DEBUG_DISABLE_SYSTEM_DB);
+}
+
+bool IsUserDbDisabled()
+{
+    return MIOPEN_DISABLE_USERDB || env::enabled(MIOPEN_DEBUG_DISABLE_USER_DB);
 }
 
 namespace {

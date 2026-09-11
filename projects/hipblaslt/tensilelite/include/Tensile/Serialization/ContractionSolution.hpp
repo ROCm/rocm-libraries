@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,6 +68,8 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
+                if(!iot::outputting(io) && s.customKernel.name.empty())
+                    s.customKernel.name = s.sizeMapping.customKernelName;
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 iot::mapRequired(io, "problemType", s.problemType);
             }
@@ -167,6 +169,9 @@ namespace TensileLite
                 iot::mapRequired(io, "gsu", s.gsu);
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
+                // Optional so older logic files that omit the field deserialize
+                // as false (no per-tile extra-iters capability).
+                iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
@@ -196,6 +201,7 @@ namespace TensileLite
                 iot::mapRequired(io, "useBeta", s.useBeta);
                 iot::mapOptional(io, "useBias", s.useBias);
                 iot::mapOptional(io, "useE", s.useE);
+                iot::mapOptional(io, "useGateResidual", s.useGateResidual);
                 iot::mapOptional(io, "useScaleAB", s.useScaleAB);
                 iot::mapOptional(io, "useScaleCD", s.useScaleCD);
                 iot::mapOptional(io, "useScaleAlphaVec", s.useScaleAlphaVec);
@@ -211,6 +217,7 @@ namespace TensileLite
                 iot::mapOptional(io, "activationNoGuard", s.activationNoGuard);
                 iot::mapOptional(io, "biasSrcWhiteList", s.biasSrcWhiteList);
                 iot::mapOptional(io, "biasDataTypeWhiteList", s.biasDataTypeWhiteList);
+                iot::mapOptional(io, "gateResidualDataTypeWhiteList", s.gateResidualDataTypeWhiteList);
                 iot::mapOptional(io, "sparse", s.sparse);
                 iot::mapOptional(io, "f32XdlMathOp", s.f32XdlMathOp);
                 iot::mapOptional(io, "supportDeviceUserArguments", s.supportDeviceUserArguments);
@@ -220,6 +227,7 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.

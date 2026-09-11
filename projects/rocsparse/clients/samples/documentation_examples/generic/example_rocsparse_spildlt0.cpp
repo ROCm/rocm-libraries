@@ -90,10 +90,6 @@ int main()
     HIP_CHECK(hipMalloc(&dcsr_val, sizeof(double) * nnz));
     HIP_CHECK(hipMemcpy(dcsr_val, hcsr_val, sizeof(double) * nnz, hipMemcpyHostToDevice));
 
-    // Allocate device array for the diagonal D (m real entries)
-    double* ddiag;
-    HIP_CHECK(hipMalloc(&ddiag, sizeof(double) * m));
-
     //
     // Create handle.
     //
@@ -247,12 +243,6 @@ int main()
     }
 
     //
-    // Set the diagonal output pointer before the compute phase.
-    //
-    ROCSPARSE_CHECK(rocsparse_spildlt0_set_input(
-        handle, spildlt0_descr, rocsparse_spildlt0_input_diag, &ddiag, sizeof(void*), nullptr));
-
-    //
     // Compute phase.
     //
     ROCSPARSE_CHECK(rocsparse_spildlt0_buffer_size(handle,
@@ -331,7 +321,6 @@ int main()
     HIP_CHECK(hipFree(dcsr_row_ptr));
     HIP_CHECK(hipFree(dcsr_col_ind));
     HIP_CHECK(hipFree(dcsr_val));
-    HIP_CHECK(hipFree(ddiag));
 
     return 0;
 }

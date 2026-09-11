@@ -43,14 +43,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class PairwiseAMG
-  * \brief Pairwise Aggregation Algebraic MultiGrid Method
-  * \details
-  * The Pairwise Aggregation Algebraic MultiGrid method is based on a pairwise
-  * aggregation matching scheme. It delivers very efficient building phase which is
-  * suitable for Poisson-like equation. Most of the time it requires K-cycle for the
-  * solving phase to provide low number of iterations. This version has multi-node
-  * support.
-  * \cite pairwiseamg
+  * \brief Pairwise Aggregation Algebraic MultiGrid method.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector

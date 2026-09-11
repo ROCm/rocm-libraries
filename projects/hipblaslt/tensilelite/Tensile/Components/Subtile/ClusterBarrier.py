@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from rocisa.code import Label, Module
 from rocisa.container import sgpr
-from rocisa.instruction import (SBarrier, SCBranchSCC0, SCmpEQU32,
+from rocisa.instruction import (SBarrier, BranchInstruction, SCBranchSCC0,
+                                SCmpEQU32,
                                 MFMAInstruction, MXMFMAInstruction)
 
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
@@ -127,8 +128,25 @@ def insertClusterBarrier(module, writer, kernel):
             head.add(inst)
         result = head
 
-    # Wait: append at the end of the section so cluster latency hides behind the
-    # whole macro tile's WMMAs before the handshake is closed.
-    for w in waitItems:
-        result.add(w)
-    return result
+    # Second pass: place the wait before the first branch after the signal,
+    # so no exit path can skip it.  Falls back to end-of-module if no branch follows.
+    signalInst = next(s for s in signalItems if isinstance(s, SBarrier))
+    items = result.flatitems()
+    patched = Module(result.name)
+    signalSeen = False
+    waitPlaced = False
+    for inst in items:
+        if inst is signalInst:
+            signalSeen = True
+            waitPlaced = False
+        if signalSeen and not waitPlaced and isinstance(inst, BranchInstruction):
+            for w in waitItems:
+                patched.add(w)
+            waitPlaced = True
+            signalSeen = False
+        patched.add(inst)
+    # Trailing wait for the last signal if no exit branch followed it.
+    if signalSeen and not waitPlaced:
+        for w in waitItems:
+            patched.add(w)
+    return patched

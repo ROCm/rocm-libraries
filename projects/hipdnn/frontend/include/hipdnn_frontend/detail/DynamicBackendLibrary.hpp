@@ -21,6 +21,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdio>
 #include <mutex>
 #include <string>
 
@@ -34,8 +35,9 @@ namespace hipdnn_frontend::detail
  * @brief Return the lazily-opened handle to the hipDNN backend shared library.
  *
  * The library is opened on first call via `std::call_once`; the result
- * (including a failure, cached as `nullptr`) is reused thereafter. Never logs,
- * so it is safe to call from the logging-initialization path.
+ * (including a failure, cached as `nullptr`) is reused thereafter. On failure it
+ * writes directly to stderr rather than the frontend logging facility, so it is
+ * safe to call from the logging-initialization path.
  *
  * `HIPDNN_HIDDEN` gives each shared object its own handle, matching the per-SO
  * isolation of the backend instance accessor.
@@ -54,10 +56,17 @@ HIPDNN_HIDDEN inline hipdnn_data_sdk::utilities::SharedLibraryHandle backendLibr
                 = hipdnn_data_sdk::utilities::getLibraryName("hipdnn_backend");
             s_handle = hipdnn_data_sdk::utilities::openLibrary(libraryName);
         }
+        catch(const std::exception& e)
+        {
+            // Report via stderr directly rather than the frontend logging
+            // facility: that callback is itself resolved through this loader, so
+            // logging here would re-enter it.
+            std::fprintf(stderr, "hipDNN: failed to load backend library: %s\n", e.what());
+            s_handle = nullptr;
+        }
         catch(...)
         {
-            // Caching nullptr means callers fall back to the not-initialized
-            // path; never log here to avoid re-entering the loader.
+            std::fprintf(stderr, "hipDNN: failed to load backend library (unknown error)\n");
             s_handle = nullptr;
         }
     });

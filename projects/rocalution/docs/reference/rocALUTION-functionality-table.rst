@@ -1,7 +1,7 @@
 .. meta::
    :description: rocALUTION functionality table
    :keywords: rocALUTION, ROCm, library, API, functionality table
-   
+
 .. _functionality-table:
 
 *******************
@@ -15,7 +15,7 @@ LocalMatrix and LocalVector classes
 
 All matrix operations (except SpMV) require a CSR matrix.
 
-.. note:: 
+.. note::
 
    If the input matrix is not a CSR matrix, an internal conversion is performed to CSR format, followed by a back conversion to the previous format after the operation. In this case, a warning message on verbosity level 2 is printed.
 
@@ -158,7 +158,7 @@ All matrix operations (except SpMV) require a CSR matrix.
 Solver and preconditioner classes
 =================================
 
-.. note:: 
+.. note::
 
    The building phase of the iterative solver also depends on the selected preconditioner.
 

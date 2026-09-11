@@ -47,7 +47,7 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  spsv_alg: [HIPSPARSE_SPSV_ALG_DEFAULT]
 
 - name: spsv_coo
   category: pre_checkin
@@ -64,7 +64,7 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  spsv_alg: [HIPSPARSE_SPSV_ALG_DEFAULT]
   filename: [nos1,
              nos3, 
              nos5]
@@ -84,7 +84,7 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
-  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  spsv_alg: [HIPSPARSE_SPSV_ALG_DEFAULT]
   filename: [scircuit,
              shipsec1,
              bmwcra_1]

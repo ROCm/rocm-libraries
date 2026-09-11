@@ -30,6 +30,8 @@
 #ifndef HIPCUB_THREAD_THREAD_LOAD_HPP_
 #define HIPCUB_THREAD_THREAD_LOAD_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
 
     #ifndef HIPCUB_THREAD_LOAD_USE_CACHE_MODIFIERS

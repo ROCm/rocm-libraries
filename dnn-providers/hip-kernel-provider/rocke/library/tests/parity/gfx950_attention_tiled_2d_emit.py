@@ -816,6 +816,37 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_transposed_half_local_pv=True,
     ),
+    # idx53: the production nw=4 softmax<->MFMA interleave config. This is exactly
+    # what the gfx950 single-batch d128 selector now routes to (see
+    # _enable_softmax_mfma_interleave): block_size=64 -> tile_size=128 (2*BS) so
+    # BLOCK_M=128 (nw4 * mw32) fits the single K slot (block_m <= tile_size). The
+    # interleave emits one iglp_opt(1) after the iter-start K drain; the gfx950 C
+    # twin ports it (kv_body_qk_softmax.cpp), so it MUST be C/Python byte-identical.
+    53: dict(
+        head_size=128,
+        block_size=64,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=1,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=128,
+        use_k_single_buffer=True,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_invariant_hoist=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+        use_softmax_mfma_interleave=True,
+        softmax_interleave_mode=1,
+    ),
 }
 
 

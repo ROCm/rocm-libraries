@@ -29,9 +29,23 @@ function(get_rocprim_test_target TEST_SOURCES TEST_TARGET)
   set(TEST_TARGET ${TEST_TARGET} PARENT_SCOPE)
 endfunction()
 
+function(set_build_coverage TEST_TARGET)
+  if(BUILD_CODE_COVERAGE)
+    target_compile_options(${TEST_TARGET} PRIVATE
+      -w
+      -fprofile-instr-generate
+      -fcoverage-mapping
+    )
+    target_link_options(${TEST_TARGET} PRIVATE
+      -fprofile-instr-generate
+    )
+  endif()
+endfunction()
+
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
   add_rocprim_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   # Re-propagate DLLS_COPIED_2 from add_rocprim_test_internal's scope to our
   # caller (file scope). PARENT_SCOPE only propagates one level, so without
   # this relay the guard resets on every call and each test target gets
@@ -102,6 +116,7 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
     set(TEST_TARGET "${TEST_TARGET}_disable_dpp")
     add_rocprim_test_internal("${TEST_NAME}_disable_dpp" "${TEST_SOURCES}" ${TEST_TARGET})
+    set_build_coverage(${TEST_TARGET})
     target_compile_definitions(${TEST_TARGET} PRIVATE ROCPRIM_DISABLE_DPP=1)
   endfunction()
 
@@ -248,6 +263,7 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
 
   set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${TEST_TARGET}.parallel")
   add_rocprim_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/rocprim")
   # Make sure the configured files are re-configured if they are removed (via clean).
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SOURCES})
@@ -257,6 +273,7 @@ function(add_rocprim_cpp_standard_test STANDARD EXTENSIONS TARGET_SUFFIX TEST_NA
   get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
   set(TEST_TARGET ${TEST_TARGET}${TARGET_SUFFIX})
   add_rocprim_test_internal(${TEST_NAME}${TARGET_SUFFIX} "${TEST_SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   # Request C++ standard 17, but decay to a previous version if not available:
   set_target_properties(${TEST_TARGET}
     PROPERTIES
@@ -328,9 +345,11 @@ add_rocprim_test_parallel("rocprim.device_segmented_radix_sort" test_device_segm
 add_rocprim_test("rocprim.device_search_n" test_device_search_n.cpp)
 add_rocprim_test("rocprim.device_segmented_reduce" test_device_segmented_reduce.cpp)
 add_rocprim_test("rocprim.device_segmented_scan" test_device_segmented_scan.cpp)
+add_rocprim_test("rocprim.device_segmented_topk_air" test_device_segmented_topk_air.cpp)
 add_rocprim_test("rocprim.device_select" test_device_select.cpp)
 add_rocprim_test("rocprim.device_topk" test_device_topk.cpp)
 add_rocprim_test("rocprim.device_transform" test_device_transform.cpp)
+add_rocprim_test("rocprim.device_topk_segmented" test_device_segmented_topk.cpp)
 add_rocprim_test("rocprim.discard_iterator" test_discard_iterator.cpp)
 add_rocprim_test("rocprim.lookback_reproducibility" test_lookback_reproducibility.cpp)
 add_rocprim_test("rocprim.radix_key_codec" test_radix_key_codec.cpp)
@@ -361,6 +380,7 @@ add_rocprim_test("rocprim.warp_reduce" test_warp_reduce.cpp)
 add_rocprim_test("rocprim.warp_scan" test_warp_scan.cpp)
 add_rocprim_test_disable_dpp("rocprim.warp_scan_disable_dpp" test_warp_scan.cpp)
 add_rocprim_test("rocprim.warp_sort" test_warp_sort.cpp)
+add_rocprim_test("rocprim.warp_sort_stable" test_warp_sort_stable.cpp)
 add_rocprim_test("rocprim.warp_store" test_warp_store.cpp)
 add_rocprim_test("rocprim.zip_iterator" test_zip_iterator.cpp)
 add_rocprim_test("rocprim.accumulator_t" test_accumulator_t.cpp)

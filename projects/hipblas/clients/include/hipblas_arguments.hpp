@@ -29,7 +29,6 @@
 #include "hipblas_datatype2string.hpp"
 #include "utility.h"
 #include <cmath>
-#include <immintrin.h>
 #include <random>
 #include <stdio.h>
 #include <stdlib.h>

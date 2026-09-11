@@ -23,7 +23,7 @@ class Function;
 /// stream order across callable functions must instead honor the
 /// FUNCTION_ASM_PLACEMENT_MARKER markers directly — walk each function and, at
 /// each marker, account for the named function body at that point — rather than
-/// relying on this flatten. Remove this pass once SwPrefetchInsertionPass (and
+/// relying on this flatten. Remove this pass once SwInstructionPrefetchRelStaticPass (and
 /// any other byte-layout-sensitive pass) does that.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createFlattenCalleesPass(
     std::vector<Function*> functions = {});

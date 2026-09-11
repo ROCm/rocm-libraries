@@ -3,7 +3,7 @@
 """Attention parity gate for the library attention harness.
 
 Spawns ``python -m builders.common.parity_fmha_extended --arch ARCH`` and
-checks that all cases pass (or legitimately skip on gfx942).  This mirrors
+checks that all cases pass (or legitimately skip on gfx942). This mirrors
 the structure of :class:`TestNumericVerification.test_extended_parity` in
 ``platform/tests/instances/test_rocke_numeric.py`` but targets the library
 attention harness which is now the correct home for FMHA / Sage / Sparse
@@ -16,35 +16,30 @@ PYTHONPATH is derived from this file's location so the test is portable:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import pathlib
 import subprocess
 import sys
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 _LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
 _PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
-def _detect_gpu_arch():
-    """(has_gpu, gfx) via torch — imported FIRST so rocke binds torch's HIP."""
-    try:
-        import torch
-
-        if not torch.cuda.is_available():
-            return False, None
-        name = torch.cuda.get_device_properties(0).gcnArchName
-        return True, name.split(":", 1)[0]
-    except Exception:
-        return False, None
-
-
-GPU, ARCH = _detect_gpu_arch()
+# Detect arch via the rocke HIP runtime (no torch). The parity harness subprocess
+# imports torch for its numeric reference, so also gate on torch being importable (a
+# dependency check, not a device probe) — a torch-free env then skips cleanly instead of
+# hitting an ImportError in the body.
+ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(ARCH and GPU, "needs a ROCm GPU + torch (run under a torch venv)")
+@unittest.skipUnless(ARCH and _HAS_TORCH, "needs a ROCm GPU + torch")
 class TestAttentionParityLibrary(unittest.TestCase):
     """Launch the library attention parity harness and check all cases pass."""
 

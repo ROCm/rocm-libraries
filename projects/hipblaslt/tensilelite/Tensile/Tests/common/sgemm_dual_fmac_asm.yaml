@@ -2,7 +2,7 @@
 # VOPD is RDNA3/3.5/4 only, so skip pre-gfx11 archs (gfx9 MI, gfx10 RDNA2). On supported
 # archs the kernels emit v_dual_fmac_f32 pairs; full numerical validation must PASS.
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030] # VOPD requires gfx11+
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1250] # VOPD requires gfx11+
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0

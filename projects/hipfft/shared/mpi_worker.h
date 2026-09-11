@@ -598,9 +598,9 @@ void exec_testcases(MPI_Comm                          mpi_comm,
 
     // use first params to know things like precision, type that
     // won't change between libraries
-    const auto& params        = all_params.front();
-    const auto  in_elem_size  = var_size<size_t>(params.precision, params.itype);
-    const auto  out_elem_size = var_size<size_t>(params.precision, params.otype);
+    auto&      params        = all_params.front();
+    const auto in_elem_size  = var_size<size_t>(params.precision, params.itype);
+    const auto out_elem_size = var_size<size_t>(params.precision, params.otype);
 
     // allocate and initialize input buffers
     alloc_local_bricks(mpi_rank,
@@ -657,14 +657,28 @@ void exec_testcases(MPI_Comm                          mpi_comm,
     std::chrono::time_point<std::chrono::steady_clock> start, stop;
 
     // call rocfft_plan_create
+
     for(auto& p : all_params)
+    {
+        // initialize JIT callbacks prior to plan create
+        if(p.run_callbacks == fft_callback_type_jit)
+        {
+            p.load_jit_cb_state
+                = get_rank_jit_state(p, "load_callback", false, jit_callback_op::LOAD);
+            p.store_jit_cb_state
+                = get_rank_jit_state(p, "store_callback", false, jit_callback_op::STORE);
+        }
+
         p.create_plan();
+    }
 
     for(size_t i = 0; i < testcases.size(); ++i)
     {
         size_t testcase = testcases[i];
 
-        std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+        // funcptr cbdata allocations are per-execute and are
+        // recreated for every exec
+        std::vector<gpubuf_t<callback_test_data>> all_funcptr_cb_data;
         std::vector<void*>                        load_cb_func;
         std::vector<void*>                        load_cb_data;
         std::vector<void*>                        store_cb_func;
@@ -673,9 +687,9 @@ void exec_testcases(MPI_Comm                          mpi_comm,
         if(all_params[testcase].run_callbacks == fft_callback_type_funcptr)
         {
             get_rank_load_callbacks_funcptr(
-                all_params[testcase], load_cb_func, load_cb_data, false, all_cb_data);
+                all_params[testcase], load_cb_func, load_cb_data, false, all_funcptr_cb_data);
             get_rank_store_callbacks_funcptr(
-                all_params[testcase], store_cb_func, store_cb_data, false, all_cb_data);
+                all_params[testcase], store_cb_func, store_cb_data, false, all_funcptr_cb_data);
 
             auto fft_status = all_params[testcase].set_funcptr_callbacks(
                 &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);

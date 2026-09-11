@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
+#include <sstream>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 
@@ -19,6 +21,8 @@
 #include <origami/streamk.hpp>
 
 #include "FallbackTestUtils.hpp"
+#include "LogReporter.hpp"
+#include "SolutionIterator.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::testing;
@@ -29,30 +33,30 @@ using namespace TensileLite::testing;
 
 TEST(CuCountPredicateTest, MatchesSPX)
 {
-    auto pred = std::make_shared<Predicates::GPU::CUCountEqual>(_SPX_CU);
-    AMDGPU spx = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
-    AMDGPU cpx = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
+    auto   pred = std::make_shared<Predicates::GPU::CUCountEqual>(_SPX_CU);
+    AMDGPU spx  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
+    AMDGPU cpx  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
 
-    EXPECT_TRUE((*pred)(spx))  << "CUCountEqual(256) should match SPX (CU=256)";
+    EXPECT_TRUE((*pred)(spx)) << "CUCountEqual(256) should match SPX (CU=256)";
     EXPECT_FALSE((*pred)(cpx)) << "CUCountEqual(256) should NOT match CPX (CU=64)";
 }
 
 TEST(CuCountPredicateTest, MatchesCPX)
 {
-    auto pred = std::make_shared<Predicates::GPU::CUCountEqual>(_CPX_CU);
-    AMDGPU spx = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
-    AMDGPU cpx = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
+    auto   pred = std::make_shared<Predicates::GPU::CUCountEqual>(_CPX_CU);
+    AMDGPU spx  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
+    AMDGPU cpx  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
 
-    EXPECT_TRUE((*pred)(cpx))  << "CUCountEqual(64) should match CPX (CU=64)";
+    EXPECT_TRUE((*pred)(cpx)) << "CUCountEqual(64) should match CPX (CU=64)";
     EXPECT_FALSE((*pred)(spx)) << "CUCountEqual(64) should NOT match SPX (CU=256)";
 }
 
 TEST(CuCountPredicateTest, NoCuCheckMatchesBoth)
 {
     // A hardware predicate with no CUCountEqual accepts any CU configuration.
-    auto hwPred = makeHwPred(AMDGPU::Processor::gfx950, _MI350_CHIP_ID);
-    AMDGPU spx = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
-    AMDGPU cpx = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
+    auto   hwPred = makeHwPred(AMDGPU::Processor::gfx950, _MI350_CHIP_ID);
+    AMDGPU spx    = makeDevice(_MI350_CHIP_ID, _SPX_CU, "spx");
+    AMDGPU cpx    = makeDevice(_MI350_CHIP_ID, _CPX_CU, "cpx");
 
     EXPECT_TRUE((*hwPred.value)(spx)) << "Predicate without CU check should match SPX";
     EXPECT_TRUE((*hwPred.value)(cpx)) << "Predicate without CU check should match CPX";
@@ -85,10 +89,9 @@ protected:
     {
         std::string got = selectSolution(lib, device, device.deviceName);
         EXPECT_EQ(got, expectedName)
-            << "Device " << device.deviceName
-            << " (chip=" << hexChipId(device.pciChipId().value())
-            << ", CU=" << device.computeUnitCount
-            << "): expected \"" << expectedName << "\", got \"" << got << "\"";
+            << "Device " << device.deviceName << " (chip=" << hexChipId(device.pciChipId().value())
+            << ", CU=" << device.computeUnitCount << "): expected \"" << expectedName
+            << "\", got \"" << got << "\"";
     }
 };
 
@@ -111,12 +114,10 @@ TEST_F(CuCountFallbackTest, CpxFallsBackToSpxOob)
          buildProblemLib(singleLib(spx_eq), singleLib(spx_oob))},
 
         // Row 2: mi350, any CU -- oob only (catch-all for CPX)
-        {makeHwPred(gfx950, _MI350_CHIP_ID),
-         buildProblemLib(singleLib(spx_oob))},
+        {makeHwPred(gfx950, _MI350_CHIP_ID), buildProblemLib(singleLib(spx_oob))},
 
         // Row 3: gfx950 catch-all
-        {makeHwPred(gfx950),
-         buildProblemLib(singleLib(spx_oob))},
+        {makeHwPred(gfx950), buildProblemLib(singleLib(spx_oob))},
     });
 
     expectSelected(*lib, mi350spx, "mi350spx_eq");
@@ -144,8 +145,7 @@ TEST_F(CuCountFallbackTest, CpxWithOwnEq)
          buildProblemLib(singleLib(cpx_eq), singleLib(spx_oob))},
 
         // Row 3: mi350, any CU -- oob
-        {makeHwPred(gfx950, _MI350_CHIP_ID),
-         buildProblemLib(singleLib(spx_oob))},
+        {makeHwPred(gfx950, _MI350_CHIP_ID), buildProblemLib(singleLib(spx_oob))},
     });
 
     expectSelected(*lib, mi350spx, "mi350spx_eq");
@@ -177,16 +177,13 @@ TEST_F(CuCountFallbackTest, CpxFallsToSameChipOob)
          buildProblemLib(singleLib(mi350spx_eq), singleLib(mi350spx_oob))},
 
         // Row 3: mi355, any CU -- mi355 oob
-        {makeHwPred(gfx950, _MI355_CHIP_ID),
-         buildProblemLib(singleLib(mi355spx_oob))},
+        {makeHwPred(gfx950, _MI355_CHIP_ID), buildProblemLib(singleLib(mi355spx_oob))},
 
         // Row 4: mi350, any CU -- mi350 oob
-        {makeHwPred(gfx950, _MI350_CHIP_ID),
-         buildProblemLib(singleLib(mi350spx_oob))},
+        {makeHwPred(gfx950, _MI350_CHIP_ID), buildProblemLib(singleLib(mi350spx_oob))},
 
         // Row 5: catch-all
-        {makeHwPred(gfx950),
-         buildProblemLib(singleLib(mi350spx_oob))},
+        {makeHwPred(gfx950), buildProblemLib(singleLib(mi350spx_oob))},
     });
 
     // CPX devices skip the CU=256 rows, then hit their chip-specific no-CU row.
@@ -220,8 +217,7 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
          buildProblemLib(singleLib(mi350cpx_eq), singleLib(mi350spx_oob))},
 
         // Row 3: mi350, any CU -- oob
-        {makeHwPred(gfx950, _MI350_CHIP_ID),
-         buildProblemLib(singleLib(mi350spx_oob))},
+        {makeHwPred(gfx950, _MI350_CHIP_ID), buildProblemLib(singleLib(mi350spx_oob))},
     });
 
     expectSelected(*lib, mi350spx, "mi350spx_eq");
@@ -229,7 +225,7 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
 
     // Verify each mode did NOT cross-select.
     // An mi350spx device should not get the CPX solution and vice versa.
-    auto problem  = dummyProblem();
+    auto problem   = dummyProblem();
     auto spxResult = lib->findBestSolution(problem, mi350spx);
     auto cpxResult = lib->findBestSolution(problem, mi350cpx);
 
@@ -242,17 +238,17 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
 TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly     = 1;
-    solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU                = 64;
-    solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.streamK            = 3;
+    solution.sizeMapping.streamKForceDPOnly = 1;
+    solution.sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
+    solution.sizeMapping.depthU             = 64;
+    solution.sizeMapping.matrixInstruction  = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy        = 1;
 
-    auto problem = dummyProblem();
-    auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto problem         = dummyProblem();
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-    auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
+    auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
 
     EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
     EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree), _CPX_CU);
@@ -261,18 +257,18 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly     = 1;
-    solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU                = 64;
-    solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.streamK            = 3;
+    solution.sizeMapping.streamKForceDPOnly = 1;
+    solution.sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
+    solution.sizeMapping.depthU             = 64;
+    solution.sizeMapping.matrixInstruction  = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy        = 1;
 
-    auto problem       = dummyProblem();
-    auto device        = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto problem         = dummyProblem();
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-    device.skFixedGrid = 17;
-    auto tiles         = problem.getNumTiles(solution.sizeMapping, 1);
+    device.skFixedGrid   = 17;
+    auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
 
     EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree),
               device.skFixedGrid);
@@ -282,7 +278,7 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 {
     ContractionSolution solution;
     solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly     = 1;
+    solution.sizeMapping.streamKForceDPOnly    = 1;
     solution.sizeMapping.streamKAtomic         = 0;
     solution.sizeMapping.macroTile             = TensileLite::dim3(256, 256, 1);
     solution.sizeMapping.depthU                = 64;
@@ -290,10 +286,10 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     solution.sizeMapping.CUOccupancy           = 1;
     solution.sizeMapping.workspaceSizePerElemC = 4;
 
-    auto problem = dummyProblem();
-    auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto problem         = dummyProblem();
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-    auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
+    auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
 
     ASSERT_NE(tiles % _CPX_CU, 0);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0);
@@ -325,7 +321,7 @@ namespace
         return origami::hardware_t(arch_t::gfx950,
                                    kGfx950AnalyticalCuCount,
                                    163840,
-                                   262144,  // rf_capacity: 65536 regs * 4 bytes
+                                   262144, // rf_capacity: 65536 regs * 4 bytes
                                    8,
                                    1.0,
                                    1.0,
@@ -380,11 +376,33 @@ namespace
 
     ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
     {
-        auto problem = ContractionProblemGemm::GEMM(
-            false, false, m, n, k, m, n, m, 1.0, false, 1);
+        auto problem = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, 1);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
         return problem;
+    }
+
+    void initBenchStreamK5Solution(ContractionSolution& solution,
+                                   TensileLite::dim3    macroTile,
+                                   size_t               depthU)
+    {
+        solution.sizeMapping.streamK           = 5;
+        solution.sizeMapping.macroTile         = macroTile;
+        solution.sizeMapping.depthU            = depthU;
+        solution.sizeMapping.workGroupSize     = TensileLite::dim3(16, 16, 1);
+        solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+        solution.sizeMapping.CUOccupancy       = 1;
+    }
+
+    size_t threadsPerWorkGroup(ContractionSolution const& solution)
+    {
+        return solution.sizeMapping.workGroupSize.x * solution.sizeMapping.workGroupSize.y
+               * solution.sizeMapping.workGroupSize.z;
+    }
+
+    uint64_t totalWorkItems(size_t skGrid, size_t threadsPerWG)
+    {
+        return static_cast<uint64_t>(skGrid) * threadsPerWG;
     }
 
     StreamKHostPack computeStreamKHostPack(ContractionSolution const& solution,
@@ -392,16 +410,14 @@ namespace
                                            Hardware const&            hardware)
     {
         StreamKHostPack pack{};
-        pack.tiles = problem.getNumTiles(solution.sizeMapping, 1);
-        pack.itersPerTile
-            = std::max(size_t{1}, problem.getItersPerTile(solution.sizeMapping));
+        pack.tiles        = problem.getNumTiles(solution.sizeMapping, 1);
+        pack.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(solution.sizeMapping));
 
         if(solution.sizeMapping.streamK == 5)
         {
             pack.effectiveDynamic = solution.streamK5EffectiveDynamic(problem, hardware);
-            pack.reduction        = pack.effectiveDynamic
-                                        ? origami::reduction_t::tree
-                                        : solution.getSKReduction(problem, hardware);
+            pack.reduction        = pack.effectiveDynamic ? origami::reduction_t::tree
+                                                          : solution.getSKReduction(problem, hardware);
         }
         else
         {
@@ -413,27 +429,24 @@ namespace
 
         if(pack.reduction == origami::reduction_t::parallel)
         {
-            uint32_t skSplit      = static_cast<uint32_t>(pack.grid / pack.tiles);
-            pack.skItersPerWG     = static_cast<uint32_t>(pack.itersPerTile) / skSplit;
-            pack.skTiles          = skSplit;
+            uint32_t skSplit  = static_cast<uint32_t>(pack.grid / pack.tiles);
+            pack.skItersPerWG = static_cast<uint32_t>(pack.itersPerTile) / skSplit;
+            pack.skTiles      = skSplit;
         }
         else
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
             assert(pAMDGPU != nullptr);
-            int  fullTiles   = pAMDGPU->skFullTiles;
-            bool bigEnough   = pack.tiles > pack.grid;
-            bool forceDPOnly = solution.sizeMapping.streamKForceDPOnly != 0;
-            pack.skTiles     = forceDPOnly ? 0u : static_cast<uint32_t>(pack.grid);
-            if(!forceDPOnly && pack.tiles % pack.grid != 0)
-            {
-                pack.skTiles = bigEnough ? pack.grid * fullTiles + pack.tiles % pack.grid
-                                         : pack.tiles;
-                pack.skTiles = std::min(pack.skTiles, static_cast<uint32_t>(pack.tiles));
-            }
-            pack.skItersPerWG
-                = static_cast<uint32_t>(pack.skTiles) * static_cast<uint32_t>(pack.itersPerTile)
-                  / static_cast<uint32_t>(pack.grid);
+            // The same helper generateSingleCall() packs from, so this mirror
+            // cannot drift from the arithmetic it claims to reproduce.
+            const StreamKStaticSplit split
+                = streamKStaticSplit(pack.tiles,
+                                     pack.itersPerTile,
+                                     pack.grid,
+                                     pAMDGPU->skFullTiles,
+                                     solution.sizeMapping.streamKForceDPOnly != 0);
+            pack.skTiles      = split.skTiles;
+            pack.skItersPerWG = split.skItersPerWG;
         }
 
         return pack;
@@ -482,11 +495,11 @@ class StreamK5ExplicitModeTest : public ::testing::TestWithParam<StreamK5Explici
 
 TEST_P(StreamK5ExplicitModeTest, ResolvesEffectiveSubPath)
 {
-    auto const& param = GetParam();
+    auto const&         param = GetParam();
     ContractionSolution solution;
     initStreamK5Solution(solution);
-    auto        problem  = dummyProblem();
-    auto        device   = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto problem = dummyProblem();
+    auto device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
     problem.setParams().setStreamKTileSchedulingMode(param.mode);
 
     EXPECT_EQ(solution.streamK5EffectiveDynamic(problem, device), param.expectDynamic)
@@ -494,20 +507,20 @@ TEST_P(StreamK5ExplicitModeTest, ResolvesEffectiveSubPath)
         << (param.expectDynamic ? "dynamic (SK4)" : "static (SK3)") << " sub-path";
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    StreamK5HybridModeTest,
-    StreamK5ExplicitModeTest,
-    ::testing::Values(StreamK5ExplicitModeParam{0, false}, StreamK5ExplicitModeParam{1, true}),
-    [](::testing::TestParamInfo<StreamK5ExplicitModeParam> const& info) {
-        return info.param.mode == 0 ? "OffStatic" : "OnDynamic";
-    });
+INSTANTIATE_TEST_SUITE_P(StreamK5HybridModeTest,
+                         StreamK5ExplicitModeTest,
+                         ::testing::Values(StreamK5ExplicitModeParam{0, false},
+                                           StreamK5ExplicitModeParam{1, true}),
+                         [](::testing::TestParamInfo<StreamK5ExplicitModeParam> const& info) {
+                             return info.param.mode == 0 ? "OffStatic" : "OnDynamic";
+                         });
 
 TEST(StreamK5HybridModeTest, TriStateAutoRequiresAnalyticalHardware)
 {
     ContractionSolution solution;
     initStreamK5Solution(solution);
-    auto device   = makeHipDeviceWithoutAnalytical();
-    auto problem  = makeGemmProblem(4096, 4096, 64);
+    auto device  = makeHipDeviceWithoutAnalytical();
+    auto problem = makeGemmProblem(4096, 4096, 64);
     problem.setParams().setStreamKTileSchedulingMode(2);
 
     EXPECT_THROW(solution.streamK5EffectiveDynamic(problem, device), std::runtime_error)
@@ -528,26 +541,28 @@ class StreamK5AutoOrigamiTest : public ::testing::TestWithParam<StreamK5AutoOrig
 
 TEST_P(StreamK5AutoOrigamiTest, ResolvesViaOrigamiAndHostPack)
 {
-    auto const& param = GetParam();
+    auto const&           param = GetParam();
     StreamK5AnalyticalEnv env;
     auto                  problem = makeGemmProblem(param.m, param.n, 64);
     problem.setParams().setStreamKTileSchedulingMode(2);
+    // A non-zero smCountTarget signals a cotenant sharing the device, which is
+    // required for the tiles-per-cu heuristic to engage (see the cotenant gate
+    // in origami::streamk::select_hybrid_mode).
+    problem.setParams().setSmCountTarget(128);
 
     EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problem, env.device), param.expectDynamic)
         << "StreamK=5 AUTO " << param.suffix;
 
     StreamKHostPack pack = computeStreamKHostPack(env.solution, problem, env.device);
     EXPECT_EQ(pack.effectiveDynamic, param.expectDynamic);
-    EXPECT_EQ(pack.grid,
-              env.solution.getSKGrid(problem, env.device, pack.tiles, pack.reduction));
+    EXPECT_EQ(pack.grid, env.solution.getSKGrid(problem, env.device, pack.tiles, pack.reduction));
 }
 
 INSTANTIATE_TEST_SUITE_P(
     StreamK5HybridModeTest,
     StreamK5AutoOrigamiTest,
-    ::testing::Values(
-        StreamK5AutoOrigamiParam{2560, 2560, false, "LowTilesPerCu"},
-        StreamK5AutoOrigamiParam{4096, 4096, true, "HighTilesPerCu"}),
+    ::testing::Values(StreamK5AutoOrigamiParam{2560, 2560, false, "BelowMinTilesGate"},
+                      StreamK5AutoOrigamiParam{4096, 4096, true, "AboveMinTilesGate"}),
     [](::testing::TestParamInfo<StreamK5AutoOrigamiParam> const& info) {
         return info.param.suffix;
     });
@@ -589,6 +604,72 @@ TEST(StreamK5HybridModeTest, OffWithSmCountTargetEngagesHeuristic)
 
 // smCountTarget heuristic threshold behavior is covered by origami/tests/test_streamk.cpp.
 
+// Guards the smCountTarget() -> origami_problem.num_cus wiring through the
+// ContractionSolution path, on both outputs it feeds: getSKReduction (reduction
+// strategy) and getSKGrid (grid size).
+TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
+{
+    // streamK=3 on the gfx950 analytical device (256 CUs), k_split_aware selector.
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    env.device.skDynamicGrid         = static_cast<int>(origami::grid_selection_t::k_split_aware);
+
+    // Make smCountTarget the sole grid budget source (AMDGPU defaults, explicit).
+    env.device.skFixedGrid      = 0;
+    env.device.skMaxCUs         = 0;
+    env.device.skGridMultiplier = 1;
+
+    // Scenario 1 - reduction: select_reduction picks parallel when tiles <=
+    // cu_count/4. 512x512 => 16 tiles fits at 256 CUs (16<=64) but not at 32
+    // (16>8), so the strategy flips parallel -> tree.
+    {
+        auto problem = makeGemmProblem(512, 512, 8192);
+
+        problem.setParams().setSmCountTarget(0); // use all device CUs (256)
+        const auto reductionAllCUs = env.solution.getSKReduction(problem, env.device);
+
+        problem.setParams().setSmCountTarget(32); // tight CU budget
+        const auto reductionCapped = env.solution.getSKReduction(problem, env.device);
+
+        EXPECT_EQ(reductionAllCUs, origami::reduction_t::parallel)
+            << "[reduction] With all 256 CUs, 16 tiles fit the parallel-reduction window";
+        EXPECT_EQ(reductionCapped, origami::reduction_t::tree)
+            << "[reduction] With smCountTarget=32, 16 tiles exceed cu_count/4, so tree";
+        EXPECT_NE(reductionAllCUs, reductionCapped)
+            << "[reduction] smCountTarget() must flow through to change the predicted reduction";
+    }
+
+    // Scenario 2 - grid size: getSKGrid folds smCountTarget into num_cus and
+    // select_grid_size (k_split_aware) sizes the grid to the usable CU count.
+    // 4096x4096 => 1024 tiles > CUs, so grid ~= cu_count: 256 at all CUs, 64 at
+    // smCountTarget=64.
+    {
+        auto problem = makeGemmProblem(4096, 4096, 8192);
+
+        const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+        ASSERT_EQ(tiles, 1024u) << "[grid] 128x128 tiles over 4096x4096 => 32*32 = 1024";
+
+        problem.setParams().setSmCountTarget(0); // use all device CUs (256)
+        const auto   reductionAllCUs = env.solution.getSKReduction(problem, env.device);
+        const size_t gridAllCUs
+            = env.solution.getSKGrid(problem, env.device, tiles, reductionAllCUs);
+
+        problem.setParams().setSmCountTarget(64); // tight CU budget
+        const auto   reductionCapped = env.solution.getSKReduction(problem, env.device);
+        const size_t gridCapped
+            = env.solution.getSKGrid(problem, env.device, tiles, reductionCapped);
+
+        EXPECT_EQ(gridAllCUs, 256u)
+            << "[grid] With all 256 CUs, k_split_aware distributes 1024 tiles onto 256 CUs";
+        EXPECT_EQ(gridCapped, 64u)
+            << "[grid] smCountTarget=64 folds into num_cus and caps the grid at 64";
+        EXPECT_LT(gridCapped, gridAllCUs)
+            << "[grid] A tighter CU budget must shrink the predicted grid";
+        EXPECT_NE(gridAllCUs, gridCapped)
+            << "[grid] smCountTarget() must flow through to change the predicted StreamK grid";
+    }
+}
+
 // ===========================================================================
 // SK5 workspace sizing regression tests
 //
@@ -603,7 +684,7 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
-    env.solution.sizeMapping.streamKAtomic        = 0;
+    env.solution.sizeMapping.streamKAtomic         = 0;
 
     // Pick M/N so tiles % grid != 0 (partial tiles exist).
     // macroTile=128x128 → tiles = ceil(M/128)*ceil(N/128).
@@ -627,17 +708,17 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
 
-    // The workspace must be at least partialTileSize; the +2048 queue
-    // region is included by both query and launch so they agree.
+    // The workspace must cover the partial tiles. Query and launch agree
+    // because both size it from partialTileSize(grid).
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
 }
 
-TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
+TEST(StreamK5WorkspaceRegressionTest, StaticModeWorkspaceIsPartialTilesOnly)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
-    env.solution.sizeMapping.streamKAtomic        = 0;
+    env.solution.sizeMapping.streamKAtomic         = 0;
 
     auto problem = makeGemmProblem(4096, 4224, 64);
     problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static)
@@ -652,8 +733,8 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
 
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
-    // Static (SK3) path does not use the work-queue, so workspace
-    // should be exactly partialTileSize — no +2048.
+    // The static (SK3) path sizes the workspace from the partial tiles alone,
+    // so it must come out exactly partialTileSize(staticGrid).
     EXPECT_EQ(ws, env.solution.partialTileSize(grid))
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }
@@ -662,14 +743,14 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
 {
     StreamK5AnalyticalEnv env;
     env.solution.sizeMapping.workspaceSizePerElemC = 4;
-    env.solution.sizeMapping.streamKAtomic        = 0;
+    env.solution.sizeMapping.streamKAtomic         = 0;
 
     // Use dimensions that produce partial tiles.
     auto problem = makeGemmProblem(4096, 4224, 64);
     problem.setParams().setStreamKTileSchedulingMode(1); // ON (dynamic)
 
     size_t wsNeeded = env.solution.requiredWorkspaceSize(
-        [&]{
+        [&] {
             auto p = problem;
             p.setWorkspaceSize(std::numeric_limits<size_t>::max());
             return p;
@@ -684,16 +765,14 @@ TEST(StreamK5WorkspaceRegressionTest, SufficientWorkspacePreventsDPFallback)
     size_t wsActual = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_EQ(wsActual, wsNeeded)
         << "With workspace >= required, requiredWorkspaceSize must return the "
-        << "full amount (not 0 from DP fallback). ws=" << wsActual
-        << " needed=" << wsNeeded;
+        << "full amount (not 0 from DP fallback). ws=" << wsActual << " needed=" << wsNeeded;
 
     // Providing one byte less must trigger fallback (returns 0 for SK partial).
     auto problemShort = makeGemmProblem(4096, 4224, 64);
     problemShort.setParams().setStreamKTileSchedulingMode(1);
     problemShort.setWorkspaceSize(wsNeeded - 1);
     size_t wsShort = env.solution.requiredWorkspaceSize(problemShort, env.device);
-    EXPECT_EQ(wsShort, 0u)
-        << "With workspace < required, must fall back (return 0 for partial)";
+    EXPECT_EQ(wsShort, 0u) << "With workspace < required, must fall back (return 0 for partial)";
 }
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
@@ -717,7 +796,7 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     auto problemSk5 = makeGemmProblem(512, 512, 512);
     problemSk5.setParams().setStreamKTileSchedulingMode(0); // SK5-off
 
-    auto sk3Pack = computeStreamKHostPack(sk3Solution, problemSk3, *hardware);
+    auto sk3Pack    = computeStreamKHostPack(sk3Solution, problemSk3, *hardware);
     auto sk5OffPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
 
     EXPECT_FALSE(sk5OffPack.effectiveDynamic);
@@ -734,3 +813,480 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
         EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
             << "512^3 static path oversubscribes; dynamic path should not match";
 }
+
+// ===========================================================================
+// StreamKDynamicQueueXcdGateTest -- MI300A (NUM_XCD=6) reject-and-continue.
+//
+// SK4 / SK5-dynamic work-stealing kernels bake a fixed power-of-two per-XCD
+// queue count (8 for gfx942/gfx950) and mask indices with (Q-1), so they are
+// valid only when the device's runtime NUM_XCD equals that baked count. MI300A
+// reports gfx942 (baked 8) but has 6 XCDs; a mismatched partition (e.g. a 4-XCD
+// slice of an 8-XCD gfx942) is likewise rejected. The host excludes such a
+// solution from selection (streamKDynamicQueueSupported wired into
+// softwarePredicate) and warns once instead of silently degrading. The
+// production predicates live in a .cpp anonymous namespace, so -- like
+// computeStreamKHostPack above -- this test mirrors them over a hip::HipAMDGPU
+// mock (6 -> reject, 4 -> reject, 8 -> allow, unknown -> allow). Not run on
+// real MI300A silicon.
+// ===========================================================================
+namespace
+{
+    // Mirror of the anonymous-namespace helper in ContractionSolution.cpp
+    // (streamKBakedQueueCount): the baked per-XCD queue count comes from
+    // origami's per-arch XCD count. Kept in lockstep with the production code.
+    inline size_t streamKBakedQueueCountRef(Hardware const& hardware)
+    {
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return 0;
+        try
+        {
+            return origami::hardware_t::get_default_num_xcds(hipAMDGPU->analyticalHardware->arch);
+        }
+        catch(std::exception const&)
+        {
+            return 0;
+        }
+    }
+
+    // Byte-for-byte mirror of the anonymous-namespace numeric predicate in
+    // ContractionSolution.cpp (streamKDynamicQueueUnsupported). Kept in lockstep
+    // with the production code; if that predicate changes, update this too.
+    // Unknown hardware (not a HipAMDGPU, no analytical hardware, or no baked
+    // per-XCD queue count) is treated as UNSUPPORTED (returns true).
+    inline bool streamKDynamicQueueUnsupportedRef(Hardware const& hardware)
+    {
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return true;
+        size_t baked  = streamKBakedQueueCountRef(hardware);
+        size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+        return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0 || numXCD != baked;
+    }
+
+    // Mirror of ContractionSolution::streamKDynamicQueueSupported(). Returns
+    // true when the solution is SELECTABLE, false when it must be EXCLUDED
+    // (dynamic-queue / work-stealing on a non-power-of-two XCD device). streamK
+    // is sizeMapping.streamK; effectiveDynamic is the SK5 sub-mode result
+    // (ignored for streamK != 5). Kept in lockstep with the production member.
+    inline bool streamKDynamicQueueSupportedRef(int             streamK,
+                                                bool            effectiveDynamic,
+                                                Hardware const& hardware)
+    {
+        if(streamK != 4 && streamK != 5)
+            return true;
+        if(!streamKDynamicQueueUnsupportedRef(hardware))
+            return true;
+        const bool dynamicQueue = (streamK == 4) || (streamK == 5 && effectiveDynamic);
+        return !dynamicQueue; // dynamic-queue on non-pow2 XCD -> excluded
+    }
+
+    // gfx942 analytical hardware with a caller-chosen XCD count. NUM_XCD is the
+    // 5th positional arg of origami::hardware_t (see origami/hardware.hpp).
+    origami::hardware_t makeGfx942HardwareWithXcd(size_t numXCD)
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        return origami::hardware_t(arch_t::gfx942,
+                                   304, // N_CU (MI300X SPX)
+                                   163840,
+                                   262144,
+                                   numXCD,
+                                   1.0,
+                                   1.0,
+                                   1.0,
+                                   4000000,
+                                   1.2,
+                                   1,
+                                   std::make_tuple(0.0, 0.008, 0.0));
+    }
+
+    hip::HipAMDGPU makeGfx942DeviceWithXcd(size_t numXCD)
+    {
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx942;
+        device.computeUnitCount = 304;
+        device.deviceName       = "test-gfx942-xcd";
+        device.analyticalHardware
+            = std::make_shared<origami::hardware_t>(makeGfx942HardwareWithXcd(numXCD));
+        return device;
+    }
+
+    class TestSolutionIterator : public Client::SolutionIterator
+    {
+    public:
+        explicit TestSolutionIterator(std::shared_ptr<Hardware> hardware)
+            : SolutionIterator(nullptr, std::move(hardware), false)
+        {
+        }
+
+        bool accepts(ContractionSolution&    solution,
+                     ContractionProblemGemm& problem,
+                     bool                    reportResult)
+        {
+            return checkSolution(solution, problem, reportResult);
+        }
+
+        void postProblem() override {}
+        void preSolution(ContractionSolution* const) override {}
+        void postSolution() override {}
+        bool moreSolutionsInProblem() const override
+        {
+            return false;
+        }
+        std::shared_ptr<ContractionSolution> getSolution() override
+        {
+            return nullptr;
+        }
+    };
+} // namespace
+
+TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
+{
+    hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
+    Hardware const& hw     = mi300a;
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+        << "MI300A (NUM_XCD=6, not a power of two) must flag the dynamic-queue "
+           "work-stealing path as unsupported";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, AllowsMi300xEightXcd)
+{
+    hip::HipAMDGPU  mi300x = makeGfx942DeviceWithXcd(8);
+    Hardware const& hw     = mi300x;
+    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+        << "MI300X (NUM_XCD=8, power of two) must keep the dynamic-queue path";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, RejectsGfx942FourXcdPowerOfTwoButMismatched)
+{
+    // A 4-XCD partition (e.g. a CPX-style slice) of an 8-XCD gfx942: 4 IS a
+    // power of two, but the kernel bakes Q=8, so runtime NUM_XCD (4) != baked
+    // (8) and the fixed Q=8 masking would mis-map queues. Must be rejected.
+    hip::HipAMDGPU  gfx942Cpx = makeGfx942DeviceWithXcd(4);
+    Hardware const& hw        = gfx942Cpx;
+    EXPECT_EQ(streamKBakedQueueCountRef(hw), 8u)
+        << "gfx942 must bake origami's per-arch XCD count (8)";
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+        << "gfx942 with NUM_XCD=4 (power of two but != baked 8) must be rejected";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, AllowsGfx950EightXcd)
+{
+    // gfx950 (local MI355X) analytical hardware advertises 8 XCDs.
+    hip::HipAMDGPU  gfx950 = makeHipDeviceWithAnalytical(makeGfx950AnalyticalHardware());
+    Hardware const& hw     = gfx950;
+    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+        << "gfx950 (NUM_XCD=8) must keep the dynamic-queue work-stealing path";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
+{
+    // Unknown hardware (null analyticalHardware -> unknown NUM_XCD / baked
+    // queue count == 0) must be treated as UNSUPPORTED so the dynamic-queue
+    // solution is excluded from selection and a non-dynamic-queue solution
+    // serves the GEMM, rather than staying selectable while the flag-region
+    // clamp in getSKGrid computes its work-queue prefix from an unknown (0)
+    // queue count and so leaves the grid bounded by the whole region.
+    hip::HipAMDGPU noAnalytical;
+    noAnalytical.processor     = AMDGPU::Processor::gfx942;
+    noAnalytical.deviceName    = "test-gfx942-no-analytical";
+    Hardware const& hwNoAnalyt = noAnalytical;
+    ASSERT_EQ(noAnalytical.analyticalHardware, nullptr);
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hwNoAnalyt))
+        << "Missing analyticalHardware (unknown NUM_XCD) must be treated as unsupported";
+    // And the selection predicate must therefore EXCLUDE the dynamic-queue
+    // solution (SK4) while keeping non-dynamic-queue solutions selectable.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK4 work-stealing solution must be excluded when NUM_XCD is unknown";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK3-static solution must remain selectable when NUM_XCD is unknown";
+}
+
+// Selection-predicate contract: on MI300A (6 XCD) the dynamic-queue solution is
+// EXCLUDED from selection (supported == false) so a different solution serves
+// the GEMM, while on MI300X (8 XCD) the identical solution stays selectable.
+TEST(StreamKDynamicQueueXcdGateTest, ExcludesDynamicQueueSolutionOnMi300a)
+{
+    hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
+    hip::HipAMDGPU  mi300x = makeGfx942DeviceWithXcd(8);
+    Hardware const& hwA    = mi300a;
+    Hardware const& hwX    = mi300x;
+
+    // SK4 is always dynamic-queue.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwA))
+        << "SK4 work-stealing solution must be excluded from selection on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwX))
+        << "SK4 work-stealing solution must remain selectable on MI300X";
+
+    // SK5 only takes the dynamic-queue path when it resolves to the dynamic
+    // sub-mode; the static (SK3) sub-mode stays selectable even on MI300A.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(5, /*effectiveDynamic=*/true, hwA))
+        << "SK5-dynamic must be excluded from selection on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(5, /*effectiveDynamic=*/false, hwA))
+        << "SK5-static (SK3 sub-path) must remain selectable on MI300A";
+}
+
+// Non-dynamic-queue solutions must never be excluded, so the GEMM still runs.
+TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
+{
+    hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
+    Hardware const& hwA    = mi300a;
+
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(0, /*effectiveDynamic=*/false, hwA))
+        << "Non-StreamK solution must remain selectable on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
+        << "SK3-static solution must remain selectable on MI300A";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamicQueue)
+{
+    auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
+    TestSolutionIterator iterator(mi300a);
+    auto                 problem = makeGemmProblem(512, 512, 512);
+    std::ostringstream   reportOutput;
+    auto reporter = std::make_shared<Client::LogReporter>(
+        Client::LogLevel::Terse,
+        std::initializer_list<std::string>{Client::ResultKey::Validation},
+        reportOutput,
+        false,
+        false);
+    iterator.setReporter(reporter);
+
+    ContractionSolution dynamicSolution;
+    initEquality512Solution(dynamicSolution, 4);
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true))
+        << "The explicit all-solutions client path must not launch an eight-queue "
+           "dynamic kernel on a six-XCD MI300A";
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, false))
+        << "Topology filtering must also apply during non-reporting prediction checks";
+
+    ContractionSolution staticSolution;
+    initEquality512Solution(staticSolution, 3);
+    EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
+        << "The topology guard must retain static StreamK coverage on MI300A";
+}
+
+// ===========================================================================
+// StreamKFlagBound -- the bound getSKGrid puts on a Stream-K grid.
+//
+// A Stream-K flag region is one block of StreamKFlagElements ints, private to
+// one (stream, problem) pair. The dynamic-queue kernels (StreamK 4, and the
+// StreamK 4 sub-path of StreamK 5) put the per-XCD work-queue counters at the
+// base of that block and start the ready flags after them, so they can index
+// fewer entries than the block holds. A grid sized against the whole block
+// would run its last workgroups off the end of the block. Blocks are laid out
+// as adjacent problem slots within a stream, so the overrun lands on the next
+// problem's flags, or on the next stream's from the last slot of a block.
+//
+// skGrid defaults to the CU count, which is inside the bound on the parts we
+// ship, but TENSILE_STREAMK_GRID_MULTIPLIER scales it uncapped. Both that and
+// TENSILE_STREAMK_FIXED_GRID latch into a function-local static on first read,
+// so they cannot be set from inside a running test; these drive
+// AMDGPU::skFixedGrid, the field the latter feeds, directly.
+// ===========================================================================
+
+namespace
+{
+    // gfx950 has 8 XCDs and a 128-byte cache line, so the counters take
+    // 8 * 128 = 1024 bytes = 256 ints before the first flag.
+    constexpr size_t kQueuePrefixElements = 256;
+
+    // Pin the grid the clamp has to cut back. skFixedGrid is the first arm of
+    // getSKGrid's if-chain, so it wins over skMaxCUs and skGridMultiplier,
+    // which keep whatever values the environment left on the device; clearing
+    // skDynamicGrid additionally keeps origami out of the decision.
+    void pinGridToWholeFlagRegion(StreamK5AnalyticalEnv& env)
+    {
+        env.device.skDynamicGrid = 0;
+        env.device.skFixedGrid   = static_cast<int>(StreamKFlagElements);
+    }
+
+    // 8192 x 8064 over the env's 128x128 macro tile is 64 x 63 = 4032 tiles:
+    // not a multiple of the pinned grid, so partial tiles exist and the flags
+    // are read. K is small enough that the tree-fixup bounds above the clamp
+    // leave the grid alone.
+    ContractionProblemGemm makeFlagBoundProblem()
+    {
+        return makeGemmProblem(8192, 8064, 512);
+    }
+
+    size_t clampedGrid(StreamK5AnalyticalEnv& env, ContractionProblemGemm& problem)
+    {
+        auto tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+        EXPECT_NE(tiles % StreamKFlagElements, 0u) << "grid must leave partial tiles to fix up";
+        return env.solution.getSKGrid(problem, env.device, tiles, origami::reduction_t::tree);
+    }
+} // namespace
+
+// Grid plus counters fills exactly one block, which is what makes the clamp
+// the right one rather than merely safe: an entry more would overrun the
+// block, an entry less would be grid left unused.
+TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
+{
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 4;
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements);
+}
+
+TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
+{
+    // StreamK 3 indexes its flags from offset 0, so tightening it for the
+    // work-queue prefix would cost it grid it is entitled to.
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements);
+}
+
+// StreamK 5 picks its sub-path at runtime, so which of the two bounds applies
+// is decided by streamK5EffectiveDynamic() rather than by sizeMapping alone.
+// These two pin both answers.
+TEST(StreamKFlagBound, StreamK5DynamicSubPathStopsBeforeTheNextBlock)
+{
+    StreamK5AnalyticalEnv env; // initStreamK5Solution leaves streamK == 5
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
+
+    ASSERT_TRUE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "mode=ON must resolve StreamK 5 to the dynamic (SK4) sub-path";
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements - kQueuePrefixElements)
+        << "SK5 on its dynamic sub-path carries the work-queue prefix, so its "
+           "grid must stop short of the block by that many entries";
+}
+
+TEST(StreamKFlagBound, StreamK5StaticSubPathKeepsTheWholeBlock)
+{
+    StreamK5AnalyticalEnv env; // initStreamK5Solution leaves streamK == 5
+    pinGridToWholeFlagRegion(env);
+    auto problem = makeFlagBoundProblem();
+    problem.setParams().setStreamKTileSchedulingMode(0); // OFF -> static (SK3)
+    problem.setParams().setSmCountTarget(0); // no cotenant, so no heuristic
+
+    ASSERT_FALSE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "mode=OFF with smCountTarget=0 must resolve StreamK 5 to the static "
+           "(SK3) sub-path";
+
+    EXPECT_EQ(clampedGrid(env, problem), StreamKFlagElements)
+        << "SK5 on its static sub-path indexes from offset 0, so it keeps the "
+           "whole block";
+}
+// SKLaunchGridLimitsTest -- tree-fixup must not force skGrid=tiles when that
+// would overflow the uint32_t work-item limit (M=524288, N=98304, K=128 bench).
+
+TEST(SKLaunchGridLimitsTest, CapsGridWhenTilesReach2Pow24)
+{
+    ContractionSolution solution;
+    initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
+    const size_t tpg               = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
+
+    auto   problem       = makeGemmProblem(524288, 98304, 128);
+    AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    device.skDynamicGrid = 0;
+
+    auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
+    ASSERT_EQ(tiles, maxTilesBeforeCap);
+
+    size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+    EXPECT_EQ(grid, static_cast<size_t>(_SPX_CU))
+        << "Tree-fixup must cap skGrid to cuCount*occupancy, not full tile count";
+    EXPECT_NE(grid, tiles);
+    EXPECT_LE(totalWorkItems(grid, tpg),
+              static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
+}
+
+TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
+{
+    origami::hardware_t hw     = makeGfx950AnalyticalHardware();
+    hip::HipAMDGPU      device = makeHipDeviceWithAnalytical(hw);
+
+    ContractionSolution solution;
+    initBenchStreamK5Solution(solution, TensileLite::dim3(32, 96, 1), 32);
+    const size_t tpg               = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
+    auto         problem           = makeGemmProblem(524288, 98304, 128);
+    auto         tiles             = problem.getNumTiles(solution.sizeMapping, 1);
+    ASSERT_EQ(tiles, maxTilesBeforeCap);
+
+    size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+    EXPECT_EQ(grid, kGfx950AnalyticalCuCount)
+        << "Origami dynamic-grid path must still cap when tiles >= 2^24";
+    EXPECT_NE(grid, tiles);
+}
+
+TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
+{
+    ContractionSolution solution;
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(128, 1, 1);
+    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 128);
+    const size_t tpg               = threadsPerWorkGroup(solution);
+    const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
+
+    auto   problem       = makeGemmProblem(65536, 65552, 128);
+    AMDGPU device        = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    device.skDynamicGrid = 0;
+
+    auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
+    ASSERT_EQ(tiles, 16781312u);
+    ASSERT_LT(tiles, maxTilesBeforeCap);
+
+    size_t itersPerTile = problem.getItersPerTile(solution.sizeMapping);
+    ASSERT_GE(tiles * itersPerTile, maxTilesBeforeCap)
+        << "Tree-fixup trigger must fire even below the tile cap threshold";
+
+    size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+    EXPECT_EQ(grid, tiles) << "Non-overflow tile count must keep the DP fallback (skGrid=tiles)";
+}
+
+struct BenchLaunchLimitCase
+{
+    const char* label;
+    size_t      mt0;
+    size_t      mt1;
+    size_t      depthU;
+    size_t      workGroupSizeX;
+};
+
+class SKLaunchGridLimitsParamTest : public ::testing::TestWithParam<BenchLaunchLimitCase>
+{
+};
+
+TEST_P(SKLaunchGridLimitsParamTest, FailingMacroTilesStayWithinWorkItemLimit)
+{
+    auto const& param = GetParam();
+
+    ContractionSolution solution;
+    solution.sizeMapping.workGroupSize = TensileLite::dim3(param.workGroupSizeX, 1, 1);
+    initBenchStreamK5Solution(solution, TensileLite::dim3(param.mt0, param.mt1, 1), param.depthU);
+
+    origami::hardware_t hw     = makeGfx950AnalyticalHardware();
+    hip::HipAMDGPU      device = makeHipDeviceWithAnalytical(hw);
+
+    auto problem = makeGemmProblem(524288, 98304, 128);
+    auto tiles   = problem.getNumTiles(solution.sizeMapping, 1);
+
+    size_t grid = solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree);
+    EXPECT_LT(grid, tiles) << param.label << ": skGrid must not equal full tile count";
+
+    const size_t tpg = threadsPerWorkGroup(solution);
+    EXPECT_LE(totalWorkItems(grid, tpg),
+              static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
+        << param.label << ": total work items must fit in uint32_t";
+}
+
+INSTANTIATE_TEST_SUITE_P(BenchSweep,
+                         SKLaunchGridLimitsParamTest,
+                         ::testing::Values(BenchLaunchLimitCase{"MT32x96x32", 32, 96, 32, 256},
+                                           BenchLaunchLimitCase{"MT32x96x64", 32, 96, 64, 256},
+                                           BenchLaunchLimitCase{"MT256x256x32", 256, 256, 32, 256},
+                                           BenchLaunchLimitCase{"MT16x16x128", 16, 16, 128, 128}),
+                         [](::testing::TestParamInfo<BenchLaunchLimitCase> const& info) {
+                             return info.param.label;
+                         });

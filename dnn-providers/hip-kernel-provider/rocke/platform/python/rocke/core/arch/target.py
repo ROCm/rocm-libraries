@@ -524,6 +524,28 @@ def _wmma_gfx12_b_16x16(builder, lane, slot):
 # column-distributed layout as gfx12 (<8 x float>, slot i -> row (l//16)*8 + i,
 # col l%16), since the output tile is still 16x16. These maps are the
 # *hypothesis* verified empirically by examples/gfx1250/wmma_probe.py.
+def _wmma_gfx1250_a_16x16x4_f32(builder, lane, slot):
+    """gfx1250 WMMA 16x16x4 fp32 A operand (wave32): kABKLane=2, kAK1PerLane=2.
+    row = lane // 2 (M index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
+    Returns ``(row, k)``."""
+    c2 = builder.const_i32(2)
+    row = builder.div(lane, c2)
+    k_lane = builder.mod(lane, c2)
+    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x4_f32(builder, lane, slot):
+    """gfx1250 WMMA 16x16x4 fp32 B operand (wave32): kABKLane=2, kAK1PerLane=2.
+    col = lane // 2 (N index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
+    Returns ``(k, col)``."""
+    c2 = builder.const_i32(2)
+    col = builder.div(lane, c2)
+    k_lane = builder.mod(lane, c2)
+    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    return k, col
+
+
 def _wmma_gfx1250_a_16x16x32(builder, lane, slot):
     """gfx1250 WMMA 16x16x32 A operand (wave32): lane ``l`` holds row ``l % 16``;
     the ``<16 x half>`` fragment slot ``i`` is K=``(l // 16) * 16 + i``. Returns
@@ -622,9 +644,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
     # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
     # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
-    # same fragment widths as the f8f6f4 sibling below. Registered so the op_id
-    # (already in ir._MMA_C_FRAG_LEN) resolves to correct fragment lengths if
-    # added to the JSON catalog, instead of the zero-length _frag_info fallback.
+    # same fragment widths as the f8f6f4 sibling below. Registered here so the
+    # op_id resolves to correct fragment lengths (this table is the SSOT that
+    # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
+    # instead of hitting the zero-length _frag_info fallback.
     "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
@@ -656,6 +679,21 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     ),
     "wmma_gfx12_f32_16x16x16_bf16": _FragInfo(
         8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    # --- WMMA fp32 (wave32, gfx1250, CDNA) --------------------------------
+    # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2).
+    # kABKLane=2, kAK1PerLane=2: row=lane//2, K=(lane%2)*2+slot (slot ∈ {0,1}).
+    # Accumulator is the gfx12 column-distributed <8 x float> (c_frag_len=8).
+    # Intrinsic: __builtin_amdgcn_wmma_f32_16x16x4_f32 (verified in CK Tile
+    # wmma_gfx12.hpp lines 355-373; amdgcn_mma_base kABKPerLane=2, kCMPerLane=8).
+    "wmma_gfx1250_f32_16x16x4_f32": _FragInfo(
+        2,
+        2,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x4_f32,
+        _wmma_gfx1250_b_16x16x4_f32,
+        _wmma_gfx12_acc_16x16,
     ),
     # --- WMMA f16 / bf16 (wave32, gfx1250, CDNA) ----------------------
     # K=32 atom: A/B are <16 x half> per lane (K split across lane-halves, 16
@@ -934,6 +972,45 @@ def _load_specs() -> Dict[str, dict]:
     return doc["arches"]
 
 
+@lru_cache(maxsize=1)
+def _op_id_c_dtype() -> Dict[str, str]:
+    """``op_id -> normalized accumulator dtype``, aggregated across every arch
+    row in the JSON catalog.
+
+    An ``op_id`` names a specific atom, so its accumulator dtype is invariant
+    across the arches that list it. This lets a caller that only has a bare
+    ``op_id`` string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) recover the
+    accumulator dtype from the SSOT without holding an :class:`ArchTarget`.
+    Op_ids that are frag-registered but not yet in the JSON catalog are absent
+    (callers should treat a miss as the default f32 accumulator).
+
+    The **first** catalog hit for an op_id wins, matching the C implementation
+    (``rocke_arch_mma_op_id_c_dtype`` in ``query.cpp``, which returns the first
+    registry hit). If a later arch lists the same op_id with a *different*
+    accumulator dtype we raise instead of silently overwriting: that would be
+    SSOT drift (the invariant above is broken) and must be fixed in the catalog,
+    not masked. Raising here also keeps the Python and C engines deterministic
+    and byte-identical rather than diverging on catalog ordering.
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            op_id = o["op_id"]
+            c = normalize_dtype(o["c"])
+            prev = out.get(op_id)
+            if prev is None:
+                out[op_id] = c  # first hit wins
+            elif prev != c:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
+                    f"inconsistent accumulator dtype across arches "
+                    f"({prev!r} vs {c!r}). An op_id names a specific atom, so its "
+                    f"accumulator dtype must be invariant across the arches that "
+                    f"list it; fix the catalog so every row agrees."
+                )
+    return out
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1021,3 +1098,14 @@ def known_arches() -> Tuple[str, ...]:
 def arch_from_isa(isa: str) -> str:
     """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
     return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+
+
+def validate_arch(arch: Optional[str]) -> None:
+    if arch is None:
+        raise ValueError(
+            "Could not detect a GPU architecture. Pass in an explicit architecture instead."
+        )
+    if arch not in known_arches():
+        raise ValueError(
+            f"Unknown GPU architecture detected. Known architectures include: {known_arches()}"
+        )

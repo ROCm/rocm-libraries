@@ -285,6 +285,18 @@ rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,
                                    const char* name_hint,
                                    const rocke_stride_t* strides /* NULL => packed */);
 
+/* Like rocke_make_lds_view but forwards `exclusive` to smem_alloc (cshuffle
+ * no-alias mode): the smem-pool packer gives the buffer its own byte range.
+ * rocke_make_lds_view is rocke_make_lds_view_ex(..., exclusive=0). */
+rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
+                                      rocke_tensor_view_t* out,
+                                      const rocke_type_t* dtype,
+                                      const int* shape,
+                                      int rank,
+                                      const char* name_hint,
+                                      const rocke_stride_t* strides /* NULL => packed */,
+                                      int exclusive);
+
 /* ----------------------------------------- compute-promoting (f32) peers */
 
 /* TensorView.load_vec_as_f32(b, indices, n): vector load + per-lane f32

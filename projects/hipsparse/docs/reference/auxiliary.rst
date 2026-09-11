@@ -429,6 +429,11 @@ hipsparseCooSetPointers()
 
 .. doxygenfunction:: hipsparseCooSetPointers
 
+hipsparseBlockedEllSetPointers()
+================================
+
+.. doxygenfunction:: hipsparseBlockedEllSetPointers
+
 hipsparseSpMatGetSize()
 =======================
 

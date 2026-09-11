@@ -28,7 +28,7 @@
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
 
-#include <rocsparse/rocsparse-version.h>
+#include <rocsparse/rocsparse-config.h>
 
 namespace rocsparse_clients
 {

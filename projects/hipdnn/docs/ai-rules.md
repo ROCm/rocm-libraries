@@ -18,16 +18,17 @@ Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below de
    python3 tools/ai/install-skills.py --target <target-skills-dir> <skill-name> [<skill-name> ...]
    ```
    Use `python3 tools/ai/install-skills.py --list` to see what's available. If the user names skills, pass them explicitly; if they ask for a full refresh, omit names to install all available skills. The installer copies skills as snapshots, updates stale copies by comparing content hashes, and skips existing symlinks rather than replacing them. After changing committed skill packages, run `python3 tools/ai/validate-skills.py` before offering or installing them.
-3. **Invoke via the active host's skill syntax.** In Codex, use `$hipdnn-superbuild`, `$hipdnn-review`, or the other `$skill-name` form. In Claude, use the slash-command adapters such as `/hipdnn-superbuild` or `/hipdnn-review`. The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
+3. **Invoke via the active host's skill syntax.** In Codex, use `$hipdnn-pr-quality`, `$hipdnn-superbuild`, or the other `$skill-name` form. In Claude, use the slash-command adapters such as `/hipdnn-pr-quality` or `/hipdnn-superbuild`. The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
 
 When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
 
-- `tools/ai/skills/pr-summary/SKILL.md`
-  - Drafts or revises new or existing pull request titles and bodies with hipDNN's preferred summary, risk, testing, and technical-change format.
-  - Suggest this skill when the user asks for PR creation, PR body updates, PR summaries, risk summaries, testing sections, or review-ready PR descriptions.
-- `tools/ai/skills/hipdnn-review/SKILL.md`
-  - Reviews hipDNN pull requests or local diffs for correctness, public API compatibility, provider behavior, resource ownership, code reuse, and testing coverage/quality.
-  - Suggest this skill when the user asks for a hipDNN code review, PR review, merge-readiness assessment, or a focused review of testing quality and coverage.
+- `tools/ai/skills/hipdnn-pr-quality/SKILL.md`
+  - Authors, reviews, or pre-merge gates a hipDNN pull request. It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipDNN — scope buckets, the Libraries PR Bot title/tracking gate, the hipDNN PR body format, RAII/resource ownership, provider behavior, cuDNN compatibility, FlatBuffers schema compatibility, and ASIC/multi-arch coverage. It refreshes the base from TheRock `main` at user scope on every run, never relaxes a base rule, and never posts to GitHub/Jira without explicit human approval.
+  - Suggest this skill when the user asks to draft a PR title/body, review a hipDNN PR or local diff, assess merge-readiness, or pre-merge gate a change. It supersedes the former `pr-summary` and `hipdnn-review` skills.
+- `tools/ai/skills/pr-summary/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (author assist). Kept only so the old name still resolves; when invoked it announces its deprecation and defers to the new skill.
+- `tools/ai/skills/hipdnn-review/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (review assist). Same behavior: announce deprecation, then defer.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
@@ -37,9 +38,7 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 
 ## Commit & PR Conventions
 
-Commit messages and PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional-scope): short description`, where `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. Keep PR titles between 10 and 80 characters, and never include `WIP` or `do not merge`. The Libraries PR Bot gates any PR whose title does not match.
-
-Tracking references (a `JIRA ID :` / `ISSUE ID :` line, a closing keyword such as `Closes #123`, or a plain `#123`) belong in the PR body, not the title; the bot requires one. Use the `pr-summary` skill to draft conforming PR titles and bodies.
+Commit messages and PR titles follow the rules enforced by the **Libraries PR Bot**, the authoritative gate every PR must clear before it can be reviewed (a [Conventional Commits](https://www.conventionalcommits.org/) title, a tracking reference in the body, an accompanying test for code changes, and more). Don't rely on a copy of those rules here — they change over time, and a duplicate goes stale. Read the bot's live policy and FAQ in the rocm-libraries repo for the current specifics, and use the `hipdnn-pr-quality` skill to draft conforming PR titles and bodies.
 
 ## Project Overview & Architecture
 

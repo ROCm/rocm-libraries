@@ -22,32 +22,21 @@
  * ************************************************************************ */
 #pragma once
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <stdexcept>
 #include <string>
-#include <time.h>
-
-#define LABEL_NAME_LENGTH 17
+#include <utility>
 
 namespace rocisa
 {
-    std::string magicGenerator()
-    {
-        static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        std::string       name(LABEL_NAME_LENGTH - 1, '\0');
-        for(int i = 0; i < LABEL_NAME_LENGTH - 1; i++)
-        {
-            name[i] = chars[rand() % (sizeof(chars) - 1)];
-        }
-        return name;
-    }
-
     class LabelManager
     {
     public:
         LabelManager() {}
-        LabelManager(const std::map<std::string, int>& data)
-            : m_labels(data)
+        LabelManager(std::map<std::string, int> data, uint64_t counter)
+            : m_labels(std::move(data))
+            , m_counter(counter)
         {
         }
 
@@ -103,25 +92,16 @@ namespace rocisa
 
         std::string getUniqueName()
         {
-            std::string name = magicGenerator();
-            while(1)
-            {
-                if(m_labels.find(name) == m_labels.end())
-                    break;
-                name = magicGenerator();
-            }
-            return getName(name);
+            return getUniqueNamePrefix("label");
         }
 
         std::string getUniqueNamePrefix(const std::string& prefix)
         {
-            std::string name = prefix + "_" + magicGenerator();
-            while(1)
+            std::string name;
+            do
             {
-                if(m_labels.find(name) == m_labels.end())
-                    break;
-                name = prefix + "_" + magicGenerator();
-            }
+                name = prefix + "_" + std::to_string(m_counter++);
+            } while(m_labels.find(name) != m_labels.end());
             return getName(name);
         }
 
@@ -130,7 +110,13 @@ namespace rocisa
             return m_labels;
         }
 
+        uint64_t getCounter() const
+        {
+            return m_counter;
+        }
+
     private:
         std::map<std::string, int> m_labels;
+        uint64_t                   m_counter = 0;
     };
 }

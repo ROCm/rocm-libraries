@@ -51,6 +51,7 @@ rocke_conv_problem_t rocke_conv_problem_make(int N,
     p.sD = 0;
     p.pD = 0;
     p.dD = 0;
+    p.groups = 1;
     return p;
 }
 
@@ -123,30 +124,31 @@ int rocke_conv_problem_m(const rocke_conv_problem_t* p)
     return p->is_3d ? base * rocke_conv_problem_do(p) : base;
 }
 
-/* K */
+/* K / groups  (= kpg; per-group output channels) */
 int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p)
 {
-    return p->K;
+    return rocke_conv_problem_kpg(p);
 }
 
-/* Y * X * C  (Z * Y * X * C for 3-D) */
+/* Y * X * cpg  (Z * Y * X * cpg for 3-D) */
 int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p)
 {
     int z = p->is_3d ? p->Z : 1;
-    return z * p->Y * p->X * p->C;
+    return z * p->Y * p->X * rocke_conv_problem_cpg(p);
 }
 
-/* 2 * M * N_gemm * K_gemm */
+/* 2 * M * N_gemm * K_gemm * groups  (Python property: groups factor restores total FLOPs) */
 long long rocke_conv_problem_flops(const rocke_conv_problem_t* p)
 {
     long long m = (long long)rocke_conv_problem_m(p);
     long long n = (long long)rocke_conv_problem_n_gemm(p);
     long long k = (long long)rocke_conv_problem_k_gemm(p);
-    return 2LL * m * n * k;
+    long long g = (long long)(p->groups > 1 ? p->groups : 1);
+    return 2LL * m * n * k * g;
 }
 
-/* 2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
- * 3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}" */
+/* 2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}{g}"   where g="G{groups}" if groups>1 else ""
+ * 3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}{g}" */
 rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
                                         char* out,
                                         size_t out_cap,
@@ -159,11 +161,20 @@ rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
         return ROCKE_ERR_VALUE;
     }
 
+    /* Python: g = f"G{groups}" if groups > 1 else "" */
+    const char* g_suffix = "";
+    char g_buf[16];
+    if(p->groups > 1)
+    {
+        snprintf(g_buf, sizeof(g_buf), "G%d", p->groups);
+        g_suffix = g_buf;
+    }
+
     if(p->is_3d)
     {
         written = snprintf(out,
                            out_cap,
-                           "N%dD%dH%dW%dC%d_K%dZ%dY%dX%d",
+                           "N%dD%dH%dW%dC%d_K%dZ%dY%dX%d%s",
                            p->N,
                            p->Di,
                            p->Hi,
@@ -172,12 +183,22 @@ rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
                            p->K,
                            p->Z,
                            p->Y,
-                           p->X);
+                           p->X,
+                           g_suffix);
     }
     else
     {
-        written = snprintf(
-            out, out_cap, "N%dH%dW%dC%d_K%dY%dX%d", p->N, p->Hi, p->Wi, p->C, p->K, p->Y, p->X);
+        written = snprintf(out,
+                           out_cap,
+                           "N%dH%dW%dC%d_K%dY%dX%d%s",
+                           p->N,
+                           p->Hi,
+                           p->Wi,
+                           p->C,
+                           p->K,
+                           p->Y,
+                           p->X,
+                           g_suffix);
     }
     if(written < 0 || (size_t)written >= out_cap)
     {

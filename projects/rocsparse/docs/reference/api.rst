@@ -284,6 +284,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bsr_set_pointers`               |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_bell_set_pointers`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_size`                 |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_nnz`                  |
@@ -315,6 +317,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_create_dnvec_descr`             |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_dnvec_descr`       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnvec_descr_create_scalar`      |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_dnvec_descr`            |
 +-----------------------------------------------------+
@@ -648,6 +652,8 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_spgeam_buffer_size()`           |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam()`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmat_scale()`                  |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_buffer_size()`            |
 +-----------------------------------------------------+

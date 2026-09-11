@@ -521,6 +521,21 @@ def _parse_op(src: _Lines, values: Dict[str, Value]) -> Op:
             sc = _Scanner(tail[q + 1 :])
             loc = _read_quoted(sc)
 
+    # The smem type name deliberately omits ``exclusive``; it rides on the
+    # smem_alloc op as an attr. Rebuild the result SmemType with exclusive set
+    # so the packer's no-alias behavior round-trips through the serializer.
+    if (
+        opname == "tile.smem_alloc"
+        and attrs.get("exclusive")
+        and results
+        and isinstance(results[0].type, SmemType)
+    ):
+        _st = results[0].type
+        results[0] = Value(
+            name=results[0].name,
+            type=SmemType(_st.elem, _st.shape, exclusive=True),
+        )
+
     op = Op(
         name=opname,
         operands=operands,

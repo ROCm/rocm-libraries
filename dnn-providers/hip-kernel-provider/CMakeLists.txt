@@ -15,6 +15,12 @@ dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
+# shared/ctest is only present in a full rocm-libraries checkout; guard the check at the
+# point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -31,9 +37,9 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
     CACHE BOOL "Add paths to linker search and installed rpath"
 )
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
      ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
@@ -41,6 +47,10 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+
+# Gates the generic kernel ingestor. The ingestor engine compiles its kernel
+# through the HIP kernel engine's compiler, so it only builds alongside that engine.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -63,6 +73,135 @@ if(ENABLE_ASM_SDPA_ENGINE)
     message(STATUS "ASM SDPA engine enabled")
 else()
     message(STATUS "ASM SDPA engine disabled")
+endif()
+
+option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942)" OFF)
+if(ENABLE_HIP_FLASH2_ENGINE)
+    message(STATUS "HIP Flash2 SDPA engine enabled")
+    # Engine sources and compile definitions are wired onto the provider's object
+    # library in src/CMakeLists.txt (hip_kernel_provider target does not exist yet
+    # at this point -- it is created by add_subdirectory(src) below).
+    # The Flash2 kernel is shipped as a precompiled .co file (gfx942).
+    # HipFlash2FwdPlan.hip is NOT compiled here -- it is the offline source for
+    # the .co files and requires rocWMMA headers.
+    # At runtime the .co is loaded via hipModuleLoad in HipFlash2KernelUtils.hpp.
+    install(FILES
+        src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
+        DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
+
+    # ------------------------------------------------------------------
+    # Kernel variant regeneration (opt-in, requires a HIP compiler)
+    #
+    # The dispatcher in Flash2Dispatch.hpp selects among several tilings, each
+    # a separate .co built from HipFlash2FwdPlanVariant.hip with different
+    # F2_* macros. The variant table and this list MUST stay in sync: the
+    # builder checks HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK against the
+    # geometry the table claims and hard-errors on mismatch.
+    #
+    # Off by default. Only the legacy hip_flash2_fwd_gfx942.co is tracked in
+    # git; the per-variant objects are not, so build this target before
+    # installing if you want per-shape dispatch to be active:
+    #   cmake -DENABLE_HIP_FLASH2_ENGINE=ON -DHIP_FLASH2_BUILD_VARIANTS=ON ...
+    #   cmake --build . --target hip_flash2_variants
+    #
+    # IMPORTANT: build these with the SAME ROCm as the shipped default object.
+    # The current hip_flash2_fwd_gfx942.co was built with ROCm 10.0.0 and is
+    # ~1.4x faster than the identical source built with 7.2 (S=2048 D=128
+    # causal: 54.1 vs 38.3 TFLOPS). Mixing toolchains makes most shapes slower
+    # while looking like an upgrade.
+    option(HIP_FLASH2_BUILD_VARIANTS "Regenerate the Flash2 kernel variant .co files" OFF)
+    if(HIP_FLASH2_BUILD_VARIANTS)
+        find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
+        if(NOT HIP_FLASH2_HIPCC)
+            message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
+        endif()
+
+        # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
+        # flag and the output filename silently produces mislabelled objects if
+        # anyone points the build at another arch. Single-arch only -- the
+        # variant filename encodes one arch, so a multi-arch GPU_TARGETS list
+        # takes the first entry.
+        set(_f2_arch "gfx942")
+        if(GPU_TARGETS)
+            list(GET GPU_TARGETS 0 _f2_arch)
+        endif()
+
+        set(_f2_src ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/HipFlash2FwdPlanVariant.hip)
+        set(_f2_out ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels)
+
+        # tag;WAVES;QG;KG -- all other knobs stay at the source defaults
+        # (F2_PIPE=0, F2_PAD=8, F2_PADK=8, F2_VTMAJOR=1, F2_SKIPRESCALE=1).
+        # Verified: rebuilding at these defaults reproduces the shipped
+        # objects' LDS footprint exactly for all five variants.
+        set(_f2_variants
+            "w4q1k4 4 1 4"
+            "w8q1k4 8 1 4"
+            "w8q2k4 8 2 4"
+            "w8q3k2 8 3 2"
+            "w8q3k4 8 3 4")
+
+        set(_f2_targets "")
+        foreach(_v IN LISTS _f2_variants)
+            # Space-separated, then re-split: a ;-list would be flattened by
+            # foreach(... IN LISTS ...), leaving each entry a bare scalar.
+            string(REPLACE " " ";" _vf "${_v}")
+            list(GET _vf 0 _tag)
+            list(GET _vf 1 _waves)
+            list(GET _vf 2 _qg)
+            list(GET _vf 3 _kg)
+            set(_co ${_f2_out}/hip_flash2_fwd_${_f2_arch}_${_tag}.co)
+            add_custom_command(
+                OUTPUT ${_co}
+                COMMAND ${HIP_FLASH2_HIPCC} --genco -O3 -std=c++17
+                        --offload-arch=${_f2_arch}
+                        -DF2_WAVES=${_waves} -DF2_QG=${_qg} -DF2_KG=${_kg}
+                        ${_f2_src} -o ${_co}
+                DEPENDS ${_f2_src}
+                COMMENT "Flash2: building variant ${_tag} (waves=${_waves} qg=${_qg} kg=${_kg})"
+                VERBATIM)
+            list(APPEND _f2_targets ${_co})
+        endforeach()
+
+        # The partial-tile correctness probe is a standalone HIP program, built
+        # only under this same opt-in flag. Leaving it in no target at all was
+        # the same class of problem as the dispatch test, which was fixed by
+        # registering it with hip_kernel_provider_tests.
+        add_executable(hip_flash2_partial_tile_probe EXCLUDE_FROM_ALL
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/tools/partial_tile_probe.cpp)
+        target_link_libraries(hip_flash2_partial_tile_probe PRIVATE hip::host)
+
+        add_custom_target(hip_flash2_variants
+            DEPENDS ${_f2_targets}
+            COMMENT "Regenerating all Flash2 kernel variant objects")
+    endif()
+
+    # Install any variant objects that are present. The engine falls back to
+    # the legacy single-kernel object when a variant is absent, so a partial
+    # or empty set is safe.
+    #
+    # The glob MUST be evaluated at install time, not configure time. The
+    # documented workflow is configure -> build hip_flash2_variants -> install,
+    # so at configure time the variant objects do not exist yet. A plain
+    # file(GLOB) + install(FILES) silently installs nothing in that order and
+    # leaves the dispatcher inert with no diagnostic (found by S. Reeder, who
+    # measured it: variants staged after configure -> legacy object only;
+    # staged before configure -> all six).
+    install(CODE "
+        file(GLOB _f2_co
+             \"${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_*_*.co\")
+        if(_f2_co)
+            file(INSTALL
+                 DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels\"
+                 TYPE FILE FILES \${_f2_co})
+        else()
+            message(STATUS
+                \"HipFlash2: no variant .co objects found; installing the legacy \"
+                \"single-kernel object only. Build the hip_flash2_variants target \"
+                \"before installing to enable per-shape dispatch.\")
+        endif()
+    ")
+else()
+    message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
@@ -125,42 +264,190 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 endif()
 include(Tests)
 
-if(WIN32)
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
-else()
-    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
+if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
+    message(FATAL_ERROR
+        "HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR was not set by hipdnn_data_sdk package import.")
 endif()
 
+# Build output, install destination and the test lookup below all resolve from this one
+# SDK-provided relative directory, so the build tree mirrors the install tree.
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
-    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
+    "${CMAKE_BINARY_DIR}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}"
 )
 
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
-message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
+message(STATUS "Plugin install directory (relative): ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
+
+# The offset a test binary walks from its own directory to reach the plugin engine
+# directory and the trees hanging off it. Binaries land under CMAKE_INSTALL_BINDIR, the
+# plugin engine directory under HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR; both are
+# relative to ${CMAKE_BINARY_DIR} in the build tree and to the prefix in the install tree,
+# so this one offset reaches them in either -- and a binary carries no path belonging to
+# the machine that configured it. Computed against a synthetic root because
+# file(RELATIVE_PATH) needs two absolute paths, and only the relationship between them
+# matters here.
+set(_synthetic_root "/__hipkernelprovider_root__")
+file(RELATIVE_PATH HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR
+     "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
+     "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Production content.
+    set(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider")
+    set(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+    )
+
+    # Test content lives in a sibling of arch_content/, under a provider segment for the
+    # same reason arch_content/ has one: the engines directory is shared by every provider,
+    # so an unqualified test_arch_content/ would let two providers collide on a set name --
+    # and would let this provider's install(DIRECTORY) ship another provider's content.
+
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR "test_arch_content/hip-kernel-provider")
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
+    )
+
+    # Two test descriptor roots, one per test binary. The unit root holds two packed
+    # subtrees and the integration root holds three, all five wired in
+    # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
+    # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
+    # the archive beside it. An embedded_source descriptor names a kernel compiled into a
+    # binary and JIT-compiled at load; for one of those the packer stamps the shard
+    # architecture and records the authored values in a provenance block, and the subtree
+    # gets descriptors and no archive. Both roots stage into the build tree rather than
+    # being read from the source tree, so the build tree matches the install tree.
+    set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
+    set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
+    set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
+    set(HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}")
+
+    set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
+
+    # The name of each authored set, which is also the name it stages under. Named here
+    # only because the test subdirectories compile these same segments into their binaries
+    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
+    # roots above directly.
+    #
+    # Every set is a top-level folder under test_descriptors/, and every one is packed
+    # WHOLE rather than by the set inside it. Each descriptor therefore lands in a CHILD of
+    # its shard root while the archive is written at the shard root itself, so it must
+    # climb out of its own folder to reach the archive -- the climb the runtime containment
+    # guard checks, which a set packed from its own leaf folder never produces.
+    #
+    # One archive is written per pack. A folder added under one of these roots joins that
+    # root's archive rather than getting its own; a set that has to be able to fail on its
+    # own needs a top-level folder here and an OUT_ROOT of its own. That is why
+    # archive_fixture/ is authored beside the others rather than inside integration/: the
+    # broken-archive test corrupts its archive and asserts the shipped pointwise engine
+    # still serves, which needs the two archives to be separate files.
+    set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
+    set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
+
+    # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
+    file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
+         "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
+         "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
+
+    # No HIPDNN_DESCRIPTOR_DIR is published for the test suites: the integration binary loads
+    # the plugin and resolves the tree from that module, and the unit binary resolves it
+    # from its own module in main().
+    message(STATUS "Kernel ingestor enabled. Descriptors build into:")
+    message(STATUS "  production: ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
+    message(STATUS "  test:       ${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}")
+endif()
+
+# ============================================================================
+# YAML-based CTest categorization detection
+# ============================================================================
+# Hoisted here (rather than src/CMakeLists.txt) so it is available before
+# add_subdirectory(rocke) below: rocke/platform/tests/CMakeLists.txt applies
+# ROCKE_ENGINE_CTEST_CATEGORIES_YAML to its own pre-registered CTest tests in
+# its own directory scope (CMake's set_property(TEST ...) predates 3.28's
+# cross-directory support, so this project's 3.25.2 floor requires it run
+# where the tests were add_test()'d).
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories.yaml")
+    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(ROCKE_ENGINE_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ROCKE_ENGINE_test_categories_external.yaml")
+    set(HKP_PACK_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HKP_PACK_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
+    set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
+    if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}")
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
+            "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+        )
+        set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
+        message(STATUS "hip-kernel-provider: YAML-based CTest categorization enabled")
+    else()
+        message(STATUS "hip-kernel-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+    endif()
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
+    message(FATAL_ERROR
+        "hip-kernel-provider: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and packs "
+        "rocKE kernels, but HIPKERNELPROVIDER_ENABLE_ROCKE is OFF, so the "
+        "rocKE engine and its Python wheels are never built and the pack "
+        "step would have nothing to lower rocKE kernels with. Configure "
+        "with -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON, or with "
+        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+endif()
 
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
-    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
-    # installed CTest entries stage into
-    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
-    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
+    # rocke/ = platform (engine + build-time Python). The engine's installed
+    # CTest entries stage into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider,
+    # so add_subdirectory(rocke) must precede src/ below, which emits
+    # bin/hip_kernel_provider/CTestTestfile.cmake. It must also precede
+    # descriptor-packaging below, whose ingestor-toolchain assertion reads the
+    # ROCKE_WHEEL_DIR and ROCKE_WHEEL_VERSION cache variables rocke/ sets.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
-    # Defer the Python rocKE CI tests (import smoke + golden): their test-artifact
-    # packaging (rocke package + scripts + golden JSON) is not yet wired into
-    # TheRock's hipkernelprovider artifact includes, so staging them here would
-    # fail CI. The C++ smoke tests stay enabled; re-enable once packaging lands.
+
+    # rocKE's installed Python CTest entries invoke a bare `python`, which the
+    # runtime image does not provide, so they cannot run from an installed tree.
+    # The installed C++ entries and the rocke Python frontend are unaffected.
     set(ROCKE_INSTALL_PYTHON_TESTS OFF)
-    # Route rocke-client test targets into hip-kernel-provider's test bucket so
-    # they appear in install_provider_ctest_files("hip_kernel_provider") output.
-    # Without this, _add_test_target_internal uses rocke-client's own PROJECT_NAME
-    # and the targets are never picked up by the parent's finalize_test_targets.
-    set(ROCKE_CLIENT_PARENT_PROJECT "${PROJECT_NAME}")
+
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
+endif()
+
+# The kpack reader and the descriptor packer both ride the ingestor gate. (The ASM SDPA
+# engine is a separate kpack producer on its own gate; it packs but never reads.)
+#
+# The reader is the rocm_kpack shared library ROCm ships, resolved the way this repo's
+# other providers resolve their externals: miopen-provider finds MIOpen, hipblaslt-provider
+# finds the SDKs. The guard lets a superbuild that already defines the target -- one
+# building rocm-kpack as a sibling component -- win over an installed copy.
+#
+# descriptor-packaging resolves the packer separately, from the rocm_kpack Python
+# package. Both halves come from the platform, so nothing here pins a ref.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
+    add_subdirectory(descriptor-packaging)
 endif()
 
 add_subdirectory(src)
@@ -240,4 +527,53 @@ if(ENABLE_ASM_SDPA_ENGINE)
     install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
             DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
             FILES_MATCHING PATTERN "*.co")
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # The two descriptor trees are installed here and nowhere else. Every producer --
+    # the packer, or a step added later -- delivers content into one of these two
+    # build-tree folders, and these two rules ship them wholesale. Each installed
+    # descriptor tree is then a copy of its build-tree folder, so a test that passes
+    # against one is evidence about the other, and a set cannot be staged for testing
+    # yet silently missing from the package.
+    #
+    # This holds for these two trees only. Other content under the engine directory
+    # installs from the source tree, so it has no build-tree counterpart at the same
+    # relative path.
+    #
+    # Neither rule is OPTIONAL: each is emitted only when something was wired to fill its
+    # tree, so a directory missing at install time means the build did not run to
+    # completion, and saying so beats shipping a package with no descriptors in it.
+    #
+    # hkp_packaging_product exists exactly when the production packer will write -- the
+    # production source root is set and is a real directory. Re-testing the source root
+    # here would emit the rule for configurations the packer skips, turning a supported
+    # build into an install-time failure.
+    # Each pack marks its output root complete with a stamp file inside it, so that
+    # emptying the tree invalidates the stamp too. The stamp belongs to the build and not
+    # to the package, and every pack writes the same name, so one pattern drops all of
+    # them from both trees below and from any pack added later.
+    #
+    # Asserted rather than defaulted: an empty name here would install a pattern that
+    # matches nothing, and the stamp would ship with no diagnostic.
+    if(NOT HKP_PACK_STAMP_NAME)
+        message(FATAL_ERROR
+                "hkp: HKP_PACK_STAMP_NAME is empty, so the descriptor install rules "
+                "cannot exclude the pack stamps. descriptor-packaging defines it; this "
+                "means it was not added before these rules.")
+    endif()
+
+    if(TARGET hkp_packaging_product)
+        install(DIRECTORY "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/"
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
+    endif()
+
+    # The test packing roots are wired unconditionally under this gate, so the test tree
+    # always has content to ship once the build has run.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS)
+        install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
+                PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
+    endif()
 endif()

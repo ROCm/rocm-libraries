@@ -63,6 +63,44 @@ Tests:
   orderC: [R]
   orderD: [R]
 
+- name: spmm_batched_small
+  category: quick
+  function:
+    - spmm_batched: *hpa_e4m3_fnuz_fp32_precision
+  matrix_size: *batched_small_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: 3
+  bias_vector: true
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true]
+  factor_dim: [0, 1]
+  gate_residual: [true]
+  gate_type: [f32_r, f8_fnuz_r]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]  
+
+- name: spmm_batched_small
+  category: quick
+  function:
+    - spmm_batched: *hpa_e4m3_fp32_precision_gate
+  matrix_size: *batched_small_matrix_size_range
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: 3
+  bias_vector: true
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true]
+  factor_dim: [0, 1]
+  gate_residual: [true]
+  gate_type: [f32_r, f8_r]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]  
+
 - name: spmm_batched_medium
   category: pre_checkin
   function:

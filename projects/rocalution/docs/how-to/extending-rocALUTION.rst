@@ -10,7 +10,7 @@ Extending rocALUTION functionality
 
 The rocALUTION library is open source and can be extended with user-specific routines, solvers, and preconditioners.
 
-You can choose to extend rocALUTION 
+You can choose to extend rocALUTION
 In the following sections, different levels of functionality enhancements are illustrated.
 These examples can be used as guidelines to extend rocALUTION step by step with your own routines.
 Please note, that user-added routines can also be added to the main GitHub repository using pull requests.
@@ -20,7 +20,7 @@ Please note, that user-added routines can also be added to the main GitHub repos
 
 This section demonstrates how to extend the :cpp:class:`LocalMatrix <rocalution::LocalMatrix>` class with an additional routine.
 The routine supports both Host and Accelerator backend.
-Furthermore, the routine requires the matrix to be in CSR format. 
+Furthermore, the routine requires the matrix to be in CSR format.
 Here are the steps to extend the :cpp:class:`LocalMatrix <rocalution::LocalMatrix>` functionality:
 
 1.  API enhancement

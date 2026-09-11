@@ -352,13 +352,13 @@ TEST_F(TestResampleFwdOperationFromNode, FromNodePreservesGenerateIndex)
     ASSERT_NE(desc, nullptr);
 
     EXPECT_TRUE(desc->getData().generate_index.has_value());
-    EXPECT_EQ(desc->getData().generate_index.value(), true);
+    EXPECT_TRUE(desc->getData().generate_index.value());
 
     auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleFwdAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->generate_index.has_value());
-    EXPECT_EQ(rebuiltAttrs->generate_index.value(), true);
+    EXPECT_TRUE(rebuiltAttrs->generate_index.value());
 }
 
 TEST_F(TestResampleFwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)

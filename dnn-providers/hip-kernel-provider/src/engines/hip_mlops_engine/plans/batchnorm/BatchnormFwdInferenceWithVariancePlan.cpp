@@ -29,10 +29,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _estVariance(tensorMap.at(attributes.variance_tensor_uid()))
     , _activationOut(nullptr)
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-        epsilonTensorAttr, "Epsilon");
+    _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -51,10 +49,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _optActivation(parseActivation(pointwiseAttributes))
     , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-    auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
-    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-        epsilonTensorAttr, "Epsilon");
+    _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, inferenceAttributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
@@ -93,9 +89,11 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _estVariance;
 }
 
-double BatchnormFwdInferenceWithVarianceParams::epsilonValue() const
+double BatchnormFwdInferenceWithVarianceParams::epsilonValue(
+    const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
 {
-    return _epsilonValue;
+    return hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 const std::optional<ActivationParams>&
@@ -141,28 +139,28 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
     if(xDims->size() == 4)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        h = static_cast<int>(xDims->Get(2));
-        w = static_cast<int>(xDims->Get(3));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        h = checkedNarrowToInt(xDims->Get(2), "h");
+        w = checkedNarrowToInt(xDims->Get(3), "w");
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(3));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(3), "wStride");
     }
     else if(xDims->size() == 5)
     {
-        n = static_cast<int>(xDims->Get(0));
-        c = static_cast<int>(xDims->Get(1));
-        auto d = static_cast<int>(xDims->Get(2));
-        h = static_cast<int>(xDims->Get(3));
-        w = static_cast<int>(xDims->Get(4));
+        n = checkedNarrowToInt(xDims->Get(0), "n");
+        c = checkedNarrowToInt(xDims->Get(1), "c");
+        auto d = checkedNarrowToInt(xDims->Get(2), "d");
+        h = checkedNarrowToInt(xDims->Get(3), "h");
+        w = checkedNarrowToInt(xDims->Get(4), "w");
         // For 5D, combine D*H*W into spatial dimension
         h = d * h;
 
-        nStride = static_cast<int>(xStrides->Get(0));
-        cStride = static_cast<int>(xStrides->Get(1));
-        wStride = static_cast<int>(xStrides->Get(4));
+        nStride = checkedNarrowToInt(xStrides->Get(0), "nStride");
+        cStride = checkedNarrowToInt(xStrides->Get(1), "cStride");
+        wStride = checkedNarrowToInt(xStrides->Get(4), "wStride");
     }
     else
     {
@@ -288,18 +286,19 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = findDeviceBuffer(_inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer
-        = findDeviceBuffer(_inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer
-        = findDeviceBuffer(_inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estVarianceBuffer
-        = findDeviceBuffer(_inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
     // Get epsilon
-    double epsilon = _inferenceParams.epsilonValue();
+    double epsilon = _inferenceParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
@@ -307,7 +306,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
-        auto activationOutBuffer = findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         // Get activation parameters
@@ -334,8 +333,8 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     }
     else
     {
-        auto yBuffer
-            = findDeviceBuffer(_inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
         _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,

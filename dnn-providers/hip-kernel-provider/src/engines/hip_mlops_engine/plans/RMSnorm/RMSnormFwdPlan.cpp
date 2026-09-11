@@ -35,7 +35,8 @@ RMSnormFwdParams::RMSnormFwdParams(
     , _invRMS(attributes.inv_rms_tensor_uid().has_value()
                   ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
                   : nullptr)
-    , _epsilon(tensorMap.at(attributes.epsilon_tensor_uid()))
+    , _epsilon(hipdnn_plugin_sdk::makeScalarOperand(
+          tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
 
 {
 }
@@ -50,9 +51,11 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::
     return _scale;
 }
 
-const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::epsilon() const
+double RMSnormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                      uint32_t numDeviceBuffers) const
 {
-    return _epsilon;
+    return hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
@@ -171,23 +174,25 @@ void RMSnormFwdPlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-    void* biasBufferPtr
-        = (_params.bias() == nullptr)
-              ? nullptr
-              : findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
-    void* invRMSBufferPtr
-        = (_params.invRMS() == nullptr)
-              ? nullptr
-              : findDeviceBuffer(_params.invRMS()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+    void* biasBufferPtr = (_params.bias() == nullptr)
+                              ? nullptr
+                              : hipdnn_plugin_sdk::findDeviceBuffer(
+                                    _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
+                                    .ptr;
+    void* invRMSBufferPtr = (_params.invRMS() == nullptr)
+                                ? nullptr
+                                : hipdnn_plugin_sdk::findDeviceBuffer(
+                                      _params.invRMS()->uid(), deviceBuffers, numDeviceBuffers)
+                                      .ptr;
 
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
-    _params.epsilon()->UnPackTo(&epsilonTensor);
-    double epsilon
-        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     _runnableKernel->launch(handle.getStream(),
                             xBuffer.ptr,

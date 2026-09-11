@@ -22,9 +22,10 @@
 #
 ################################################################################
 
+import ast
 import os
 import warnings
-from argparse import Action, ArgumentParser
+from argparse import Action, ArgumentParser, ArgumentTypeError
 from typing import Any, Dict, List, Optional
 
 from ..Common import DeveloperWarning, architectureMap
@@ -39,10 +40,21 @@ class DeprecatedOption(Action):
 
 
 def splitExtraParameters(par):
-    """Allows the --global-parameters option to specify any parameters from the command line."""
+    """Allows the --global-parameters option to specify any parameters from the command line.
 
-    (key, value) = par.split("=")
-    value = eval(value)
+    Each argument is a ``key=value`` pair. The value is parsed as a Python literal
+    (number, string, tuple, list, dict, bool, or None) via ``ast.literal_eval``.
+    Arbitrary expressions are rejected so a CLI/CI argument cannot execute code.
+    """
+
+    (key, value) = par.split("=", 1)
+    try:
+        value = ast.literal_eval(value)
+    except (ValueError, SyntaxError) as e:
+        raise ArgumentTypeError(
+            f"invalid --global-parameters value for '{key}': {value!r} must be a "
+            f"Python literal (e.g. 5, True, 'text', [1, 2])"
+        ) from e
     return (key, value)
 
 

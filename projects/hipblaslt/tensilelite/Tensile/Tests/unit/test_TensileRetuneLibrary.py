@@ -145,6 +145,33 @@ class TestParseCurrentLibrary:
             assert sizes_arg[0] == {"Exact": [64, 64, 1, 64]}
             assert sizes_arg[1] == {"Exact": [128, 128, 1, 128]}
 
+    @patch('Tensile.TensileRetuneLibrary.globalParameters', {})
+    @patch('Tensile.TensileRetuneLibrary.ProblemSizes')
+    @patch('Tensile.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
+    def test_parses_dict_library_sets_perf_metric(self, mock_parse, mock_problem_sizes):
+        """parseCurrentLibrary should read PerfMetric from dict-format logic."""
+        from Tensile.TensileRetuneLibrary import parseCurrentLibrary, globalParameters
+
+        mock_problem_type = Mock()
+        mock_solution1 = MagicMock()
+        mock_solution1.__eq__ = Mock(return_value=False)
+        mock_exact_logic = [([64, 64, 1, 64], {})]
+
+        mock_parse.return_value = (None, None, mock_problem_type, [mock_solution1], mock_exact_logic, None, None)
+        mock_problem_sizes.return_value = Mock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lib_file = os.path.join(tmpdir, "lib.yaml")
+            lib_data = {"PerfMetric": "DeviceEfficiency"}
+
+            with open(lib_file, 'w') as f:
+                yaml.dump(lib_data, f)
+
+            result = parseCurrentLibrary(lib_file, None)
+
+            assert len(result) == 3
+            assert globalParameters["PerformanceMetric"] == "DeviceEfficiency"
+
     @patch('Tensile.TensileRetuneLibrary.ProblemSizes')
     @patch('Tensile.TensileRetuneLibrary.LibraryIO.parseLibraryLogicData')
     def test_parses_library_with_size_file(self, mock_parse, mock_problem_sizes):
@@ -419,6 +446,95 @@ class TestTensileRetuneLibrary:
             write_args = mock_write.call_args[0]
             written_data = write_args[1]
             assert written_data[7] == update_logic
+
+    @patch('Tensile.TensileRetuneLibrary.LibraryLogic.main')
+    @patch('Tensile.TensileRetuneLibrary.LibraryIO.writeYAML')
+    @patch('Tensile.TensileRetuneLibrary.LibraryIO.read')
+    @patch('Tensile.TensileRetuneLibrary.runBenchmarking')
+    @patch('Tensile.TensileRetuneLibrary.parseCurrentLibrary')
+    @patch('Tensile.TensileRetuneLibrary.validateToolchain')
+    @patch('Tensile.TensileRetuneLibrary.assignGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.restoreDefaultGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.argUpdatedGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.print1')
+    def test_retune_library_remake_mode_with_dict_header(
+        self, mock_print, mock_arg_updated, mock_restore,
+        mock_assign, mock_validate, mock_parse, mock_bench, mock_read,
+        mock_write, mock_logic_main
+    ):
+        """TensileRetuneLibrary should pass dict header fields to LibraryLogic.main in remake mode."""
+        from Tensile.TensileRetuneLibrary import TensileRetuneLibrary
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logic_file = os.path.join(tmpdir, "logic.yaml")
+            output_path = os.path.join(tmpdir, "output")
+
+            with open(logic_file, 'w') as f:
+                yaml.dump({"dummy": "data"}, f)
+
+            mock_validate.return_value = ("g++", "gcc", "as", "bundler")
+            mock_arg_updated.return_value = {}
+
+            raw_yaml = {
+                "ScheduleName": "sched",
+                "ArchitectureName": "gfx950",
+                "DeviceNames": ["Device 0049"],
+                "ExactLogic": [],
+            }
+            mock_parse.return_value = (raw_yaml, [], Mock())
+
+            args = [logic_file, output_path, "--update-method", "remake"]
+            TensileRetuneLibrary(args)
+
+            mock_logic_main.assert_called_once()
+            header_arg = mock_logic_main.call_args[0][0]
+            assert header_arg["ScheduleName"] == "sched"
+            assert header_arg["ArchitectureName"] == "gfx950"
+            assert header_arg["DeviceNames"] == ["Device 0049"]
+
+    @patch('Tensile.TensileRetuneLibrary.LibraryIO.writeYAML')
+    @patch('Tensile.TensileRetuneLibrary.LibraryIO.read')
+    @patch('Tensile.TensileRetuneLibrary.runBenchmarking')
+    @patch('Tensile.TensileRetuneLibrary.parseCurrentLibrary')
+    @patch('Tensile.TensileRetuneLibrary.validateToolchain')
+    @patch('Tensile.TensileRetuneLibrary.assignGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.restoreDefaultGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.argUpdatedGlobalParameters')
+    @patch('Tensile.TensileRetuneLibrary.print1')
+    def test_retune_library_update_mode_writes_update_logic_dict(
+        self, mock_print, mock_arg_updated, mock_restore,
+        mock_assign, mock_validate, mock_parse, mock_bench, mock_read, mock_write
+    ):
+        """TensileRetuneLibrary should write update logic into ExactLogic for dict-format logic."""
+        from Tensile.TensileRetuneLibrary import TensileRetuneLibrary
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logic_file = os.path.join(tmpdir, "logic.yaml")
+            output_path = os.path.join(tmpdir, "output")
+
+            with open(logic_file, 'w') as f:
+                yaml.dump({"dummy": "data"}, f)
+
+            mock_validate.return_value = ("g++", "gcc", "as", "bundler")
+            mock_arg_updated.return_value = {}
+
+            raw_yaml = {
+                "ScheduleName": "sched",
+                "ArchitectureName": "gfx950",
+                "DeviceNames": ["Device 0049"],
+                "ExactLogic": "old_logic",
+            }
+            update_logic = "new_logic"
+            mock_parse.return_value = (raw_yaml, [], Mock())
+            mock_read.return_value = update_logic
+
+            args = [logic_file, output_path, "--update-method", "update"]
+            TensileRetuneLibrary(args)
+
+            mock_write.assert_called_once()
+            write_args = mock_write.call_args[0]
+            written_data = write_args[1]
+            assert written_data["ExactLogic"] == update_logic
 
 
 @pytest.mark.unit

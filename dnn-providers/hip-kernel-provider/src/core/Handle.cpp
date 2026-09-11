@@ -5,7 +5,7 @@
 
 #include "Container.hpp"
 
-hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Handle::getEngineManager()
+hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& Handle::getEngineManager() const
 {
     return container->getEngineManager();
 }

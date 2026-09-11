@@ -10,7 +10,7 @@ rocALUTION accelerator support
 
 The rocALUTION structure is embedded with the support for accelerator devices. It is recommended to use accelerators to decrease the computational time.
 
-.. note:: 
+.. note::
 
   Not all functions are ported and present on the accelerator backend. This limited functionality is natural, since not all operations can be performed efficiently on the accelerators (e.g. sequential algorithms, I/O from the file system, etc.).
 
@@ -18,7 +18,7 @@ rocALUTION supports HIP-capable GPUs starting with ROCm 1.9. Due to its design, 
 
 If a particular function is not implemented for the used accelerator, the library moves the object to the host and computes the routine there. In such cases, a warning message of level 2 is printed. For example, if the user wants to perform an ILUT factorization on the HIP backend which is currently unavailable, the library moves the object to the host, performs the routine there and prints the following warning message:
 
-.. warning:: 
+.. warning::
 
   LocalMatrix::ILUTFactorize() is performed on the host
 
@@ -64,10 +64,10 @@ This can be done with :cpp:func:`rocalution::LocalVector::CopyFromAsync` and :cp
 
 When using the ``MoveToAcceleratorAsync()`` and ``MoveToHostAsync()`` functions, the object still points to its original location (i.e. host for calling ``MoveToAcceleratorAsync()`` and accelerator for ``MoveToHostAsync()``). The object switches to the new location after the ``Sync()`` function is called.
 
-.. note:: 
+.. note::
 
   The objects should not be modified during an active asynchronous transfer to avoid the possibility of generating incorrect values after the synchronization.
-.. note:: 
+.. note::
 
   To use asynchronous transfers, enable the pinned memory allocation. Uncomment ``#define ROCALUTION_HIP_PINNED_MEMORY`` in ``src/utils/allocate_free.hpp``.
 

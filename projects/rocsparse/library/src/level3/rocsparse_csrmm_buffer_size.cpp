@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -244,6 +244,7 @@ rocsparse_status rocsparse::csrmm_buffer_size(rocsparse_handle          handle,
                                               int64_t                   n,
                                               int64_t                   k,
                                               int64_t                   nnz,
+                                              int64_t                   batch_count_C,
                                               const rocsparse_mat_descr descr,
                                               rocsparse_datatype        compute_datatype,
                                               rocsparse_datatype        csr_val_datatype,
@@ -256,12 +257,43 @@ rocsparse_status rocsparse::csrmm_buffer_size(rocsparse_handle          handle,
 {
 
     ROCSPARSE_ROUTINE_TRACE;
+
+    // buffer_size runs before analysis, so the structural profile does not exist
+    // yet and the eventual default choice is unknown. Size conservatively for the
+    // largest auto-selectable kernel (nnz-split); row-split needs no buffer, so
+    // this is a safe upper bound for whichever kernel analysis/compute select. The
+    // upgrade only applies to the non-transposed path, matching csrmm_select_default_alg.
+    rocsparse_csrmm_alg size_alg = alg;
+    if(alg == rocsparse_csrmm_alg_default && trans_A == rocsparse_operation_none)
+    {
+        size_alg = rocsparse_csrmm_alg_nnz_split;
+    }
+
     rocsparse::csrmm_buffer_size_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_buffer_size_find(
         &f, compute_datatype, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
 
-    RETURN_IF_ROCSPARSE_ERROR(f(
-        handle, trans_A, alg, m, n, k, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans_A,
+                                size_alg,
+                                m,
+                                n,
+                                k,
+                                nnz,
+                                descr,
+                                csr_val,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                buffer_size));
+
+    // The nnz-split temporary reduction buffers (row_block_red / val_block_red)
+    // are laid out contiguously per batch, so the workspace scales with the
+    // number of output batches. Over-allocate by batch_count_C; this is a safe
+    // upper bound for row-split/default (which need no buffer) as well.
+    if(batch_count_C > 1)
+    {
+        *buffer_size *= static_cast<size_t>(batch_count_C);
+    }
 
     return rocsparse_status_success;
 }

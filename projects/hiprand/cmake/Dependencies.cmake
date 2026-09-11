@@ -214,7 +214,7 @@ function(fetch_dep method repo_name repo_path download_branch)
         execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
-        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name}
+        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name} shared/primbench
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
         # Finally, download the files using git checkout.

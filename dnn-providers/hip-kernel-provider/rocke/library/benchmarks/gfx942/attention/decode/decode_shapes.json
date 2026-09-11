@@ -115,6 +115,22 @@
         {"batch": 1, "seqlen_q": 1, "seqlen_k": 16384, "dtype": "fp16", "label": "qwen3_235b_fp16_b1_kv16384"},
         {"batch": 1, "seqlen_q": 1, "seqlen_k": 32768, "dtype": "fp16", "label": "qwen3_235b_fp16_b1_kv32768"}
       ]
+    },
+    {
+      "model": "Qwen3-Next-80B-A3B",
+      "num_query_heads": 16,
+      "num_kv_heads": 2,
+      "head_size": 256,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 512,   "dtype": "bf16", "label": "qwen3next_80b_b1_kv512"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 1024,  "dtype": "bf16", "label": "qwen3next_80b_b1_kv1024"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 2048,  "dtype": "bf16", "label": "qwen3next_80b_b1_kv2048"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 4096,  "dtype": "bf16", "label": "qwen3next_80b_b1_kv4096"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 8192,  "dtype": "bf16", "label": "qwen3next_80b_b1_kv8192"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 16384, "dtype": "bf16", "label": "qwen3next_80b_b1_kv16384"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 32768, "dtype": "bf16", "label": "qwen3next_80b_b1_kv32768"}
+      ]
     }
   ]
 }

@@ -50,7 +50,8 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     bool hasSaveMeanVariance() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
@@ -59,7 +60,8 @@ public:
     bool hasRunningStats() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* prevRunningVariance() const;
-    double momentumValue() const;
+    double momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                         uint32_t numDeviceBuffers) const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* nextRunningVariance() const;
 
@@ -71,7 +73,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     // Save mean/variance
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean = nullptr;
@@ -82,7 +84,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
-    std::optional<double> _momentumValue;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
     bool _hasRunningStats{false};
 
     std::optional<ActivationParams> _optActivation;

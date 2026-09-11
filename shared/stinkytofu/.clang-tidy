@@ -30,6 +30,11 @@
 # Excluded performance checks:
 #   -performance-enum-size               (too noisy, low value)
 #
+# Excluded clang-analyzer checks:
+#   -clang-analyzer-core.NullDereference (false positive in nanobind try_cast templates)
+#   -clang-analyzer-optin.performance.Padding
+#   -clang-analyzer-optin.core.EnumCastOutOfRange
+#
 # Not included (style enforcement, not bug-finding):
 #   readability-*, modernize-*, google-*, fuchsia-*
 Checks: >
@@ -45,6 +50,7 @@ Checks: >
   -bugprone-string-literal-with-embedded-nul,
   -bugprone-macro-parentheses,
   clang-analyzer-*,
+  -clang-analyzer-core.NullDereference,
   -clang-analyzer-optin.performance.Padding,
   -clang-analyzer-optin.core.EnumCastOutOfRange,
   misc-*,

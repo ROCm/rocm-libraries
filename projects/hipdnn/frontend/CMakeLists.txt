@@ -141,7 +141,6 @@ install(
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
-    PATTERN "*.h.in" EXCLUDE
     REGEX "/hipdnn_compatibility/" EXCLUDE
 )
 
@@ -155,6 +154,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         COMPONENT Development
         FILES_MATCHING
         PATTERN "*.h"
+        PATTERN "*.hpp"
     )
 endif()
 

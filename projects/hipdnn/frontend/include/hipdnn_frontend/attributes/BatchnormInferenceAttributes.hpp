@@ -158,6 +158,16 @@ public:
     {
         return setOutput(OutputNames::Y, std::move(value));
     }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl([[maybe_unused]] const BatchnormInferenceAttributes& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl([[maybe_unused]] const BatchnormInferenceAttributes& other) const
+    {
+        return true;
+    }
 };
 
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes; ///< @brief Compatibility alias

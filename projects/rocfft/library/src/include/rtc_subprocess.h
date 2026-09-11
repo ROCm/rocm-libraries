@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,13 @@
 #ifndef ROCFFT_RTC_SUBPROCESS_H
 #define ROCFFT_RTC_SUBPROCESS_H
 
+#include <optional>
 #include <string>
 #include <vector>
 
 // spawn a subprocess to do a compile, to get around process-wide locks in hipRTC
-std::vector<char> compile_subprocess(const std::string& kernel_src, const std::string& gpu_arch);
+std::vector<char> compile_subprocess(const std::string&                kernel_src,
+                                     const std::string&                gpu_arch,
+                                     const std::optional<std::string>& forced_rtc_helper);
 
 #endif

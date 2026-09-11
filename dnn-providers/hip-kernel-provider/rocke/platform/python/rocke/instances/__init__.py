@@ -86,6 +86,37 @@ from .common.conv_implicit_gemm import (  # noqa: F401
     make_b_descriptor,
     make_d_descriptor,
 )
+from .common.conv_implicit_gemm_wgrad import (  # noqa: F401
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+    make_dy_descriptor,
+    make_dw_descriptor,
+    make_x_wgrad_descriptor,
+)
+from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
+    DgradConvSpec,
+    SubGemmParams,
+    TildeDecomposition,
+    build_implicit_gemm_conv_dgrad,
+    compute_tilde,
+    enumerate_sub_gemms,
+    is_valid_dgrad_spec,
+    make_dgrad_dy_descriptor,
+    make_dgrad_dx_descriptor,
+    make_dgrad_w_descriptor,
+    pack_sub_gemm_buffer,
+)
+from .common.conv_wgrad_workspace_reduce import (  # noqa: F401
+    WgradReduceSpec,
+    build_conv_wgrad_workspace_reduce,
+    wgrad_reduce_grid,
+    wgrad_reduce_signature,
+)
+from .common.conv_implicit_gemm_wgrad_two_stage import (  # noqa: F401
+    build_implicit_gemm_conv_wgrad_two_stage,
+    wgrad_two_stage_workspace_nbytes,
+)
 from .common.gemm_universal import (  # noqa: F401
     DataSpec,
     Epilogue,

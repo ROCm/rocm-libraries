@@ -45,7 +45,12 @@
  *     gfx942 instead carried _strided_v_b_operand + the hoist_* invariant cache;
  *     NEITHER exists here.
  *   - async feed: HALVES_PER_LANE = ASYNC_LDS_DWORDS(4) * 2 = 8; there is NO
- *     wide-b128 sync path (no WIDE_* fields) and NO invariant-hoist.
+ *     wide-b128 sync path (no WIDE_* fields).
+ *   - KV-loop invariant hoist: qp_r / qh_r / row_ok / causal_lim are
+ *     per-thread row quantities that do not change across tiles; they are
+ *     emitted once before the scf.for and cached in ctx->hoist_* (mirrors
+ *     the 2D kernel's hoist_* block and the Python PR that applied the same
+ *     LICM to attention_tiled_3d.py). ALiBi slope loads are also hoisted.
  *
  * CONTRACT STABILITY (bucket note). This is the ONE shared surface every
  * body-implementing .c binds to. It is DESIGNED TO BE COMPLETE: every
@@ -315,6 +320,16 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* l_inits[4];
     rocke_value_t* acc_inits[16]; /* PV_N_TILES <= 16                          */
     rocke_value_t* cur_buf_init; /* const_i32(0)                              */
+
+    /* ---------- KV-loop invariant hoist (before scf.for, lines 772-810) ---------- *
+     * Per-thread-row quantities that are constant across all KV tiles. Emitted
+     * once before the loop and read inside the loop body (alibi/mask section).
+     * hoist_alibi is only populated when cfg.USE_ALIBI; otherwise NULL. */
+    rocke_value_t* hoist_qp_r[4];
+    rocke_value_t* hoist_qh_r[4];
+    rocke_value_t* hoist_row_ok[4];
+    rocke_value_t* hoist_causal_lim[4];
+    rocke_value_t* hoist_alibi[4]; /* NULL entries when USE_ALIBI is false     */
 
     /* ---------- loop results (epilogue inputs, lines 901-904) ---------- */
     rocke_value_t* m_final[4];

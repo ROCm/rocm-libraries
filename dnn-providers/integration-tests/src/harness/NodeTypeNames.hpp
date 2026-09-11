@@ -41,7 +41,7 @@ inline const char* to_string(const hipdnn_frontend::graph::NodeType& type)
     case NodeType::LAYER_NORM:
         return "LayerNorm";
     case NodeType::RMS_NORM:
-        return "RmsNorm";
+        return "RMSNorm";
     case NodeType::SDPA_FWD:
         return "SdpaFwd";
     case NodeType::SDPA_BWD:

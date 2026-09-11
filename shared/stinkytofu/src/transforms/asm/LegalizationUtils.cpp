@@ -104,11 +104,13 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 
     StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, inst);
 
-    // Replace EXEC destination with VCC
-    StinkyRegister destReg = destRegs[0];
-    if (destReg.reg.type == RegType::EXEC || destReg.reg.type == RegType::EXEC_LO) {
-        destReg = StinkyRegister::getVCCRegister(wavefrontSize);
-    }
+    // Any v_cmpx that reaches here writes EXEC (CMPXWritesSGPR is false on this
+    // arch), so the split v_cmp must target VCC regardless of how the source path
+    // represented the EXEC destination. The rocisa->asm path types dest[0] as
+    // RegType::EXEC/EXEC_LO; the logical/adaptor path may encode EXEC as a plain
+    // SGPR (index 126/127), which a type-only check missed — leaving v_cmp writing
+    // EXEC and tripping the emulator's isVcmpX assertion. Remap unconditionally.
+    StinkyRegister destReg = StinkyRegister::getVCCRegister(wavefrontSize);
     cmpInst->addDestReg(destReg);
 
     // Copy source registers
@@ -149,11 +151,11 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 }
 
 Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
+    // Only legalize on gfx12.5 (either stepping).
     // TODO: Support other SeparateVMcnt + SeparateLGKMcnt archs (e.g. gfx1200,
     // gfx1201). Need to verify whether they also support combined instructions
     // (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt).
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get wait count data from modifiers
     const SWaitCntData* waitData = inst->getModifier<SWaitCntData>();
@@ -171,7 +173,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     bool hasKmcnt = (waitData->kmcnt != -1);
 
     // Combine dlcnt and dscnt into a single dscnt for gfx1250
-    int8_t combinedDscnt = -1;
+    int combinedDscnt = -1;
     if (hasDlcnt && hasDscnt) {
         combinedDscnt = std::min(waitData->dlcnt, waitData->dscnt);
     } else if (hasDlcnt) {
@@ -186,22 +188,22 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     StinkyInstruction* lastInst = nullptr;
 
     // Helper to create single wait instruction before inst
-    auto createSingleWait = [&](GFX opcode, int8_t count) -> StinkyInstruction* {
+    auto createSingleWait = [&](GFX opcode, int count) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(count)));
+        waitInst->addSrcReg(StinkyRegister(clampToWaitCntField(count)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
         return waitInst;
     };
 
-    // Helper to create combined wait instruction before inst
-    auto createCombinedWait = [&](GFX opcode, int8_t count1, int8_t count2) -> StinkyInstruction* {
+    // Helper to create combined wait instruction before inst. memCount is the
+    // loadcnt or storecnt half, dsCount the dscnt half.
+    auto createCombinedWait = [&](GFX opcode, int memCount, int dsCount) -> StinkyInstruction* {
         const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
         StinkyInstruction* waitInst = irBuilder.create(desc, inst);
-        uint16_t combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
-        waitInst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
+        waitInst->addSrcReg(StinkyRegister(packMemDsWaitCnt(memCount, dsCount)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
@@ -251,8 +253,8 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
 }
 
 Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    // Only legalize on gfx12.5 (either stepping).
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get modifiers to transfer
     const CommentData* commentMod = inst->getModifier<CommentData>();

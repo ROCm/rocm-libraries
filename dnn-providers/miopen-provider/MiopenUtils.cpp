@@ -6,24 +6,6 @@
 namespace miopen_plugin::miopen_utils
 {
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "Device buffer with the uid: " + std::to_string(uid)
-            + " not found in the provided device buffers.");
-}
-
 miopenDataType_t
     tensorDataTypeToMiopenDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
@@ -69,7 +51,7 @@ MiopenTensor createTensor(
     return {tensorAttr};
 }
 
-MiopenTensor createBatchnormTensor(
+MiopenTensor createPaddedTensor(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
@@ -99,9 +81,9 @@ MiopenTensor createBatchnormTensor(
     std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
     std::vector<int64_t> strides(tensorAttr.strides()->begin(), tensorAttr.strides()->end());
 
-    // MIOpen requires at least 4D tensors for batchnorm.
-    // Pad 3D to 4D by appending W=1 dimension.
-    // Stride for W: 1 for channels-first (NCL→NCHW), C for channels-last (NLC→NHWC).
+    // MIOpen requires at least 4D tensors. Pad 3D to 4D by appending a size-1
+    // trailing dimension. Stride for that dimension: 1 for channels-first
+    // (NCL→NCHW), C for channels-last (NLC→NHWC).
     dims.push_back(1);
 
     constexpr size_t C_IDX = 1;
@@ -208,27 +190,4 @@ ActivationParams mapPointwiseModeToMiopenActivation(
                                                        "Unsupported activation operation");
     }
 }
-
-std::string getDeviceArch(hipStream_t stream)
-{
-    hipDevice_t deviceId = -1;
-    auto status = hipStreamGetDevice(stream, &deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipStreamGetDevice failed: "
-                                                           + std::to_string(status));
-    }
-    hipDeviceProp_t props;
-    status = hipGetDeviceProperties(&props, deviceId);
-    if(status != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "hipGetDeviceProperties failed: "
-                                                           + std::to_string(status));
-    }
-    const std::string archStr(props.gcnArchName);
-    return archStr.substr(0, archStr.find(':'));
-}
-
 }

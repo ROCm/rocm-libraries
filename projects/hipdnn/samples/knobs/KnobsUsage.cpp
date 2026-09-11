@@ -9,7 +9,6 @@
 #include <variant>
 
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
@@ -46,7 +45,7 @@ std::string knobValueToString(const KnobValueVariant& value)
     return ret;
 }
 
-void demonstrateKnobQuery(int64_t engineId, graph::Graph& graph)
+void demonstrateKnobQuery(int64_t engineId, const std::string& engineName, graph::Graph& graph)
 {
     std::cout << "Querying Knobs (vector):\n";
 
@@ -59,8 +58,7 @@ void demonstrateKnobQuery(int64_t engineId, graph::Graph& graph)
         return;
     }
 
-    std::cout << "    Engine " << hipdnn_data_sdk::utilities::getEngineNameFromId(engineId)
-              << " has " << knobs.size() << " knob(s):\n";
+    std::cout << "    Engine " << engineName << " has " << knobs.size() << " knob(s):\n";
 
     for(const auto& knob : knobs)
     {
@@ -146,6 +144,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         bool useBenchmarking = false;
         for(int i = 1; i < argc; ++i)
         {
@@ -215,7 +215,9 @@ int main(int argc, char* argv[])
 
         const int64_t engineId = rankedEngineIds[0];
 
-        demonstrateKnobQuery(engineId, *graph);
+        const std::string engineName = getEngineName(handle, engineId);
+
+        demonstrateKnobQuery(engineId, engineName, *graph);
         demonstrateSettingKnobs(engineId, *graph);
         demonstrateKnobValidation(engineId, *graph);
 

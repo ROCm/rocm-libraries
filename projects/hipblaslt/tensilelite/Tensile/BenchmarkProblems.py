@@ -31,11 +31,13 @@ import sys
 import time
 import itertools
 
+import rocisa
+
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
+from Tensile import SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -192,12 +194,21 @@ def _resetCacheDir(cacheDir):
     os.makedirs(cacheDir)
 
 
-def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap,
+                              rocIsaData=None):
     """Helper function to generate a single solution from a permutation.
-    
+
     This function handles standard permutations without group_ parameter expansion.
     For GA individuals that may have group_ parameters, use the GA backend's equivalent.
+
+    ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    singleton here has never been init'd and every capability lookup would read a
+    default. Validators that ask the assembly backend what a solution emits need the
+    parent's capabilities to answer the same way the emitter will.
     """
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     solution = {
         "ProblemType": deepcopy(problemType.state),
         "ISA": next(iter(isaInfoMap.keys()))
@@ -264,7 +275,8 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
         itertools.repeat(constantParams),
         itertools.repeat(assembler),
         itertools.repeat(debugConfig),
-        itertools.repeat(isaInfoMap)
+        itertools.repeat(isaInfoMap),
+        itertools.repeat(rocisa.rocIsa.getInstance().getData())
     )
     raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
 
@@ -285,7 +297,7 @@ def _getCustomKernelSolutionObj(
         assembler: Assembler,
         debugConfig: DebugConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        directory=CUSTOM_KERNEL_PATH
+        directory=None
     ):
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)
@@ -440,6 +452,7 @@ def writeBenchmarkFiles(
         srcToolchain: SourceToolchain,
         sourcePath: Path,
         debugConfig: DebugConfig,
+        gateTypeArgs,
         deviceId: int,
         gfxName: str,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
@@ -554,13 +567,13 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  libraryFile=newLibraryFileFull, gateTypeArgs=gateTypeArgs, probSolMap=probSolMap,
                                   sourceDir=str(sourcePath))
 
     if len(solutions) == 0:
@@ -599,7 +612,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     keyPathPrefix = f"BenchmarkProblems[{outerBenchmarkIdx}][{1 + problemSizeGroupIdx}]"
     benchmarkProcess = BenchmarkProcess(
         problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo,
-        keyPathPrefix=keyPathPrefix, srcFile=configPath,
+        keyPathPrefix=keyPathPrefix, srcFile=configPath, gfxName=gfxName,
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]
@@ -719,7 +732,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                             benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                             benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                             benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                            sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap)
                 # ^ this mutates solutions
 
                 # write cache data
@@ -769,14 +782,14 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                     benchmarkStep.icacheFlushArgs, conProblemType,
                                     sourcePath, codeObjectFiles, resultsFileName,
-                                    outFile, deviceId, gfxName, libraryFile=cachedLibraryFile, 
-                                    probSolMap=probSolMap)
+                                    outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
+                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
 
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case
             with timing_context("python_write_solutions"):
                 LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
-                    benchmarkStep.activationArgs, solutions, isCached)
+                    benchmarkStep.activationArgs, solutions, gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), cache=isCached)
 
             returncode = 0
             # run benchmarking client

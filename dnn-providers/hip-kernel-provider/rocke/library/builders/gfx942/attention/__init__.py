@@ -8,8 +8,8 @@ wide (flash-regime) tiled attention kernel in
 harness it has **no** Triton/AITER dependency: the oracle is a fp32 torch
 reference, so the example runs on any box with torch + a gfx942 GPU.
 
-Ships the canonical shapes we validate (``shapes.json``) and the definitive
-correctness + perf check (``final_shapes_check.py``); see ``README.md``. The
-exhaustive sweep / probe / regression harnesses that found & gated the levers
-are archived under ``~/attention-archive/``.
+Ships inline scenario groups (``default`` / ``fmha`` / ``creative``) and the
+definitive correctness + perf check (``final_shapes_check.py``); see
+``README.md``. The exhaustive sweep / probe / regression harnesses that found
+& gated the levers are archived under ``~/attention-archive/``.
 """

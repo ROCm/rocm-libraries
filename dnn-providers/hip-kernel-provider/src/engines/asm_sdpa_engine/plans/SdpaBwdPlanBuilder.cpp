@@ -18,6 +18,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
@@ -439,6 +440,12 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
     auto deviceStringOpt
@@ -475,6 +482,19 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& scaleTensorMap = opGraph.getTensorMap();
+        const auto scaleIt = scaleTensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == scaleTensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
 
     // --- Validate required tensors ---
 
@@ -536,14 +556,28 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
-    // GQA: SdpaBwdPlan packs ratio = nhead_q / nhead_k (integer division) into
-    // the dqdkdv kernarg.  A fractional ratio is a kernel-correctness violation
-    // (silent truncation), not a "no row matches" registry miss, so reject it
-    // here rather than letting buildPlan succeed and execute corrupt dQ/dK/dV.
+    // The AITER dqdkdv kernel indexes dK/dV by q-head: workgroup.y spans nhead_q and
+    // the kernel divides by ratio only for the K/V *reads*, never for the dK/dV
+    // *writes*.  Supporting GQA therefore requires caller-side head expansion -
+    // allocate dK/dV with nhead_q head slots, launch, then sum each ratio-group into
+    // the user's nhead_k tensors - which is what AITER does in asm_mha_bwd.cu via
+    // dk_expanded/dv_expanded plus at::sum_out().
+    //
+    // SdpaBwdPlan does not implement that protocol; it passes the user's nhead_k
+    // buffers straight through.  The kernel then writes
+    // (nhead_q - nhead_k) * head_dim * sizeof(bf16) bytes past the end of dK/dV.
+    // The buffer-descriptor bounds check cannot catch this: num_records is relative
+    // to the already-advanced base pointer, so the overrun faults (observed as
+    // HSA_STATUS_ERROR_MEMORY_FAULT on gfx942) instead of clamping.
+    //
+    // Reject GQA/MQA here rather than letting buildPlan succeed and execute a kernel
+    // that corrupts memory.  Restore the weaker "nhead_q % nhead_k == 0" check once
+    // the expansion and reduction are implemented.
     auto numHeadsQ = qTensor->dims()->Get(1);
     auto numHeadsKv = kTensor->dims()->Get(1);
-    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ % numHeadsKv != 0,
-                               "GQA requires nhead_q % nhead_k == 0 (Actual: nhead_q="
+    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
+                               "GQA/MQA backward requires dK/dV head expansion, which is not "
+                               "implemented (Actual: nhead_q="
                                    + std::to_string(numHeadsQ)
                                    + ", nhead_k=" + std::to_string(numHeadsKv) + ")");
 
@@ -885,14 +919,23 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
     // -------------------------------------------------------------------------
-    // 3. Attention scale
+    // 3. Attention scale — resolve as ScalarOperand (RFC 0016)
     // -------------------------------------------------------------------------
-    // Default to 1/sqrt(D_qk) if not provided
-    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
-    auto scaleValue = sdpaAttrs.attn_scale_value();
-    if(scaleValue.has_value())
+    hipdnn_plugin_sdk::ScalarOperand attnScale{};
+    if(sdpaAttrs.scale_tensor_uid().has_value())
     {
-        attnScale = scaleValue.value();
+        attnScale = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, sdpaAttrs.scale_tensor_uid().value(), "attn_scale");
+    }
+    else
+    {
+        float scaleVal = sdpaAttrs.attn_scale_value().value_or(
+            1.0f / std::sqrt(static_cast<float>(headDimQk)));
+        attnScale = hipdnn_plugin_sdk::ScalarOperand{
+            0,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            false,
+            hipdnn_plugin_sdk::ScalarValue{scaleVal}};
     }
 
     // -------------------------------------------------------------------------

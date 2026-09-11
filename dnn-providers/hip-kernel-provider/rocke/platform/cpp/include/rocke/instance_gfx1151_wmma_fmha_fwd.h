@@ -93,10 +93,11 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
                                                size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). The WMMA 16x16x16 f16 atom must
- * exist on `arch` (family "wmma") and the target must be wave32 (WMMA is an
- * RDNA/gfx11 instruction; gfx1151-only). `arch` NULL => "gfx1151". On reject
- * `reason` (if non-NULL, capacity reason_cap) receives the structured message
- * and the function returns false; on accept it returns true and writes "ok". */
+ * exist on `arch` (family "wmma"), the target must be wave32, and GQA requires
+ * num_query_heads to be divisible by num_kv_heads (zero denotes MHA). `arch`
+ * NULL => "gfx1151". On reject `reason` (if non-NULL, capacity reason_cap)
+ * receives the structured message and the function returns false; on accept it
+ * returns true and writes "ok". */
 bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
                                        const char* arch,
                                        char* reason,

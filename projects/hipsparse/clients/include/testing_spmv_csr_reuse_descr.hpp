@@ -390,8 +390,12 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
         hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
 
     const std::vector<hipsparseOperation_t> ops = get_supported_operations(aType);
-    const std::vector<hipsparseSpMVAlg_t>   algs
+    std::vector<hipsparseSpMVAlg_t>         algs
         = {HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG1, HIPSPARSE_SPMV_CSR_ALG2};
+#ifndef CUDART_VERSION
+    // nnzsplit (CSR_ALG3) is a rocSPARSE-specific algorithm with no CUDA equivalent.
+    algs.push_back(HIPSPARSE_SPMV_CSR_ALG3);
+#endif
 
     constexpr int number_of_passes = 3;
 

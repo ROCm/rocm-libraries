@@ -375,15 +375,18 @@ void testing_spmm_bsr(Arguments argus)
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
-    // Preprocess (host pointer mode)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, buffer));
+    if(argus.call_preprocess)
+    {
+        // Preprocess (host pointer mode)
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, buffer));
 
-    // Preprocess (device pointer mode)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, buffer));
+        // Preprocess (device pointer mode)
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, buffer));
+    }
 
     if(argus.unit_check)
     {

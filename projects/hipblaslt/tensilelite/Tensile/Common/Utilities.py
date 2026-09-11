@@ -230,7 +230,7 @@ class SpinnyThing:
     def increment(self, value=1):
         sys.stdout.write("\b" + self.chars[self.index])  # pragma: no mutate
         sys.stdout.flush()
-        self.index = (self.index + 1) % len(self.chars)
+        self.index = (self.index + value) % len(self.chars)
 
     def finish(self):
         sys.stdout.write("\b*\n")
@@ -361,8 +361,70 @@ def isRhel8() -> bool:
 # Math
 ########################################
 
+def clusterEnabled(clusterDim):
+    """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
+    return (clusterDim[0] * clusterDim[1]) != 1
+
+def isPow2(n):
+    """True when ``n`` is a positive power of two."""
+    return n > 0 and (n & (n - 1)) == 0
+
+def streamKCluster(d):
+    """True when the StreamK=3 cluster launch path is active.
+
+    Single source of truth derived from ClusterDim: on StreamK=3 a spatial
+    cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
+    tiles) IS the cluster launch path, so there is no separate state key to
+    store or serialize.
+
+    StreamKForceDPOnly=1 is part of the condition, not an extra gate the callers
+    add: only the DP-only schedule launches over the real M x N tile space that
+    the mask derivation, the tile-index fold and the padded-peer exit assume.
+    The two-tile (FDPO=0) SK3 cluster is cluster *reduction*, which predates this
+    path and must keep emitting exactly what it emits without any of it.
+
+    TDM-multicast waits are ``streamKMulticast``.
+
+    ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
+    and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
+    construct a dict without a StreamK / ClusterDim / StreamKForceDPOnly key.
+    """
+    return (d.get("StreamK", 0) == 3
+            and d.get("ClusterDim", [1, 1])[0] > 1
+            and bool(d.get("StreamKForceDPOnly", 0)))
+
+def streamKMulticast(d):
+    """True when ``streamKCluster`` also issues TDM-multicast loads.
+
+    Requires ``d["Multicast"]``. Missing key defaults True so pre-derivation
+    call sites match ``streamKCluster``.
+    """
+    return streamKCluster(d) and bool(d.get("Multicast", True))
+
+def streamK2DCluster(d):
+    """True when the cluster has both axes > 1, i.e. Ck > 1.
+
+    ClusterDim = [Cs, Ck] with BOTH axes > 1: Cs/X peers share B on M-adjacent
+    tiles and Ck/Y peers share A on N-adjacent tiles. A 1-D [Cs, 1] cluster is
+    the Ck == 1 degenerate of the same shape -- A simply has no peers there.
+
+    ``d`` may be a kernel or a solution ``state`` dict; uses ``.get`` for
+    partial-state derivation call sites.
+    """
+    clusterDim = d.get("ClusterDim", [1, 1])
+    return clusterDim[0] > 1 and clusterDim[1] > 1
+
 def log2(x):
     return int(log(x, 2) + 0.5)
+
+def effectiveMatrixInstMN(matrixInstM, matrixInstN, sourceSwap):
+    # Effective per-instruction M/N extents for tiling/layout. SourceSwap on a
+    # non-square MatrixInstruction transposes the accumulator, so the M/N tiling
+    # extents swap; the physical MatrixInstM/N (opcode / accumulator-layout source
+    # of truth) are unchanged. Square MI or SS0 return the inputs unchanged.
+    if sourceSwap and matrixInstM != matrixInstN:
+        return matrixInstN, matrixInstM
+    return matrixInstM, matrixInstN
 
 def ceilDivide(numerator, denominator):
     # import pdb
@@ -425,3 +487,39 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
+
+# Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
+SWIZZLE_LOAD_BYTES = 16
+
+def swizzleGeometry(solution, tc: str) -> dict:
+    """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
+
+    The tensor is a sequence of swizzle blocks; a block is one wave's global load, of
+    MI_{M|N} rows each holding laneSize contiguous unroll elements.
+
+    dupFactor is 2 where the matrix instruction replicates operands across the wave
+    (gfx10/gfx11 WMMA), so only half the lanes are distinct; 1 for MFMA and gfx12.
+    loadsPerLane is >1 where a lane's operand exceeds one load (gfx11 fp16: 32 bytes);
+    the remainder sits in the next block along the unroll dimension.
+
+    `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
+    WavefrontSize and ProblemType.DataType{tc} are read.
+    """
+    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    miInput   = solution[f"MIInputPerThread{tc}"]
+    miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
+    # Pack several MI steps into one load when one operand is narrower than a dwordx4.
+    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    miOperand = miInput * packK
+    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the wave holds vs. distinct elements the instruction consumes.
+    dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
+    lanesUsed = solution["WavefrontSize"] // dupFactor
+    return {
+        "packK":        packK,
+        "laneSize":     laneSize,
+        "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        "lanesUsed":    lanesUsed,
+        "dupFactor":    dupFactor,
+        "loadsPerLane": miOperand // laneSize,
+    }

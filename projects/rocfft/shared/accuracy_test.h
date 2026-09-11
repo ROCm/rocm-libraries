@@ -344,6 +344,14 @@ inline void run_round_trip_inverse(Tparams&              params,
                                    std::vector<void*>&   pobuffer,
                                    std::vector<hostbuf>& gpu_output)
 {
+    if(params.run_callbacks == fft_callback_type_jit)
+    {
+        params.load_jit_cb_state = get_rank_jit_state(
+            params, "load_callback_round_trip_inverse", true, jit_callback_op::LOAD);
+        params.store_jit_cb_state = get_rank_jit_state(
+            params, "store_callback_round_trip_inverse", true, jit_callback_op::STORE);
+    }
+
     params.validate();
 
     // Make sure that the parameters make sense:
@@ -504,6 +512,14 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Call hipGetLastError to reset any errors
     // returned by previous HIP runtime API calls.
     hipError_t hip_status = hipGetLastError();
+
+    if(params.run_callbacks == fft_callback_type_jit)
+    {
+        params.load_jit_cb_state
+            = get_rank_jit_state(params, "load_callback", false, jit_callback_op::LOAD);
+        params.store_jit_cb_state
+            = get_rank_jit_state(params, "store_callback", false, jit_callback_op::STORE);
+    }
 
     // Make sure that the parameters make sense:
     ASSERT_TRUE(params.valid(verbose));

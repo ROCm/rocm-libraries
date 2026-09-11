@@ -1,0 +1,8249 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "1_16_112_112_bfp16_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/0",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/1",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_1"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/10",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_10"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/11",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_11"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/2",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_2"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/3",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_3"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/4",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_4"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/5",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_5"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/6",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_6"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/7",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_7"
+      }
+    },
+    {
+      "id": "1_16_112_112_bfp16_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/8",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_8"
+      }
+    },
+    {
+      "id": "5_256_14_14_bfp16_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness/9",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dBfp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dBfp16.Correctness_9"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/0",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/1",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/10",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_10"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/11",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_11"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/2",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/3",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_3"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/4",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_4"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/5",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_5"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/6",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_6"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/7",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_7"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp16_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/8",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_8"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp16_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness/9",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp16.Correctness_9"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/0",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/1",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_1"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/10",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_10"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/11",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_11"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              12544,
+              112,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/2",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_2"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nchw_rlo0_norhi",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/3",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_3"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nchw_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/4",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_4"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nchw_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/5",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_5"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/6",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_6"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nhwc_norlo_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/7",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_7"
+      }
+    },
+    {
+      "id": "1_16_112_112_fp32_nhwc_rlo0p1_rhi0p5",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              16,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              112,
+              112
+            ],
+            "strides": [
+              200704,
+              1,
+              1792,
+              16
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/8",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_8"
+      }
+    },
+    {
+      "id": "5_256_14_14_fp32_nhwc_rlo0_norhi",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              256,
+              1,
+              1
+            ],
+            "strides": [
+              256,
+              1,
+              256,
+              256
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              5,
+              256,
+              14,
+              14
+            ],
+            "strides": [
+              50176,
+              1,
+              3584,
+              256
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": 0.0,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "10": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          },
+          "9": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "5": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "8": {
+            "hi": 0.10000000149011612,
+            "kind": "free",
+            "lo": -0.10000000149011612
+          },
+          "7": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": 1.899999976158142
+          },
+          "6": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness/9",
+        "operation": "Full/IntegrationGpuBatchnormBackwardActivation2dFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormBackwardActivation2dFp32.Correctness_9"
+      }
+    }
+  ]
+}

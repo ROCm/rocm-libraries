@@ -1,4 +1,4 @@
 interface:
-  display_name: "hipDNN Review"
-  short_description: "Review hipDNN diffs and PRs"
-  default_prompt: "Use $hipdnn-review to review a hipDNN pull request, branch, or local diff for correctness, compatibility, resource ownership, provider behavior, ASIC/multi-arch coverage, and testing quality."
+  display_name: "hipDNN Review (deprecated)"
+  short_description: "Deprecated — use hipdnn-pr-quality"
+  default_prompt: "DEPRECATED: hipdnn-review has been replaced by $hipdnn-pr-quality. First tell the user this skill is deprecated, then use $hipdnn-pr-quality (review assist) to review the hipDNN PR, branch, or diff."

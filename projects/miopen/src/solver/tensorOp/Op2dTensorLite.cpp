@@ -78,13 +78,6 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     return false;
 }
 
-std::size_t Op2dTensorLite::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext& context,
                                          const miopen::tensorOp::ProblemDescription& problem) const
 {

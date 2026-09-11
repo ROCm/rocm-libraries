@@ -118,7 +118,7 @@ def load_and_decode_mx_scale_byte(
             f"load_and_decode_mx_scale_byte expects ptr<i8>, "
             f"got ptr<{scale_ptr.type.pointee.name}>"
         )
-    e8m0 = b.global_load(scale_ptr, scale_idx, I8, align=1)
+    e8m0 = b.global_load_i8(scale_ptr, scale_idx)
     return decode_mx_scale_e8m0(b, e8m0)
 
 

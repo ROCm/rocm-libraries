@@ -275,7 +275,7 @@ namespace hipblaslt_bench
             const int32_t iters    = cfg.iters > 0 ? cfg.iters : 1;
             double        batch_us = 0.0;
             detail::time_batch(launch, iters, global_index, cfg.use_gpu_timer, events, batch_us);
-            const double per_iter = batch_us / iters;
+            const double per_iter = batch_us / iters - cfg.flush_us;
             out.mean_us = out.median_us = out.min_us = per_iter;
             out.cv = out.rel_iqr = 0.0;
             out.batch            = iters;
@@ -354,7 +354,7 @@ namespace hipblaslt_bench
         {
             double batch_us = 0.0;
             detail::time_batch(launch, batch, global_index, cfg.use_gpu_timer, events, batch_us);
-            const double per_iter = batch_us / batch;
+            const double per_iter = batch_us / batch - cfg.flush_us;
             samples.push_back(per_iter);
             stats.add(per_iter);
             total_us += batch_us;

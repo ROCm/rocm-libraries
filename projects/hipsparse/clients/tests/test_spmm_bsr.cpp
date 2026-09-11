@@ -42,5 +42,6 @@ TEST_ROUTINE_WITH_CONFIG(spmm_bsr,
                          arg.baseA,
                          arg.spmm_alg,
                          arg.block_dim,
-                         arg.dirA);
+                         arg.dirA,
+                         arg.call_preprocess);
 #endif

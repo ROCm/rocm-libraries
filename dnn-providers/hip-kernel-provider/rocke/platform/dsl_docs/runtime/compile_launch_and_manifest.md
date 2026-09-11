@@ -34,6 +34,10 @@ kernel_name  : str
 hsaco_bytes  : int
 ```
 
+Scheduler selection is a typed per-kernel policy rather than an arbitrary
+`compile_kernel(options=...)` escape hatch. See
+[`../optimization/scheduler-policy.md`](../optimization/scheduler-policy.md).
+
 Timing keys:
 
 ```text
@@ -97,7 +101,8 @@ Both fixes are automatic when launches go through `KernelLauncher`.
 
 ## Torch Runtime Layer
 
-File: `runtime/torch_module.py`.
+Files: `runtime/packing.py` (torch-agnostic arg packing) and
+`runtime/torch_interop.py` (stream resolution + torch-tensor launch).
 
 ```text
 pack_args(signature, values) -> bytes      # packs kernel args in declaration order

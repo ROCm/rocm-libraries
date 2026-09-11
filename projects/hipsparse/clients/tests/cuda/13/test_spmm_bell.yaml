@@ -46,6 +46,7 @@ Tests:
   orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
+  call_preprocess: [true, false]
 
 - name: spmm_bell
   category: quick
@@ -66,7 +67,8 @@ Tests:
   orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1, HIPSPARSE_SPMM_ALG_DEFAULT]
-
+  call_preprocess: [true]
+  
 # Pre-checkin
 - name: spmm_bell
   category: pre_checkin
@@ -89,6 +91,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [nos1,
              nos4]
+  call_preprocess: [true]
 
 - name: spmm_bell
   category: pre_checkin
@@ -111,6 +114,7 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [nos2,
              nos3]
+  call_preprocess: [true]
 
 - name: spmm_bell
   category: pre_checkin
@@ -133,7 +137,8 @@ Tests:
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [nos5,
              nos6]
-
+  call_preprocess: [true]
+  
 - name: spmm_bell
   category: pre_checkin
   function: spmm_bell
@@ -154,6 +159,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [nos7]
+  call_preprocess: [true]
 
 # Nightly
 - name: spmm_bell
@@ -176,7 +182,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [shipsec1]
-
+  call_preprocess: [true]
+  
 - name: spmm_bell
   category: nightly
   function: spmm_bell
@@ -197,3 +204,4 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_BLOCKED_ELL_ALG1]
   filename: [bmwcra_1]
+  call_preprocess: [true]

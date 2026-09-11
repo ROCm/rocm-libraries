@@ -127,7 +127,7 @@ def main() -> int:
     if args.ref_shim:
         ref_args += ["--shim", args.ref_shim]
 
-    def run_gate(label: str, extra: list[str]) -> int:
+    def run_gate(label: str, dashboard: str, extra: list[str]) -> int:
         print(f"\n== differential gate: {label} ==")
         proc = subprocess.run(
             [
@@ -135,6 +135,8 @@ def main() -> int:
                 str(RUN_DIFF),
                 "--archive",
                 str(archive),
+                "--json",
+                dashboard,
                 *only_args,
                 *ref_args,
                 *extra,
@@ -145,16 +147,26 @@ def main() -> int:
         print(proc.stdout)
         if proc.stderr:
             print(proc.stderr, file=sys.stderr)
-        if "COMPILE_FAIL" in (proc.stdout + proc.stderr):
-            print(f"GATE FAIL ({label}): a family failed to compile.", file=sys.stderr)
-            return 1
+        # run_diff owns the pass/fail rule (its GATE_PASS/GATE_FAIL partition,
+        # which fails closed on any status it does not recognize). Trust the
+        # exit code -- a second rule here could only disagree with it.
         return proc.returncode
 
-    status = run_gate("LLVM-IR (the contract)", ["--mode", "ll"])
+    # A dashboard per lane, beside the archive it describes: one shared path
+    # meant the diagnostic ir run overwrote the gating run's JSON.
+    status = run_gate(
+        "LLVM-IR (the contract)",
+        str(build_root / "dashboard_ll.json"),
+        ["--mode", "ll"],
+    )
     if args.ir:
+        # Diagnostic, not gating: its exit code is deliberately discarded, so a
+        # GATE FAILURES block under this label does not turn the result RED.
         run_gate(
-            "IR canonical (diagnostic)", ["--mode", "ir", "--canonical"]
-        )  # non-gating
+            "IR canonical (diagnostic)",
+            str(build_root / "dashboard_ir.json"),
+            ["--mode", "ir", "--canonical"],
+        )
 
     print()
     if status == 0:
@@ -162,9 +174,9 @@ def main() -> int:
             "RESULT: GREEN - engine builds and .ll emission is byte-identical to Python."
         )
     else:
-        print(
-            "RESULT: RED - see the mismatching families above. The two engines disagree."
-        )
+        # Not "the engines disagree" -- they may not have been compared at all
+        # (nothing built, nothing enumerated). The GATE FAILURES block says which.
+        print("RESULT: RED - the gate rejected this run; see GATE FAILURES above.")
     return status
 
 

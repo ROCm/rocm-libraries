@@ -3,6 +3,22 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 5.1.0 for ROCm 10.1.0
+
+### Optimized
+ 
+* Added tuning configurations for gfx950 across rocRAND generators.
+ 
+### Resolved Issues
+ 
+* Fixed pure C compilation of the public rocrand/rocrand.h header, which could previously fail with an undefined __half type error or a uint4 typedef redefinition when included before <hip/hip_runtime.h>.
+
+## rocRAND 5.0.0 for ROCm 10.0.0
+
+### Removed
+
+* Removed `h_scrambled_sobol(32|64)_constants`, `rocrand_h_scrambled_sobol(32|64)_direction_vectors`, `rocrand_h_sobol(32|64)_direction_vectors` from public namespace.
+
 ## rocRAND 4.5.0 for ROCm 7.14
 
 ### Added
@@ -15,6 +31,12 @@ Documentation for rocRAND is available at
 
 * gfx1150,gfx1152 and gfx1153 support
 * rocrand.dll now contains embedded file version metadata.
+
+### Changed
+
+* Device API benchmark now utilize vectorized distributions if available.
+  * For example, philox will now be benchmarked via `rocrand4(...)` instead of `rocrand(...)`.
+* Device API benchmark now uses heuristics to pick a config that achieves the highest possible kernel occupancy.
 
 ### Resolved Issues
 

@@ -87,9 +87,11 @@ class WmmaFmhaFwdSpec:
     """One gfx1151 WMMA FMHA forward configuration.
 
     ``head_size`` must be a multiple of 16 (the WMMA K/N tile); standard FMHA
-    head sizes 64 / 128 / 256 qualify. ``seqlen_q`` / ``seqlen_k`` are runtime
-    kernel args (the grid is sized from ``seqlen_q`` at launch), so the spec
-    only carries the compile-time tile facts.
+    head sizes 64 / 128 / 256 qualify. For GQA, ``num_query_heads`` must be a
+    multiple of ``num_kv_heads`` so every query head maps to a valid KV head.
+    ``seqlen_q`` / ``seqlen_k`` are runtime kernel args (the grid is sized from
+    ``seqlen_q`` at launch), so the spec only carries the compile-time tile
+    facts.
     """
 
     head_size: int
@@ -120,6 +122,13 @@ class WmmaFmhaFwdSpec:
         if self.mask_mode not in ("none", "causal"):
             raise ValueError(
                 f"WMMA FMHA supports mask_mode 'none'/'causal', got {self.mask_mode!r}"
+            )
+        if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                "num_query_heads must be a multiple of num_kv_heads for GQA "
+                f"(got num_query_heads={self.num_query_heads}, "
+                f"num_kv_heads={self.num_kv_heads}); otherwise a query head "
+                "would map to an out-of-range KV head"
             )
 
     @property

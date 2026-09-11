@@ -25,6 +25,17 @@ Atom set: `16x16x16`, `16x16x32`, `32x32x8`, `32x32x16` f16.
 
 Pipelines: `mem`, `compv3`, `compv4`. Epilogues: `default`, `cshuffle`. Layout: `RCR`.
 
+Quantized-weight GEMM:
+[`matmul_nbits.py`](../../python/rocke/instances/common/matmul_nbits.py) ships
+`MatMulNBitsSpec` for fp16 activations and packed-int4 weights with group size
+32. Its validator accepts gfx1151 and gfx1201.
+
+Deep fusion:
+[`deep_fused_conv_pool.py`](../../python/rocke/instances/common/deep_fused_conv_pool.py)
+ships the conv -> epilogue -> conv -> maxpool prototype. gfx950 and gfx1201 use
+the shared target-selected `MmaOp` body; gfx1151 has a target-specific
+implementation.
+
 ## Convolution Family
 
 | File | Spec | Doc |
@@ -76,6 +87,21 @@ Path selection: `select_2d_config` / `select_3d_config` / `use_2d_kernel`. The r
 Coverage: fp16 / bf16, head_size in `{64, 128, 256}`, block_size in `{16, 64}`, causal / sliding window / softcap / sinks / ALiBi / QQ-bias.
 
 FP8 K/V cache + output scale/clamp is wired through `UnifiedAttentionProblem.use_fp8` (the kernel takes per-tensor `k_scale` / `v_scale` and stores the cache as `fp8e4m3`); see attention parity README.
+
+## Linear Attention Family
+
+A gated delta-rule recurrence rather than softmax attention, so it shares no
+code with the family above.
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gfx942/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
+| `gfx950/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
+
+Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
+builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
+Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
+fused kernel and keeps the split halves opt-in.
 
 ## Small Ops
 
@@ -143,6 +169,7 @@ From `helpers/README.md`:
 | attention_unified | - | Q + output + paged-KV | - | - | - | yes | - | `OnlineSoftmaxState`, `PagedKvDescriptor` |
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
+| kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
 
 ## Building Any Instance
 

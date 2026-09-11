@@ -15,15 +15,13 @@ from pathlib import Path
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.runtime.hip_module import get_device_arch
 
 
-def _has_rocm_gpu() -> bool:
-    try:
-        import torch
-
-        return bool(torch.cuda.is_available())
-    except Exception:
-        return False
+# The runtime bodies below build+launch a gfx950 code object, so gate on the exact arch
+# (via the rocke HIP runtime, no torch): on any other device the launch would fail with
+# hipError(209) no kernel image.
+_ARCH = get_device_arch(0)
 
 
 def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
@@ -70,7 +68,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
     return output
 
 
-@unittest.skipUnless(_has_rocm_gpu(), "requires a ROCm GPU")
+@unittest.skipUnless(_ARCH == "gfx950", "requires a gfx950 GPU")
 class TestGemmParallelRuntime(unittest.TestCase):
     def test_threaded_compile_and_run(self):
         jobs = (

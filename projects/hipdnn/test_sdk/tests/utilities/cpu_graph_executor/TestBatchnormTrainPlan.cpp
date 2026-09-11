@@ -98,6 +98,84 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlan)
                                                 planTensorBundle.invVarianceTensor));
 }
 
+TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
+{
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
+
+    // Runtime pass-by-value epsilon and momentum: neither carries a baked
+    // value; both host values are delivered through the variant pack at
+    // execute.
+    BatchnormTrainTensorBundle<float, float, float> runtimeBundle(
+        dims, seed, TensorLayout::NHWC, /*useOptionalTensors=*/true);
+    auto runtimeGraphTuple = buildBatchnormTrainGraph(runtimeBundle,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      /*useOptionalTensors=*/true,
+                                                      /*runtimeEpsilon=*/true,
+                                                      /*runtimeMomentum=*/true);
+    auto& runtimeGraph = std::get<0>(runtimeGraphTuple);
+    auto& runtimeVariantPack = std::get<1>(runtimeGraphTuple);
+    auto [runtimeSerialized, runtimeSerErr] = runtimeGraph->to_binary();
+    ASSERT_TRUE(runtimeSerErr.is_good()) << runtimeSerErr.get_message();
+    const GraphWrapper runtimeWrapper(runtimeSerialized.data(), runtimeSerialized.size());
+
+    const auto epsilonHostValue = static_cast<float>(BATCHNORM_DEFAULT_EPSILON);
+    const float momentumHostValue = 0.1f;
+    const auto* runtimeAttrs = runtimeWrapper.getNode(0).attributes_as_BatchnormAttributes();
+    *static_cast<float*>(runtimeVariantPack.at(runtimeAttrs->epsilon_tensor_uid()))
+        = epsilonHostValue;
+    ASSERT_TRUE(runtimeAttrs->momentum_tensor_uid().has_value());
+    *static_cast<float*>(runtimeVariantPack.at(runtimeAttrs->momentum_tensor_uid().value()))
+        = momentumHostValue;
+
+    const BatchnormTrainPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        builder;
+    auto runtimePlan = builder.buildNodePlan(runtimeWrapper, runtimeWrapper.getNode(0));
+    runtimePlan->execute(runtimeVariantPack);
+
+    // Baked-value reference graph with the same seed and equal epsilon/momentum.
+    BatchnormTrainTensorBundle<float, float, float> bakedBundle(
+        dims, seed, TensorLayout::NHWC, /*useOptionalTensors=*/true);
+    auto bakedGraphTuple = buildBatchnormTrainGraph(bakedBundle,
+                                                    DataType::FLOAT,
+                                                    DataType::FLOAT,
+                                                    DataType::FLOAT,
+                                                    DataType::FLOAT,
+                                                    /*useOptionalTensors=*/true);
+    auto& bakedGraph = std::get<0>(bakedGraphTuple);
+    auto& bakedVariantPack = std::get<1>(bakedGraphTuple);
+    auto [bakedSerialized, bakedSerErr] = bakedGraph->to_binary();
+    ASSERT_TRUE(bakedSerErr.is_good()) << bakedSerErr.get_message();
+    const GraphWrapper bakedWrapper(bakedSerialized.data(), bakedSerialized.size());
+
+    const BatchnormTrainPlanBuilder<DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT>
+        bakedBuilder;
+    auto bakedPlan = bakedBuilder.buildNodePlan(bakedWrapper, bakedWrapper.getNode(0));
+    bakedPlan->execute(bakedVariantPack);
+
+    auto tolerance = batchnorm::getToleranceTraining<float>();
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(bakedBundle.yTensor, runtimeBundle.yTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(bakedBundle.meanTensor, runtimeBundle.meanTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(bakedBundle.invVarianceTensor,
+                                                runtimeBundle.invVarianceTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(*bakedBundle.nextRunningMeanTensor,
+                                                *runtimeBundle.nextRunningMeanTensor));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(*bakedBundle.nextRunningVarianceTensor,
+                                                *runtimeBundle.nextRunningVarianceTensor));
+}
+
 TEST(TestBatchnormTrainPlanBuilder, PlanConstruction)
 {
     const std::vector<int64_t> dims = {2, 1, 1, 1};

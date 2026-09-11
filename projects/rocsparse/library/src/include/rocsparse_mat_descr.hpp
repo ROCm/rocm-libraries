@@ -45,6 +45,4 @@ struct _rocsparse_mat_descr
     rocsparse_index_base base = rocsparse_index_base_zero;
     // storage mode
     rocsparse_storage_mode storage_mode = rocsparse_storage_mode_sorted;
-    // maximum nnz per row
-    int64_t max_nnz_per_row = 0;
 };

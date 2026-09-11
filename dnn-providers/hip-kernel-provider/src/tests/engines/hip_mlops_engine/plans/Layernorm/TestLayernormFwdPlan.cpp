@@ -48,7 +48,7 @@ TEST(TestLayernormFwdParams, HasCorrectTensorPointersForSingleNode)
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_EQ(params.mean(), nullptr);
-    EXPECT_NE(params.epsilon(), nullptr);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
     EXPECT_EQ(params.invVariance(), nullptr);
 }
 
@@ -68,7 +68,7 @@ TEST(TestLayernormFwdParams, TensorPointersMatchExpectedUids)
     EXPECT_EQ(params.y()->uid(), attrs->y_tensor_uid());
     EXPECT_EQ(params.scale()->uid(), attrs->scale_tensor_uid());
     EXPECT_EQ(params.bias()->uid(), attrs->bias_tensor_uid());
-    EXPECT_EQ(params.epsilon()->uid(), attrs->epsilon_tensor_uid());
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestLayernormFwdParams, IsMoveConstructible)
@@ -293,10 +293,10 @@ TEST(TestLayernormFwdPlanBfp16, CompileSetsCorrectDefines)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INPUT_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTPUT_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INPUT_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTPUT_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE=__bf16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_INNER_SIZE=150528"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_OUTER_SIZE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_LAYERNORM_LOCAL_SIZE=1024"));

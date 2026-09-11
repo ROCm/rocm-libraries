@@ -217,6 +217,36 @@ TEST(MatrixScaleFmt, ParseInvalidReturnsNone) {
 }
 
 // ---------------------------------------------------------------------------
+// parseMatrixScaleSel — single-bit selector, capped to 0/1
+// ---------------------------------------------------------------------------
+
+TEST(MatrixScaleSel, ParseSelectBits) {
+    EXPECT_EQ(parseMatrixScaleSel("0"), 0);
+    EXPECT_EQ(parseMatrixScaleSel("1"), 1);
+    EXPECT_EQ(parseMatrixScaleSel(""), 0);
+}
+
+// ---------------------------------------------------------------------------
+// MatrixFmtModifiers::empty() — must account for scale-select
+// ---------------------------------------------------------------------------
+
+TEST(MatrixFmtModifiers, EmptyWhenAllFieldsUnset) {
+    EXPECT_TRUE(MatrixFmtModifiers{}.empty());
+}
+
+TEST(MatrixFmtModifiers, NonZeroScaleSelIsNotEmpty) {
+    // A scale-select of 1 is meaningful on its own (matrix_*_scale:1), so the
+    // modifier must not be dropped as empty even with no fmt/scaleFmt set.
+    MatrixFmtModifiers a;
+    a.scaleSelA = 1;
+    EXPECT_FALSE(a.empty());
+
+    MatrixFmtModifiers b;
+    b.scaleSelB = 1;
+    EXPECT_FALSE(b.empty());
+}
+
+// ---------------------------------------------------------------------------
 // CallTargetData serializer
 // ---------------------------------------------------------------------------
 

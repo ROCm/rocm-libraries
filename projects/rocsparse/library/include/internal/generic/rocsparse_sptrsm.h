@@ -133,7 +133,7 @@ rocsparse_status rocsparse_sptrsm_buffer_size(rocsparse_handle            handle
 *  </table>
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, and \ref rocsparse_format_csc.
 *
 *  \note
 *  Only the \ref rocsparse_sptrsm_stage_compute stage is non-blocking

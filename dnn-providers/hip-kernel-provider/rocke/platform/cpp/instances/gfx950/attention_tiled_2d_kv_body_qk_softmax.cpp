@@ -587,6 +587,14 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
     rocke_b_sync(b);
 
+    /* STEP 2 lever (modes 0/1): canned iglp interleave for the whole loop body,
+     * placed once after the iter-start K drain (mirrors Python 3093-3094). Level
+     * 0 = GEMM MFMA-interleave, level 1 = attention-style interleave. Mode 2
+     * (sched_group_barrier grouping) is rejected in the glue. */
+    if(ctx->USE_SOFTMAX_INTERLEAVE
+       && (ctx->SOFTMAX_INTERLEAVE_MODE == 0 || ctx->SOFTMAX_INTERLEAVE_MODE == 1))
+        rocke_b_iglp_opt(b, ctx->SOFTMAX_INTERLEAVE_MODE);
+
     /* Early-V schedule: V_lds is single-buffered and the iter-start full drain
      * guarantees the previous PV's V reads retired, so the current V copy can be
      * issued before QK to overlap with QK + softmax (Python 2566-2570). */

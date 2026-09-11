@@ -323,8 +323,7 @@ namespace rocsparse
 
     // Segmented block reduction kernel
     template <unsigned int BLOCKSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* __restrict__ rows,
-                                                    T* __restrict__ vals)
+    ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* rows, T* vals)
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
@@ -348,15 +347,17 @@ namespace rocsparse
         }
     }
 
-    // Do the final block reduction of the block reduction buffers back into global memory
+    // Do the final block reduction of the block reduction buffers back into global
+    // memory for a single batch. Pointers are expected to already be offset to the
+    // batch this block operates on.
     template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_general_block_reduce(I nblocks,
-                                      const J* __restrict__ row_block_red,
-                                      const T* __restrict__ val_block_red,
-                                      C*              dense_C,
-                                      int64_t         ldc,
-                                      rocsparse_order order_C)
+    ROCSPARSE_DEVICE_ILF void
+        csrmmnn_general_block_reduce_device(I nblocks,
+                                            const J* __restrict__ row_block_red,
+                                            const T* __restrict__ val_block_red,
+                                            C*              dense_C,
+                                            int64_t         ldc,
+                                            rocsparse_order order_C)
     {
         const int tid = hipThreadIdx_x;
 
@@ -364,12 +365,12 @@ namespace rocsparse
         __shared__ I shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE];
 
+        const I col = hipBlockIdx_x;
+
         shared_row[tid] = -1;
         shared_val[tid] = static_cast<T>(0);
 
         __syncthreads();
-
-        const I col = hipBlockIdx_x;
 
         for(I i = 0; i < nblocks; i += BLOCKSIZE)
         {
@@ -404,6 +405,33 @@ namespace rocsparse
             }
 
             __syncthreads();
+        }
+    }
+
+    // Do the final block reduction of the block reduction buffers back into global memory
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrmmnn_general_block_reduce(I       nblocks,
+                                      int64_t batch_count,
+                                      const J* __restrict__ row_block_red,
+                                      const T* __restrict__ val_block_red,
+                                      C*              dense_C,
+                                      int64_t         ldc,
+                                      rocsparse_order order_C,
+                                      int64_t         batch_stride_C)
+    {
+        // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
+        // are computed with load_pointer so the device kernel stays batch-agnostic.
+        // hipGridDim_x equals n, so the per-batch val_block_red stride is nblocks * n.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnn_general_block_reduce_device<BLOCKSIZE>(
+                nblocks,
+                load_pointer(row_block_red, batch, static_cast<int64_t>(nblocks)),
+                load_pointer(val_block_red, batch, static_cast<int64_t>(nblocks) * hipGridDim_x),
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C);
         }
     }
 

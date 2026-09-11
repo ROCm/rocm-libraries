@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,17 @@
 #if(defined(CUDART_VERSION))
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
+static void print_cuda_13_3_0_and_later_support_string()
+{
+    std::cout << "Warning: You are using CUDA version: " << TOSTRING(CUDART_VERSION)
+              << " but this routine is not supported. See CUDA support table for this"
+              << " routine below: " << std::endl;
+    std::string table = "              CUDA Version                      \n"
+                        "|...|12.8.2|12.9.2|13.0.0|...|13.3.0|13.3.1|...|\n"
+                        "                             |<---supported--->|  ";
+    std::cout << table << std::endl;
+}
+
 static void print_cuda_12_0_0_to_12_5_1_support_string()
 {
     std::cout << "Warning: You are using CUDA version: " << TOSTRING(CUDART_VERSION)
@@ -196,6 +207,14 @@ struct routine_support
         return false;
 #endif
     }
+    static bool is_cscsv_supported()
+    {
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+        return true;
+#else
+        return false;
+#endif
+    }
     static bool is_gemvi_supported()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
@@ -265,6 +284,14 @@ struct routine_support
     static bool is_csrsm_supported()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+        return true;
+#else
+        return false;
+#endif
+    }
+    static bool is_cscsm_supported()
+    {
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
         return true;
 #else
         return false;
@@ -490,6 +517,12 @@ struct routine_support
         print_cuda_10_0_0_to_11_8_0_support_string();
 #endif
     }
+    static void print_cscsv_support_warning()
+    {
+#if(defined(CUDART_VERSION))
+        print_cuda_13_3_0_and_later_support_string();
+#endif
+    }
     static void print_gemvi_support_warning()
     {
 #if(defined(CUDART_VERSION))
@@ -543,6 +576,12 @@ struct routine_support
     {
 #if(defined(CUDART_VERSION))
         print_cuda_11_3_1_to_12_5_1_support_string();
+#endif
+    }
+    static void print_cscsm_support_warning()
+    {
+#if(defined(CUDART_VERSION))
+        print_cuda_13_3_0_and_later_support_string();
 #endif
     }
     static void print_gemmi_support_warning()

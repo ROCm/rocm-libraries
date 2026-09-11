@@ -37,6 +37,11 @@ else()
     set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 
+# Set ROCM_LIBRARIES_ROOT for monorepo builds (shared ctest infrastructure)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
 set(USING_THE_ROCK OFF)
 if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
@@ -64,7 +69,7 @@ endif()
 
 # RPP Version
 # NOTE: package version and rpp_version.h is generated with this version
-set(VERSION "3.1.2")
+set(VERSION "3.2.0")
 
 # Set Project Version and Language
 project(rpp VERSION ${VERSION} LANGUAGES CXX)
@@ -92,6 +97,9 @@ set(DEFAULT_BUILD_TYPE "Release")
 
 ### RPP_AUDIO_SUPPORT - default = OFF, NOTE: enabled automatically when FFTS is found
 option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
+
+### CODE_COVERAGE - default = OFF, instruments librpp.so for LLVM coverage
+option(CODE_COVERAGE          "Build RPP with code coverage instrumentation (LLVM)"  OFF)
 
 # Set message options
 if(NOT WIN32)
@@ -195,6 +203,7 @@ message("-- ${Cyan}RPP Developer Options${ColourReset}")
 message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/HIP](default:HIP)]${ColourReset}")
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
+message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
 
 # OpenMP
 find_package(OpenMP COMPONENTS CXX REQUIRED)
@@ -328,6 +337,18 @@ endif()
 add_library(${PROJECT_NAME} SHARED api/rpp.h $<TARGET_OBJECTS:modules>)
 # Enable fast-math to replace Ofast
 target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
+
+# LLVM source-based coverage. Compile flags go on `modules` since ${PROJECT_NAME} builds
+# from its objects and has no sources of its own. -Xarch_host keeps instrumentation off the
+# HIP device passes, which otherwise fail to link on __llvm_profile_instrument_gpu.
+# COMPILE_FLAGS avoids COMPILE_OPTIONS de-duplicating the repeated -Xarch_host.
+if(CODE_COVERAGE)
+    set_property(TARGET modules APPEND_STRING PROPERTY COMPILE_FLAGS
+                 " -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping")
+    set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY LINK_FLAGS " -fprofile-instr-generate")
+    message("-- ${Green}${PROJECT_NAME} set to build with CODE_COVERAGE${ColourReset}")
+endif()
+
 if("${SIMD_ENABLE}" STREQUAL "1")
     target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_SIMD_INTRINSICS=1)
     message("-- ${Green}${PROJECT_NAME} set to build with ENABLE_SIMD_INTRINSICS${ColourReset}")
@@ -388,6 +409,7 @@ endif()
 # Test suite
 enable_testing()
 include(CTest)
+add_subdirectory(test)
 add_subdirectory(utilities/test_suite)
 
 # Installation
@@ -415,6 +437,17 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/rpp_version.h
 # install Test
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/utilities/test_suite/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
+
+# Install shared ctest infrastructure for test filtering (quick, standard, comprehensive, full labels)
+# Files are installed to cmake/shared/ctest/ to match the path expected by TestCategories.cmake
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest")
+    install(FILES
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake
+        ${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_ctest_categories.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/cmake/shared/ctest
+        COMPONENT test
+    )
+endif()
 
 # set license information
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
