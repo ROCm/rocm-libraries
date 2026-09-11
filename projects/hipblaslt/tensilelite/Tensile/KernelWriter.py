@@ -56,7 +56,8 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, swizzleGeometry
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, \
+  swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -5609,8 +5610,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # past the generic per-load cluster-barrier bracketing boundary.
           # Bracket them with a self-contained cluster-scope handshake so every
           # multicast load stays synchronized and signal/wait counts stay
-          # balanced. Gated on StreamKMulticast (only ever set on the StreamK=3
-          # component), so the emitted code is unchanged for every other path.
+          # balanced. Gated on streamKMulticast (cluster + TDM broadcast):
+          # gfx1250v0 has the cluster launch but no peer ld_bcst to keep in lockstep.
           if streamKMulticast(kernel):
             module.add(skComponent.streamKMulticastProloguePrefetchHandshake(self, kernel))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
@@ -6871,7 +6872,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # drain in InsertClusterBarrierPass Rule 3 (mainloop): with PGR>=2
                                # an `s_wait_tensorcnt 0` is emitted after the cooperative
                                # tensor_load group so the broadcast retires before the back edge.
-                               # Defaults off; no-op for every other kernel.
+                               # Requires TDM multicast, not just a cluster: without a peer
+                               # ld_bcst that wait has nothing to retire (gfx1250v0).
                                "StreamKMulticast": bool(streamKMulticast(kernel)),
                                # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
                                # between an urgent and a deferrable tensor_load group.
