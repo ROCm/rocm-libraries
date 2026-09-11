@@ -47,9 +47,11 @@ TEST(TestIngestorScoreTransform, AnUntransformedTargetPassesThroughUnchanged)
 
 TEST(TestIngestorScoreTransform, AnUnrecognisedTransformDoesNotSilentlyPassThrough)
 {
-    // isSupported is what the loader checks. Without that check an unknown name would reach
-    // applyInverse, fall through to the identity branch, and report a log-scale number as
-    // TFLOPS -- a value ~100x too small, still positive, still ordered correctly.
+    // isSupported is the gate: parseUhdConfig's `score` block calls it, and so does
+    // prediction_detail::validateBinding where an engine binds an L1 model. Without it an
+    // unknown name would reach applyInverse, fall through to the identity branch, and report a
+    // log-scale number as TFLOPS -- a value ~100x too small, still positive, still ordered
+    // correctly.
     EXPECT_FALSE(score_transform::isSupported("log10"));
     EXPECT_FALSE(score_transform::isSupported("Log1p")) << "the match must be exact";
     EXPECT_FALSE(score_transform::isSupported("boxcox"));

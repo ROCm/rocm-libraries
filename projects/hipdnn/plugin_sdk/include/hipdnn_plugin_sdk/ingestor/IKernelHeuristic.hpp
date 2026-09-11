@@ -238,17 +238,16 @@ public:
         return ranked;
     }
 
-    /// @brief Whether this heuristic's score is comparable against other engines' scores.
+    /// @brief Exact physical-throughput estimates; empty when this ranker cannot calibrate.
     ///
     /// RFC 0019 §11.3: a cross-engine score must be an absolute metric on a scale that means
-    /// the same thing everywhere -- calibrated TFLOPS. Defaults to false, so a heuristic that
+    /// the same thing everywhere -- calibrated TFLOPS. Empty by default, so a heuristic that
     /// has not said otherwise is never compared against another engine by accident.
-    virtual bool scoreIsCalibrated() const
-    {
-        return false;
-    }
-
-    /// @brief Exact physical-throughput estimates; empty when this ranker cannot calibrate.
+    ///
+    /// The only place calibration is decided. It used to share that decision with a
+    /// `scoreIsCalibrated()` flag read off the heuristic's own descriptor, and the two
+    /// disagreed whenever the descriptor answering was not the one the running architecture
+    /// ranks with.
     virtual std::vector<ScoredKernel>
         calibratedRanking(const Catalog&, const MatchContext&, std::string& /*modelId*/) const
     {
@@ -263,31 +262,35 @@ public:
     /// predicted score as its estimate, accepting the enumeration cost" -- which is what this
     /// is. A distinct estimate model, when one exists, replaces the body without moving the seam.
     ///
+    /// Derived from calibratedRanking rather than from rankScored plus a calibration flag, so
+    /// the two cannot disagree about what the number means. The flag answered for the heuristic
+    /// *object*, while the ranking comes from whichever per-architecture model §8.3 resolved,
+    /// and the two parted company in both directions: a UED naming per-arch calibrated models
+    /// and no `default` reported the 0 distrust sentinel on the very architectures it shipped a
+    /// calibrated model for, and a UED whose `default` is calibrated while the arch-specific
+    /// model is not reported that model's uncalibrated number as though it were TFLOPS.
+    ///
+    /// calibratedRanking is the stricter test -- it also requires `score.units` to be tflops,
+    /// the objective to be `max`, and the model to have been trained for this architecture -- so
+    /// an out-of-distribution architecture now estimates 0 where the flag alone reported a
+    /// number. That is the intended answer and not a regression: RFC 0019 §5 step 8's distrust
+    /// signal. Selection is unaffected, since §9.3 keeps an untrained-for architecture ranking
+    /// on the model; only the cross-engine claim is withdrawn.
+    ///
     /// Returns 0, not an absent value, when this heuristic has no figure of merit to offer:
     /// §5 step 7 and §7 both spell the contract as "the engine reports an estimated throughput
     /// of 0 so any engine with a real estimate outranks it in engine selection. The engine still
     /// answers, still dispatches, and loses on merit rather than by exception." An optional
     /// would have made every caller decide separately what an absent estimate means, and §11.3
     /// needs one comparable scale rather than two kinds of answer.
-    ///
-    /// The two cases that yield 0 are an uncalibrated score -- which ranks within one engine
-    /// only (§15.1) and says nothing cross-engine -- and a ranking that computed no score at
-    /// all (§15.2). Both still rank; declining to estimate is not declining to select.
     double estimateTflops(const Catalog& catalog, const MatchContext& context) const
     {
-        if(!scoreIsCalibrated())
-        {
-            return 0.0;
-        }
-
-        const auto scored = rankScored(catalog, context);
-        if(scored.empty())
-        {
-            return 0.0;
-        }
-        // rankScored already reports an unusable score as 0, so the top entry needs no second
-        // sentinel check -- one rule, applied once, at the point that knows.
-        return scored.front().score;
+        // The id of the model that produced the estimate is provenance GenericPlanBuilder
+        // records where it needs it; an estimate is one number, so it is taken and dropped here
+        // rather than growing a second overload for callers that do not want it.
+        std::string modelId;
+        const auto calibrated = calibratedRanking(catalog, context, modelId);
+        return calibrated.empty() ? 0.0 : calibrated.front().score;
     }
 
     /// The same order as rankScored(), as whole kernels.

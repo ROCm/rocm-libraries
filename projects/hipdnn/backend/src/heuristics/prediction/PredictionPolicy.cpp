@@ -3,6 +3,7 @@
 
 #include "PredictionPolicy.hpp"
 
+#include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <memory>
 #include <string_view>
@@ -421,7 +423,8 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
                     estimate->engine_config()->UnPackTo(&config);
                 }
             }
-            // L1-only and unknown engines use their ordinary selector.
+            // L1-only and unknown engines use their ordinary selector; only the quick
+            // policy's winner is refined below (RFC 0019 §11.2).
             // L2 estimates retain the exact scored configuration and all its knobs.
             flatbuffers::FlatBufferBuilder builder;
             builder.Finish(EngineConfig::Pack(builder, &config));
@@ -442,6 +445,59 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
                              }
                              return left.available && left.tflops > right.tflops;
                          });
+        // RFC 0019 §11.2: the quick policy "ranks applicable engines by A; picks the
+        // winner; if the winner has a config UHD (B), runs it to pick the kernel"
+        // (§11.2 quick policy, table row "A and B"). Only the winner drills down —
+        // losers are never scored at the kernel level — and the ranking is untouched
+        // because §11.2 ranks by A alone. A winner that answers nothing usable keeps
+        // its knob-less config and performs its own kernel selection (row "A only").
+        if(!desc.modeB && desc.ranked.front().available)
+        {
+            auto& winner = desc.ranked.front();
+            if(const auto* drilled
+               = query(*host, winner.id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION))
+            {
+                EngineConfigT config;
+                drilled->engine_config()->UnPackTo(&config);
+                flatbuffers::FlatBufferBuilder builder;
+                builder.Finish(EngineConfig::Pack(builder, &config));
+                winner.config = builder.Release();
+            }
+        }
+        // RFC 0019 §11.2: an engine that supplies neither estimate "falls back to
+        // static ordering; contributes no score" (table row "Neither") and "is
+        // ordered by the existing static rules". Emitting the unscored tail in
+        // candidate-arrival order is neither the static rules nor deterministic, so
+        // order it with the shared static ordering; scored rows keep their ranking.
+        const auto tail = std::find_if(desc.ranked.begin(),
+                                       desc.ranked.end(),
+                                       [](const RankedEngine& row) { return !row.available; });
+        if(tail != desc.ranked.end())
+        {
+            std::vector<int64_t> unscored;
+            unscored.reserve(static_cast<size_t>(desc.ranked.end() - tail));
+            for(auto row = tail; row != desc.ranked.end(); ++row)
+            {
+                unscored.push_back(row->id);
+            }
+            hipdnn_data_sdk::utilities::sortEngineIds(unscored);
+            // Engine ids are unique (policySetEngineIds rejects duplicates), so each
+            // target id selects exactly one row and the permutation is a swap chain.
+            for(std::size_t i = 0; i < unscored.size(); ++i)
+            {
+                const auto slot = tail + static_cast<std::ptrdiff_t>(i);
+                if(slot->id == unscored[i])
+                {
+                    continue;
+                }
+                std::iter_swap(slot,
+                               std::find_if(slot + 1,
+                                            desc.ranked.end(),
+                                            [target = unscored[i]](const RankedEngine& row) {
+                                                return row.id == target;
+                                            }));
+            }
+        }
         desc.finalized = true;
         *applied = 1;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;

@@ -18,6 +18,7 @@
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginManager.hpp"
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
@@ -179,25 +180,86 @@ TEST_F(TestPredictionPolicies, RegistersBothPredictionPoliciesUnderTheirCanonica
     EXPECT_NE(findPredictionPlugin(fresh), nullptr);
 }
 
-TEST_F(TestPredictionPolicies, ModeARanksOnlyL1AndRetainsUnknownEngines)
+// RFC 0019 §11.2 quick policy: "Rank applicable engines by A; pick the winner; if the
+// winner has a config UHD (B), run it to pick the kernel. Only the winner drills down,
+// so losers are never scored at the kernel level." The drill-down chooses the winner's
+// kernel; it never chooses the winner (the table's "A and B" row ranks by A).
+TEST_F(TestPredictionPolicies, ModeARanksByL1AndOnlyTheWinnerDrillsIntoL2)
 {
     selectMode(MODE_A_POLICY_NAME, {1, 2, 3, 4});
     estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
     estimate(2, HIPDNN_ENGINE_PREDICTION_ENGINE, 20);
     estimate(4, HIPDNN_ENGINE_PREDICTION_ENGINE, 20);
+    // A loser's L2 score beats every L1 estimate — it must never be asked for it.
     estimate(1, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, 500);
+    // The winner's L2 score is worse than the runner-up's L1 estimate: ranking is by A.
+    estimate(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, 1);
     const auto services = host();
     ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
     EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{2, 4, 1, 3}));
-    EXPECT_EQ(_calls.size(), 4u);
-    for(const auto& [key, calls] : _calls)
+
+    // Every applicable engine is asked for A exactly once and only the winner is also
+    // asked for B, so the quick policy pays exactly one kernel enumeration.
+    const std::map<Key, size_t> expected{{{1, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
+                                         {{2, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
+                                         {{3, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
+                                         {{4, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
+                                         {{2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION}, 1u}};
+    EXPECT_EQ(_calls, expected);
+
+    // The winner carries the kernel its drill-down picked; losers and unknown engines
+    // keep the knob-less config that leaves kernel choice to their ordinary selector.
+    const auto winner = _plugin->getEngineConfig(_descriptor.get(), 2);
+    ASSERT_NE(winner, nullptr);
+    ASSERT_EQ(winner->knobs.size(), 1u);
+    EXPECT_EQ(winner->knobs[0]->knob_id, "tile");
+    ASSERT_NE(winner->knobs[0]->value.AsIntValue(), nullptr);
+    EXPECT_EQ(winner->knobs[0]->value.AsIntValue()->value, 128);
+    for(const auto loser : {int64_t{1}, int64_t{3}, int64_t{4}})
     {
-        EXPECT_EQ(key.second, HIPDNN_ENGINE_PREDICTION_ENGINE);
-        EXPECT_EQ(calls, 1u);
-        const auto config = _plugin->getEngineConfig(_descriptor.get(), key.first);
+        const auto config = _plugin->getEngineConfig(_descriptor.get(), loser);
         ASSERT_NE(config, nullptr);
-        EXPECT_EQ(config->engine_id, key.first);
+        EXPECT_EQ(config->engine_id, loser);
         EXPECT_TRUE(config->knobs.empty());
+    }
+
+    // RFC 0019 §11.2 row "A only (opaque)": a winner that declines B keeps its
+    // knob-less config and runs its own kernel selection. The ranking is unchanged.
+    _predictions.erase(Key(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION));
+    _calls.clear();
+    ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+    EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{2, 4, 1, 3}));
+    EXPECT_EQ(_calls[Key(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION)], 1u);
+    EXPECT_TRUE(_plugin->getEngineConfig(_descriptor.get(), 2)->knobs.empty());
+}
+
+// RFC 0019 §11.2 table row "Neither": an engine that answers neither query "falls back
+// to static ordering; contributes no score" and "is ordered by the existing static
+// rules" — identically under both policies. The order candidates arrived in is neither.
+TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
+{
+    using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    // Arrival order is the exact reverse of the static rules for the silent engines.
+    const std::vector<int64_t> arrival{
+        HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_DETERMINISTIC_ID, ASM_SDPA_ENGINE_ID, MIOPEN_ENGINE_ID};
+    for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
+    {
+        selectMode(mode, arrival);
+        estimate(HIPBLASLT_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+        const auto services = host();
+        ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+        // The one scored engine keeps its rank ahead of the silent tail, and that tail
+        // comes out MIOPEN, ASM_SDPA, MIOPEN_DETERMINISTIC however it arrived.
+        EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
+                  (std::vector<int64_t>{HIPBLASLT_ENGINE_ID,
+                                        MIOPEN_ENGINE_ID,
+                                        ASM_SDPA_ENGINE_ID,
+                                        MIOPEN_ENGINE_DETERMINISTIC_ID}))
+            << "policy " << mode;
     }
 }
 

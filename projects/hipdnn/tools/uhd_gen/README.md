@@ -27,7 +27,7 @@ pip install -e .
    |              |                   |           |             |
    |              |                   |           |             `- writes the UED's
    |              |                   |           |                role/architecture reference
-   |              |                   |           `- eval_report.json (§11.2 regret)
+   |              |                   |           `- eval_report.json (§11.2/§11.4 regret)
    |              |                   `- <stem>.uhd.json + model.bin
    |              `- §8.3 training CSV
    `- ingestor benchmark log
@@ -141,7 +141,8 @@ it was dropped.
 | `--target` | No | Target column name (default: `tflops`) |
 | `--objective` | No | `max` or `min` (default: `max`). Pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
 | `--score-units` | No | Units the score is expressed in (default: the `--target` column name) |
-| `--calibrated` | No | Declare the score cross-engine comparable (RFC 0019 §12.3). Off by default; nothing here verifies the claim. |
+| `--calibrated` | No | Declare the score cross-engine comparable — RFC 0019 §4.1's `score.calibrated` header, which §11.3 reads when it compares predicted throughput across engines. Off by default; nothing here verifies the claim, but RFC 0019.13 §11.2 pins a calibrated score to `avgTimeMs`, so `--timing-statistic avgTimeMs` is required alongside it. |
+| `--timing-statistic` | With `--calibrated` | Which measured timing the target was derived from (`avgTimeMs`, `minTimeMs`, `robustMeanMs`). Recorded in the manifest per §10.5: §11.2 refuses cross-engine comparison between models trained on different statistics, so it has to be readable off the artifact. |
 | `--group-by` | No | Columns for GroupKFold CV |
 | `--output-dir` | Yes | Output directory |
 | `--name` | No | UHD display name |
@@ -190,7 +191,7 @@ It validates everything before writing anything, and refuses rather than half-su
 ## `evaluate`: regret against the best kernel that was measured
 
 RMSE on `log1p(target)` is what `train` reports, and it can improve while the model's
-*choice* gets worse. `evaluate` measures the choice, per RFC 0019.13 §11.2:
+*choice* gets worse. `evaluate` measures the choice, per RFC 0019.13 §11.2 and §11.4:
 
 - **top-1 regret** — how much worse the model's pick is than the oracle `v*(p)`, the
   best measured candidate for that problem. `t(v̂)/t(v*) − 1` under `objective: min`,
@@ -201,6 +202,12 @@ RMSE on `log1p(target)` is what `train` reports, and it can improve while the mo
 - **per-regime regret** — the same mean, grouped by the corpus's regime column. §11.2
   makes this the *primary* form: an aggregate hides a model that is excellent on the
   dense middle of the corpus and useless on decode-shaped or prime-dimension problems.
+- **§11.4 references** — the same figures for the two things the model has to be read
+  against: the **static order** the engine ships (its `priority`/`id` ordering, read
+  off the corpus's enumeration order) and **random** choice from `V(p)`, plus the
+  oracle's zero. The model's regret is not interpretable alone: §11.4 wants to know
+  whether it beats the ordering it replaces. It also warns when it does not, in
+  aggregate (MUST 2) or in any one regime (MUST 3).
 
 It writes `eval_report.json` — the artifact §10.4 names — into `--model-dir`.
 
@@ -209,7 +216,7 @@ python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output
 ```
 
 ```
-Regret report (0019.13 §11.2) -- ./uhd_output/eval_report.json
+Regret report (0019.13 §11.2, §11.4) -- ./uhd_output/eval_report.json
   target/objective:   minTimeMs (min)
   problems grouped by: benchmark, device
   split:              group_holdout_by_problem, seed 0, 12 eval / 48 train problem(s)
@@ -217,6 +224,7 @@ Regret report (0019.13 §11.2) -- ./uhd_output/eval_report.json
   top-1 regret:       mean 0.7012  p50 0.0000  p95 2.1976  max 2.2109
   regret tail (>5%):  0.4167 (5 problem(s))
   top-1 recall:       strict 0.5833   tie-aware 0.5833
+  vs §11.4 references: static order 1.2210   random 1.8043   oracle 0.0000 (mean top-1 regret)
   per-regime regret:  (from column 'regime')
     decode                   mean 1.4025  (6 problem(s))
     prefill                  mean 0.0000  (6 problem(s))
@@ -304,9 +312,16 @@ So recall is reported twice. `strict` demands the exact oracle row in the top k.
   **only** when the target is a millisecond timing (`minTimeMs`, `avgTimeMs`,
   `robustMeanMs`), because `stddevMs` is in milliseconds and widening a TFLOPS
   comparison by it would be a units error. For `avgTimeMs` that band is exact; for
-  `minTimeMs` the sample spread is a scale for the noise rather than that estimator's
-  own error, so the band is approximate and deliberately so — the alternative is no
-  noise notion at all for the §8.5 default statistic.
+  `minTimeMs` — §8.5's default target — and for `robustMeanMs`, the sample spread is a
+  scale for the noise rather than that estimator's own error, so the band is
+  approximate and deliberately so: the alternative is no noise notion at all for
+  either.
+
+The band needs the columns to be there. §8.3 makes `stddevMs` and `iters` part of the
+result envelope, and both `export-benchmarks` and `generate` emit them; a corpus that
+drops them turns the band off, and `ties.policy` then names the missing column rather
+than blaming the target's units. `evaluate` also warns loudly, because nothing else in
+the report changes when the band goes away.
 
 `topk_recall.trivial` records the fraction of problems with no more than k measured
 candidates, so a recall@5 of 1.0 on 4-candidate problems is legible as the tautology it
@@ -349,11 +364,12 @@ printing a plausible small number.
 | `split` | method, unit, seed, fraction, train/eval problem counts, and the evaluated problem keys |
 | `slice` | that `V(p)` is what the sweep measured rather than every applicable configuration, so `v*(p)` is a lower bound (§11.1) |
 | `exclusions` | counts by reason, plus the policy that produced them |
-| `metrics` | `problems_scored`, `top1_regret` (mean/p50/p95/max), `regret_tail`, `topk_recall` (`strict`/`tie_aware`/`trivial`), `per_regime`, `per_regime_status` |
+| `metrics` | `problems_scored`, `top1_regret` (mean/p50/p95/max), `regret_tail`, `topk_recall` (`strict`/`tie_aware`/`trivial`), `per_regime`, `per_regime_status`, and `references` |
+| `metrics.references` | §11.4's `oracle`, `static_order` and `random`, each carrying the same `top1_regret`/`regret_tail`/`topk_recall`/`per_regime` block plus a note on how it was derived |
 | `ties` | tolerance, sigma, whether the noise band applied, and the policy |
 | `model` | artifact, features, what it was trained on, how many rows |
 | `holdout_integrity` | `held_out`, `COMPROMISED`, or `unknown`, with the reason |
-| `not_implemented` | the parts of §11.2/§11.3 this command does not compute |
+| `not_implemented` | the parts of §11.2/§11.3/§11.4 this command does not compute |
 | `warnings` | every loud condition, in the order printed |
 | `per_problem` | with `--include-per-problem`: key, regime, candidate count, oracle, pick, regret, ranks |
 
@@ -363,9 +379,20 @@ says so — an absent metric someone expected is worse than a stated gap.
 `not_implemented` names what is missing rather than leaving a reader to infer it:
 §11.2's regime-weighted aggregates (nothing declares weights yet), its calibration
 metrics (required only when `score.calibrated` is true), §11.3's leave-one-regime-out
-and leave-variants-out splits (both need retraining per fold), and §5.6.3's round-0
+and leave-variants-out splits (both need retraining per fold), §5.6.3's round-0
 core versus full slice and steering versus reserved portions (properties of a corpus
-collected by the campaign loop, which does not exist yet).
+collected by the campaign loop, which does not exist yet), and two of §11.4's
+obligations — MUST 4's regression check against a previously promoted UHD, which has no
+loader here, and item 5's scoring-time comparison, which §11.4 itself notes is blocked
+on the §11.6 (B5) harness.
+
+§11.4's static-order reference is read off the corpus: a problem's rows are in the
+order the engine enumerated its catalog, which is the `priority`/`id` order Stage 1
+ships, so the static pick is the first row carrying a usable measurement. A corpus
+re-sorted after collection no longer carries that order, and the reference then
+describes a permutation rather than the shipped one; the note in the report says so.
+The random reference is an exact expectation over `V(p)`, never a sampled draw, so the
+sanity floor does not move between runs.
 
 ## Input Format
 
@@ -410,21 +437,57 @@ graph files or corpus directories, enumerates matched candidates through
 trains, evaluates a held-out problem/device split, and promotes.
 `--no-promote` validates installation without changing the shipping tree.
 
+`--graphs` takes both serialized forms: hand-written or exported `*.json`, and the
+binary FlatBuffers `hipdnn_corpus_gen` writes as `problems/<operation>_<n>.fb`, so a
+generated corpus composes with `generate` directly. Directories are searched
+recursively for both. Form is decided by content rather than extension, the same way
+`hipdnn_bench` decides it, so a renamed file still loads. An ID-less JSON graph is
+given a reproducible UUID5 of its canonical content; a serialized graph already
+carries its own id and the bench preserves it, so nothing is injected there.
+
 Collection uses STANDARD autotune for each explicitly enrolled candidate; an
 internal exhaustive sweep must not substitute a different kernel. Providers that
 do not implement enumeration report unsupported, not an empty catalog.
 Existing timing-based `is_valid` semantics are unchanged: this workflow does not
 establish per-candidate numerical correctness.
 
+Every collected row carries §8.3's envelope, `stddevMs` and `iters` included, so
+`evaluate`'s noise band works on a generated corpus rather than being inert on it.
+
+**A failure never destroys the measurements.** Collection is the expensive half of a
+run, and §8.7 is explicit that measurements outlive the strategy that requested them,
+so a failure anywhere after collection — training, evaluation, an empty holdout,
+installation validation — leaves the staging directory in place and names it in the
+error. It is only consumed by the rename into `--output-dir` that a successful run
+performs, so nothing accumulates from runs that worked. Delete a reported stage once
+you no longer need what it measured.
+
+**What the catalog model is scored in.** When the engine publishes `graph.flops`,
+`generate` derives `tflops = graph.flops / (avgTimeMs * 1e9)` per candidate and trains
+`sort_kernel_catalog` on `tflops`/`max` with `score.calibrated: true` —
+`avgTimeMs` because RFC 0019.13 §11.2 pins a calibrated score to the mean. That is what
+gives the role the cross-engine standing RFC 0019 §11.1 describes, and with it §11.2's
+`B only` ranking row. Without a published work count it falls back to
+`robustMeanMs`/`min`/uncalibrated, which is legal (§2.5, §15.1) and ranks this engine's
+own catalog just as well, and warns that the score is no longer comparable with another
+engine's — Mode B then falls back to the engine's L1 prediction.
+
 ### Engine-level immediate predictions
 
 `predict_engine_tflops` trains an engine's **normal untuned performance**, not
 the best configuration found by a sweep. Collection builds only that engine's
 plan with `global.benchmarking=0`, warms it up, and measures ordinary execution
-with HIP events and the existing `robustMeanMs` statistic. It does not enumerate
-configurations or invoke autotune; normal engine cache behavior is unchanged.
-Full-graph work and elapsed time determine the TFLOPS label; unsupported work
-accounting is not replaced with a guessed label.
+with HIP events. It does not enumerate configurations or invoke autotune; normal
+engine cache behavior is unchanged. Full-graph work and elapsed time determine the
+TFLOPS label; unsupported work accounting is not replaced with a guessed label.
+
+The label is `graph.flops / (avgTimeMs * 1e9)`. RFC 0019.13 §11.2 (:2003) requires a
+UHD declaring `calibrated: true` to train on `avgTimeMs`, and §10.6.2 repeats it for
+this role specifically; L1 always declares it, so the mean is the label and never the
+minimum or the robust mean. `robustMeanMs` stays on every corpus row as §8.5's
+informational statistic, alongside `stddevMs` and `iters`. Which statistic produced the
+label is recorded as `timing_statistic` in `train_manifest.json`, because §11.2 refuses
+cross-engine comparison between models trained on different ones.
 
 ```bash
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \
@@ -531,10 +594,11 @@ capability; otherwise it stores the graph alone. For an engine without that
 capability, restore the graph and explicitly reapply the owned configuration.
 
 L2 cross-engine comparison requires a model trained against actual TFLOPS with
-`--target tflops --objective max --score-units tflops --calibrated`.
-The default latency-trained `generate` model ranks a catalog but is not a
-calibrated L2 throughput estimate. Do not relabel a latency or arbitrary-score
-model as TFLOPS.
+`--target tflops --objective max --score-units tflops --calibrated
+--timing-statistic avgTimeMs`. `generate` produces exactly that whenever the engine
+publishes `graph.flops`, and otherwise says in a warning that the model it produced
+ranks a catalog without being a calibrated L2 throughput estimate. Do not relabel a
+latency or arbitrary-score model as TFLOPS.
 
 ## Output
 

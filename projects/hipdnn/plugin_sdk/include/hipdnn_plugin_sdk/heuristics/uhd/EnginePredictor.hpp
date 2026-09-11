@@ -134,12 +134,19 @@ inline void
     {
         throw std::invalid_argument("UHD attachment does not match engine, role, or architecture");
     }
+    // RFC 0019 §11.3: an L1 estimate is cross-engine TFLOPS, so the transform has to be one
+    // this runtime can invert back into the declared units. That is score_transform's
+    // vocabulary, asked rather than restated: the inline list here accepted only identity and
+    // log1p, which made a second, narrower spelling of a closed set the parser already gates
+    // (parseUhdConfig) -- two vocabularies to keep in step, and a descriptor an author could
+    // load and then not bind. What keeps the estimate *physical* is not the list but the
+    // finite-and-non-negative check at the evaluation site below, which is transform-agnostic.
     if(config.scoreUnits != "tflops" || !config.scoreCalibrated || config.objective != "max"
-       || (!config.scoreTransform.empty() && config.scoreTransform != "identity"
-           && config.scoreTransform != "log1p"))
+       || !score_transform::isSupported(config.scoreTransform))
     {
-        throw std::invalid_argument(
-            "L1 UHD requires calibrated TFLOPS with identity or log1p transform");
+        throw std::invalid_argument("L1 UHD requires calibrated TFLOPS with an invertible "
+                                    "transform (one of "
+                                    + score_transform::supportedTransformList() + ")");
     }
     if(config.adapterType != "tree_data" && config.adapterType != "native"
        && config.adapterType != "custom_library")

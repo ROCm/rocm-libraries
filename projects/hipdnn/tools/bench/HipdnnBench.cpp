@@ -1033,8 +1033,14 @@ int runBench(const std::vector<std::string>& args)
         {
             std::cout << ",kernel." << knob;
         }
-        std::cout << ",engine,rank,succeeded,is_valid,skip_reason,min_time_ms,avg_time_ms,"
-                     "robust_time_ms,stddev_ms,iterations,converged,workspace_bytes\n";
+        // RFC 0019.13 §8.3 names the timing columns of the result envelope --
+        // `minTimeMs`, `avgTimeMs`, `stddevMs`, `iters` -- and reads them by name, so
+        // this header spells them that way and not in snake_case. `robustMeanMs` is not
+        // one of §8.3's columns but is the name `export-benchmarks` and the uhd_gen
+        // corpus already use for the same statistic; a second spelling for it would
+        // make a harvested CSV unreadable by `uhd_gen evaluate --target robustMeanMs`.
+        std::cout << ",engine,rank,succeeded,is_valid,skip_reason,minTimeMs,avgTimeMs,"
+                     "robustMeanMs,stddevMs,iters,converged,workspace_bytes\n";
     }
 
     // Every variant is emitted, including the ones that lost and the ones that failed. A
@@ -1047,7 +1053,7 @@ int runBench(const std::vector<std::string>& args)
     // threshold tried, including an exact tie. That is not noise to be tightened away; there
     // is no difference there to resolve. A model fitted to the winner would be fitting the
     // coin flip, which is why RFC 0019.13 §5.6 ranks on per-problem normalised time and why
-    // `stddev_ms` is emitted beside every measurement rather than folded into it.
+    // `stddevMs` is emitted beside every measurement rather than folded into it.
     for(const auto& result : results)
     {
         std::cout << problemId;

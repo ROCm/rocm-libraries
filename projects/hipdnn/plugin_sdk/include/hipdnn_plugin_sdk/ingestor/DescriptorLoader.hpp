@@ -73,35 +73,51 @@
  * engines; two packs of one engine sharing a kernel is not legal, since the duplicate
  * completed metadata tuples collide on the catalog key.
  *
- * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
- * their own follow-ups land. Six deliberate divergences, pending an amendment:
+ * The UED follows RFC 0020 and the UMD RFC 0018 (sources of truth); the other five follow
+ * RFC 0017 §4 until their own follow-ups land. Six deliberate divergences: four ask for an
+ * RFC amendment, and two -- the declarative `graph_match` arm and `kernel_fields` -- are
+ * conforming features this loader does not implement and rejects rather than ignores:
  *
- *  - RFC 0020 §4.2: no `schema` member -- the filename already carries that fact, and a
- *    file whose name and body disagree has no correct reading.
- *  - RFC 0020 §4.2: `version` required on every type, not just the UED -- a type with no
- *    version can't be gated by §11.1 at all.
- *  - RFC 0020 §4.2 lists no `graph_match`: an object naming the graph-topology pattern
- *    this engine matches, with one inner key today, `native`, a symbol resolved through
- *    GraphMatchRegistry. Its amendment lands with the finalized declarative pattern this
- *    key is the escape hatch for.
- *  - RFC 0020 §10.2.1 makes the id the unit of collision; packs and standalone kernels
- *    are keyed by (id, arch), because a per-arch shard ships one id per arch with content
- *    built against that arch. The other five types stay keyed by id alone.
- *  - RFC 0017 §5 calls arch a pack property; a standalone UKD carries `arch` too, and an
- *    inline kernel may narrow within its pack's list, for the same reason -- a shard ships
- *    one kernel id many times and the id alone cannot distinguish them. Every entry is a
- *    bare base id: a device reports feature suffixes and matching stops at ':', so a
- *    partial target id (`gfx942:xnack-`) would match nothing while reading as deliberate.
- *  - RFC 0020 §10.1 and §11 make any unknown field a hard rejection
+ *  - RFC 0018 A.1 makes a UMD's `version` optional, defaulting to `1.0`; here every
+ *    file-backed descriptor must carry one, because a type with no version cannot be
+ *    gated by RFC 0017 §4's accept rule at all. Only an inline kernel is exempt: it
+ *    gates against its pack's UKD row.
+ *  - RFC 0020 §4.2 gives `graph_match` two mutually exclusive arms, the declarative
+ *    `nodes` of §4.3 and the `native` symbol of §4.5; only `native` is accepted here
+ *    (parseEngineDescriptor), resolved through GraphMatchRegistry. A conforming UED
+ *    written against the declarative arm is not partially read: `nodes` is an unknown
+ *    key, so the file fails, the engine never registers, and every pack naming it is
+ *    dropped for an engine no descriptor defines. What the author sees is an unknown-key
+ *    error, not "not implemented yet". The escape hatch is the only arm today.
+ *  - RFC 0018 A.1 permits `kernel_fields` beside `match_symbol`, the hand-declared
+ *    `$kernel.*` read set a native criterion trades for memoization and the KMD
+ *    cross-check; the UMD key set here does not list it (parseMatchDescriptor). A UMD
+ *    carrying it fails as an unknown key, so the matcher is skipped and every pack
+ *    listing it is dropped naming a matcher "which no descriptor defines" -- the author
+ *    sees a missing matcher rather than a rejected field. Omitting the key gives RFC
+ *    0018's own unmemoized fallback, which is what every matcher here gets.
+ *  - RFC 0020 §13.2.1 makes the id alone the unit of collision; packs and standalone
+ *    kernels are keyed by (id, arch), because a per-arch shard ships one id per arch with
+ *    content built against that arch. The other five types stay keyed by id alone.
+ *  - RFC 0017 §4 calls arch a pack property (§8.1 applies the gate when packs resolve);
+ *    a standalone UKD carries `arch` too, and an inline kernel may narrow within its
+ *    pack's list, for the same reason -- a shard ships one kernel id many times and the
+ *    id alone cannot distinguish them. Every entry is a bare base id: a device reports
+ *    feature suffixes and matching stops at ':', so a partial target id
+ *    (`gfx942:xnack-`) would match nothing while reading as deliberate.
+ *  - RFC 0020 §4.2 and §13.1 make any unknown field a hard rejection
  *    (`additionalProperties: false`); a key prefixed `x-` or `_`, plus the packager's
  *    `provenance` block, is warned about and ignored instead, so a descriptor may carry
  *    tracking data. Every other unknown key is still the hard rejection the RFC asks
  *    for, including a leftover `schema`.
  *
- * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
- * parseEngineDescriptor().
+ * Two things that look like divergences are not. No descriptor carries a `schema` member:
+ * the filename states the type, which is what RFC 0018 §10 and A.1 and RFC 0019 §4.1 ask
+ * for (RFC 0019's illustrative JSON shows one, and it is rejected here as an unknown key).
+ * And `sdk_version` belongs on the UED: RFC 0020 §4.2 carries both the field-table row and
+ * the schema property, and RFC 0017 §4 declares the graph-schema floor once, on the engine.
  *
- * Apart from the UED and KDP, whose keys the RFCs fix, every JSON key is the snake_case
+ * Apart from the UED, UMD and KDP, whose keys the RFCs fix, every JSON key is the snake_case
  * spelling of its C++ field, and an unrecognized key fails the file naming the path unless
  * it announces itself as extension data (see requireKnownKeys). The KDP's
  * `kernelDescriptors` key is camelCase, the RFCs' own inconsistency, kept as-is rather
@@ -771,10 +787,10 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
 
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const std::string& where)
 {
-    // `sdk_version` deviates from RFC 0020 §4.2, whose field table and schema don't list
-    // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
-    // under an engine reads tokens that engine's binding produced, so it belongs on the
-    // engine instead. Accepted here pending the RFC amendment that moves the field.
+    // `sdk_version` conforms: RFC 0020 §4.2 lists it in the field table and in the schema,
+    // and RFC 0017 §4 declares the graph-schema floor once, on the engine, with no other
+    // descriptor carrying one -- a UMD included (RFC 0018 A.1 restates that). It sits here
+    // because every descriptor under an engine reads tokens that engine's binding produced.
     requireKnownKeys(root,
                      {"version",
                       "revision",
@@ -874,8 +890,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
     // The graph-topology match this engine declares. Absent leaves the symbol empty,
     // meaning this engine binds no tokens and is admitted or declined by its UMDs
-    // alone. The only inner key today is the native escape hatch; a declarative
-    // `nodes`/`criteria` pattern is a future sibling of `native`, not a replacement.
+    // alone. The only inner key today is the native escape hatch of RFC 0020 §4.5;
+    // §4.3's declarative `nodes` arm is a conforming sibling this loader rejects as an
+    // unknown key, taking the engine and its packs with it (see the ledger above).
     if(const auto it = root.find("graph_match"); it != root.end())
     {
         const std::string graphMatchWhere = where + " graph_match";
@@ -888,6 +905,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root, const std::string& where)
 {
+    // RFC 0018 A.1's `kernel_fields`, legal beside `match_symbol`, is absent from this key
+    // set on purpose: a UMD declaring it fails, and its packs then name a matcher nothing
+    // defines (see the ledger above). `criteria`, the declarative arm, is likewise unread.
     requireKnownKeys(root, {"version", "revision", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
