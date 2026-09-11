@@ -36,7 +36,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast, deriveWaveParams, \
+                    streamKCluster, streamKMulticast, streamK2DCluster, deriveWaveParams, \
                     swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
@@ -271,7 +271,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
   cluster (cluster reduction), which develop never constrained.
   """
-  if not streamKMulticast(state):
+  if not streamKCluster(state):
     return True
 
   # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
@@ -1193,7 +1193,7 @@ class Solution(collections.abc.Mapping):
     # -- except on the DP-only SK3 cluster, where every WG owns one whole tile, so the
     # peers stay the spatial tile neighbours the ClusterLoad component broadcasts between.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
-                                  and (state["StreamK"] == 0 or streamKMulticast(state)))
+                                  and (state["StreamK"] == 0 or streamKCluster(state)))
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles
@@ -1957,7 +1957,7 @@ class Solution(collections.abc.Mapping):
         # ForceDPOnly cluster multicast; anywhere else a Y-extent > 1 would collide
         # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
         # no B-sharing X peers at all and is not a multicast shape.
-        if state["ClusterDim"][1] != 1 and not (streamK2DMulticast(state)
+        if state["ClusterDim"][1] != 1 and not (streamK2DCluster(state)
                                                 and state["StreamKForceDPOnly"]):
           reject(state, printRejectionReason,
                  "Stream-K + ClusterDim Y-extent > 1 requires StreamKForceDPOnly=1 "

@@ -37,6 +37,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <map>
 #include <random>
 
 #include "RunListener.hpp"
@@ -1191,6 +1192,10 @@ namespace TensileLite
             // hand back gpuInput.valid as-is rather than re-swizzling).
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
+
+            // Scale descriptor most recently swizzled into gpuInput.valid, per
+            // tensor index. The MX equivalent of g_swizzleCache.
+            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
         };
 
         template <>
