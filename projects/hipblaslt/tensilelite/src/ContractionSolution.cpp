@@ -4005,7 +4005,8 @@ namespace TensileLite
             // fallback requiredWorkspaceSize() reports on, and additionally
             // applies streamKReconcileReduction(), so query and launch cannot
             // disagree.
-            sk = resolveStreamKSettings(problem, hardware);
+            sk = resolveStreamKSettings(
+                problem, hardware, sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
 
             // Defense in depth. resolveStreamKSettings() demotes every
             // (parallel, F < 2) triple to tree, so this should not fire; keep it
@@ -4880,16 +4881,21 @@ namespace TensileLite
     }
 
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,
-                                                                Hardware const& hardware) const
+                                                                Hardware const& hardware,
+                                                                bool const* effectiveDynamicHint) const
     {
         StreamKSettings sk;
         if(sizeMapping.streamK == 0)
             return sk;
 
         auto tiles = problem.getNumTiles(sizeMapping, 1);
-        const bool effectiveDynamic = (sizeMapping.streamK == 5)
-                                          ? streamK5EffectiveDynamic(problem, hardware)
-                                          : false;
+        // Take the caller's already-resolved sub-mode when offered: resolving it
+        // is not free (see the note in getSKGridImpl), and solve() has it.
+        const bool effectiveDynamic
+            = (sizeMapping.streamK == 5)
+                  ? (effectiveDynamicHint != nullptr ? *effectiveDynamicHint
+                                                     : streamK5EffectiveDynamic(problem, hardware))
+                  : false;
         // SK4 and SK5-resolved-dynamic are unconditionally tree; everything else
         // asks getSKReduction(). requiredWorkspaceSize() always asks
         // getSKReduction() and has no such special case, so a dynamic-queue

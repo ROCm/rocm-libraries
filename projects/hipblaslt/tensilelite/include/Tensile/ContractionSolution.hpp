@@ -1125,8 +1125,14 @@ namespace TensileLite
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.
+        //
+        // effectiveDynamicHint, when non-null, is the SK5 sub-mode the caller
+        // already resolved for this same (problem, hardware); it is used in
+        // place of a second streamK5EffectiveDynamic() call, which is not free
+        // (it can run the origami hybrid-mode heuristic). Null recomputes.
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
-                                               Hardware const& hardware) const;
+                                               Hardware const& hardware,
+                                               bool const* effectiveDynamicHint = nullptr) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
