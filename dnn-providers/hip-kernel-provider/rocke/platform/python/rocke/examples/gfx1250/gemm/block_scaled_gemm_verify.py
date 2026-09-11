@@ -3,7 +3,7 @@
 """Launch gfx1250 block-scaled GEMM and compare with an independent reference.
 
 The default invocation keeps the K=64 FP8/BF8 WMMA + FP32-scale verifier.
-Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use FP8 and E8M0
+Native ``--matrix-path wmma_scale`` / ``wmma_scale16`` use FP8 or FP4 and E8M0
 scales with K=32 / K=16 groups. Native fixtures cover K=128 or 256 and use
 bounded dyadic values, permitting exact comparison after BF16 rounding.
 
@@ -45,6 +45,33 @@ def decode_e8m0(encoded: np.ndarray) -> np.ndarray:
     return np.ldexp(np.ones(encoded.shape), encoded.astype(np.int32) - 127)
 
 
+def decode_fp4(packed: np.ndarray) -> np.ndarray:
+    """Decode low-nibble-first E2M1 pairs by the format's exponent formula."""
+    if packed.dtype != np.uint8 or packed.ndim != 2:
+        raise ValueError("expected a rank-2 uint8 packed FP4 matrix")
+    codes = np.empty((packed.shape[0], packed.shape[1] * 2), dtype=np.uint8)
+    codes[:, 0::2] = packed & 15
+    codes[:, 1::2] = packed >> 4
+    exponent = ((codes >> 1) & 3).astype(np.int32)
+    mantissa = (codes & 1).astype(np.float64)
+    magnitude = np.where(
+        exponent == 0, mantissa * 0.5, np.ldexp(1.0 + mantissa * 0.5, exponent - 1)
+    )
+    return np.copysign(magnitude, np.where(codes & 8, -1.0, 1.0))
+
+
+def pack_fp4_codes(codes: np.ndarray) -> np.ndarray:
+    """Pack E2M1 codes, not arbitrary floating values; no quantization policy."""
+    if (
+        codes.dtype != np.uint8
+        or codes.ndim != 2
+        or codes.shape[1] % 2
+        or np.any(codes > 15)
+    ):
+        raise ValueError("expected rank-2 uint8 FP4 codes in [0, 15] and even K")
+    return codes[:, 0::2] | (codes[:, 1::2] << 4)
+
+
 def reference_result(
     a: np.ndarray,
     b: np.ndarray,
@@ -60,13 +87,19 @@ def reference_result(
     scales 2**[-2,3]. At K<=256, even the sum of absolute products fits in
     2**22 units of 2**-8, so every FP32 partial sum is exact. Float64 host
     arithmetic and a single BF16 rounding provide an independent oracle.
+    FP4 fixtures cover all E2M1 values (magnitude <=6), scales 2**[-2,1],
+    and K<=256: absolute partial sums are below 2**22 units of 2**-6,
+    so FP32 accumulation is also exact before the final BF16 rounding.
     """
     import ml_dtypes
 
     sa = decode_e8m0(a_scale) if native else a_scale.astype(np.float64)
     sb = decode_e8m0(b_scale) if native else b_scale.astype(np.float64)
-    scaled_a = a.astype(np.float64) * np.repeat(sa, block_k, axis=1)
-    scaled_b = b.astype(np.float64) * np.repeat(sb.T, block_k, axis=1)
+    # Packed FP4 is the only uint8 matrix input to this verifier.
+    a_values = decode_fp4(a) if a.dtype == np.uint8 else a.astype(np.float64)
+    b_values = decode_fp4(b) if b.dtype == np.uint8 else b.astype(np.float64)
+    scaled_a = a_values * np.repeat(sa, block_k, axis=1)
+    scaled_b = b_values * np.repeat(sb.T, block_k, axis=1)
     ref = scaled_a @ scaled_b.T
     if native:
         ref = ref.astype(ml_dtypes.bfloat16)
@@ -90,16 +123,24 @@ def make_case_inputs(
         "bf8e5m2": ml_dtypes.float8_e5m2,
     }
     rng = np.random.default_rng(0xB10C)
-    magnitude = 0.25 if native else 0.5
-    a = (rng.integers(-4, 5, size=(spec.M, spec.K)) * magnitude).astype(
-        lowbit_types[spec.dtype_a]
-    )
-    b = (rng.integers(-4, 5, size=(spec.N, spec.K)) * magnitude).astype(
-        lowbit_types[spec.dtype_b]
-    )
+    packed_fp4 = spec.dtype_a == "fp4" and spec.dtype_b == "fp4"
+    if packed_fp4:
+        # Exercise all 16 code points, including signed zero. Keep codes
+        # unpacked until group masking is finished.
+        a = rng.integers(0, 16, size=(spec.M, spec.K), dtype=np.uint8)
+        b = rng.integers(0, 16, size=(spec.N, spec.K), dtype=np.uint8)
+    else:
+        magnitude = 0.25 if native else 0.5
+        a = (rng.integers(-4, 5, size=(spec.M, spec.K)) * magnitude).astype(
+            lowbit_types[spec.dtype_a]
+        )
+        b = (rng.integers(-4, 5, size=(spec.N, spec.K)) * magnitude).astype(
+            lowbit_types[spec.dtype_b]
+        )
     if native:
-        sa = rng.integers(125, 131, size=(spec.M, groups), dtype=np.uint8)
-        sb = rng.integers(125, 131, size=(groups, spec.N), dtype=np.uint8)
+        max_exponent = 129 if packed_fp4 else 131
+        sa = rng.integers(125, max_exponent, size=(spec.M, groups), dtype=np.uint8)
+        sb = rng.integers(125, max_exponent, size=(groups, spec.N), dtype=np.uint8)
         neutral = 127
     else:
         sa = rng.uniform(0.5, 1.5, size=(spec.M, groups)).astype(np.float32)
@@ -118,6 +159,8 @@ def make_case_inputs(
         b[:, ~active] = 0
     elif case not in ("neutral", "a-only", "b-only", "mixed"):
         raise ValueError(f"unknown verification case {case!r}")
+    if packed_fp4:
+        a, b = pack_fp4_codes(a), pack_fp4_codes(b)
     return a, b, sa, sb
 
 
@@ -211,7 +254,7 @@ def run_cases(
             inputs = make_case_inputs(spec, case)
             expected = reference_result(*inputs, spec.block_k, native=native)
             label = (
-                f"{spec.resolved_matrix_path()}/{compile_route}/{case} "
+                f"{spec.resolved_matrix_path()}/{spec.dtype_a}/{compile_route}/{case} "
                 f"{spec.M}x{spec.N}x{spec.K} bk{spec.block_k}"
             )
             got = _launch(rt, fn, spec, inputs)
@@ -233,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n", type=int, default=16)
     p.add_argument("--k", type=int, default=128)
     p.add_argument("--block-k", type=int, default=None)
-    p.add_argument("--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2"))
+    p.add_argument("--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2", "fp4"))
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")
     p.add_argument(
         "--matrix-path", default="wmma", choices=("wmma", "wmma_scale", "wmma_scale16")

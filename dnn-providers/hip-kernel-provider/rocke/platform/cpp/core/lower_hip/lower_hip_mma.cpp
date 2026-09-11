@@ -76,10 +76,14 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
 static rocke_status_t
-    h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op, bool scale16)
+    h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op, bool scale16, int fmt)
 {
     const char* op_id
         = scale16 ? "wmma_scale16_f32_16x16x128_fp8_fp8" : "wmma_scale_f32_16x16x128_fp8_fp8";
+    if(fmt == 4)
+    {
+        op_id = scale16 ? "wmma_scale16_f32_16x16x128_fp4_fp4" : "wmma_scale_f32_16x16x128_fp4_fp4";
+    }
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -95,11 +99,13 @@ static rocke_status_t
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_id);
     }
     rocke_h_emitf(lw,
-                  "f32x8 %s = %s(0, %s, 0, %s, (int16_t)0, %s, "
+                  "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
                   "0, 0, %s, 0, 0, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
+                  fmt,
                   rocke_h_name(lw, op->operands[0]),
+                  fmt,
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
                   rocke_h_name(lw, op->operands[3]),
@@ -125,11 +131,19 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     }
     if(__builtin_strcmp(op_id, "wmma_scale_f32_16x16x128_fp8_fp8") == 0)
     {
-        return h_emit_gfx1250_scaled_wmma(lw, op, false);
+        return h_emit_gfx1250_scaled_wmma(lw, op, false, 0);
+    }
+    if(__builtin_strcmp(op_id, "wmma_scale_f32_16x16x128_fp4_fp4") == 0)
+    {
+        return h_emit_gfx1250_scaled_wmma(lw, op, false, 4);
     }
     if(__builtin_strcmp(op_id, "wmma_scale16_f32_16x16x128_fp8_fp8") == 0)
     {
-        return h_emit_gfx1250_scaled_wmma(lw, op, true);
+        return h_emit_gfx1250_scaled_wmma(lw, op, true, 0);
+    }
+    if(__builtin_strcmp(op_id, "wmma_scale16_f32_16x16x128_fp4_fp4") == 0)
+    {
+        return h_emit_gfx1250_scaled_wmma(lw, op, true, 4);
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);

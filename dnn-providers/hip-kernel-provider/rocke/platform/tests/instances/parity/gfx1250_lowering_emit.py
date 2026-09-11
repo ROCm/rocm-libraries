@@ -180,6 +180,8 @@ CONFIGS = [
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),

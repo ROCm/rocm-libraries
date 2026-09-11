@@ -119,7 +119,7 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
 
 /* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
  * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
-static void wmma_scaled(rocke_ir_builder_t* b, bool scale16)
+static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* op_id)
 {
     const rocke_type_t* scale_ty = scale16 ? rocke_i64() : rocke_i32();
     rocke_value_t* a_ptr = frag_param(b, "A", rocke_i32(), true);
@@ -137,21 +137,30 @@ static void wmma_scaled(rocke_ir_builder_t* b, bool scale16)
     rocke_value_t* bb = rocke_b_vec_concat(b, b_lo, b_hi);
     rocke_value_t* c = rocke_b_global_load_vN(b, c_ptr, tid, rocke_f32(), 8, /*align=*/0);
     rocke_value_t* scale = rocke_b_global_load(b, scale_ptr, tid, scale_ty, /*align=*/1);
-    rocke_value_t* d = scale16
-                           ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(b, a, bb, c, scale, scale)
-                           : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(b, a, bb, c, scale, scale);
+    rocke_value_t* scales[] = {scale, scale};
+    rocke_value_t* d = rocke_b_mma(b, op_id, a, bb, c, scales, 2);
     rocke_b_global_store(b, c_ptr, tid, d, /*align=*/1);
     rocke_b_ret(b);
 }
 
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false);
+    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true);
+    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
+}
+
+static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp4_fp4");
+}
+
+static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp4_fp4");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
@@ -259,6 +268,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_bf8_bf8, "gfx1250"},
     {build_wmma_scale, "gfx1250"},
     {build_wmma_scale16, "gfx1250"},
+    {build_wmma_scale_fp4, "gfx1250"},
+    {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},

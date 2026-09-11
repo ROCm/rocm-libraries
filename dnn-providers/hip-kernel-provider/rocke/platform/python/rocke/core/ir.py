@@ -87,6 +87,8 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
     "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
     "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
+    "wmma_scale_f32_16x16x128_fp4_fp4": "mxacc",
+    "wmma_scale16_f32_16x16x128_fp4_fp4": "mxacc",
 }
 
 
