@@ -28,5 +28,11 @@ if(BUILD_TEST)
 endif()
 
 if(WITH_ROCRAND)
-  fetch_monorepo_dep(PACKAGE rocrand)
+  # While we could find rocRAND through 'fetch_monorepo_dep()', this is not the
+  # intented development setup. It is instead recommended to install rocRAND
+  # seperately instead with e.g. 'apt install rocrand-dev'.
+  # 
+  # rocRAND only accelerates generating test/benchmark data. It is not a
+  # critical depedency.
+  find_package(PACKAGE rocrand REQUIRED)
 endif()
