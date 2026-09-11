@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
 #include <functional>
+#include <limits>
 
 namespace hip_kernel_provider::test_utilities
 {
@@ -106,6 +107,74 @@ protected:
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
                                << ", name: " << _tensorIdToNameMap.at(tensorId);
         }
+    }
+
+    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on device with an
+    /// already-sized `workspace`, and compares against CpuReferenceGraphExecutor. Reseeds
+    /// inputs from `seed` so repeated calls never compare stale buffers. `reductionLength`
+    /// widens the tolerance for kernels that accumulate: GPU and CPU sum in different
+    /// orders, so a K-term sum needs ~K*epsilon of slack where a pointwise op needs one.
+    ///
+    /// Unlike verifyGraph() this drives an already-built graph and validates the single
+    /// output at uid 3, for suites that stage the build themselves.
+    void executeAndVerify(hipdnn_frontend::graph::Graph& graph,
+                          void* workspace,
+                          unsigned int seed,
+                          int reductionLength = 1)
+    {
+        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
+        hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                gpuBundle.addTensor(
+                    *tensorAttr,
+                    hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                cpuBundle.addTensor(
+                    *tensorAttr,
+                    hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+            }
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                if(gpuBundle.tensors.find(tensorAttr->get_uid()) == gpuBundle.tensors.end())
+                {
+                    gpuBundle.addTensor(
+                        *tensorAttr,
+                        hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                    cpuBundle.addTensor(
+                        *tensorAttr,
+                        hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+                }
+            }
+        });
+
+        for(auto& [uid, tensor] : gpuBundle.tensors)
+        {
+            // Per-uid offset so the operands are never byte-identical: a+a and a+b are
+            // indistinguishable to allClose() when both operands hold the same bytes.
+            const auto tensorSeed = seed + static_cast<unsigned int>(uid);
+            gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
+            cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
+        }
+
+        auto deviceVariantPack = gpuBundle.toDeviceVariantPack();
+        auto result = graph.execute(_handle, deviceVariantPack, workspace);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
+
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), cpuBundle.toHostVariantPack());
+
+        auto& gpuOut = gpuBundle.getTensor(3);
+        auto& cpuOut = cpuBundle.getTensor(3);
+        gpuOut.markDeviceModified();
+        const auto tolerance
+            = static_cast<float>(reductionLength) * std::numeric_limits<float>::epsilon();
+        EXPECT_TRUE(
+            hipdnn_test_sdk::utilities::CpuFpReferenceValidation<float>(tolerance, tolerance)
+                .allClose(cpuOut, gpuOut));
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,

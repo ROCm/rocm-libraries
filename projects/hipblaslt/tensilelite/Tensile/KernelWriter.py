@@ -56,7 +56,7 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled, streamKMulticast, swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -79,6 +79,12 @@ import itertools
 
 # TODO: DEBUG ONLY, remove later
 from pprint import pprint
+
+
+def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
+  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
+              and not preLoopLocalReadDrainEmitted)
+
 
 # Make const values immutable
 @dataclass(frozen=True)
@@ -404,8 +410,15 @@ class StateValues:
   tailloopInNllmaxUnit: int              = 0
   staggerUCode: bool                     = 0
   waveIdxReleasedAfterStagger: bool      = False
+  # Wave-separated TDM packs loop-invariant wave parity into sgpr ArgType bit 8
+  # before releasing WaveIdx. Named ArgType value tests must mask 0xFF.
+  tdmParityPackedInArgType: bool         = False
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
+  # Loop bodies emitted per unroll-loop iteration. Each advances the LDS tokens
+  # once, so this is also how far the back edge rotates them; see
+  # _ldsTokenBackEdgeMap.
+  unrollLoopCopies: int                  = 1
   IncLdsBufSwitch: bool                  = False
   # First token of the TDMSplit half-1 block used when tokens rotate. Buffer
   # tokens occupy 0..numLDSBlk-1 and metadata uses memTokenLdsBufferMeta (4), so
@@ -442,6 +455,11 @@ class StateValues:
     self.numStoreSgprNameSizes = []
 
     self.nonPostLoopSgpr = []
+
+    # FusedGemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
+    # runtime gate + both push/local versions (default, unchanged behavior);
+    # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
+    self.fusedA2ADispatchMode = "BOTH"
 
     self.preloadGuard = []
     self.tmpvgpr = {}
@@ -2758,11 +2776,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #TODO: TDM handles MXSA and MXSB
       if tdmA:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
-          if kernel["UseSubtileImpl"]:
-            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
-          else:
-            module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+          # Init resolves ArgType 3 A; offsets then apply to the selected matrix.
+          module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+          module.add(self.tdmGlobalOffset(kernel, tensorParametersA, useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -2775,8 +2791,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if tdmMetadata:
           if not tdmMetadataInited:
             # TODO: TDM global offset for metadata
-            module.add(self.tdmGlobalOffset(kernel, tPM))
             module.add(self.initTDMDescriptor(kernel, tPM))
+            module.add(self.tdmGlobalOffset(kernel, tPM, useDescriptor=True))
             tdmMetadataInited = True
         else:
           module.addComment1("global read addresses: tile offset assignment metadata")
@@ -2792,11 +2808,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graTileAssignment(kernel, tensorParametersB["MX"]))
       if tdmB:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
-          if kernel["UseSubtileImpl"]:
-            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
-          else:
-            module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+          # Init resolves ArgType 3 B; offsets then apply to the selected matrix.
+          module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+          module.add(self.tdmGlobalOffset(kernel, tensorParametersB, useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -3085,13 +3099,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+        # Wave-separated TDM picks WrapUA or WrapUB by wave parity. Both the parity
+        # (a function of Serial) and the two WrapU values are loop-invariant, so fold
+        # the choice into WrapUA once here instead of redoing it every unroll iteration.
+        module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx sits at a very low physical index, and checkOutAligned scans the pool
       # from 0, so holding it past the prologue both removes a slot and fragments the
       # low pool for the unroll loop's aligned temps -- enough to push the tightest
-      # gfx1250 StreamK configs over MaxSgpr. Release it here: the stagger prologue
-      # above is its last cheap-parity consumer, everything later recomputes parity
-      # from vgpr("Serial").
+      # gfx1250 StreamK configs over MaxSgpr. Pack wave-parity into ArgType bit 8
+      # first (in-place SALU, no tmp while WaveIdx is live), then release: later
+      # parity sites s_bitcmp1 ArgType rather than v_readfirstlane(Serial).
+      # ClusterBarrier keeps WaveIdx and must not pack.
+      module.add(self.packTdmParityIntoArgType(kernel))
       module.add(self.releaseWaveIdxAfterStagger(kernel))
 
       # LRO and LWA as assigned
@@ -3687,7 +3707,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
-
+      if kernel["TDMPlusLdsBuf"]:
+        isSwapAndResetLwoIter = (u == 0)
       extraComment = ""
       if isLastLoop:
         extraComment += " (last unrolled loop)"
@@ -4501,6 +4522,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["_ScheduleIterAlg"] == 3:
         isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
+      if kernel["TDMPlusLdsBuf"]:
+        isSwapAndResetLwoIter = (u == 0)
       extraComment = ""
       if isResetLroIter:
         extraComment += " (reset local read pointers iteration) "
@@ -4789,15 +4812,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync", skipForceWaitcnt0=skipForceWaitcnt0))
 
         if isSwapAndResetLwoIter: # ResetLroIter
+          # Swap local write memory token
+          self.states.ldsWriteTokenIdx = \
+            self._nextLdsToken(self.states.ldsWriteTokenIdx)
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["_ScheduleIterAlg"] == 0 and \
-             kernel["PrefetchGlobalRead"] == 2 and kernel["TDMPlusLdsBuf"] != 1:
+             kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
             pointerLWCode.add(self._syncThreads(
               kernel,
-              "Waiting current LR finish for next GR(TDM), sync"))
+              "Waiting current LR finish for next GR(TDM), sync LDS%d"%self.states.ldsWriteTokenIdx,
+              memoryToken=[self.states.ldsWriteTokenIdx]))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -4833,9 +4860,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["enableTDMMetadata"]:
               pointerLWCode.addComment1("tdm swap offsets metadata")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tPM))
-          # Swap local write memory token
-          self.states.ldsWriteTokenIdx = \
-            self._nextLdsToken(self.states.ldsWriteTokenIdx)
 
         if isSwapLroIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
@@ -5504,6 +5528,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     pack = [ Module() for i in range (self.states.numPackBuffer ) ]
     packPre = [ Module() for i in range (self.states.numPackBuffer ) ]
     self.preLoopLocalWriteCode = None
+    preLoopLocalReadDrainEmitted = False
 
     # InitCIterWmma is resolved to 0/1 in SolutionStructs/Solution.py (-1 auto path).
     initCIterWmma = bool(kernel["InitCIterWmma"])
@@ -5778,6 +5803,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
           if len(packPrePrefetchItems) > 0:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
+            preLoopLocalReadDrainEmitted = True
 
             module.addItems(packPrePrefetchItems)
           else:
@@ -5812,6 +5838,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         for lri in range(len(localReadCodeB) // 2):
           module.add(localReadCodeB[lri])
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete"))
+        preLoopLocalReadDrainEmitted = True
         if kernel["UsePLRPack"]:
           for pi in range(len(packCodeA) // 2):
             module.add(packCodeA[pi])
@@ -5844,6 +5871,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if loopCopies == 1 and needSecondLoop:
       # force to generate 2 loop bodies
       loopCopies = 2
+    self.states.unrollLoopCopies = loopCopies
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
 
@@ -5852,6 +5880,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop(s) - Begin")
       if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
         module.add(SBarrier(comment="TDM PGR=0: prime barrier before loop"))
+      if _needsPreLoopLocalReadDrain(kernel, self.states.numItersPLR,
+                                     preLoopLocalReadDrainEmitted):
+        module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
+                            comment="complete one-time pre-loop local reads"))
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, nta=nta, ntb=ntb))
 
       loop = Module("loopBody")
@@ -6863,6 +6895,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # s_wait_xcnt drains to order them.
                                "RequiresXCntForVolatileVMEM": bool(
                                    self.states.archCaps["RequiresXCntForVolatileVMEM"]),
+                               "EnableXnackReplay": bool(
+                                   self.states.archCaps["EnableXnackReplay"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -6981,7 +7015,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       setattr(self.states, "subtileIterateMode%s" % tc, isSubtileIterateMode(kernel, tc))
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
-    self.kernelArgDefs = []
     self.codes  = CodeModules()
     self.labels = LabelManager()
 
@@ -7630,7 +7663,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       elif not ( self.states.asmCaps["HasMFMA"] or self.states.asmCaps["HasWMMA"]):
         raise RuntimeError("MatrixInstruction not supported for {0}".format(self.states.version))
 
-      if kernel.get("MFMA_BF16_1K") and not self.states.asmCaps["HasMFMA_bf16_1k"]:
+      if kernel["MFMA_BF16_1K"] and not self.states.asmCaps["HasMFMA_bf16_1k"]:
         raise RuntimeError("BF16_1k MatrixInstruction not supported for {0}".format(self.states.version))
 
       # Modification: Add "HasSWMMAC" to asmCaps for wave-32. Separatlly check for SMFMA and SWMMAC.
@@ -8272,9 +8305,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # nor B needs a forced extra register there -- the baseline reach reservation already covers it.
         if kernel.get("LDSSegmentInterleave") == 1 and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False):
           numComp = kernel["NumWaves"] // 2
+          # Only [2,2] VWB=WaveTileB/2 (1 wave/comp) needs an extra LocalReadAddr reg: it reaches comp1 via the
+          # read offset, which must span the far segment. [1,4] puts the jump in the address reg instead.
+          wavesPerCompB = kernel["MIWaveGroup"][1] // numComp
           compColsB = kernel["MacroTile1"] // numComp
           segILWaveSpansCompB = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * kernel["VectorWidthB"] >= compColsB
-          if not segILWaveSpansCompB:
+          if wavesPerCompB == 1 and not segILWaveSpansCompB:
             writeStride = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
             reachB = (numComp - 1) * writeStride + maxOffsetB // numComp
             maxOffsetB = max(maxOffsetB, reachB)
@@ -9461,7 +9497,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # since the General Batched GEMM will also use this value like
     # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
     #if kernel["ProblemType"]["SupportUserArgs"]:
-    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args
+    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args, 3: general batched; bit 8 = TDM wave-parity
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
@@ -9512,6 +9548,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
+
+    # Persistent copy of the grid-wide WG count for the counter3 last-WG election;
+    # latched in graWorkGroup because NumWorkGroups0/1 can be borrowed as temps later.
+    if kernel["ProblemType"]["FusedGemmA2A"]:
+      self.defineSgpr("FusedTotalWGs", 1)
+      # Counter-block base, loaded once in the prologue. Every region is reached
+      # from it by immediate offset (FusedA2ACounterSentinel.hpp).
+      # Aligned to 2 because S_ATOMIC_INC takes SBASE as an SGPR pair with the low
+      # address bit omitted from the encoding.
+      self.defineSgpr("FusedCounterPtr", 2, 2)
+      # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
+      # power of two, so this is a real u32 divide, not a shift).
+      self.defineSgpr("FusedNShard", 1)
+      # ceil(N / MT1), needed by both the counter3 address and the handshake's
+      # counter index; latched so the two do not each recompute it.
+      self.defineSgpr("FusedTokenTiles", 1)
+      # Offset of this WG's peer group within the kernarg segment. Every pointer
+      # the epilogue needs for that peer is an immediate off it, so the SDMA
+      # emitters do no address arithmetic of their own.
+      self.defineSgpr("FusedPeerGroupPtr", 1)
 
     # Calculate numSgpr preload
     self.states.preloadGuard = []
@@ -9697,6 +9753,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if kernel.get("PrefetchAcrossPersistent"):
+        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+        self.states.numSgprStreamK += 1
+        # SK4 PAP pops the next tile's work item once, in the prior persistent
+        # iteration's NLL window, and stashes the global work-item index here so
+        # the persistent back-edge's graWorkGroup reuses it instead of popping
+        # again (a second atomic pop would double-consume a queue slot).
+        requiredUnalignedSgprVar.append("SkNextWorkItem")
+        self.states.numSgprStreamK += 1
       # Work stealing: per-WG sticky-empty flag. Persists across the persistent
       # loop back-edge (added to nonPostLoopSgpr below) so each WG only touches
       # its home counter for its valid dispenses + exactly one empty fetch.
@@ -9735,6 +9800,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredUnalignedSgprVar.append("StreamKStickyEmpty")
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
+      if kernel.get("PrefetchAcrossPersistent"):
+        # SK5 PAP mirrors SK3 (static sub-path) and SK4 (dynamic sub-path):
+        # SkPrefetchPrimed marks that the next-tile work item was already popped
+        # in the prior persistent iteration's NLL window; the dynamic sub-path
+        # stashes the popped global work-item index in SkNextWorkItem so the
+        # persistent back-edge's graWorkGroup reuses it instead of popping again
+        # (a second atomic pop would double-consume a queue slot). Both are dead
+        # on the static sub-path (mode==0) but allocated unconditionally because
+        # the mode bit is a runtime value.
+        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+        self.states.numSgprStreamK += 1
+        requiredUnalignedSgprVar.append("SkNextWorkItem")
+        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"]:
@@ -10249,8 +10327,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-
-    self.states.numStoreSgprToLoad = storeSgprLoad
+  
+    self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")
@@ -10413,9 +10491,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
 
     if tP["isSwizzled"]:
-      # 16 means bytes of buffer_load_dwordx4
-      tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
-      tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
+      swz = swizzleGeometry(kernel, cM)
+      tP["swizzlePackK"]        = swz["packK"]
+      tP["swizzleK"]            = swz["swizzleK"]
+      tP["swizzleLaneSize"]     = swz["laneSize"]
+      tP["swizzleLanesUsed"]    = swz["lanesUsed"]
+      tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B
@@ -10880,7 +10961,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def isPrefetchAcrossPersistentEnabled(self, kernel):
     """Return True when PAP is enabled for this kernel."""
-    return (kernel["StreamK"] == 3
+    return (kernel["StreamK"] in (3, 4, 5)
             and kernel.get("PrefetchAcrossPersistent", 0)
             and (not kernel.get("SuppressNoLoadLoop", False)
                  or kernel["HalfPLR"])
@@ -11127,14 +11208,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         headInfo[beginName] = info
       return headInfo
 
-    # Back-edge modeling is only needed for PrefetchGlobalRead < 2. With
-    # PrefetchGlobalRead >= 2 the pipelined prologue pre-stages the next
-    # iteration's LDS data, so the steady-state phase is already established and
-    # a plain single linear pass is correct - leaving loopHeadInfo empty makes
-    # _rewriteModuleInOrder degrade to exactly that linear pass.
+    # Back-edge modeling is only needed when the loop head's incoming token phase
+    # differs from what a plain linear walk computes. With PrefetchGlobalRead >= 2
+    # the pipelined prologue pre-stages the next iteration's LDS data, so the
+    # steady-state phase is already established and a single linear pass is
+    # correct - leaving loopHeadInfo empty makes _rewriteModuleInOrder degrade to
+    # exactly that linear pass. Rotating tokens are the exception at any PGR: the
+    # back edge renames them, so the linear walk reads each token's phase off the
+    # wrong buffer and misses every loop-carried hazard.
+    ldsTokenBackEdgeMap = self._ldsTokenBackEdgeMap()
     loopEntryOverride = {}
     loopPendingTokens = set()
-    loopHeadInfo = _detectLoopHeadInfo() if kernel["PrefetchGlobalRead"] < 2 else {}
+    loopHeadInfo = _detectLoopHeadInfo() \
+      if kernel["PrefetchGlobalRead"] < 2 or ldsTokenBackEdgeMap else {}
 
     def _rewriteModuleInOrder(mod: Module):
       nonlocal insertedCount
@@ -11155,11 +11241,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # barrier hoisted into the prologue (emitted right before the loop
             # label) instead of one that re-fires every iteration.
             prologueBarrierTokens = []
-            for token, (firstAccess, tailState) in loopHeadInfo[labelName].items():
+            tailStates = {token: info[1] for token, info in loopHeadInfo[labelName].items()}
+            for token, (firstAccess, _) in loopHeadInfo[labelName].items():
+              # Next iteration this token names the buffer that
+              # ldsTokenBackEdgeMap[token] names now, so the phase the back edge
+              # carries in is that token's tail phase. Without rotation the map is
+              # empty and a token simply carries its own tail phase. A buffer the
+              # body never touches stays standby.
+              carriedToken = ldsTokenBackEdgeMap.get(token, token)
+              carriedState = tailStates.get(carriedToken, "standby")
               preState = tokenState.get(token, "standby")
-              loopEntryOverride[token] = tailState
+              loopEntryOverride[token] = carriedState
               loopPendingTokens.add(token)
-              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, tailState):
+              if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
                 prologueBarrierTokens.append(token)
             if prologueBarrierTokens:
               uniqueTokens = sorted(set(prologueBarrierTokens))
@@ -11235,152 +11329,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
 
 
-  def _registerKernelArgs(self, kernel):
-    """Register all kernel arguments for the CustomKernel definition.
-
-    Populates self.kernelArgDefs in kernarg-buffer-layout order
-    (matching Signature.py).  Must be called after _initKernel so that
-    self.states is fully set up."""
-
-    def _reg(argType, semantic, index=0):
-      entry = {"type": argType, "semantic": semantic}
-      if index:
-        entry["index"] = index
-      self.kernelArgDefs.append(entry)
-
-    # -- Header ----------------------------------------------------------------
-    _reg("uint32", "GemmInfo")
-    _reg("uint32", "InternalArgs")
-    if kernel["InternalSupportParams"]["KernArgsVersion"] >= 1:
-      _reg("uint32", "InternalArgs1")
-      _reg("uint32", "NumWorkGroups")
-
-    # -- Sizes -----------------------------------------------------------------
-    for i in range(self.states.numSgprSizesFree):
-      _reg("uint32", "SizeFree%d" % i)
-    for i in range(self.states.numSgprSizesSum):
-      _reg("uint32", "SizeSum" if i == 0 else "SizeSum%d" % i)
-
-    # -- Debug buffer ----------------------------------------------------------
-    if self.debugConfig.debugKernel:
-      _reg("address", "DebugBuffer")
-
-    # -- Tensor addresses ------------------------------------------------------
-    _reg("address", "AddressD")
-    _reg("address", "AddressC")
-    _reg("address", "AddressA")
-    if kernel["ProblemType"]["MXBlockA"]:
-      _reg("address", "AddressMXScaleA")
-    _reg("address", "AddressB")
-    if kernel["ProblemType"]["MXBlockB"]:
-      _reg("address", "AddressMXScaleB")
-    if kernel["ProblemType"]["Sparse"]:
-      _reg("address", "AddressMetadata")
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
-      _reg("address", "AddressWorkspace")
-      _reg("address", "AddressFlags")
-
-    # -- Strides ---------------------------------------------------------------
-    for i in range(self.states.d.numSgprStrides):
-      _reg("uint32", "StrideD%d" % i)
-    for i in range(self.states.c.numSgprStrides):
-      _reg("uint32", "StrideC%d" % i)
-    for i in range(self.states.a.numSgprStrides):
-      _reg("uint32", "StrideA%d" % i)
-    if kernel["ProblemType"]["MXBlockA"]:
-      for i in range(self.states.mxsa.numSgprStrides):
-        _reg("uint32", "StrideScaleA%d" % i)
-    for i in range(self.states.b.numSgprStrides):
-      _reg("uint32", "StrideB%d" % i)
-    if kernel["ProblemType"]["MXBlockB"]:
-      for i in range(self.states.mxsb.numSgprStrides):
-        _reg("uint32", "StrideScaleB%d" % i)
-    if kernel["ProblemType"]["Sparse"]:
-      for i in range(self.states.m.numSgprStrides):
-        _reg("uint32", "StrideMetadata%d" % i)
-
-    # -- Packed-batch magic divisors -------------------------------------------
-    for i, _ in enumerate(kernel["PackedC0IdxChars"][:-1]):
-      idx = kernel["PackedC0IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
-    for i, _ in enumerate(kernel["PackedC1IdxChars"][:-1]):
-      idx = kernel["PackedC1IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
-
-    # -- Alpha / Beta ----------------------------------------------------------
-    numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
-    _reg("float64" if numSgprAlpha > 1 else "uint32", "Alpha")
-    if kernel["ProblemType"]["UseBeta"]:
-      numSgprBeta = max(1, int(self.states.bpeCinternal / 4))
-      _reg("float64" if numSgprBeta > 1 else "uint32", "Beta")
-
-    # -- StreamK scalar args ---------------------------------------------------
-    if kernel["StreamK"]:
-      _reg("uint32", "ItersPerTile")
-      _reg("uint32", "MagicNumberItersPerTile")
-      _reg("uint32", "MagicShiftItersPerTile")
-      _reg("uint32", "SKItersPerWG")
-      if kernel["StreamK"] >= 2:
-        _reg("uint32", "SKGrid")
-        _reg("uint32", "SKTilesAndSplit")
-
-    # -- Scale addresses -------------------------------------------------------
-    if kernel["ProblemType"]["UseScaleAB"]:
-      _reg("address", "AddressScaleA")
-      _reg("address", "AddressScaleB")
-    if kernel["ProblemType"]["UseScaleCD"]:
-      _reg("address", "AddressScaleC")
-      _reg("address", "AddressScaleD")
-    if kernel["ProblemType"]["UseScaleAlphaVec"]:
-      _reg("address", "AddressScaleAlphaVec")
-
-    # -- Bias ------------------------------------------------------------------
-    if self.states.useBias != DataDirection.NONE:
-      _reg("address", "AddressBias")
-      if self.states.needBiasType:
-        _reg("uint32", "BiasType")
-        _reg("uint32", "StrideBias")
-
-    # -- FactorDim -------------------------------------------------------------
-    enableFactorDim = False
-    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
-      enableFactorDim = True
-    if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
-      enableFactorDim = True
-    if enableFactorDim:
-      _reg("uint32", "FactorDim")
-
-    # -- E tensor --------------------------------------------------------------
-    if kernel["ProblemType"]["UseE"]:
-      _reg("address", "AddressE")
-      for i in range(self.states.e.numSgprStrides):
-        _reg("uint32", "StrideE%d" % i)
-
-    # -- Activation args -------------------------------------------------------
-    if ((kernel["ProblemType"]["ActivationType"] != 'none') and kernel["ActivationFused"]):
-      actArgType = "float64" if self.states.numActivationArgSize > 1 else "float32"
-      for idx in range(len(kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList())):
-        _reg(actArgType, "ActivationArg", idx)
-      if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
-        _reg("uint32", "ActivationTypeArg")
-
-    # -- Amax output -----------------------------------------------------------
-    if kernel["ProblemType"]["OutputAmaxD"]:
-      _reg("address", "AddressAmaxOut")
-      _reg("address", "AmaxWS")
-      _reg("address", "AmaxSync")
-
-    # -- MBSK (MultipleBufferSingleKernel) -------------------------------------
-    # Must match the canonical condition used by Signature.py and elsewhere in
-    # this file (e.g. the ExpertSchedulingMode gate above): AdaptiveGemmGSUA=1
-    # also requires these trailing args, even for plain MultipleBuffer mode.
-    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1:
-      _reg("address", "AddressTD")
-      _reg("address", "Synchronizer")
-      _reg("uint32", "GSUSync")
-
   def _getKernelSource(self, kernel: Solution):
     """
     Returns the source of the kernel, either C++ or assembly.
@@ -11389,23 +11337,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tensorParametersA = {}
     tensorParametersB = {}
     self._initKernel(kernel, tensorParametersA, tensorParametersB)
-
-    self._registerKernelArgs(kernel)
-    gridX = "TilesXYBatchGSU"
-    if kernel["StreamK"]:
-      gridX = "StreamKWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "StreamKNoBatch"
-    kernel["CustomKernel"] = {
-      "name": self.states.kernelName,
-      "args": self.kernelArgDefs,
-      "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
-      "threads": [kernel["NumThreads"], 1, 1],
-      "grid": [gridX, "One", "One"],
-      "workspaceType": "None",
-      "workspaceSizePerElemC": 0,
-      "workspaceSizePerElemBias": 0,
-      "generated": True,
-    }
-
     self.stringIdx = 0
     if not kernel["UseSubtileImpl"]:
       (error, kb) = self.kernelBody(kernel, tensorParametersA, tensorParametersB)
@@ -11513,7 +11444,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmGlobalOffset(self, kernel, tP) -> Module:
+  def tdmGlobalOffset(self, kernel, tP, useDescriptor=False) -> Module:
     assert False, "Should be overrided"
 
   def tdmGlobalOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
@@ -11546,8 +11477,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
     assert False, "Should be overrided"
 
-  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0,
+                                 hoistedWrapUSel=False) -> Module:
     assert False, "Should be overrided"
+
+  def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def packTdmParityIntoArgType(self, kernel) -> Module:
+    assert False, "Should be overrided"
+
+  def cmpNamedArgTypeEq(self, module, value, comment=""):
+    """Compare the named ArgType domain (low 8 bits) to *value*.
+
+    Bit 8 of sgpr ArgType is a TDM wave-parity side channel on wave-separated
+    stagger kernels. Masking every named value test keeps == 2 / == 3 dispatch
+    correct independent of whether pack has run yet (persistent graWorkGroup
+    is emitted before pack but runs after pack on tile N+1).
+    """
+    with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
+      module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
+                         comment="mask ArgType domain (bit 8 = TDM wave-parity)"))
+      module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
@@ -11589,6 +11540,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return (idx + 1) % self.states.numLDSBlk
     return self.states.memTokenLdsBuffer1 if idx == self.states.memTokenLdsBuffer0 \
       else self.states.memTokenLdsBuffer0
+
+  def _ldsTokenBackEdgeMap(self) -> dict:
+    """Map each LDS token to the token naming the same LDS region one iteration later.
+
+    A token names a physical buffer only for the iteration it was emitted from:
+    the runtime LDS addresses advance one block per loop body, so on trip ``k+1``
+    the instruction tagged ``t`` touches whatever the instruction tagged
+    ``map[t]`` touched on trip ``k``. postMainLoopBarrierCheckAndReset uses that
+    to carry loop-tail phases onto the right token across the back edge. Empty
+    when the tokens do not rotate, which leaves the carry an identity - the
+    classic behaviour, and what the binary 0<->1 toggle already amounts to once
+    ExpandPointerSwap's two loop copies have each taken it.
+
+    A token is not an LDS buffer index, so the advance cannot be arithmetic on
+    the token itself: ``_getLdsReadMemToken`` builds it as
+    ``memTokenLdsSplit[buffer][half]``, which for TDMSplit puts the half-1 tokens
+    in a numbering disjoint from the buffer tokens. Rotate the buffer row with
+    ``_nextLdsToken``, the same primitive codegen swaps with, then read the token
+    back out of the same table so each LDS region stays in its own ring.
+    Tokens outside the table (the metadata token) name no rotating buffer and are
+    left out, so the caller's lookup falls back to identity for them.
+    """
+    if self.states.kernel.get("TDMPlusLdsBuf", 0) != 1:
+      return {}
+    splitTable = self.states.memTokenLdsSplit
+    backEdgeMap = {}
+    for buf, row in enumerate(splitTable):
+      # One _nextLdsToken per loop body is what the body itself does to the read
+      # and tensor tokens, so a whole iteration advances the buffer loopCopies times.
+      nextBuf = buf
+      for _ in range(self.states.unrollLoopCopies):
+        nextBuf = self._nextLdsToken(nextBuf)
+      for half, token in enumerate(row):
+        backEdgeMap[token] = splitTable[nextBuf][half]
+    return backEdgeMap
 
   def resetLdsTokensForTailLoop(self) -> None:
     """Point all LDS-related memory tokens at buffer 0 before tail-loop codegen.
