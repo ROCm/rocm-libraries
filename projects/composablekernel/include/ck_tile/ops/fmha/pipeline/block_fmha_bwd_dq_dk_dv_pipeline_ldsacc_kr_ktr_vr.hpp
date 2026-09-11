@@ -16,9 +16,15 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT 1
 #endif
 
+// Sink the next iteration's Q/LSE loads past gemm_4, so their live ranges do
+// not span it. dO/D are already loaded after gemm_4; Q/LSE were the odd ones
+// out. Safe: gemm_4 touches neither, and nothing between gemm_4 and the dO/D
+// loads writes LDS or barriers, so they sit in the same validity window the
+// dO/D loads already rely on.
 #ifndef CK_TILE_FMHA_BWD_SINK_TDM_WAIT
 #define CK_TILE_FMHA_BWD_SINK_TDM_WAIT 1
 #endif
+
 // 0 = keep the hand-written scheduler prescriptions, 1 = drop them where the
 // loop body holds a single Q tile, 2 = drop them always. See schedgate.py.
 //
@@ -30,35 +36,12 @@ namespace ck_tile {
 #ifndef CK_TILE_FMHA_BWD_SCHED_DROP_MODE
 #define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 2
 #endif
+
+// Keep only dV in registers, leave dK in LDS. Halves the extra register cost
+// versus the fully register-resident pipeline (128 VGPR instead of 256).
 #ifndef CK_TILE_FMHA_BWD_DV_IN_REG
 #define CK_TILE_FMHA_BWD_DV_IN_REG 1
 #endif
-
-
-// PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
-// (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
-// did for <1>/<2>.  Bit N of the mask selects scheduler N.
-
-
-// PROBE: fence the softmax/dropout stage from the operand prefetch that follows
-// it. The hot-loop VGPR peak is a ~1000-line band where the scheduler has
-// hoisted the next gemm's ds_load_tr fragments into the dropout stage; this
-// measures what that overlap costs in registers.
-
-
-// A2: merge the gemm_1 / gemm_2 scheduling regions -- drop the sched_barrier
-// between them AND both hand-written GemmStagedScheduler prescriptions.
-// Both halves are required; doing either alone is a loss (see HANDOFF_A2).
-
-
-// PROBE: keep ONLY dV in registers, leave dK in LDS. Halves the extra register
-// cost versus the fully register-resident pipeline (128 VGPR instead of 256).
-// PROBE: sink the next iteration's Q/LSE loads past gemm_4, so their live
-// ranges do not span it.  dO/D are already loaded after gemm_4; Q/LSE were the
-// odd ones out.  Safe: gemm_4 touches neither, and nothing between gemm_4 and
-// the dO/D loads writes LDS or barriers, so they sit in the same validity
-// window the dO/D loads already rely on.
-
 
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, with the dK and dV
 // accumulators held in LDS instead of registers.
