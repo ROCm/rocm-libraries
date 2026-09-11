@@ -89,6 +89,9 @@ _SHAPES: List[_Shape] = [
     _Shape("dw_N2H14W14_g16", N=2, H=14, W=14, groups=16, cpg=1),
     # 1×1 pointwise for cpg=16 (PAD=0, KH=KW=1)
     _Shape("16c_1x1_N2H16W16_g2", N=2, H=16, W=16, groups=2, cpg=16, KH=1, KW=1, PAD=0),
+    # stride=2 cases — output H=6, W=6 for H=W=14, PAD=1, KH=KW=3
+    _Shape("4c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=4, stride=2),
+    _Shape("16c_N2H14W14_g2_s2", N=2, H=14, W=14, groups=2, cpg=16, stride=2),
 ]
 
 
@@ -177,7 +180,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     B_t = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float16).uniform_(
         -1.0, 1.0
     )
-    D_t = torch.empty(p.N, p.H, p.W, total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16)
 
     ref = _conv_ref_grouped(A_t, B_t, p)
 
@@ -202,7 +205,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         rt.free(D_dev)
         return False, f"kernel load failed: {e}"
 
-    q_tiles = (p.W + spec.block_q - 1) // spec.block_q
+    q_tiles = (p.Wo + spec.block_q - 1) // spec.block_q
     g_tiles = p.groups // spec.block_groups
     grid = (q_tiles, g_tiles, p.N)
     block = (spec.threads_per_block, 1, 1)
