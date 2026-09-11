@@ -399,7 +399,6 @@ pipeline {
         gfx908_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx908"
         gfx90a_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx90a"
         gfx942_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx942"
-        gfx1151_flags   = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx1151"
         gfx1101_flags   = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx1101"
 
         Smoke_targets   = " check MIOpenDriver"
@@ -437,7 +436,6 @@ pipeline {
                 stage('Build Docker for CI') { steps { script { runDockerBuild('ci') } } } // Unified docker build for CI
                 // stage('Build Docker gfx90X') { steps { script { runDockerBuild('gfx90X') } } }
                 // stage('Build Docker gfx942, gfx950') { steps { script { runDockerBuild('gfx942_gfx950') } } }
-                // stage('Build Docker Navi(gfx1101, gfx1151)') { steps { script { runDockerBuild('navi') } } }
             }
         }
         stage("Package and Static checks") {
