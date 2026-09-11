@@ -124,6 +124,45 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "1d_filter1_bfp16_ncl_pad0_stride1",
+          "1d_filter1_bfp16_nlc_pad0_stride1",
+          "1d_filter1_fp16_ncl_pad0_stride1",
+          "1d_filter1_fp16_nlc_pad0_stride1",
+          "1d_filter1_fp32_ncl_pad0_stride1",
+          "1d_filter1_fp32_nlc_pad0_stride1",
+          "1d_filter3_bfp16_ncl_pad0_stride1",
+          "1d_filter3_bfp16_nlc_pad0_stride1",
+          "1d_filter3_fp16_ncl_pad0_stride1",
+          "1d_filter3_fp16_nlc_pad0_stride1",
+          "1d_filter3_fp32_ncl_pad0_stride1",
+          "1d_filter3_fp32_nlc_pad0_stride1",
+          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
+          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
+          "1d_grouped2_bfp16_ncl_pad1_stride1",
+          "1d_grouped2_bfp16_nlc_pad1_stride1",
+          "1d_grouped2_fp16_ncl_pad1_stride1",
+          "1d_grouped2_fp16_nlc_pad1_stride1",
+          "1d_grouped2_fp32_ncl_pad1_stride1",
+          "1d_grouped2_fp32_nlc_pad1_stride1"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
       }
     ],
     "MIOPEN_ENGINE_DETERMINISTIC": [
@@ -248,6 +287,45 @@
           ],
           "gfx942": [
             "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1d_filter1_bfp16_ncl_pad0_stride1",
+          "1d_filter1_bfp16_nlc_pad0_stride1",
+          "1d_filter1_fp16_ncl_pad0_stride1",
+          "1d_filter1_fp16_nlc_pad0_stride1",
+          "1d_filter1_fp32_ncl_pad0_stride1",
+          "1d_filter1_fp32_nlc_pad0_stride1",
+          "1d_filter3_bfp16_ncl_pad0_stride1",
+          "1d_filter3_bfp16_nlc_pad0_stride1",
+          "1d_filter3_fp16_ncl_pad0_stride1",
+          "1d_filter3_fp16_nlc_pad0_stride1",
+          "1d_filter3_fp32_ncl_pad0_stride1",
+          "1d_filter3_fp32_nlc_pad0_stride1",
+          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
+          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
+          "1d_grouped2_bfp16_ncl_pad1_stride1",
+          "1d_grouped2_bfp16_nlc_pad1_stride1",
+          "1d_grouped2_fp16_ncl_pad1_stride1",
+          "1d_grouped2_fp16_nlc_pad1_stride1",
+          "1d_grouped2_fp32_ncl_pad1_stride1",
+          "1d_grouped2_fp32_nlc_pad1_stride1"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
           ]
         }
       }
