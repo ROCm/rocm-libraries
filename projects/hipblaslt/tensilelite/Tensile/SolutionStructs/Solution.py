@@ -1279,12 +1279,10 @@ class Solution(collections.abc.Mapping):
             if stackReason:
               reject(state, printRejectionReason, stackReason)
               return
-            state[f"_ABTilePair{tc}"] = {
-              2: "AB_B4_TLU1",
-              4: "AB_B4_TLU1_4x1",
-              8: "AB_B4_TLU1_8x1",
-              16: "AB_B4_TLU1_16x1",
-            }[stack]
+            # Lazy import for the same reason as _validateSubtileGRKPartition:
+            # Components/Subtile at module scope deadlocks the package load.
+            from Tensile.Components.Subtile.Kernel import abB4Tlu1Name
+            state[f"_ABTilePair{tc}"] = abB4Tlu1Name(stack)
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
