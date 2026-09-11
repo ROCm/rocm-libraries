@@ -5,6 +5,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ## hipTensor 2.4.0
 
 ### Added
+* Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
 * Added `ffm-quick` and `ffm-full` test categories for emulation tests.
 * Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
 
@@ -17,7 +18,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Resolved issues
 * Enabled `-frtti` on Windows to fix RTTI-related build failures.
 * Fixed batched contractions reporting success while producing incorrect results. `hiptensorCreateContraction` and `hiptensorCreateContractionTrinary` now return `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is shared by both inputs and the output of a contraction.
-* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when an input tensor doesn't carry the same modes as the output tensor. These configurations previously produced a valid descriptor and plan, then failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` at execution.
+* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when an input tensor carries a mode that the output tensor doesn't carry, and `HIPTENSOR_STATUS_INVALID_VALUE` when a shared mode has a different extent in the two tensors. These configurations previously produced a valid descriptor and plan, then failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` at execution.
+* Fixed elementwise operations reading the wrong elements when two input tensors ordered the same modes differently. Every tensor's strides are now permuted into the output tensor's mode order before reaching the kernel.
 * Removed the internal compiler flags `-amdgpu-early-inline-all=true` and `-amdgpu-function-calls=false` from the build, which caused excessive compile-time memory usage (OOM) with newer ROCm/LLVM toolchains (JIRA: LCOMPILER-2589).
 
 ## hipTensor 2.3.0 for ROCm 7.14

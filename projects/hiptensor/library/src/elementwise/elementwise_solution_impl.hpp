@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <map>
 #include <numeric>
 
 #include "elementwise_solution.hpp"
@@ -90,39 +89,60 @@ namespace hiptensor
 
             auto isColMajorStrides = HiptensorOptions::instance()->isColMajorStrides();
 
+            // The output tensor defines the iteration space: its mode order fixes what each
+            // dimension index means, and every other tensor's strides are permuted into that
+            // order. Indexing a tensor with strides left in its own mode order would read the
+            // wrong element whenever that order differs from the output's.
+            auto const& refModes = outModesArray[0];
+
+            // convertVectorToCkArray copies a fixed NDim elements, so a rank that disagrees
+            // with the instance would read past the end of the source vector.
+            constexpr auto nDim = static_cast<std::size_t>(Traits::NDim);
+            if(refModes.size() != nDim || outLengthsArray[0].size() != nDim)
+            {
+                return false;
+            }
+
             std::array<index_t, Traits::NDim> deviceInputLengths;
-            convertVectorToCkArray(inLengthsArray[0], deviceInputLengths);
+            convertVectorToCkArray(outLengthsArray[0], deviceInputLengths);
+
+            auto alignedStrides = [&](std::vector<std::size_t> const& lengths,
+                                      std::vector<std::size_t> const& strides,
+                                      std::vector<int32_t> const&     modes) {
+                return hiptensor::alignStridesToModes(
+                    refModes,
+                    modes,
+                    strides.empty() ? hiptensor::stridesFromLengths(lengths, isColMajorStrides)
+                                    : strides);
+            };
 
             std::array<std::array<index_t, Traits::NDim>, Traits::InDataT::Size()>
                 deviceInputStrides;
             for(int i = 0; i < deviceInputStrides.size(); i++)
             {
-                if(inStridesArray.empty() || inStridesArray[i].empty())
+                auto strides = alignedStrides(inLengthsArray[i],
+                                              inStridesArray.empty() ? std::vector<std::size_t>{}
+                                                                     : inStridesArray[i],
+                                              inModesArray[i]);
+                if(strides.size() != nDim)
                 {
-                    convertVectorToCkArray(
-                        hiptensor::stridesFromLengths(inLengthsArray[i], isColMajorStrides),
-                        deviceInputStrides[i]);
+                    return false;
                 }
-                else
-                {
-                    convertVectorToCkArray(inStridesArray[i], deviceInputStrides[i]);
-                }
+                convertVectorToCkArray(strides, deviceInputStrides[i]);
             }
 
             std::array<std::array<index_t, Traits::NDim>, Traits::OutDataT::Size()>
                 deviceOutputStrides;
             for(int i = 0; i < deviceOutputStrides.size(); i++)
             {
-                auto stides = hiptensor::stridesFromLengths(outLengthsArray[i], isColMajorStrides);
-                std::map<int32_t, int> modeToIndex;
-                for(int j = 0; j < Traits::NDim; j++)
+                // Output strides are still derived from the lengths rather than taken from
+                // outStridesArray, preserving the existing behaviour for strided outputs.
+                auto strides = alignedStrides(outLengthsArray[i], {}, outModesArray[i]);
+                if(strides.size() != nDim)
                 {
-                    modeToIndex[outModesArray[i][j]] = j;
+                    return false;
                 }
-                for(int j = 0; j < Traits::NDim; j++)
-                {
-                    deviceOutputStrides[i][j] = stides[modeToIndex[inModesArray[i][j]]];
-                }
+                convertVectorToCkArray(strides, deviceOutputStrides[i]);
             }
 
             std::array<const void*, Traits::InDataT::Size()> deviceInBuffers;
@@ -212,7 +232,7 @@ namespace hiptensor
 
             // Size count
             Base::mSize = std::accumulate(
-                inLengthsArray[0].cbegin(), inLengthsArray[0].cend(), 1, std::multiplies{});
+                outLengthsArray[0].cbegin(), outLengthsArray[0].cend(), 1, std::multiplies{});
 
             // Arg test
             Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());
