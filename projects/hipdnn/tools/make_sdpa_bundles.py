@@ -66,8 +66,15 @@ def tensor(uid: int, name: str, batch: int, heads: int, seq: int,
     }
 
 
-def bundle_for(geom: dict) -> dict:
-    """One SdpaFwd bundle, shaped like the shipped bshd ones."""
+def bundle_for(geom: dict, *, mma_core_mode: str | None = "float") -> dict:
+    """One SdpaFwd bundle, shaped like the shipped bshd ones.
+
+    `mma_core_mode` pins the MMA core precision. The shipped bundles carry `"float"`,
+    so that stays the default, but it is a real constraint and not a formality: AITER's
+    `SdpaFwdPlanBuilder::isApplicable` declines any graph that sets it ("mma_core_mode
+    must be unset"), which is how a bf16/d128 corpus its own kernel table serves came
+    back declined 24 times out of 24. A caller comparing engines passes None.
+    """
     dt = geom["dtype"]
     b, hq, hkv = geom["batch"], geom["num_query_heads"], geom["num_kv_heads"]
     sq, skv, d = geom["seqlen_q"], geom["seqlen_kv"], geom["head_size"]
@@ -92,7 +99,7 @@ def bundle_for(geom: dict) -> dict:
         "causal_mask_bottom_right": False,
         "attn_scale_value": 1.0 / math.sqrt(d),
         "diagonal_alignment": "TOP_LEFT",
-        "mma_core_mode": "float",
+        "mma_core_mode": mma_core_mode,
         "implementation": "AUTO",
     }
     if geom["causal"]:

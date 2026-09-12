@@ -257,6 +257,18 @@ def real_corpus(tmp_path_factory):
     return pipeline.build(out, count=120, seed=0), out
 
 
+def test_no_emitted_graph_pins_the_mma_core_mode(real_corpus):
+    """AITER's `SdpaFwdPlanBuilder::isApplicable` declines any graph that sets
+    `mma_core_mode` -- in its own words, "mma_core_mode must be unset". The shipped
+    bundles carry `"float"`, and a corpus that inherited it reported that engine as
+    serving 0 of 24 bf16/d128 graphs its own kernel table serves (run 67928822). An
+    engine-agnostic corpus must not decide the contest in the graph document."""
+    _, out = real_corpus
+    for path in sorted((out / "graphs").glob("*.json")):
+        node = json.loads(path.read_text(encoding="utf-8"))["nodes"][0]
+        assert node["attributes"]["mma_core_mode"] is None, path.name
+
+
 def test_every_emitted_graph_reads_back_as_the_shape_it_claims(real_corpus):
     """Read back by `mine_shapes.from_graph_corpus`, which is the repository's other
     hipDNN graph reader and derives causality from `left_bound`/`causal_mask` rather
