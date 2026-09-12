@@ -93,6 +93,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
+      therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
       - name: Checkout ci-env action
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -109,7 +111,13 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      test_projects: ${{ steps.test-projects.outputs.test_projects }}
+      # TheRock's determine_rocm_test_dependencies.py natively resolves
+      # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
+      # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
+      # right consumer set, so changed_projects is passed straight through
+      # as test_projects without a rocm-libraries-side translation step.
+      # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
+      test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
@@ -118,9 +126,6 @@ jobs:
         with:
           sparse-checkout: |
             .github/repos-config.json
-            .github/scripts/ci_utils.py
-            .github/scripts/multi_arch_test_projects.py
-            .github/scripts/therock_matrix.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -143,12 +148,6 @@ jobs:
             --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
-
-      - name: Select multi-arch test projects
-        id: test-projects
-        run: |
-          python3 .github/scripts/multi_arch_test_projects.py \
-            --changed-projects "${{ steps.configure.outputs.changed_projects }}"
 
   setup:
     needs: [ci-env, configure]
@@ -253,6 +252,32 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  rocjitsu_race_check_gfx94x:
+    name: rocjitsu race check (gfx94X-dcgpu)
+    # A caller cannot depend on an individual job inside a reusable workflow,
+    # so start after the Linux workflow has finished publishing its artifacts.
+    # This sidecar remains advisory and is not part of the required summary.
+    needs: [ci-env, configure, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+        ) &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      amdgpu_families: gfx94X-dcgpu
+      amdgpu_targets: gfx942
+      # TODO(newling): Add gfx1151 after validating a target-specific workload.
+      # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
