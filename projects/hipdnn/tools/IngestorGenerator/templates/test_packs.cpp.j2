@@ -36,12 +36,20 @@
  * authored config, which over-counts every bundle whose generation expressions
  * overlap, and whose pack file stems are not the pack names the loader reports.
  *
- * Which architecture's row applies is supplied by the caller in
- * HIPDNN_TEST_EXPECTED_ARCH -- CMake takes it from the configured packaging
- * architecture list and registers one invocation per selected arch against that
- * arch's descriptor shard. It is never probed from a device (a host census must not
- * depend on which card happens to be in the machine) and never read back out of the
- * descriptors under test (a bundle cannot be its own expectation).
+ * The caller supplies HIPDNN_TEST_EXPECTED_ARCH explicitly, never from a detected
+ * device or the descriptors under test (a bundle cannot be its own expectation).
+{% if emitted.source_kind == 'kpack' %}
+ * CMake registers hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs
+ * as a fresh native process for each configured packaging arch. It supplies
+ * HIPDNN_DESCRIPTOR_DIR for that arch's shard and
+ * HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs.
+ * The native guard requires an existing explicit root and every registered case
+ * to execute and pass without skipping in every iteration; at least one
+ * iteration must complete. Merely listing or selecting some cases is not proof.
+{% else %}
+ * This direct-load engine uses ordinary host tests, not the packaged-shard census.
+ * Supply its descriptor root in HIPDNN_DESCRIPTOR_DIR when running this suite.
+{% endif %}
  *
  * This proves registration, loading and inventory. It proves nothing about dispatch.
  *

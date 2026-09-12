@@ -873,11 +873,8 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # hkp_defer_census_registration(<arches>)
-#   Schedule the per-arch census registration for the END of the provider
-#   directory. hip_kernel_provider_tests is created by the provider's
-#   `add_subdirectory(src)`, which runs AFTER this subdirectory, so registering
-#   inline finds no target at all -- which is exactly how the whole registration
-#   sat dead and green while nobody could see it.
+#   Schedule per-arch/per-suite census registration for the END of the provider
+#   directory, after add_subdirectory(src) creates hip_kernel_provider_tests.
 #
 #   Wrapped in EVAL CODE because a deferred CALL's arguments are expanded when the
 #   call RUNS, in the deferred directory's scope, where none of these locals exist.
@@ -890,8 +887,6 @@ function(hkp_defer_census_registration arches)
     cmake_language(EVAL CODE "
         cmake_language(DEFER DIRECTORY [[${HKP_PROVIDER_DIR}]]
             CALL hkp_register_census_tests
-                 [[${Python3_EXECUTABLE}]]
-                 [[${HKP_PKG_DIR}/tools/hkp_census_check.py]]
                  [[${HIPDNN_DESCRIPTOR_BUILD_DIR}]]
                  [[${arches}]])
     ")
@@ -1025,36 +1020,30 @@ endfunction()
 #
 # The architecture is supplied EXPLICITLY. `arches` is the configured packaging
 # list (GPU_TARGETS/AMDGPU_TARGETS, normalized by hkp_selected_arches) -- the same
-# list the pack step lowered for -- so one entry is registered per selected arch
+# list the pack step lowered for -- so each suite gets an entry per selected arch
 # against that arch's own shard under HIPDNN_DESCRIPTOR_BUILD_DIR. Nothing here
 # probes a device and nothing reads the descriptors to decide what to expect: a
 # bundle cannot be its own expectation, and a host census must not depend on which
 # card is in the machine.
 #
-# Rows are GTest suite names, one per generated engine census spliced into the
-# test binary; the driver requires the filter to select at least one case, because
-# a filter matching nothing is a gtest PASS. EMPTY here by design -- this branch
-# carries the mechanism, not a generated engine -- and each integration appends
-# its own suite name (the generator's cmake_test_sources fragment says so).
+# Rows are literal GTest suite names, one per generated packaged-engine census
+# spliced into the test binary. The native execution guard requires every registered
+# case in that suite to pass without skipping in every completed iteration. The
+# list is empty until an integration appends its suite name (see the generator's
+# cmake_test_sources fragment). Direct-load engines use ordinary host tests.
 #
-# CALLED DEFERRED, from the end of the provider directory (see hkp_add_packaging),
-# because hip_kernel_provider_tests does not exist while descriptor-packaging is
-# being processed. Everything it needs is therefore passed in rather than read from
-# scope: `python`, `census_tool`, `descriptor_build_dir` and `arches`. Once a suite
-# row exists, a missing target or an empty arch list is a FATAL_ERROR -- the earlier
-# silent `return()` is what kept this registration dead and green.
+# CALLED DEFERRED, from the end of the provider directory, after the test target
+# exists. descriptor_build_dir and arches are captured before local scope expires.
+# Declared suites require both the target and a nonempty arch list.
 # ---------------------------------------------------------------------------
-function(hkp_register_census_tests python census_tool descriptor_build_dir arches)
+function(hkp_register_census_tests descriptor_build_dir arches)
     set(HKP_CENSUS_TEST_SUITES)
 
     if(NOT HKP_CENSUS_TEST_SUITES)
         return()
     endif()
 
-    # Past this point a census was DECLARED, so anything missing is a wiring fault, not
-    # a reason to register nothing. Silence here is what let the whole registration sit
-    # dead: it ran before add_subdirectory(src) created the target, took the `NOT TARGET`
-    # branch every time, and reported nothing.
+    # A declared census with missing prerequisites is a configuration error.
     if(NOT TARGET hip_kernel_provider_tests)
         message(FATAL_ERROR
             "hkp: census suites are declared (${HKP_CENSUS_TEST_SUITES}) but "
@@ -1068,25 +1057,17 @@ function(hkp_register_census_tests python census_tool descriptor_build_dir arche
             "census. Set GPU_TARGETS/AMDGPU_TARGETS.")
     endif()
 
-    set(_census_filter "")
-    foreach(_suite IN LISTS HKP_CENSUS_TEST_SUITES)
-        if(_census_filter)
-            string(APPEND _census_filter ":")
-        endif()
-        string(APPEND _census_filter "${_suite}.*")
-    endforeach()
-
     foreach(_census_arch IN LISTS arches)
-        add_test(
-            NAME "hip-kernel-provider-hkp-census-${_census_arch}"
-            COMMAND "${python}"
-                    "${census_tool}"
-                    --arch "${_census_arch}"
-                    --descriptor-root
-                    "${descriptor_build_dir}/${_census_arch}"
-                    --test-binary "$<TARGET_FILE:hip_kernel_provider_tests>"
-                    --gtest-filter "${_census_filter}")
-        set_tests_properties("hip-kernel-provider-hkp-census-${_census_arch}" PROPERTIES
-            LABELS "unit_test;hip-kernel-provider;host")
+        foreach(_suite IN LISTS HKP_CENSUS_TEST_SUITES)
+            set(_census_name "hip-kernel-provider-hkp-census-${_census_arch}-${_suite}")
+            add_test(
+                NAME "${_census_name}"
+                COMMAND "$<TARGET_FILE:hip_kernel_provider_tests>"
+                        "--gtest_filter=${_suite}.*")
+            set_tests_properties("${_census_name}" PROPERTIES
+                ENVIRONMENT
+                    "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_census_arch};HIPDNN_DESCRIPTOR_DIR=${descriptor_build_dir}/${_census_arch}"
+                LABELS "unit_test;hip-kernel-provider;host")
+        endforeach()
     endforeach()
 endfunction()

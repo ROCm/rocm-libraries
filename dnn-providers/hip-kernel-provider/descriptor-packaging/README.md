@@ -94,10 +94,33 @@ equivalence of arbitrary machine code or correctness of native dispatch.
 The runtime consumes packed per-architecture descriptors with source kind KPACK,
 not unlowered rocKE/HIP authoring descriptors. Native proof separately executes
 actual typed provider registration/loading and a finalized emitted-bundle census;
-source-text symbol matching is not certification. Host checks use explicit
-`HIPDNN_TEST_EXPECTED_ARCH` from configured packaging arches with the corresponding
-shard and nonempty exact test selection. Neither structural nor host loading
-proves numerical device behavior. The
+source-text symbol matching is not certification. For each literal suite in
+`HKP_CENSUS_TEST_SUITES` and configured packaging arch, CMake registers
+`hip-kernel-provider-hkp-census-<arch>-<suite>`. This invokes
+`hip_kernel_provider_tests --gtest_filter=<suite>.*` directly, without Python, with
+`HIPDNN_TEST_CENSUS_SUITE=<suite>`, `HIPDNN_TEST_EXPECTED_ARCH=<arch>` and
+`HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`. Each entry is an independent
+process labeled `unit_test;hip-kernel-provider;host`.
+
+```bash
+ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
+  --no-tests=error -V -R '^hip-kernel-provider-hkp-census-<arch>-<suite>$'
+```
+
+Strict mode is active only for a nonempty census-suite variable. Before default-root
+setup it rejects missing/empty/nonexistent explicit roots and empty expected arches;
+the production loader's normal fallback is unchanged. The exact named suite must
+exist and be nonempty. Every registered case must complete and pass without skipping
+in each iteration, with at least one completed iteration. Disabled, filtered-out,
+sharded-out, failed or skipped cases, list-only and repeat-zero invocations cannot
+satisfy the census. Repeated partial runs cannot accumulate coverage.
+
+Registration is deferred until the test target exists and covers packaged shards
+only. Declared suites with a missing target or empty arch list are configuration
+errors. Tests OFF or no declared suites yields no census evidence. Direct-load
+engines use ordinary host tests; normal non-census invocations retain their filtering
+and skip behavior. Neither structural nor host loading proves numerical device
+behavior. The
 [ingestor RUNBOOK](../../../projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/RUNBOOK.md)
 owns the complete create/extend sequence and post-regeneration gates.
 
