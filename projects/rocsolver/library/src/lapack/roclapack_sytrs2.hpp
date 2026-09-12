@@ -238,7 +238,7 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
 {
     // LCOV_EXCL_START
     {
-        // Extra defensive check for future proff
+        // Extra defensive check for future proof
         bool const has_work = (n >= 1) && (batch_count >= 1) && (nrhs_arg >= 1);
         if(!has_work)
         {
