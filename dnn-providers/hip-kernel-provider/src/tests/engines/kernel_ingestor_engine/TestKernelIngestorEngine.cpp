@@ -315,7 +315,8 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
     const auto resolved = descriptorSearchDirectory();
 
     EXPECT_NE(resolved, std::filesystem::path("/nowhere/in/particular"));
-    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+    EXPECT_TRUE(resolved.generic_string().find(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR)
+                != std::string::npos)
         << "resolved to " << resolved;
 }
 
@@ -330,8 +331,10 @@ TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
     const auto resolved = descriptorSearchDirectory();
 
     ASSERT_FALSE(resolved.empty());
-    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
-        << "resolved to " << resolved << ", which does not end in " << HIPDNN_DESCRIPTOR_SUBDIR;
+    EXPECT_TRUE(resolved.generic_string().find(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR)
+                != std::string::npos)
+        << "resolved to " << resolved << ", which does not end in "
+        << HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR;
 }
 
 /// Asserts the mechanism step 2 rests on: an address resolves to the module containing

@@ -64,6 +64,7 @@ def _make_kernel(**overrides):
         "ForceUnrollSubIter": True,
         "_ScheduleIterAlg": 0,
         "PrefetchGlobalRead": 2,
+        "TDMPlusLdsBuf": False,
         # fields read in the per-iteration body
         "ProblemType": {
             "Sparse": False,
