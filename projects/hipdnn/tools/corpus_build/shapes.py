@@ -83,6 +83,15 @@ class Shape:
             raise ValueError(
                 f"a non-causal shape has no diagonal to anchor, so it carries the "
                 f"canonical {TOP_LEFT!r}; got {self.alignment!r}")
+        if self.causal and self.seqlen_q > self.seqlen_kv:
+            raise ValueError(
+                f"causal cross attention is not a problem: {self.seqlen_q} queries against "
+                f"{self.seqlen_kv} keys leaves the later queries with nothing to attend to, "
+                "and `sdpa_fwd.opmeta.json`'s masked FLOP count "
+                "(Sq*Sk - Sq*(Sq-1)/2) goes non-positive, so the measurement cannot be "
+                "labelled at all -- `full-graph graph.flops must be a positive finite "
+                "number` ended AITER's 843-graph collection on run 67929589"
+            )
         # No `seqlen_q <= seqlen_kv` check. That relation is a constraint on the
         # DECLARED space (`sdpa_fwd.opmeta.json` `constraints`), which the sweep reads
         # and obeys -- it is not a fact about attention. `gfx942_attention_dense`
