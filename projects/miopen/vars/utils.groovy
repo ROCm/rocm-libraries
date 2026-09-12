@@ -532,7 +532,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (gpu_family == "navi")
     {
-        gpu_arch = "gfx1101;gfx1151"
+        gpu_arch = "gfx1101"
     }
     else
     {
@@ -1574,7 +1574,6 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
     def Bf16_flags      = pipelineEnv.Bf16_flags
     def Fp16_flags      = pipelineEnv.Fp16_flags
     def gfx908_flags    = pipelineEnv.gfx908_flags
-    def gfx1151_flags   = pipelineEnv.gfx1151_flags
     def Smoke_targets   = pipelineEnv.Smoke_targets
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
@@ -1636,33 +1635,8 @@ def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnode
         }
     }
 
-    // GFX115X Strix Halo Tests
-    def bf16Gfx115X = 'Bf16 Hip Install All gfx115X'
-    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx115X), bf16Gfx115X) {
-        node(rocmnodeFn("strix")) {
-            try {
-                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp16Gfx115X = 'Fp16 Hip Install All gfx115X'
-    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx115X), fp16Gfx115X) {
-        node(rocmnodeFn("strix")) {
-            try {
-                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32Gfx115X = 'Fp32 Hip Install All gfx115X'
-    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx115X), fp32Gfx115X) {
-        node(rocmnodeFn("strix")) {
-            try {
-                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
-            } finally { cleanWs() }
-        }
-    }
 
     return stages
 }
