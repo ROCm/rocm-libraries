@@ -1,9 +1,10 @@
 # Environment Variable Reference
 
-Every environment variable the CK DSL, its C++ engine, the hipDNN provider, and
-the tooling read. The **core** flags are the ones most users need; the rest are
-build/CI, integration, or experimental kernel-development knobs that are off by
-default. For setup and the most common flags in context, see
+Environment variables read by the CK DSL, its C++ engine, the hipDNN provider,
+and the tooling, plus external compiler-runtime settings that affect rocKE.
+The **core** flags are the ones most users need; other sections cover build/CI,
+integration, external runtime settings, and experimental kernel-development knobs.
+For setup and the most common flags in context, see
 [`../development/setup_guide.md`](../development/setup_guide.md).
 
 > Set on Linux with `export NAME=value`; on Windows with `set NAME=value`.
@@ -18,6 +19,7 @@ default. For setup and the most common flags in context, see
 | `ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT` | base-10 integer `1..2147483647` (**64**) | Maximum Value items accepted in one canonical device-print record. Empty is treated as unset; surrounding whitespace is ignored. Invalid values fail with the name, received value, and accepted range. Read for each device-print build or verification operation. This changes validation policy only and has no cache-key impact for an accepted kernel. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
+| `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
 | `ROCKE_TIME` | `1` (unset) | Print phase timings for the build/lower/compile pipeline. |
 | `ROCKE_USE_SUDO` | `1` (unset) | Benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
 
@@ -53,6 +55,31 @@ default. For setup and the most common flags in context, see
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
 
+## External compiler runtime
+
+These settings are consumed by COMGR or supporting runtime components, rather
+than parsed as rocKE options. Their defaults and availability are determined by
+the loaded COMGR/toolchain version and the operating system.
+
+| Variable | Values / purpose |
+|---|---|
+| `AMD_COMGR_CACHE_DIR` | Path to COMGR's persistent compilation cache. On clusters with NFS-backed home directories, select a writable node-local directory to avoid synchronous cache metadata access over NFS. |
+| `AMD_COMGR_CACHE` | Set to `0` to disable COMGR caching for diagnosis. Repeated compilations then lose persistent cache hits; prefer relocating the cache to node-local storage for normal use. |
+| `TMPDIR` | On Unix-like systems, selects the temporary-file directory for components that honor it. Use a writable node-local directory for compilation jobs. This does not relocate the persistent COMGR cache. |
+
+Create the cache and temporary directories before launching the compilation
+process, and set these variables in the environment inherited by its workers.
+Workers on the same node can share the job's COMGR cache to retain cache reuse.
+A fresh job-local cache starts without entries from previous jobs; choose its
+lifetime according to the desired reuse and the site's scratch-storage policy.
+
+COMGR also reads ROCm/HIP metadata and toolchain inputs. If those paths are on
+NFS, relocating the cache alone may leave filesystem stalls. When using a
+locally staged ROCm installation, point `ROCM_PATH` and `HIP_PATH` at that
+installation and ensure the loaded COMGR library, compiler inputs, temporary
+files, and outputs use the intended local paths. Disabling the COMGR cache does
+not disable these other filesystem accesses.
+
 ## Case-study-specific flags
 
 Some flags are specific to one example/case study and are documented there, not
@@ -79,5 +106,6 @@ are diagnostics that intentionally change emission. None affect the default buil
 | gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE` | experimental gfx942 FMHA levers |
 | gfx942 V-transpose-store diagnostics | `HIPDNN_GFX942_CFV`, `HIPDNN_GFX942_CFV_CK_VLDS`, `HIPDNN_GFX942_CFV_SCALAR_READ`, `HIPDNN_GFX942_CFV_STORE`, `HIPDNN_GFX942_CFV_STORE_PREZERO`, `HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD`, `HIPDNN_GFX942_CFV_STORE_SCATTER`, `HIPDNN_GFX942_CFV_STORE_SEPOFF`, `HIPDNN_GFX942_CFV_STORE_SPLIT` | gfx942 cfv-store debug toggles (some intentionally change emission) |
 
-A flag not listed here that you find in the source is, by definition, an
-internal experimental knob — treat it as off-by-default and read its call site.
+For an unlisted variable, check its reader and documentation before assuming its
+default or stability. It may be an internal experimental knob or a setting owned
+by an external library or tool.

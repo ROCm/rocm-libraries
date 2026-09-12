@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,10 +18,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "../../shared/sha256.h"
 #include "device/generator/generator.h"
 #include "load_store_ops.h"
 #include "rtc_kernel.h"
 #include "tree_node.h"
+#include <cstring>
+
+std::string rocfft_spirv_cb_t::get_hash() const
+{
+    std::string ret;
+    if(symbol_name.empty() || bitcode_data.empty())
+        return ret;
+    // compute sha256 of symbol name + spirv code, output hex string as
+    // this will go into the kernel's name
+
+    sha256_buff state;
+    sha256_init(&state);
+    sha256_update(&state, symbol_name.data(), symbol_name.size());
+    sha256_update(&state, bitcode_data.data(), bitcode_data.size());
+
+    ret.resize(64);
+    sha256_finalize(&state);
+    sha256_read_hex(&state, ret.data());
+    return ret;
+}
 
 Function LoadOps::add_ops(const Function& f) const
 {
@@ -57,7 +78,10 @@ struct StoreOpsVisitor : public BaseVisitor
             return {x};
 
         TStatement y{x};
-        y.value = y.value * scale_factor;
+        if(ops.scale_factor != 1.0)
+        {
+            y.value = y.value * scale_factor;
+        }
         return {y};
     }
 
@@ -106,7 +130,31 @@ void make_load_store_ops(Function&                      f,
                          const std::optional<StoreOps>& storeOps)
 {
     if(loadOps && loadOps->enabled())
+    {
         f = loadOps->add_ops(f);
+    }
     if(storeOps && storeOps->enabled())
+    {
         f = storeOps->add_ops(f);
+    }
+}
+
+std::string load_store_decls(const std::optional<LoadOps>&  loadOps,
+                             const std::optional<StoreOps>& storeOps,
+                             const CallbackType             cbtype,
+                             const char*                    load_data_type,
+                             const char*                    store_data_type)
+{
+    // FIXME: need to namespace things so user-chosen symbols can't
+    // (easily) collide with our internal syms
+    std::string ops_declarations;
+    if(loadOps && loadOps->has_spirv())
+    {
+        ops_declarations += loadOps->forward_decls(cbtype, load_data_type);
+    }
+    if(storeOps && storeOps->has_spirv())
+    {
+        ops_declarations += storeOps->forward_decls(cbtype, store_data_type);
+    }
+    return ops_declarations;
 }

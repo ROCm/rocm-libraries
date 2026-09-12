@@ -81,6 +81,9 @@ except ImportError:
 
 # Custom YAML loader that preserves int type for 0 and 1 (doesn't auto-convert to bool)
 # This allows type validation to catch int-vs-bool mismatches in YAML files.
+# It derives from CSafeLoader/SafeLoader and so is safe, but bandit's B506 check only
+# recognises those two names, hence the bare nosec marker at its call sites. Never spell
+# that marker out with its leading hash here, or bandit parses this comment too (SEC-00404).
 class StrictTypeLoader(yamlLoader):
     """YAML loader that does NOT auto-convert 0/1 to False/True.
 
@@ -366,7 +369,7 @@ def read(filename, customizedLoader=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, StrictTypeLoader)
+        data = yaml.load(f, StrictTypeLoader)  # nosec B506
     return data
 
 
@@ -575,6 +578,11 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     dict), then applies :func:`reorderSolutionsParams` so the three naming
     fields lead each solution block, matching merge output.
 
+    ``InternalSupportParams.KernArgsVersion`` is dropped: it is bound to the
+    generator version rather than being a tuning result, so logic files follow
+    ``defaultInternalSupportParams`` instead of pinning a layout that goes
+    stale. The ``.s`` metadata and benchmark solution files still carry it.
+
     Args:
         state: One solution entry after library-logic serialization.
 
@@ -588,7 +596,8 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     for key in sorted(state.keys()):
         value = state[key]
         if key == "InternalSupportParams" and isinstance(value, dict):
-            out[key] = dict(sorted(value.items()))
+            out[key] = {k: v for k, v in sorted(value.items())
+                        if k != "KernArgsVersion"}
         else:
             out[key] = value
     bundle = {"Solutions": [out]}

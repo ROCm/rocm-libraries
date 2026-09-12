@@ -201,8 +201,45 @@ def my_op_grid(M: int, spec: MyOpSpec) -> Tuple[int, int, int]:
 
 ### 3.6 Builder
 
+A builder takes **exactly `(spec, *, arch)`** — the spec object and the target
+arch, and nothing else. An arch-specific knob is a **field on the spec** (on an
+arch-specific subclass of the shared spec, when it only applies to one arch),
+never an extra builder parameter.
+
+This is not style. A third parameter is invisible to anything that has to
+*describe* a kernel without calling it — the kernel-descriptor format and the
+downstream packager both hydrate a spec from a file and then call the builder.
+An extra parameter has nowhere to live in that file, so it forces a separate
+descriptor format per arch, and the breakage surfaces far from the commit that
+caused it. Keeping one signature everywhere means the specs may differ freely in
+*content* between arches while staying identical in *shape*.
+
+The spec's *shape* is a compatibility surface for the same reason. "Hydrate" above
+is literal: the packager reads the fields out of the descriptor file and calls
+`MyOpSpec(**fields_from_the_file)`. A descriptor written today lists only today's
+fields, so **a spec field added later must carry a default** — the value that ships
+today, or `None` where a policy function resolves it. `None` is the stronger choice:
+a descriptor that omits the field then auto-tracks whatever ships, instead of
+freezing the value that happened to be the default the day it was written. Only the
+problem shape — the fields without which there is no kernel to describe — may be
+required. Note that Python catches just one corner of this by accident: a dataclass
+rejects a non-defaulted field declared *after* a defaulted one, so appending breaks
+loudly, while inserting the same field higher up is legal and breaks every existing
+descriptor silently.
+
+If a new field genuinely *is* problem shape — there is no kernel to describe without
+it — then old descriptors cannot be rescued, because they describe a problem the spec
+no longer expresses. That is a breaking change, not a test to route around: add the
+field to `REQUIRED_FIELDS`, regenerate the descriptors and AOT packs for that spec,
+and say in the PR that the existing ones are invalidated. Reach for it only after
+ruling out a `None` default resolved by policy.
+
+[`library/tests/test_builder_signature_contract.py`](../../../library/tests/test_builder_signature_contract.py)
+enforces both for `library/kernels`: the signature, and a frozen required-field set
+per spec class.
+
 ```python
-def build_my_op(spec: MyOpSpec) -> KernelDef:
+def build_my_op(spec: MyOpSpec, *, arch: str = "gfx950") -> KernelDef:
     ok, why = is_valid_spec(spec)
     if not ok:
         raise ValueError(f"invalid MyOpSpec: {why}")

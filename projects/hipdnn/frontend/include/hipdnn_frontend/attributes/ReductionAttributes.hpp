@@ -143,6 +143,25 @@ public:
     {
         return setOutput(output_names::Y, std::move(y));
     }
+
+    /**
+     * @brief Custom equality hook for reduction-specific attributes
+     *
+     * Compares the reduction mode and the deterministic-algorithm flag —
+     * both of which define the semantics of the reduction rather than
+     * tensor layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const ReductionAttributes& other) const
+    {
+        return mode == other.mode && is_deterministic == other.is_deterministic;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ReductionAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 
 typedef ReductionAttributes Reduction_attributes; // NOLINT(readability-identifier-naming)
