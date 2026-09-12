@@ -377,8 +377,20 @@ class _FuseAMxWriter(_SKWriter):
 def _tdm_setup_increment_items(dp_only):
     writer = _FuseAMxWriter()
     tpa, tpb = _tensor_parameters(with_mx=True)
+    # The shared-set increment reads its fallthrough tensor and its compared
+    # wave indices from the grouping table, so the solution has to resolve to
+    # TDMFuse=2 rather than merely have the predicate overridden above. These
+    # four keys are what the resolver needs; before it was routed, the override
+    # alone was enough and the dict could stay this short.
     kernel = {
         "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TDMFuse": 2,
+        "TDMInst": 3,
+        "NumWaves": 4,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "enableTDMA": True,
+        "enableTDMB": True,
         "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
     }
     return _module_items(

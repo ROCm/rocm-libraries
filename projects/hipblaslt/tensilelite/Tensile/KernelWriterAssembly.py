@@ -82,7 +82,10 @@ from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
 from .Components.TDMFuse import tdmWaveComponents, tdmFuseAMx, tdmFusePaired, \
                                 tdmWavePartition, tdmGroupPartner, \
                                 tdmSeparateABDescriptors, tdmWaveSeparated, \
-                                tdmSoleWave, tdmWaveRangeText
+                                tdmSoleWave, tdmWaveRangeText, \
+                                tdmFuseSharedScales, tdmSharedScaleSetOwner, \
+                                tdmSetOwner, tdmGrouping, tdmSharedSetOrder, \
+                                tdmSharedScaleSetActive
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -392,6 +395,7 @@ class KernelWriterAssembly(KernelWriter):
     """True when {MXSA,A} and {MXSB,B} each own a descriptor set, parity crossed."""
     return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
 
+
   def tdmSeparateABDescriptors(self, kernel) -> bool:
     """True when A's and B's TDM descriptors are distinct register sets.
 
@@ -410,18 +414,21 @@ class KernelWriterAssembly(KernelWriter):
     Per-iteration mutations of a set -- the LDS buffer swap above all -- must be
     applied under the owner only: applied under an alias too, the even count
     cancels silently instead of failing to build.
+
+    Read off the grouping row rather than branched per TDMFuse value, so a new
+    row inherits its ownership with no case here. The two preconditions the
+    table does not carry stay: at one wave the descriptors are independent and
+    every tensor owns its own, and when the TDM moves only one of A and B there
+    is no wave partition to lay a grouping onto, so the default set is
+    programmed whatever TDMFuse asked for.
     """
     if tc not in ("A", "B", "MXSA", "MXSB"):
       return tc
     if kernel["NumWaves"] == 1:
       return tc
-    if self.tdmFuseAMx(kernel):
-      return "B" if tc == "B" else "A"
-    if self.tdmFusePaired(kernel):
-      return "A" if tc in ("A", "MXSA") else "B"
-    if tc in ("A", "B"):
-      return "A"
-    return "MXSA"
+    if not self.isTdmWaveSeparated(kernel):
+      return "A" if tc in ("A", "B") else "MXSA"
+    return tdmSetOwner(kernel, tc)
 
   def _tdmPairedParityOrder(self, kernel, tPA, tPB):
     """(even, odd) member of the descriptor set this (tPA,tPB) call programs.
@@ -446,7 +453,8 @@ class KernelWriterAssembly(KernelWriter):
       tPA, tPB = tPB, tPA
     # The three-way dispatch has no "even member" to name, and its own helpers
     # (_applyStaggerTdmFuseAMx, _hoistTdmFuseAMxWrapUSel) intercept before here.
-    if self.tdmFuseAMx(kernel) or not self.isTdmWaveSeparated(kernel):
+    # Asked of the grouping's structure, so the mirror row bypasses it too.
+    if tdmSharedScaleSetActive(kernel) or not self.isTdmWaveSeparated(kernel):
       return tPA, tPB
     if 0 in tdmWavePartition(kernel, tPA["tensorChar"])[1]:
       return tPA, tPB
@@ -1104,8 +1112,26 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
 
   def defineTdmSgprs(self, kernel):
-    """Allocate TDM descriptor SGPRs. Extracted so subtile can defer this."""
+    """Allocate TDM descriptor SGPRs. Extracted so subtile can defer this.
+
+    Which tensors share a register range is the grouping row's answer, asked
+    through `tdmDescriptorSetOwner`: one member of each set is allocated and the
+    rest are RegSet aliases of it. Adding a grouping row therefore needs no
+    branch here, which it did when each TDMFuse value had its own arm.
+
+    Two preconditions are not the table's and stay spelled out: subtile gives
+    every tensor its own descriptor -- deferred allocation provides the SGPR
+    headroom, and separate descriptors avoid the reinit before each
+    tensor_load_to_lds -- and at a single wave the descriptors are independent.
+    Under either, no set is shared and every tensor owns its own.
+    """
     module = Module("DefineTdmSgprs")
+    sharedSets = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")
+
+    def setOwner(tc):
+      """The tensor whose name programs `tc`'s register range."""
+      return self.tdmDescriptorSetOwner(kernel, tc) if sharedSets else tc
+
     if kernel["enableTDMA"]:
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
@@ -1122,45 +1148,24 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprtdmAGroup3", "sgprtdmAGroup2"))
 
       if kernel["ProblemType"]["MXBlockA"]:
-        if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
+        # Whose set MXSA rides is the table's answer, not a TDMFuse case: A's
+        # under TDMFuse=1 and 2, its own under the default, B's under TDMFuse=3.
+        # Only the last one needs the alias deferred, because a RegSet is an
+        # assembler `.set` and B's SGPRs do not exist yet -- see the enableTDMB
+        # block below, which emits it once its owner is allocated.
+        mxsaOwner = setOwner("MXSA")
+        if mxsaOwner == "A":
           # Keeping the two sets at 4+8 twice holds this row at 24 SGPRs.
           module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
-        else:
+        elif mxsaOwner == "MXSA":
           module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
           module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      # Alias B descriptor onto A for multi-wave to reduce SGPR pressure.
-      # Subtile uses separate descriptors -- deferred allocation provides
-      # enough SGPR headroom, and separate descriptors avoid the reinit
-      # overhead before each tensor_load_to_lds.
-      # TDMFuse=2 separates B and puts both scale tensors on A's set.
-      fuseAMx = self.tdmFuseAMx(kernel)
-      fusePaired = self.tdmFusePaired(kernel)
-      aliasAB = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl") \
-                 and not fuseAMx and not fusePaired
-      if fusePaired:
-        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
-        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel.get("_TDMIterateModeB", False):
-          module.add(self.defineSgpr("tdmBGroup2", 4, 4))
-          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
-        # Safe to alias: of the two members exactly one programs the set per wave.
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmBGroup0"))
-          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmBGroup1"))
-      elif fuseAMx:
-        module.add(self.defineSgpr("tdmBGroup0", 4, 4))
-        module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel.get("_TDMIterateModeB", False):
-          module.add(self.defineSgpr("tdmBGroup2", 4, 4))
-          module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
-        # Safe to alias: of the three members at most one programs the set per wave.
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmAGroup0"))
-          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmAGroup1"))
-      elif aliasAB:
+      # Alias B's descriptor onto A's when the grouping seats them on one set,
+      # which halves the SGPR cost of the default row.
+      if setOwner("B") == "A":
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
         if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
@@ -1175,9 +1180,24 @@ class KernelWriterAssembly(KernelWriter):
         if kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB:
           module.add(self.defineSgpr("tdmBGroup2", 4, 4))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
-          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
+        # Safe to alias: of a set's members at most one programs it per wave.
+        # Each scale rides the set the table seats it on -- its own under the
+        # default row, its data tensor's under TDMFuse=1, and the shared set
+        # under TDMFuse=2 and 3. MXSA is emitted here rather than in the block
+        # above only when its owner is B, because a RegSet is an assembler
+        # `.set` and B's range does not exist until the defineSgpr above.
+        for mxs in ("MXSA", "MXSB"):
+          if not kernel["ProblemType"]["MXBlock%s" % mxs[-1]]:
+            continue
+          owner = setOwner(mxs)
+          if mxs == "MXSA" and owner != "B":
+            continue  # allocated, or aliased onto A's range, in the A block
+          if owner == mxs:
+            module.add(self.defineSgpr("tdm%sGroup0" % mxs, 4, 4))
+            module.add(self.defineSgpr("tdm%sGroup1" % mxs, 8, 4))
+          else:
+            module.add(RegSet("s", "sgprtdm%sGroup0" % mxs, "sgprtdm%sGroup0" % owner))
+            module.add(RegSet("s", "sgprtdm%sGroup1" % mxs, "sgprtdm%sGroup1" % owner))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1:
       # tdmABIncs exists only to hold the parity-selected increment for the one
@@ -1188,9 +1208,12 @@ class KernelWriterAssembly(KernelWriter):
       # dim1 H0/H1 boundaries) transiently at point of use (see
       # _tdmSplitMultiWaveInc); nothing is persisted here.
 
-      # Both scale tensors ride A's set, so there is no second increment to select.
+      # Both scale tensors ride one data tensor's set, so there is no second
+      # increment to select. Asked of the grouping's structure, not of TDMFuse:
+      # the mirror row shares the scales the same way and must not allocate it
+      # either, or the tail reset would read a register nothing writes.
       if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] \
-         and not self.tdmFuseAMx(kernel):
+         and not tdmSharedScaleSetActive(kernel):
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
@@ -6786,8 +6809,8 @@ class KernelWriterAssembly(KernelWriter):
   #   matching-parity waves should apply the offset (even=A, odd=B).
   # Non-wave-separated (numWaves == 1): A and B have independent descriptors,
   #   all waves apply unconditionally.
-  # tdmFuseAMx: the A=even/B=odd layout does not hold, so the gate comes from
-  #   the tensor's own wave set instead (_applyStaggerTdmFuseAMx).
+  # shared scale set: the A=even/B=odd layout does not hold, so the gate comes
+  #   from the tensor's own wave set instead (_applyStaggerTdmFuseAMx).
   ##############################################################################
   def _applyStaggerTDM(self, imod, kernel, tP, offsetSgpr, labelName="SkipStagger", commentTag="stagger", tdmGroupName=None):
     # tdmGroupName=None: derive SRD from tP and wave-parity-gate the add. In wave-separated
@@ -6799,9 +6822,9 @@ class KernelWriterAssembly(KernelWriter):
     if tdmGroupName is None:
       tc = tP["tensorChar"]
       tdmGroup0 = f"tdm{tc}Group0"
-      if self.tdmFuseAMx(kernel):
+      if tdmSharedScaleSetActive(kernel):
         return self._applyStaggerTdmFuseAMx(imod, kernel, tc, tdmGroup0, offsetSgpr,
-                                            labelName, commentTag)
+                                                 labelName, commentTag)
       useParityGate = kernel["NumWaves"] > 1
     else:
       tc = "Metadata"
@@ -6838,14 +6861,18 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(skipLabel)
 
   def _applyStaggerTdmFuseAMx(self, imod, kernel, tc, tdmGroup0, offsetSgpr,
-                              labelName, commentTag):
-    """Gate a TDMFuse=2 stagger add on the tensor's own wave set.
+                                   labelName, commentTag):
+    """Gate a shared-scale-set stagger add on the tensor's own wave set.
 
     {A,MXSA,MXSB} alias one descriptor and are carried by waves {0,1}, {2} and
     {3}; B owns its descriptor and every wave carries a component of it. A
     two-way parity gate cannot express that: "A" in "MXSA" puts MXSA on A's
     even waves, so wave 0 applies both A's and MXSA's offset to the one
     descriptor while wave 1 -- an A wave -- applies only MXSB's.
+
+    The wave set comes from the partition, so TDMFuse=3's mirrored layout --
+    {B,MXSA,MXSB} on waves {0,1},{2},{3} with A on every wave -- needs no case
+    of its own here.
     """
     _, waves = tdmWavePartition(kernel, tc)
 
@@ -11749,10 +11776,11 @@ class KernelWriterAssembly(KernelWriter):
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
-      # A's shared load already moves MXSA, and MXSB too at TDMFuse=2. MXSA's
-      # SGPR names alias A's here, so issuing again would fill the shared set
-      # twice rather than MXSA.
-      if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
+      # A set is filled once per wave by whichever tensor owns it, so a member
+      # that only aliases the owner's range must not issue again: that would
+      # fill the shared set twice rather than filling MXSA. True at TDMFuse=1
+      # and 2, where MXSA rides A's set, and at 3, where it rides B's.
+      if self.tdmDescriptorSetOwner(kernel, "MXSA") != "MXSA":
         return imod
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       if hasattr(self.states, "memTokenLdsDcp"):
@@ -11779,9 +11807,14 @@ class KernelWriterAssembly(KernelWriter):
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
-      # An aliased descriptor issues one shared load, counted against A, so B emits
-      # nothing here. B needs its own load whenever it owns a set; which waves issue
-      # it differs (parity when de-aliased, every wave at TDMFuse=2 and 1).
+      # An aliased descriptor issues one shared load, counted against A, so B
+      # emits nothing here. Whenever B owns a set it needs its own load, and
+      # every wave issues it: a set is filled once per wave and the per-wave
+      # descriptor programming decides which member that wave is filling. That
+      # holds for a one-member set (TDMFuse=2's {B}, every wave carries it) and
+      # for a multi-member one (TDMFuse=1's {MXSB,B} and 3's {B,MXSA,MXSB},
+      # where each wave carries exactly one member), so there is no row for
+      # which this issue is gated.
       if self.tdmSeparateABDescriptors(kernel):
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         if hasattr(self.states, "memTokenLdsDcp"):
@@ -11791,11 +11824,7 @@ class KernelWriterAssembly(KernelWriter):
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
-        if self.tdmFuseAMx(kernel) or self.tdmFusePaired(kernel):
-          imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
-        else:
-          self._emitTdmDealiasedIssue(imod.middle, kernel, "B", comp,
-                                      "tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3)
+        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
         return imod
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if numWaves == 1:
@@ -12203,12 +12232,12 @@ class KernelWriterAssembly(KernelWriter):
     if tc in ("A", "B") and self.tdmSeparateABDescriptors(kernel) \
        and not self.tdmFusePaired(kernel):
       aliased = False
-    if self.tdmFuseAMx(kernel) and tc == "A":
+    if tdmSharedScaleSetActive(kernel) and tc == tdmSharedScaleSetOwner(kernel):
       for mx in ("MXSA", "MXSB"):
         assert self._tdmDecoupledBlocks(kernel, mx)[0] \
                == self._tdmDecoupledBlocks(kernel, tc)[0], \
-          f"TDMFuse=2: {mx} rides A's descriptor set but carries a different " \
-          f"LDS block count, so the shared set needs a three-way swap arm"
+          f"{mx} rides {tc}'s descriptor set but carries a different LDS " \
+          f"block count, so the shared set needs a three-way swap arm"
     partner = self._tdmAliasPartner(kernel, tc) if (aliased and kernel["enableTDMB"]) else None
 
     if partner is None:
@@ -19787,10 +19816,10 @@ class KernelWriterAssembly(KernelWriter):
     """How many WaveIdx bits packTdmParityIntoArgType stores, from bit 8 up.
 
     Two-way parity paths read bit 0 only, so they keep the historical one-bit
-    pack and their emitted code is unchanged. tdmFuseAMx dispatches per wave,
-    so it needs the whole index.
+    pack and their emitted code is unchanged. A shared scale set dispatches per
+    wave, so it needs the whole index.
     """
-    if self.tdmFuseAMx(kernel):
+    if tdmSharedScaleSetActive(kernel):
       return max(1, ceil(log2(kernel["NumWaves"])))
     return 1
 
@@ -19866,43 +19895,25 @@ class KernelWriterAssembly(KernelWriter):
                                src=sgpr(dstTmpIdx), comment="waveId"))
     module.add(SBitcmp1B32(src0=sgpr(dstTmpIdx), src1=0, comment=comment))
 
-  def _emitTdmDealiasedIssue(self, module: Module, kernel: Mapping, tc: str,
-                             comp, group0: str, group1: str, group2, group3):
-    """Issue one de-aliased tensor's TDM fill, on the waves that carry it.
-
-    De-aliasing separates the descriptors, not the work: parity still decides
-    which tensor a wave fills and `wId // 2` which K-slice of it, so a wave that
-    carries B must not also issue A. Even waves carry A, odd waves carry B.
-
-    That parity is a literal, not the partition's answer, and this branch was
-    unreachable while `tdmSeparateABDescriptors` named only TDMFuse=1 and 2 --
-    the caller's outer guard and inner test were the same predicate, so the
-    `else` never ran. Now that the predicate reads the grouping row the branch
-    goes live for any row that separates A from B without pairing them onto
-    alternating waves, and `B_MX` is exactly that: it puts A in a one-member
-    group, which every wave issues, not the even ones. So check the literal
-    against the partition and refuse if they disagree, rather than guarding the
-    fill with the wrong waves.
-    """
-    numWaves = kernel.get("NumWaves", 1)
-    _, waves = tdmWavePartition(kernel, tc)
-    parity = tuple(w for w in range(numWaves) if (w % 2 == 0) == (tc == "A"))
-    if waves != parity:
-      raise RuntimeError(
-        "the de-aliased TDM fill gates %s on wave parity, which expects waves "
-        "%s, but the grouping puts it on waves %s; emit the partition's wave "
-        "set here before wiring a row with that arrangement" % (tc, parity, waves))
-    skip = SCBranchSCC1 if tc == "A" else SCBranchSCC0
-    other = "B" if tc == "A" else "A"
-    lbl = Label(self.labels.getNameInc(f"TdmDealiasedFill{tc}End"), "")
-    if self.isTdmWaveIdxLive(kernel):
-      self._emitTdmWaveParitySCC(module, kernel, comment=f"wave parity: fill {tc}?")
-    else:
-      with self.allocTmpSgpr(1, tag="tdmDealiasedIssue_waveIdx") as tmp:
-        self._emitTdmWaveParitySCC(module, kernel, tmp.idx, f"wave parity: fill {tc}?")
-    module.add(skip(labelName=lbl.getLabelName(), comment=f"this wave carries {other}"))
-    module.add(comp.issueLoad(group0, group1, group2, group3))
-    module.add(lbl)
+  # `_emitTdmDealiasedIssue` used to live here: a parity-gated TDM fill for a
+  # de-aliased tensor, carrying a hardcoded even=A / odd=B wave rule.
+  #
+  # It is gone rather than generalised, because no grouping row can reach it.
+  # It was written for a scheme where two sets exist and each wave issues only
+  # the one it carries, but a descriptor set is filled once by every wave and
+  # the per-wave descriptor programming picks the member -- so whenever B owns
+  # a set, every wave issues it. `tdmSeparateABDescriptors` being true means A
+  # and B are in different groups, and a group is either one member (issued by
+  # every wave) or several (each wave carrying exactly one), so the gate has no
+  # row to fire on. The caller's outer guard and inner test had been the same
+  # predicate, which is why this never ran even before the predicate moved to
+  # the table.
+  #
+  # Deleting it removes the wave rule a new row was most likely to trip over:
+  # `B_MX` puts A in a one-member group, which every wave issues, not the even
+  # ones, so the literal parity was wrong for it in the one direction that
+  # assembles cleanly. `test_TDMWaveRuleOwnership` now pins the invariant that
+  # made the helper unnecessary instead of pinning its guard.
 
   def tdmSplitLdsBoundary(self, kernel: Mapping, tP: Mapping) -> int:
     """LDS split boundary (bytes) for the second half of a TDMSplit tile. Assumes
@@ -20500,12 +20511,17 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def _tdmFuseAMxDispatch(self, kernel, tPA, tPB, waveIdxSgpr, emitFor, what: str) -> Module:
-    """Emit TDMFuse=2's uneven dispatch for one (A,B) or (MXSA,MXSB) pair.
+    """Emit an uneven shared-set dispatch for one (A,B) or (MXSA,MXSB) pair.
 
-    Called once per pair, A/B before MXSA/MXSB: A, MXSA and MXSB share one
-    register set, so the later pair must not run on a wave the earlier programmed.
+    Called once per pair, A/B before MXSA/MXSB: the owner and both scales share
+    one register set, so the later pair must not run on a wave the earlier
+    programmed.
+
+    Every wave set here is the partition's, so this already emits the mirror row
+    correctly -- TDMFuse=3 hands it B on waves 0-1 and A on every wave, which
+    are the same two shapes with the tensors exchanged.
     """
-    mod = Module(f"TDM {what} Fuse A_MX")
+    mod = Module(f"TDM {what} Fuse {tdmGrouping(kernel).name}")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     _, wavesA = tdmWavePartition(kernel, tcA)
@@ -20546,7 +20562,7 @@ class KernelWriterAssembly(KernelWriter):
     # and every wave builds both: that is what keeps every wave-uniform mutation
     # of either descriptor (the increments, the StreamK K-offset, TDMSplit)
     # reading an initialised value on every wave.
-    if self.tdmFuseAMx(kernel):
+    if tdmSharedScaleSetActive(kernel):
       mod.add(self._tdmFuseAMxDispatch(kernel, tPA, tPB, waveIdxSgpr,
                                        lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr),
                                        "Init"))
@@ -20586,7 +20602,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Both start addresses are computed on every wave, for the same reason the
     # init above is (see initTDMDescriptorWaveSeparated).
-    if self.tdmFuseAMx(kernel):
+    if tdmSharedScaleSetActive(kernel):
       def startAddr(tP):
         tc = tP["tensorChar"]
         return comp.calculateStartAddrWaveSeparated(self, kernel, tP, f"Address{tc}",
@@ -20624,14 +20640,17 @@ class KernelWriterAssembly(KernelWriter):
       return mod
 
     # Separate descriptors offset each pointer with its own increment.
-    # TDMFuse=2: A/B share one pointer; MXSA/MXSB calls must not re-offset it.
-    if self.tdmFuseAMx(kernel):
+    # A shared scale set: the owner's pointer is the shared one and takes the
+    # selected increment, the other data tensor takes its own, and the
+    # MXSA/MXSB call must not re-offset either.
+    if tdmSharedScaleSetActive(kernel):
       if tcA != "A":
         return mod
+      tcShared, tcSep = tdmSharedSetOrder(kernel, tcA, tcB)
       with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetFuseAMx_tmpSgprRes") as tmpSgprRes:
         tmpSgpr = tmpSgprRes.idx
-        for group0, incs in ((f"tdm{tcA}Group0", incSgprName),
-                             (f"tdm{tcB}Group0", sgpr(f"GlobalReadIncs{tcB}"))):
+        for group0, incs in ((f"tdm{tcShared}Group0", incSgprName),
+                             (f"tdm{tcSep}Group0", sgpr(f"GlobalReadIncs{tcSep}"))):
           src1 = incs if isinstance(incs, RegisterContainer) else sgpr(incs)
           mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=src1,
                            comment=f"StreamK K-offset for {group0} = localStart * increment"))
@@ -21156,8 +21175,11 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
 
-    if self.tdmFuseAMx(kernel):
-      return self._hoistTdmFuseAMxWrapUSel(kernel, tcA)
+    if tdmSharedScaleSetActive(kernel):
+      # The wrap folds into the shared set's owner, which is A under TDMFuse=2
+      # and B under TDMFuse=3 -- not the argument pair's first member.
+      return self._hoistTdmFuseAMxWrapUSel(
+          kernel, tdmSharedSetOrder(kernel, tcA, tcB)[0])
 
     tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tPA, tPB)
     self._emitTdmWaveParitySCCAuto(mod, kernel, comment="check wave parity",
@@ -21169,7 +21191,7 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def _hoistTdmFuseAMxWrapUSel(self, kernel, tcA: str) -> Module:
-    """Preloop: fold TDMFuse=2's three-way wrap choice into WrapU{tcA}.
+    """Preloop: fold a shared scale set's three-way wrap choice into WrapU{tcA}.
 
     The shared {A,MXSA,MXSB} descriptor advances by whichever tensor this wave
     carries, so on the wrap iteration it has to add that tensor's WrapU. Waves
@@ -21180,13 +21202,16 @@ class KernelWriterAssembly(KernelWriter):
     s_cselect_b32 does not write SCC, so one s_cmp_eq_u32 per arm is enough and
     the chain stays valid. WrapUMXSA/WrapUMXSB themselves are untouched, which
     is what lets removeStagger MXSA/MXSB still read their own wrap values.
+
+    `tcA` is the set's owner, so TDMFuse=3 folds into WrapUB with the same two
+    scale arms; the scale waves come from the partition either way.
     """
     mod = Module("HoistTdmFuseAMxWrapUSel")
     for tc in ("MXSA", "MXSB"):
       if not kernel["ProblemType"][f"MXBlock{tc[-1]}"]:
         continue
-      _, waves = tdmWavePartition(kernel, tc)
-      assert len(waves) == 1, f"{tc}: TDMFuse=2 gives it exactly one wave, got {waves}"
+      wave = tdmSoleWave(kernel, tc)
+      waves = (wave,)
       mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=waves[0],
               comment=f"wave {waves[0]} carries {tc}"))
       for half, tag in ((0, "lo"), (1, "hi")):
@@ -21207,11 +21232,14 @@ class KernelWriterAssembly(KernelWriter):
 
     # Separate descriptors advance independently, each by its own GlobalReadIncs,
     # so the wrap is per tensor because the pointer it wraps is per tensor.
-    if self.tdmFuseAMx(kernel):
-      # The shared set advances by the three-way-selected register; B by its own.
-      # MXSA/MXSB alias the shared set, so only the A/B call may advance it.
+    if tdmSharedScaleSetActive(kernel):
+      # The shared set advances by the three-way-selected register; the other
+      # data tensor by its own. MXSA/MXSB alias the shared set, so only the A/B
+      # call may advance it. Which of the two is shared is the table's answer:
+      # A under TDMFuse=2, B under TDMFuse=3.
       if tcA != "A":
         return mod
+      tcA, tcB = tdmSharedSetOrder(kernel, tcA, tcB)
       if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
         # StaggerU has to wrap the pointer back on one iteration, and without this
         # the shared set advanced unconditionally for the whole loop while
@@ -21352,10 +21380,10 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tpB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
     # Separate descriptors use per-tensor GlobalReadIncs; shared sets select one inc.
-    if self.tdmFuseAMx(kernel):
+    if tdmSharedScaleSetActive(kernel):
       # The A/B call already wrote the shared increment for all four waves and this
-      # call must not overwrite it. B is absent from the select: it owns its
-      # descriptor and advances from GlobalReadIncsB.
+      # call must not overwrite it. The other data tensor is absent from the
+      # select: it owns its descriptor and advances from its own GlobalReadIncs.
       if tcA != "A":
         return mod
       # Chained s_cselect_b32 rather than s_mov plus two s_cmov. A conditional mov
@@ -21363,35 +21391,48 @@ class KernelWriterAssembly(KernelWriter):
       # read-write operand; a select always writes and reads only its two sources.
       # That keeps this dispatch immune to any assembly-level copy propagation that
       # rewrites the cmov's read of the destination and then finds the seeding s_mov
-      # dead -- which would leave waves 0-1 advancing by whatever the register held.
-      # It is also the shape TDMFuse=0/1 already use.
+      # dead -- which would leave the owner's waves advancing by whatever the
+      # register held. It is also the shape TDMFuse=0/1 already use.
       mxA: bool = bool(kernel["ProblemType"]["MXBlockA"])
       mxB: bool = bool(kernel["ProblemType"]["MXBlockB"])
+      # Both the fallthrough increment and the compared wave indices are read
+      # from the table. This site used to spell all three as literals -- A,
+      # wave 2, wave 3 -- with a note that the duplication was deliberate and
+      # pinned by a test rather than routed, because A_MX refuses crossing and
+      # so no reachable arrangement could make the literals wrong.
+      #
+      # Adding the mirror row is what settled that: the literals are not merely
+      # at risk of drifting, they are wrong for it. The fallthrough has to be
+      # the SET OWNER's increment, and under TDMFuse=3 that is B, not A. A test
+      # pinning the wave numbers would have stayed green while every wave 0-1
+      # advanced the shared descriptor by the wrong tensor's stride -- and a
+      # descriptor advancing by the wrong increment does not fault, it walks off
+      # the tensor one iteration at a time.
+      #
+      # The objection to routing it was that the dispatch would then read
+      # solution keys stub-driven writer tests do not supply. That cost is real
+      # and is paid here: the stubs now carry NumWaves, TDMFuse and the MX
+      # block sizes. It buys a site that cannot be wrong for a row it has never
+      # seen, which the literals could not.
+      owner = tdmSharedSetOrder(kernel, tcA, tcB)[0]
+      ownerWaves = tdmWaveRangeText(kernel, owner)
       if not (mxA or mxB):
-        mod.add(SMovB32(sgpr(incSgprName), sgpr("GlobalReadIncsA"),
-                "shared-set inc = A's (waves 0-1 carry A)"))
+        mod.add(SMovB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{owner}"),
+                f"shared-set inc = {owner}'s ({ownerWaves} carry {owner})"))
         return mod
-      # A's increment is what every arm falls through to, since waves 0-1 carry A.
-      fallthrough = sgpr("GlobalReadIncsA")
-      # The wave each member rides is the partition's to say, and this spells it
-      # as a literal. Kept deliberately rather than routed: A_MX has one
-      # partitioned group, crossing reverses groups after the first, so crossing
-      # is refused for this row and no reachable arrangement makes 2 and 3 wrong.
-      # Reading tdmWavePartition here would also make this dispatch depend on
-      # solution keys that several stub-driven tests do not supply. So the
-      # duplication is explicit and checked instead: TDMFuse.tdmSoleWave is the
-      # table's answer, and test_TDMWaveRuleOwnership pins these literals to it,
-      # so a row that moves MXSA or MXSB fails a test rather than miscompiling.
-      if mxA:
-        mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=2, comment="wave 2 carries MXSA"))
-        mod.add(SCSelectB32(dst=sgpr(incSgprName), src0=sgpr("GlobalReadIncsMXSA"),
+      fallthrough = sgpr(f"GlobalReadIncs{owner}")
+      fallthroughText = f"{owner}'s ({ownerWaves} carry {owner})"
+      for mxs, live in (("MXSA", mxA), ("MXSB", mxB)):
+        if not live:
+          continue
+        wave = tdmSoleWave(kernel, mxs)
+        mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=wave,
+                comment=f"wave {wave} carries {mxs}"))
+        mod.add(SCSelectB32(dst=sgpr(incSgprName), src0=sgpr(f"GlobalReadIncs{mxs}"),
                 src1=fallthrough,
-                comment="shared-set inc = MXSA's on wave 2, else A's (waves 0-1 carry A)"))
+                comment=f"shared-set inc = {mxs}'s on wave {wave}, else {fallthroughText}"))
         fallthrough = sgpr(incSgprName)
-      if mxB:
-        mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=3, comment="wave 3 carries MXSB"))
-        mod.add(SCSelectB32(dst=sgpr(incSgprName), src0=sgpr("GlobalReadIncsMXSB"),
-                src1=fallthrough, comment="shared-set inc = MXSB's on wave 3, else as selected"))
+        fallthroughText = "as selected"
       return mod
     if self.tdmFusePaired(kernel):
       # A set's two members sit in different calls here, so both registers are
@@ -21525,9 +21566,11 @@ class KernelWriterAssembly(KernelWriter):
     mxKSplittingB = numMxKGroups >= numCompB if isMXSB else False
     assert numWaves > 1
 
-    if self.tdmFuseAMx(kernel):
-      # Parity would rebuild A's descriptor on wave 0 alone and B's only on the odd
-      # waves: here A is on waves 0-1 and B is on all four.
+    if tdmSharedScaleSetActive(kernel):
+      # Parity would rebuild the shared set's descriptor on wave 0 alone and the
+      # separate tensor's only on the odd waves: here the owner is on waves 0-1
+      # and the other data tensor is on all four. Both wave sets come from the
+      # partition below, so the mirror row needs no case of its own.
       with self.allocTmpSgpr(2, tag="resetTDMDescriptorForTailFuseAMx") as tmpRes:
         waveIdxTmp = tmpRes.idx
         waveOfstTmp = tmpRes.idx + 1
@@ -21686,10 +21729,12 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
         src1=1, \
         comment="%s"%"is this the last iters"))
-    if kernel["NumWaves"] > 1 and self.tdmFuseAMx(kernel):
-      # The shared set stops via its one selected register; B via its own.
+    if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
+      # The shared set stops via its one selected register; the other data
+      # tensor via its own, which is B under TDMFuse=2 and A under TDMFuse=3.
+      sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"
       mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
-      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsB"), src=0, comment=""))
+      mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{sep}"), src=0, comment=""))
     elif kernel["NumWaves"] > 1 :
       mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
       if kernel["ProblemType"]["MXBlockA"]:
