@@ -149,7 +149,11 @@ namespace TensileLite
 
         dim3 clusterDim{1, 1, 1};
 
-        dim3 workGroupSize;
+        // getSKGridImpl divides by workGroupSize to derive its tile cap, so an
+        // unset value is read before any solution is deserialized (dim3 has no
+        // member initializers of its own). Zero keeps that cap at its maximum,
+        // which is the behaviour from before the cap existed.
+        dim3 workGroupSize{0, 0, 0};
         dim3 threadTile;
         dim3 macroTile;
 
