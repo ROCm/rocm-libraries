@@ -273,16 +273,6 @@ if(ROCM_LIBS_SUPERBUILD)
     if(NOT TARGET roc::origami)
         message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::origami target before configuring hipBLASLt.")
     endif()
-    # tilewright is ours and is NOT supplied by the superbuild, so add it here
-    # regardless of who provides origami. It must come AFTER origami so that
-    # roc::origami-headers exists.
-    if(NOT TARGET roc::tilewright-hipblaslt)
-        block(SCOPE_FOR VARIABLES)
-            set(TILEWRIGHT_ENABLE_INSTALL OFF)
-            set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND ON)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright" tilewright)
-        endblock()
-    endif()
 elseif(HIPBLASLT_ENABLE_THEROCK)
     find_package(origami CONFIG REQUIRED)
 else()
@@ -294,6 +284,18 @@ else()
         set(BUILD_TESTING OFF)
         set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
+    endblock()
+endif()
+
+# tilewright is ours and is supplied by NO upstream path -- not the superbuild,
+# not TheRock, not the vendored branch -- while tensilelite and rocroller link
+# roc::tilewright-hipblaslt unconditionally. So add it here, after every branch
+# above has provided origami (the backend needs roc::origami-headers).
+if(NOT TARGET roc::tilewright-hipblaslt)
+    block(SCOPE_FOR VARIABLES)
+        set(TILEWRIGHT_ENABLE_INSTALL OFF)
+        set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND ON)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright" tilewright)
     endblock()
 endif()
 
