@@ -117,12 +117,36 @@ pack/kernel identities, counts, SDK version and runtime source kind derive from 
 actual output, after normalization and deduplication. Packaged runtime source kind
 is KPACK, not its authored builder kind.
 
-Host census selection uses explicit `HIPDNN_TEST_EXPECTED_ARCH` from the configured
-packaging architectures, not the loaded descriptors or detected GPU. Each selected
-architecture needs its corresponding descriptor shard and a nonempty exact test
-selection. Missing/unknown selection, wrong-arch data and missing/extra identities
-fail. Use the provider's registered host invocation for the integrated template;
-host loading does not prove graph dispatch.
+For packaged engines, append the literal `Test<Name>Packs` suite from
+`cmake_test_sources.txt` to `HKP_CENSUS_TEST_SUITES`. CMake registers a separate
+`hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` for every configured packaging
+architecture. Each runs `hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*`
+directly, without a Python launcher, with:
+
+- `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
+- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (configured, not detected or read from descriptors)
+- `HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`
+
+Run the registered obligation from the build-tree provider CTest directory:
+
+```bash
+ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
+  --no-tests=error -V -R '^hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs$'
+```
+
+Nonempty `HIPDNN_TEST_CENSUS_SUITE` enables the native strict guard. It requires an
+existing explicit descriptor root and a nonempty expected arch before default-root
+setup. Every registered case in the exact, nonempty suite must execute and pass
+without skipping in **every** iteration, including cases excluded by filters,
+disable flags or sharding. Listing only, zero iterations, partial repeated runs and
+missing suites fail; complete repeated iterations pass. Wrong-arch data and
+missing/extra identities fail in the generated inventory checks.
+
+Direct-load engines retain ordinary host suites; do not add them to the packaged
+census list. Supply their expected arch and direct-load descriptor root explicitly.
+Normal invocations without the census-suite variable keep ordinary GoogleTest
+filtering and skip behavior. Host registration/loading does not prove graph dispatch
+or numerical device correctness.
 
 ## The five CMake/registration splice points
 

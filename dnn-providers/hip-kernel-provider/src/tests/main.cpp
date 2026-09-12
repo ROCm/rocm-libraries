@@ -4,6 +4,10 @@ SPDX-License-Identifier: MIT
 */
 
 #include <filesystem>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <unordered_map>
 
 #include <gtest/gtest.h>
 
@@ -13,9 +17,118 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
+namespace
+{
+
+// The inventory includes disabled, filtered and sharded-out cases. Only callbacks
+// from a complete passing iteration can satisfy a declared census obligation.
+class CensusExecutionListener : public testing::EmptyTestEventListener
+{
+public:
+    explicit CensusExecutionListener(const testing::TestSuite& suite)
+        : _suite(suite)
+    {
+        for(int i = 0; i < suite.total_test_count(); ++i)
+        {
+            _completed.emplace(suite.GetTestInfo(i), false);
+        }
+    }
+
+    void OnTestIterationStart(const testing::UnitTest&, int) override
+    {
+        for(auto& [test, completed] : _completed)
+        {
+            completed = false;
+        }
+    }
+
+    void OnTestEnd(const testing::TestInfo& test) override
+    {
+        const auto entry = _completed.find(&test);
+        if(entry == _completed.end())
+        {
+            return;
+        }
+        entry->second = test.result()->Passed() && !test.result()->Skipped();
+        if(!entry->second)
+        {
+            _valid = false;
+            std::cerr << "Census: " << _suite.name() << "." << test.name()
+                      << " did not pass without skipping.\n";
+        }
+    }
+
+    void OnTestIterationEnd(const testing::UnitTest&, int iteration) override
+    {
+        _completedIteration = true;
+        for(const auto& [test, completed] : _completed)
+        {
+            if(!completed)
+            {
+                _valid = false;
+                std::cerr << "Census: iteration " << iteration << " did not complete "
+                          << _suite.name() << "." << test->name() << " successfully.\n";
+            }
+        }
+    }
+
+    bool passed() const
+    {
+        if(!_completedIteration)
+        {
+            std::cerr << "Census: no test iteration completed for " << _suite.name() << ".\n";
+        }
+        return _valid && _completedIteration;
+    }
+
+private:
+    const testing::TestSuite& _suite;
+    std::unordered_map<const testing::TestInfo*, bool> _completed;
+    bool _valid = true;
+    bool _completedIteration = false;
+};
+
+} // namespace
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
+
+    std::unique_ptr<CensusExecutionListener> census;
+    const auto censusSuite = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_SUITE");
+    if(!censusSuite.empty())
+    {
+        // Validate the caller's explicit shard before default-root setup can supply
+        // another tree. The production loader's fallback remains unchanged.
+        const auto arch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
+        const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
+        std::error_code error;
+        if(arch.empty() || root.empty() || !std::filesystem::is_directory(root, error))
+        {
+            std::cerr << "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing "
+                         "explicit HIPDNN_DESCRIPTOR_DIR; arch='"
+                      << arch << "', root='" << root << "'.\n";
+            return 1;
+        }
+
+        const auto* unitTest = testing::UnitTest::GetInstance();
+        const testing::TestSuite* suite = nullptr;
+        for(int i = 0; i < unitTest->total_test_suite_count(); ++i)
+        {
+            const auto* candidate = unitTest->GetTestSuite(i);
+            if(censusSuite == candidate->name())
+            {
+                suite = candidate;
+                break;
+            }
+        }
+        if(suite == nullptr || suite->total_test_count() == 0)
+        {
+            std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
+            return 1;
+        }
+        census = std::make_unique<CensusExecutionListener>(*suite);
+    }
 
     // Keep the ingestor's winner cache out of the developer's ~/.cache/hipdnn: the
     // dispatch cases benchmark, and benchmarking writes a shard through to disk.
@@ -53,7 +166,15 @@ int main(int argc, char** argv)
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
+    auto hipErrorHandler = std::make_unique<hipdnn_test_sdk::utilities::HipErrorHandler>();
+    listeners.Append(hipErrorHandler.release());
+    const auto* censusResult = census.get();
+    if(census)
+    {
+        listeners.Append(census.release());
+    }
 
-    return RUN_ALL_TESTS();
+    const int result = RUN_ALL_TESTS();
+    const bool censusPassed = censusResult == nullptr || censusResult->passed();
+    return result != 0 ? result : (censusPassed ? 0 : 1);
 }
