@@ -31,8 +31,7 @@ class Stub:
 
     def __init__(self, **binds):
         for name in ("isTdmWaveSeparated", "tdmFuseAMx", "tdmFusePaired",
-                     "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated",
-                     "_emitTdmDealiasedIssue"):
+                     "tdmSeparateABDescriptors", "tdmSetupIncrementWaveSeparated"):
                 fn = getattr(KernelWriterAssembly, name, None)
                 if fn is not None:
                     setattr(self, name, fn.__get__(self, Stub))
@@ -171,21 +170,43 @@ def test_wave_components_refuses_a_trailing_two_wave_share(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# The de-aliased fill's hardcoded parity must agree with the partition
+# The invariant that retired the de-aliased fill's hardcoded parity
 # --------------------------------------------------------------------------
 
-def test_dealiased_fill_refuses_a_non_parity_partition(monkeypatch):
-    """B_MX puts A on every wave, not the even ones, so parity must refuse.
+@pytest.mark.parametrize("name", sorted(TF.TDM_GROUPS))
+def test_a_set_that_b_owns_is_issued_by_every_wave(monkeypatch, name):
+    """Whenever B owns a descriptor set, every wave issues that set.
 
-    This branch is the landmine: it was unreachable while the writer's
-    `tdmSeparateABDescriptors` was `tdmFuseAMx or tdmFusePaired`, because the
-    caller's outer guard was that same predicate. Routing the predicate through
-    the table makes it live for `B_MX`, whose A is a one-member group.
+    This invariant is what retired `_emitTdmDealiasedIssue`, a parity-gated
+    fill carrying a literal even=A / odd=B wave rule. A set is filled once per
+    wave and the per-wave descriptor programming picks the member, so a group
+    is either one member -- issued by every wave -- or several, each wave
+    carrying exactly one. Either way no row leaves a wave with nothing to
+    issue, so there was never a row for the parity gate to fire on: it was
+    unreachable, not merely unused.
 
-    Fails against the unfixed writer, which emits the parity gate unchecked.
+    Asserted over every row including the unwired ones, because the row such a
+    gate would fire on first is the next one somebody adds. `B_MX` is the
+    concrete case -- it puts A in a one-member group, so the literal expected A
+    on the even waves while A is on all four.
+
+    This holds on the table before the change as well as after, and that is the
+    point rather than a weakness: the invariant was always true, so the parity
+    gate was always unreachable. What the change did was stop maintaining a
+    wave rule that no row could ever select. Written with nothing but the
+    published partition so it cannot pass merely because a new helper exists.
     """
-    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: TF.TDM_GROUPS["B_MX"])
-    monkeypatch.setattr(KWAMod, "tdmWavePartition", lambda _k, tc: TF.tdmWavePartition(ks(TDMFuse=0), tc))
-    with pytest.raises(RuntimeError, match="de-aliased TDM fill"):
-        Stub()._emitTdmDealiasedIssue(None, ks(TDMFuse=0), "A", None,
-                                      "tdmAGroup0", "tdmAGroup1", None, None)
+    row = TF.TDM_GROUPS[name]
+    monkeypatch.setattr(TF, "tdmGrouping", lambda _ks: row)
+    state = ks(TDMFuse=0)
+    if not TF.tdmSeparateABDescriptors(state):
+        pytest.skip("%s seats A and B on one set, so B issues nothing" % name)
+    numWaves = state["NumWaves"]
+    assignment = TF.tdmWaveAssignment(state)
+    for tc in ("A", "B"):
+        group = next(g for g in row.groups if tc in g)
+        issuing = sorted(w for w, members in assignment.items()
+                         if any(m in group for m in members))
+        assert issuing == list(range(numWaves)), (
+            "%s: every wave must carry some member of %s's set %s, got %s"
+            % (name, tc, group, issuing))
