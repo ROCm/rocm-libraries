@@ -352,7 +352,7 @@ def probe_occupancy(
 
 
 def _demo_implicit_gemm(arch: ArchCaps) -> None:
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,

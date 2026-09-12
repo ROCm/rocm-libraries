@@ -230,7 +230,7 @@ def _run_one(
     from rocke.benchmark.conv_reference import conv_reference, conv_reference_gfx1250
     from rocke.core.arch import ArchTarget
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ConvProblem,
         ImplicitGemmConvSpec,

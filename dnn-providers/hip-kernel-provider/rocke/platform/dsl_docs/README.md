@@ -156,12 +156,12 @@ The docs in this folder are written against the current code. Run commands
 from the `rocke/platform/` root with the Python interpreter for your ROCm environment:
 
 ```bash
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 

@@ -287,7 +287,7 @@ def parse_json_case(entry: dict):
     if dtype not in ("fp16", "bf16", "fp32"):
         raise ValueError(f"dtype={dtype!r} is not supported (only fp16, bf16, fp32)")
 
-    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvProblem
 
     def _scalar_or_pair(val, idx_h=0, idx_w=1):
         if isinstance(val, (list, tuple)):
@@ -503,7 +503,7 @@ def parse_miopen_cmd(cmd: str):
             f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
         )
 
-    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvProblem
 
     problem = ConvProblem(
         N=miopen_args.N,
@@ -953,7 +953,7 @@ def main() -> int:
 
     from rocke import compile_kernel
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ConvProblem,
         ImplicitGemmConvSpec,
@@ -961,12 +961,12 @@ def main() -> int:
         is_valid_spec,
         is_valid_spec_for_problem,
     )
-    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+    from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
     )
-    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+    from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
         is_valid_dgrad_spec,
@@ -1283,7 +1283,7 @@ def _build_fwd_one(args_tuple):
     tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
 
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvDataSpec,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
@@ -1352,8 +1352,8 @@ def _build_wgrad_one(args_tuple):
     ) = combo
 
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
@@ -1453,13 +1453,13 @@ def _build_wgrad_two_stage_one(args_tuple):
     ) = combo
 
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
         WgradConvSpec,
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
     )
-    from rocke.instances.common.conv_wgrad_workspace_reduce import (
+    from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
         build_conv_wgrad_workspace_reduce,
     )
@@ -1561,8 +1561,8 @@ def _build_dgrad_one(args_tuple):
         return None
 
     from rocke.core.arch import ArchTarget
-    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
         is_valid_dgrad_spec,
@@ -2548,11 +2548,11 @@ def _run_wgrad_sweep(
             f"\nSweeping {len(pending_2s)} two-stage (deterministic) wgrad configs ...",
             flush=True,
         )
-        from rocke.instances.common.conv_implicit_gemm_wgrad_two_stage import (
+        from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
             _wgrad_stage1_signature,
             wgrad_two_stage_workspace_nbytes,
         )
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             wgrad_reduce_grid,
             wgrad_reduce_signature,
@@ -2864,7 +2864,7 @@ def _run_dgrad_sweep(
         flush=True,
     )
 
-    from rocke.instances.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
+    from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
     import struct as _struct
 
     # ---- Phase 1: build + validate all specs, collect kernels (parallel) ----

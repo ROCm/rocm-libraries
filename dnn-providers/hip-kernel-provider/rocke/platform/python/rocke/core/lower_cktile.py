@@ -421,7 +421,7 @@ def lower_implicit_gemm_conv_to_cktile(
     and are passed to the launcher at runtime via
     ``ck_tile::GroupedConvFwdHostArgs``.
     """
-    from ..instances.common.conv_implicit_gemm import ImplicitGemmConvSpec
+    from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
     if not isinstance(spec, ImplicitGemmConvSpec):
         raise TypeError(
@@ -637,7 +637,7 @@ def lower_spec_to_cktile(spec: Any, *, kernel_name: str | None = None) -> str:
     # Lazy-imports keep this entry point usable when only one of the
     # instance subpackages is wired up.
     from ..instances.common.gemm_universal import UniversalGemmSpec
-    from ..instances.common.conv_implicit_gemm import ImplicitGemmConvSpec
+    from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
     if isinstance(spec, UniversalGemmSpec):
         return lower_universal_gemm_to_cktile(spec, kernel_name=kernel_name)

@@ -185,7 +185,7 @@ class TestTwoStageGridShape(unittest.TestCase):
     def test_stage2_grid_z_is_groups(self):
         # Stage 2 (workspace-reduce) uses grid z = groups: block_id_z is the
         # group index, one CTA per group covering wg_M x wg_N output elements.
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             wgrad_reduce_grid,
         )

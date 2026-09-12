@@ -26,9 +26,6 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .instances.common.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_fp16_manifest_problem,
-)
 from .instances.common.manifest_runner.conv import run_conv_manifest_problem
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
@@ -39,9 +36,6 @@ from .instances.common.manifest_runner.matmul_nbits import (
     run_matmul_nbits_manifest_problem,
 )
 from .instances.common.manifest_runner.simple_ops import run_simple_op_manifest_problem
-from .instances.gfx1151.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_i8i4_manifest_problem,
-)
 
 # Try to import torch-based launcher, fall back to direct HIP timing if unavailable
 try:
@@ -89,8 +83,30 @@ def register_manifest_runner(kind: str, builder: ProblemBuilder) -> None:
 
 
 def registered_manifest_kinds() -> Tuple[str, ...]:
-    """Every manifest kind this process can run, for error messages and CI."""
-    return tuple(sorted(_RUNNERS))
+    """Every manifest kind this process can run, for error messages and CI.
+
+    Includes library-owned kinds from ``_LIBRARY_RUNNER_MODULES`` even before
+    their module has been lazily imported, so this stays accurate regardless
+    of whether ``resolve_manifest_runner`` has already run for them.
+    """
+    return tuple(sorted(set(_RUNNERS) | set(_LIBRARY_RUNNER_MODULES)))
+
+
+# Library-owned manifest runners: imported lazily on first use so the platform
+# package stays importable without the library on sys.path. The module is
+# imported via importlib (no top-level platform→library import) and the runner
+# function is looked up by name. This extends the existing runner_module
+# mechanism from manifest JSON to built-in library families.
+_LIBRARY_RUNNER_MODULES: Dict[str, Tuple[str, str]] = {
+    "deep_fused_conv_pool_fp16": (
+        "kernels.common.deep_fused_conv_pool",
+        "run_deep_fused_conv_pool_fp16_manifest_problem",
+    ),
+    "deep_fused_conv_pool_i8i4": (
+        "kernels.gfx1151.deep_fused_conv_pool",
+        "run_deep_fused_conv_pool_i8i4_manifest_problem",
+    ),
+}
 
 
 def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
@@ -102,11 +118,20 @@ def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
     path; that module is imported here so it can call
     :func:`register_manifest_runner`. The import is skipped when the kind
     is already registered, so a GEMM manifest is unaffected.
+
+    Library-owned kinds (e.g. deep_fused_conv_pool_*) are resolved lazily
+    via :data:`_LIBRARY_RUNNER_MODULES` — the library module is imported on
+    first use so a standalone-installed rocke wheel stays importable without
+    the library on sys.path.
     """
     kind = str(manifest["kind"])
     module_name = manifest.get("runner_module")
     if kind not in _RUNNERS and module_name:
         importlib.import_module(str(module_name))
+    if kind not in _RUNNERS and kind in _LIBRARY_RUNNER_MODULES:
+        mod_path, fn_name = _LIBRARY_RUNNER_MODULES[kind]
+        mod = importlib.import_module(mod_path)
+        register_manifest_runner(kind, getattr(mod, fn_name))
     try:
         return _RUNNERS[kind]
     except KeyError:
@@ -133,12 +158,8 @@ def _register_builtin_runners() -> None:
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
-    register_manifest_runner(
-        "deep_fused_conv_pool_i8i4", run_deep_fused_conv_pool_i8i4_manifest_problem
-    )
-    register_manifest_runner(
-        "deep_fused_conv_pool_fp16", run_deep_fused_conv_pool_fp16_manifest_problem
-    )
+    # deep_fused_conv_pool_* runners live in the library tree and are resolved
+    # lazily via _LIBRARY_RUNNER_MODULES in resolve_manifest_runner().
 
 
 _register_builtin_runners()

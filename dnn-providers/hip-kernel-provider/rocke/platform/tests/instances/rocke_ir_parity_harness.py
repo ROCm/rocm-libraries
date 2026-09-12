@@ -129,7 +129,7 @@ def build_conv(
     vector_size_c=None,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -177,11 +177,11 @@ def build_conv_wgrad(
     two_stage=False,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             WgradConvSpec,
             build_implicit_gemm_conv_wgrad,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
@@ -225,11 +225,11 @@ def build_dgrad(
     split_k=1,
 ):
     def _build():
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             build_implicit_gemm_conv_dgrad,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
@@ -266,11 +266,11 @@ def build_conv_wgrad_reduce(
     """
 
     def _build():
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             build_conv_wgrad_workspace_reduce,
         )
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
 
         # WgradReduceSpec only uses p for wg_M (= K) and wg_N (= Y*X*C).
         # Y=1, X=1 → wg_N = C = wg_N.
@@ -720,22 +720,22 @@ def build_attention_d128_swa_fold_gfx942(arch):
 def build_deep(kind, arch, **kw):
     def _build():
         if kind == "common":
-            from rocke.instances.common.deep_fused_conv_pool import (
+            from kernels.common.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         elif kind == "gfx950":
-            from rocke.instances.gfx950.deep_fused_conv_pool import (
+            from kernels.gfx950.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         elif kind == "gfx1201":
-            from rocke.instances.gfx1201.deep_fused_conv_pool import (
+            from kernels.gfx1201.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )
         else:
-            from rocke.instances.gfx1151.deep_fused_conv_pool import (
+            from kernels.gfx1151.deep_fused_conv_pool import (
                 build_deep_fused_conv_pool,
                 make_deep_fused_conv_pool_spec,
             )

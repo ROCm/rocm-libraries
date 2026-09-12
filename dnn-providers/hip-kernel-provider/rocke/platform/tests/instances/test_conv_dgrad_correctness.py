@@ -516,11 +516,11 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
 
     def _lower_gfx1250(self, groups: int) -> str:
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             build_implicit_gemm_conv_dgrad,
             is_valid_dgrad_spec,
@@ -588,7 +588,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
 
     from rocke import compile_kernel
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+    from kernels.common.conv_implicit_gemm_dgrad import (
         build_implicit_gemm_conv_dgrad,
         pack_sub_gemm_buffer,
     )
@@ -659,8 +659,8 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
         self, dtype, *, warp_tile_mn, tile_k, epilogue, split_k, stride=1, Hi=14, K=64
     ):
         sys.path.insert(0, os.path.abspath(_PYDIR))
-        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             is_valid_dgrad_spec,
         )
