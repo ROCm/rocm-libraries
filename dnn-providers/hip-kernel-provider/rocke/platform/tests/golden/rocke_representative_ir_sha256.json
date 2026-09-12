@@ -82,6 +82,14 @@
           "sha256": "12dcee5c39cf7f0486d3a7418b2511ac3c78046d9e5dba42c4e35d649158b807",
           "status": "ok"
         },
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks": {
+          "arch": "gfx950",
+          "bytes": 71552,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_h64kv8_fp16_sinks",
+          "sha256": "712b9182dcecd8971a8f788a380d9e29b966d967bf03abe31a5ba66c0bdad816",
+          "status": "ok"
+        },
         "attention/gfx950/3d_bf16_d128_b64": {
           "arch": "gfx950",
           "bytes": 229103,
@@ -1036,11 +1044,11 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 75
         },
         "expected_failures": 0,
         "families": {
-          "attention": 14,
+          "attention": 15,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 28,
@@ -1055,7 +1063,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 129
       }
     },
     "llvm22": {
@@ -1138,6 +1146,14 @@
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
           "sha256": "820d4d097c0edbba5b494aa134eabbd04e79809f1beba6ee3f98bc719ae1ec08",
+          "status": "ok"
+        },
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks": {
+          "arch": "gfx950",
+          "bytes": 71648,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_h64kv8_fp16_sinks",
+          "sha256": "bc67d589b1ee1bf84b554899622eb346f58fd28c797561efbed526eb453fa5d1",
           "status": "ok"
         },
         "attention/gfx950/3d_bf16_d128_b64": {
@@ -2094,11 +2110,11 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 75
         },
         "expected_failures": 0,
         "families": {
-          "attention": 14,
+          "attention": 15,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 28,
@@ -2113,7 +2129,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 129
       }
     },
     "llvm23": {
@@ -2196,6 +2212,14 @@
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_h4kv2_fp16_softcap",
           "sha256": "76b621c7992e1857fe32f44698580d03ab685dcc9736d87058df16c421bde0e3",
+          "status": "ok"
+        },
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks": {
+          "arch": "gfx950",
+          "bytes": 71652,
+          "family": "attention",
+          "kernel_name": "rocke_uattn2d_tiled_d64_b32_h64kv8_fp16_sinks",
+          "sha256": "c13b1354c566d0819860a85031ab7cc19d8ba049b7cf4b562b524349e8560c08",
           "status": "ok"
         },
         "attention/gfx950/3d_bf16_d128_b64": {
@@ -3152,11 +3176,11 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 27,
-          "gfx950": 74
+          "gfx950": 75
         },
         "expected_failures": 0,
         "families": {
-          "attention": 14,
+          "attention": 15,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 28,
@@ -3171,7 +3195,7 @@
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 128
+        "ok_cases": 129
       }
     }
   },
