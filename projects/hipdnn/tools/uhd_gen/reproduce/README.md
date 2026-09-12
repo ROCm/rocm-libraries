@@ -112,6 +112,21 @@ causality top-left when AITER's gfx942 kernels are bottom-right, and an AITER `.
 resolved from the install path rather than the build tree
 (`HIPDNN_AITER_ASM_DIR`).
 
+## When the node builds the wrong commit
+
+Compute sites do not all resolve `github.com` to the same mirror: a node can clone a branch
+tip hours behind the one `git ls-remote` reports from the login node. Carry the commits
+yourself rather than trusting the clone:
+
+```bash
+git bundle create delta.bundle <a commit the mirror has>..HEAD --branches=<branch>
+scp delta.bundle <cluster>:~/
+sbatch --export=ALL,UHD_BUNDLE=/exchange/delta.bundle,... <script>.sbatch
+```
+
+Every script here fetches the bundle over the clone and checks out its tip, so the job
+builds the tree you meant.
+
 ## Known gaps
 
 - **flyDSL (`hipkernel:FlydslAttention`)** is not part of this: its 21 HSACOs are not
