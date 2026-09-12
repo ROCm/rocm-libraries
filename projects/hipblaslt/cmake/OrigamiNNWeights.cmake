@@ -19,7 +19,12 @@ function(origami_nn_colocate_weights ARCH OUTPUT_ROOT)
     endif()
 
     if(NOT TARGET ${_target})
-        add_custom_target(${_target})
+        add_custom_target(${_target} ALL)
+        # Copy after the per-arch Tensile library is generated, so the codegen run
+        # that owns ${_dst} cannot clobber the colocated YAML.
+        if(TARGET tensilelite-device-libraries)
+            add_dependencies(${_target} tensilelite-device-libraries)
+        endif()
     endif()
 
     add_custom_command(
