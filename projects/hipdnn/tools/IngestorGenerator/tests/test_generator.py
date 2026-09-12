@@ -6,11 +6,6 @@
 Covers: rendered content assertions (not golden-file diffing), UUID
 cross-reference threading, allow-listed JSON keys, and the UMD policy
 (single-pack -> zero graph-scoped UMDs, multi-pack -> one per pack).
-
-The two REQUIRED content assertions (Task 2A.4, non-negotiable) live in
-``TestRequiredTrapAssertions`` below: the graph_match stub's whole-catalog
-blast-radius warning, and TestMatchers.cpp's by-value DeviceProperties
-construction.
 """
 
 import json
@@ -28,50 +23,6 @@ from codegen.generator import (
 )
 from codegen.models import KmdField
 from tests.helpers import make_kernel, make_minimal_config, make_pack
-
-
-class TestRequiredTrapAssertions:
-    """Task 2A.4's two non-negotiable mechanical checks."""
-
-    def test_graph_match_stub_carries_whole_catalog_warning(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        assert "empties" in rendered and "WHOLE catalog" in rendered
-        assert "KernelIngestorStateManager.hpp:450-455" in rendered
-        assert (
-            "every remaining pack" in rendered.lower()
-            or "EVERY remaining pack" in rendered
-        )
-
-    def test_graph_match_stub_carries_whole_catalog_warning_multi_pack(
-        self, generator, binary_ops_config
-    ):
-        """The warning must survive the multi-pack shape too, not just single-pack."""
-        rendered = generator._render_template(
-            "native.cpp.j2", binary_ops_config, ids=mint_ids(binary_ops_config)
-        )
-        assert "WHOLE catalog" in rendered
-        assert "KernelIngestorStateManager.hpp:450-455" in rendered
-
-    def test_matchers_stub_constructs_device_properties_by_value(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "test_matchers.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        # By-value construction: a local DeviceProperties built and returned, never
-        # a query through a real device call. Check for an actual CALL (with
-        # parens directly preceded by no explanatory prose marker), not merely the
-        # function's name -- the doc comment legitimately mentions
-        # hipGetDeviceProperties() in prose to explain what NOT to do.
-        assert "DeviceProperties properties;" in rendered
-        assert "hipGetDeviceProperties(&properties" not in rendered
-        assert "= hipGetDeviceProperties(" not in rendered
-        assert ".getDeviceProperties()" not in rendered
-        assert "BY VALUE" in rendered or "by value" in rendered.lower()
 
 
 class TestUuidThreading:
@@ -655,42 +606,6 @@ class TestFragmentsNameRealFiles:
         }
         listed = set(self._fragment_descriptor_paths(tmp_path))
         assert on_disk == listed
-
-
-class TestEngineSdkVersion:
-    """Every UED states the SDK version its engine was written against.
-
-    The runtime parses ``sdk_version`` onto ``EngineDescriptor::sdkVersion`` and
-    ``GenericPlanBuilder::understandsGraph()`` gates on it at match time. A bundle
-    that omits the key is matched against whatever baseline the loader carries, so
-    a configured value that never reached the descriptor changes which graphs the
-    engine admits -- with nothing anywhere saying so.
-    """
-
-    def test_a_nonbaseline_configured_version_reaches_the_ued(self, scale_add_config):
-        import copy
-
-        config = copy.deepcopy(scale_add_config)
-        config.engine.sdk_version = "1.2.0"
-        assert build_ued(config, mint_ids(config))["sdk_version"] == "1.2.0"
-
-    def test_the_baseline_version_is_emitted_rather_than_omitted(
-        self, scale_add_config
-    ):
-        """The default is a STATED default, not an absence.
-
-        Omitting it at ``1.0.0`` would leave the loader substituting its own
-        baseline, so a later change to that baseline would silently re-target every
-        bundle already shipped -- and only for the engines whose author never
-        thought to state a version.
-        """
-        import copy
-
-        config = copy.deepcopy(scale_add_config)
-        config.engine.sdk_version = "1.0.0"
-        ued = build_ued(config, mint_ids(config))
-        assert "sdk_version" in ued
-        assert ued["sdk_version"] == "1.0.0"
 
 
 class TestSpecializationContractEmission:

@@ -1,164 +1,101 @@
-# Kernel mining: applicability, specialization and launch contracts
+# Kernel contracts: applicability, specialization and launch
 
-Use this reference during [RUNBOOK.md](RUNBOOK.md)'s contract and native stages.
-It does not choose a shipping set or own another execution sequence. The current
-kernel library's authoring, dispatch, build and testing documentation and source
-outrank historical examples here. For direct-load HIP, extract the same semantic
-and launch facts from HIP source; do not invent a rocKE builder/profile.
+Current builder/dispatcher source and library documentation outrank historical
+examples. For direct-load HIP, extract the same semantic/launch facts from HIP;
+do not invent a rocKE builder or profile. [RUNBOOK.md](RUNBOOK.md) owns execution.
 
-## Source evidence to retain
+## Source evidence
 
-Locate actual builder functions, their annotated dataclass types, validation and
-support predicates, dispatch factories, signature/geometry helpers and launch
-wrappers. Names are not conventions to guess: validation may live outside
-`__post_init__`, geometry inside the builder, and ABI declarations in a
-`SignatureBuilder` chain. Follow the helpers the builder actually uses.
-
-| Source | Required observation |
+| Source | Required facts |
 |---|---|
-| Builder signature and spec type | Packable `(spec, *, arch)` interface, required fields and real defaults |
-| Constructor/validators/support predicate | Rejection conditions and architecture restrictions |
-| Builder memory arithmetic | Baked strides, buffer bounds, loop trip counts and layout per operand |
-| Dispatch factory | Request fields, constants and derived choices forming the baseline |
-| Geometry and signature helpers | Grid/block formulas, deciding fields, ordered ABI slots and guards |
-| Launch wrapper | Tensor shape/feature checks absent from the constructor |
-| Kernel docs, history and benchmarks | Measured knob hypotheses, limitations, numeric/reference contract |
+| Builder and annotated dataclass | `(spec, *, arch)` interface, required fields and defaults |
+| Constructor, validators, support predicate | Rejections and architecture restrictions |
+| Memory arithmetic | Baked strides, bounds, loop counts and operand layouts |
+| Dispatch factory | Request fields, constants and derived baseline choices |
+| Geometry/signature helpers | Grid/block formulas, deciding fields, ordered ABI and guards |
+| Launch wrapper | Shape/feature checks absent from construction |
+| Documentation, history and benchmarks | Measured knob hypotheses and numerical limits |
 
-An empty introspection architecture list means unknown, not unsupported. A
-constructor-valid spec is not necessarily supported; check the **final** overridden
-or promoted spec with the real support predicate, including isolation and shipping
-crosses. An API lookup/binding/invocation error is not a valid false predicate.
-Missing/noncallable APIs, exceptions and invalid return values fail the parity or
-reference tool with `ParityError`/exit 2, even with narrowing/escape flags.
-
-Read the graph contract first. The matcher translates graph semantics into kernel
-requirements; reading only Python misses graph-only optional fields and fused edges.
+Follow helpers actually consumed by the builder; do not guess naming conventions.
+An empty introspection arch list means unknown, not unsupported. Constructor-valid
+does not imply supported: the real predicate must accept each **final** overridden
+or promoted spec, including isolation and shipping crosses. API failures are not
+shape declines. Read [graph-contract.md](graph-contract.md) for graph-only features
+and fused edges absent from the kernel's Python surface.
 
 ## Applicability classification
 
-Classify every restriction, including constants implied by memory arithmetic:
+- **Graph-only:** reject in `graph_match` when no candidate can serve it.
+- **Graph versus baked value:** compare in `kernel_match`, using equality for an
+  extent/trip count and a proven inequality for capacity. Silent zero-fill/truncation
+  is not support.
+- **Knob-dependent:** test against each candidate, e.g. sequence divisibility by its
+  tile, rather than imposing a fixed engine-wide constraint.
+- **Spec-internal:** enforce relations between tuning fields in final-spec support
+  checks, not a graph matcher.
+- **Excluded semantic feature:** enforce the approved exclusion; do not imply its
+  sub-rules are implemented.
+- **Unrepresentable feature:** investigate semantic equivalents/composition, then
+  report the missing mechanism and scope decision rather than silently enabling it.
 
-- **Graph-only:** reject in `graph_match` if no candidate can serve it.
-- **Graph versus baked value:** compare against this candidate in `kernel_match`.
-  Equality is correct for a baked extent/trip count; a genuine capacity uses its
-  proven bound instead. A baked buffer limit can silently zero-fill/truncate rather
-  than fault, so absence of an exception is not support.
-- **Knob selection:** compare the graph with each candidate's knob. For example,
-  `seqlen_kv % block_n == 0` calls for a compatible candidate, not a fixed
-  engine-wide sequence rejection.
-- **Spec-internal:** constraints between tuning fields belong in spec construction
-  and final-spec support checking, not a graph matcher.
-- **Excluded semantic feature:** enforce the agreed feature exclusion. Do not imply
-  that its sub-rules are implemented. Excluding requested scope requires approval.
-- **Unrepresentable semantic feature:** first consider legal fused subgraphs and
-  alternate field spellings. A zero search for the Python name is insufficient.
-  If genuinely unavailable, report the schema limitation rather than silently
-  enabling it or inventing a graph field.
+Metadata used by scoring, geometry or workspace is still required even without a
+graph comparison. Enumerate every downstream consumer.
 
-A tuning field need not be compared with a graph, but it may still be needed by
-scoring, geometry or workspace sizing. Include every downstream metadata consumer
-in the field audit. `graph_match` runs before a candidate exists; returning
-`nullopt` empties the whole engine catalog for that graph.
-
-## Authoring intent versus observed compilation
+## Authored intent and compiler evidence
 
 The [generator reference](../../../IngestorGenerator/README.md#specialization-agreement)
-owns the emitted specialization contract. Existing authoring profiles describe
-request/dispatcher bindings, vocabulary and each KMD field's specialization or
-matcher-only classification. Generation emits those declarations inside UKD
-`provenance.specialization_contract`; packaging takes no separate profile list or
-root manifest.
+owns the declaration format. The generator carries
+`provenance.specialization_contract` **once on each enclosing KDP**. Inline UKDs
+inherit it only when they have no own declaration; a per-UKD declaration overrides
+**wholesale**, never merges. Standalone UKDs carry their own. This rule is identical
+for authored and packed trees; packaging takes no separate profile list/root manifest.
 
-For a metadata-backed field, bind exactly one direct `field` or zero-argument
-`method` on the **actual hydrated spec passed to the builder**. A direct attribute
-is authoritative only if the builder consumes it without more resolution. If the
-builder consumes an effective accessor, bind that accessor even when the raw field
-is non-null. Retain source use sites proving the correspondence, not a copied
-policy formula or a guessed `resolved_<name>` spelling.
+Every KMD field belongs to the exhaustive, disjoint specialization/matcher-only
+partition. Each specialization binding names exactly one direct `field` or
+zero-argument `method` on the actual hydrated object passed to the builder. A direct
+field is authoritative only if the builder consumes it without more resolution;
+bind an effective accessor even when its raw field is non-null. Retain builder use
+sites for each binding/exemption, independently reviewed; a mechanically complete
+partition cannot justify relabeling causal or swizzle as matcher-only.
 
-The gfx942 dense builder illustrates why: `resolved_use_exp2_fast()` resolves the
-policy intent; `resolved_use_cfvst()`, `resolved_v_row_pad()` and
-`resolved_use_v_swizzle()` are the coupled decisions the builder consumes.
-`use_v_swizzle=true` can still resolve false with the conflict-free-V path disabled.
-Reading the raw field, or checking the accessor only when raw is `None`, misses it.
+For gfx942 dense, the builder consumes `resolved_use_exp2_fast()`,
+`resolved_use_cfvst()`, `resolved_v_row_pad()` and `resolved_use_v_swizzle()`.
+Raw swizzle=true can still resolve false with cfvst disabled. Do not copy policy
+formulas or guess a `resolved_<name>` accessor.
 
-Preserve omitted/`None` policy intent in authored `provenance.spec`; do not rewrite
-it to false or materialize guessed defaults. Constructor defaults/default factories
-and effective accessors are observed at compilation. Unresolved `None`, missing
-readouts, unsupported types, exceptions or non-repeatable resolution block full
-agreement. A field with no authoritative readout is unsupported, not an automatic
-matcher-only exemption. In particular, reclassifying causal or swizzle merely to
-make a check pass is invalid.
+Keep authored omission/`None` intent in `provenance.spec`. Compilation observes real
+constructor defaults/default factories and effective accessors. Unresolved `None`,
+missing readouts, unsupported types, exceptions or non-repeatable resolution block
+agreement; they are not wildcards. KMD completion preserves BOOL, deliberately
+projects an observed builder boolean to 0/1 for INT, and canonicalizes FLOAT.
 
-Every KMD field belongs to the exhaustive disjoint specialization/matcher-only
-partition. Each exemption needs a source-grounded reason, reviewed independently
-of that partition's mechanical completeness. This ledger is migration/review
-evidence, not another executable policy table. Metadata is completed and typed via
-the referenced KMD: BOOL remains boolean, INT may deliberately project a builder
-boolean to 0/1, and FLOAT is canonicalized numerically.
+Compiler-owned `provenance.effective_spec` stays **per-kernel and is never inherited**.
+It binds observations/producer origins to current descriptor/schema/metadata/arch
+and payload; authored input cannot supply or overwrite it. Serial, prewarm and
+shared compile results must check every consumer independently. Full verification
+reads that record without importing today's producer. A packed no-specialized-field
+kernel without a record is `NOT VERIFIED HERE`, not binary-agreement evidence.
+These checks do not prove native dispatch or arbitrary machine-code correctness.
 
-Compiler-owned `provenance.effective_spec` binds observed decisions and producer
-origins to the actual descriptor/schema/metadata/architecture and payload. Authored
-inputs cannot forge or overwrite it. Serial, prewarm and shared compile paths must
-check **every** consuming descriptor independently. Full verification reads that
-artifact-bound record; it does not reconstruct a spec using whichever rocKE is
-installed on the checking machine. These observations establish agreement with
-builder decisions, not formal equivalence of arbitrary machine code or correctness
-of native dispatch.
+## Layout, geometry and ABI
 
-## Layout, geometry and pointer ownership
+Derive operand address formulas independently. `((b*S+s)*H+h)*D+d` describes token-major
+BSHD memory even with logical dims `[B,H,S,D]`. A kernel without stride arguments
+cannot honor arbitrary strides; extent-one axes are the exception. Do not infer
+V/output width or layout from Q.
 
-Derive each operand's address formula independently. For example,
-`((b*S+s)*H+h)*D+d` is token-major BSHD memory even if logical tensor dimensions
-are listed as `[B,H,S,D]`. A kernel with no stride arguments cannot honor arbitrary
-strides. Check every stride affecting an address, while allowing arbitrary strides
-on extent-one axes whose index is always zero. Do not assume V shares Q's head
-size or output layout without source evidence.
+Record every grid/block branch and workspace formula, resolved constants and deciding
+KMD fields. Wrong geometry can leave output unwritten without raising an error.
+Output checks belong at matching when available, otherwise at preparation.
 
-Record all grid/block branches, resolved constants and KMD fields they consume.
-Persistent and nonpersistent launch modes can need different grids; a wrong grid
-can leave output unwritten while returning success. Output shape/layout checks
-belong where the graph contract guarantees those fields are available; defer to
-`prepare()` when matching sees incomplete inferred output information.
+Every pointer slot needs a graph UID, workspace or synthesized-buffer source, lifetime
+and enforced assumptions. Synthesizing lengths from dims assumes uniform lengths;
+it is not varlen support. For a **conditional ABI**, C++ must replay presence guards
+and exact order/types. For a **fixed ABI**, disabled features leave their slots in
+place; omitting an unused argument shifts everything after it.
 
-For every pointer slot, name the graph UID, workspace or synthesized buffer that
-supplies it, its lifetime, and its preconditions. A synthesized sequence-length
-array from dims assumes uniform lengths; enforce that assumption rather than
-pretending to support variable lengths. An assumption the graph cannot establish
-blocks that path. Keep prepared dispatch independent of transient matching data.
-
-## Fixed and conditional ABI are different contracts
-
-Read the actual signature declaration in order, recording type, width, source and
-presence condition for **every** slot. Do not treat all kernels as attention-dense:
-
-- A conditional signature appends slots only under specified compile-time guards.
-  C++ must replay those guards and ordering exactly.
-- A fixed signature contains every slot even when a feature is disabled; that
-  flag controls reads, not slot existence. Omitting an unused slot shifts all
-  following arguments and corrupts memory.
-
-The same optional features can use opposite ABI conventions in different builders.
-A flat argument list is correct for a fixed ABI and wrong for a genuinely
-conditional one. Source audit, launch-surface declarations and numerical device
-cases all matter; metadata agreement does not verify this C++ restatement.
-
-## Baseline and tuning evidence
-
-Use the real dispatcher factory for baseline configs; preserve its graph-derived,
-constant and effective-policy choices. A knob's legal values are not evidence that
-all belong in a shipping cross-product. Kernel history and benchmarks provide
-hypotheses, not a requirement to ship every explored value. Match their shapes and
-numeric preconditions against the owners' published data and external workloads.
-
-RUNBOOK measures only after a runnable baseline exists: isolation, supported
-pairwise survivors, explicit selection, then regeneration/rebuild/revalidation of
-the shipping artifact. A policy omission and an explicit false value may produce
-different binaries; equality of displayed metadata or counts does not prove
-byte-identical controls.
-
-The contract evidence handed to the native stage includes restriction dispositions,
-per-operand layout equations, graph mappings, geometry/workspace deciding fields,
-ABI slot inventory, specialization binding/exemption use sites and unresolved
-questions. Every unresolved correctness-relevant row blocks that path; a table's
-existence or an arbitrary research time limit does not discharge it.
+The dispatcher defines the provisional baseline. Legal knob values and historical
+benchmarks are hypotheses, not shipping evidence. Policy omission versus explicit
+false can change binaries even when displayed metadata/counts agree. Retain restriction
+dispositions, layouts, graph mappings, geometry/workspace, ABI and binding use sites;
+unresolved correctness questions block the affected path.

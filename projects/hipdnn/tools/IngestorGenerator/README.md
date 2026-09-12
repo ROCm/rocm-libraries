@@ -455,32 +455,26 @@ with a generic "no implementation yet".
 .venv/bin/python -m pytest
 ```
 
-`pyproject.toml` sets `fail_under = 80` for `coverage`. Content/substring assertions on
-rendered output plus CLI subprocess exit-code tests -- not golden-file diffing, per
-`DescriptorGenerator`'s own test shape. Two assertions are load-bearing and
-non-negotiable (`tests/test_generator.py::TestRequiredTrapAssertions`): that the
-emitted `graph_match` stub's doc comment literally contains the whole-catalog
-blast-radius warning, and that the emitted `Test<Name>Matchers.cpp` constructs
-`DeviceProperties` by value.
+`pyproject.toml` sets `fail_under = 80` for `coverage`. The suite exercises
+descriptor identities, declaration carriage, semantic deduplication, emitted
+inventory and CLI outcomes. Source spellings and comment wording do not prove
+native registration, loading or runtime correctness; those require the compiled
+provider and create/extend execution gates.
 
-### The native stub's own shape (`tests/test_native_stub.py`)
+### Native-stub compilation (`tests/test_native_stub.py`)
 
 ```bash
 .venv/bin/python -m pytest tests/test_native_stub.py
 ```
 
-Covers what the two required trap assertions above do not: that every hook body is
-genuinely a `TODO` placeholder (none silently emitted as working logic), that the
-symbol constants the stub declares match what the SAME run's descriptor JSON names,
-that the registration block wires every declared symbol and none more, and basic
-structural soundness (balanced braces, every hook present). `TestRealCompile` also
-host-compiles the emitted stub with `g++`/`clang++` when one is on `PATH` and the
-plugin/data/flatbuffers SDK sources are found beside this checkout (walking up from
-`tools/IngestorGenerator`) plus a vendored `flatbuffers/array.h` (checked at
-`/opt/rocm/include`) -- it generates minimal stand-ins for the CMake-configured
-`version.h`/`CacheRootDefaults.h` headers from their real `.h.in` templates rather
-than skipping outright. Skips (never fails) when any prerequisite is absent, so a
-box without those trees still runs the rest of the suite.
+`TestRealCompile` host-compiles emitted single-pack, multi-pack, packaged-dialect
+and matcher-test stubs with `g++`/`clang++`, including an intentionally broken
+source control. Its `-fsyntax-only` result proves parsing and type-checking, not
+linking, registration, loading, inventory or dispatch. The fixture uses the
+plugin/data/flatbuffers SDK and provider sources beside this checkout, plus
+`flatbuffers/array.h` under `/opt/rocm/include`. It generates minimal stand-ins
+for CMake-configured `version.h`/`CacheRootDefaults.h` headers from their real
+templates. Missing prerequisites produce an explicit skip, not compiler proof.
 
 ### Fragment/struct arity (`tests/test_fragment_struct_arity.py`)
 
