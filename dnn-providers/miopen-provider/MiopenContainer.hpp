@@ -4,13 +4,26 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "HipdnnMiopenHandle.hpp"
 
 namespace miopen_plugin
 {
+
+/// @brief Each MIOpen engine's declared L1 throughput model: architecture to UHD UUID.
+///
+/// RFC 0019 Open Question 7 (RESOLVED): MIOpen ships no UED, so it binds a
+/// `predict_engine_tflops` model by naming that UHD's UUID in the provider's own engine
+/// definition rather than through a UED role map. Defined in MiopenContainer.cpp beside
+/// the engine table that consumes them, and declared here because the declaration is part
+/// of what this provider promises: a deployer installs a model by publishing a UHD that
+/// carries one of these ids.
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS;
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.

@@ -54,11 +54,20 @@
     "trained_against": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ued", "kmd", "umd"],
+      "anyOf": [
+        {"required": ["ued", "kmd", "umd"]},
+        {"required": ["selector_revision"]}
+      ],
+      "dependencies": {
+        "ued": ["kmd", "umd"],
+        "kmd": ["ued", "umd"],
+        "umd": ["ued", "kmd"]
+      },
       "properties": {
         "ued": {"$ref": "#/definitions/dependency"},
         "kmd": {"$ref": "#/definitions/dependency"},
-        "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}}
+        "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
+        "selector_revision": {"type": "string", "minLength": 1}
       }
     },
     "objective": {"enum": ["max", "min"]},

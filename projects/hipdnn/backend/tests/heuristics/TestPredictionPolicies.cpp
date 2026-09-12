@@ -233,9 +233,9 @@ TEST_F(TestPredictionPolicies, ModeARanksByL1AndOnlyTheWinnerDrillsIntoL2)
     EXPECT_TRUE(_plugin->getEngineConfig(_descriptor.get(), 2)->knobs.empty());
 }
 
-// RFC 0019 §11.2 table row "Neither": an engine that answers neither query "falls back
-// to static ordering; contributes no score" and "is ordered by the existing static
-// rules" — identically under both policies. The order candidates arrived in is neither.
+// RFC 0019 §11.2 table row "No declared model": an engine that answers neither query
+// "falls back to static ordering; contributes no score" and "is ordered by the existing
+// static rules" — identically under both policies. The arrival order is neither.
 TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
 {
     using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
