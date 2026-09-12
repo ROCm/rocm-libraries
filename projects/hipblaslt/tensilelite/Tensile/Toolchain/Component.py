@@ -170,7 +170,7 @@ class Assembler(Component):
         """
         args = self._default_args
         # Enable true16 syntax on targets that support +real-true16.
-        if targetGfx in ("gfx1250", "gfx1201", "gfx1200", "gfx1100"):
+        if targetGfx in ("gfx1250", "gfx1250-strict", "gfx1201", "gfx1200", "gfx1100"):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
@@ -289,7 +289,9 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            gfx: The target GPU architecture.
+            target: The compiler target to tag the bundle entry with. This is the
+                stepping's own name where one was asked for, not the ISA-derived
+                name, since the runtime unbundles by matching the agent's target.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
@@ -362,10 +364,16 @@ class Linker(Component):
         Since it is possible for the character limit of the operating system to be exceeded
         when invoking the linker, LLVM allows the provision of arguments via a "response file"
         Reference: https://llvm.org/docs/CommandLine.html#response-files
+
+        Named after the code object it describes, and so written beside it rather
+        than into the working directory: two builds covering architectures that
+        share an ISA run at once from one directory, and a shared name lets one
+        link the other's objects into its own code object, silently.
         """
-        with open(Path.cwd() / "clang_args.txt", "wt") as file:
+        responsePath = Path(destPath).with_name(Path(destPath).name + ".linker_args")
+        with open(responsePath, "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
-        return [*(self.default_args), "-o", destPath, "@clang_args.txt"]
+        return [*(self.default_args), "-o", destPath, f"@{responsePath}"]
 
     def _use_response_file(self, args: List[str]) -> bool:
         """

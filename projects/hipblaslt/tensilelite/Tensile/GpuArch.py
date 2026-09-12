@@ -35,22 +35,49 @@ _AMDGPU_ARCH_RELPATHS = (
     ("lib", "llvm", "bin", "amdgpu-arch"),
 )
 
-
-def _rocm_root():
-    return os.environ.get("ROCM_PATH", "/opt/rocm")
+_ROCMINFO_RELPATHS = (("bin", "rocminfo"),)
 
 
-def _tool(*relative_parts):
-    """An executable from the ROCm install, falling back to PATH."""
-    candidate = os.path.join(_rocm_root(), *relative_parts)
+def _rocm_roots():
+    """The ROCm installs ROCM_PATH names, in the order it names them.
+
+    It holds an os.pathsep-separated list often enough that ``validateToolchain``
+    splits it too; a box with both a gfx1250 and a gfx1250-strict SDK installed
+    is exactly when it does, and exactly when reading only the whole string --
+    which matches no directory -- would fall through to PATH and be answered by
+    the other install.
+    """
+    return os.environ.get("ROCM_PATH", "/opt/rocm").split(os.pathsep)
+
+
+def _inRocmInstall(root, relative_parts):
+    """That path under one ROCm install, if it is there and executable."""
+    candidate = os.path.join(root, *relative_parts)
     if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
         return candidate
-    return shutil.which(relative_parts[-1])
+    return None
 
 
-def _first_tool(relpaths):
-    """The first of several candidate locations that yields an executable."""
-    return next((found for parts in relpaths if (found := _tool(*parts))), None)
+def _tool(relpaths):
+    """An executable at any of ``relpaths``, the ROCm installs before PATH.
+
+    Every install is tried against every layout before PATH is consulted at all.
+    Resolving one candidate the whole way to PATH before trying the next would
+    let a stray amdgpu-arch beat the one inside the install the caller pointed
+    ROCM_PATH at, since the two layouts differ only by a "lib" prefix.
+    """
+    found = next(
+        (
+            tool
+            for root in _rocm_roots()
+            for parts in relpaths
+            if (tool := _inRocmInstall(root, parts))
+        ),
+        None,
+    )
+    if found:
+        return found
+    return next((w for parts in relpaths if (w := shutil.which(parts[-1]))), None)
 
 
 def _run(command):
@@ -62,36 +89,65 @@ def _run(command):
     return result.stdout if result.returncode == 0 else None
 
 
-def _first_real_arch(names):
-    return next((n for n in names if n and n != _PLACEHOLDER_ARCH), None)
+def _real_archs(names):
+    """The reported names, minus the GPU-less placeholder, in enumeration order.
+
+    One entry per agent, repeats included: callers index this positionally to
+    answer "what is device N", so the four entries of a homogeneous four-GPU box
+    have to stay four. Callers asking instead which architectures are present
+    de-duplicate it themselves.
+    """
+    return [name for name in names if name and name != _PLACEHOLDER_ARCH]
 
 
-def detect_gpu_arch():
-    """The architecture name the runtime reports for the first GPU, or None.
+def _probe():
+    """``(archs, any_tool_found)`` from the first tool that answers.
 
     Deliberately does not use rocm_agent_enumerator: it parses rocminfo with a
     capture group that ends at ``gfx\\d+``, so it truncates a suffix and answers
     "gfx1250" for an agent rocminfo names "gfx1250-strict" -- which would build
     the wrong stepping's kernels without a word. amdgpu-arch and rocminfo both
     report the full name.
+
+    The second element separates "no ROCm here" from "ROCm is here but reported
+    nothing usable", which the callers report differently.
     """
-    amdgpu_arch = _first_tool(_AMDGPU_ARCH_RELPATHS)
+    amdgpu_arch = _tool(_AMDGPU_ARCH_RELPATHS)
     if amdgpu_arch:
         output = _run([amdgpu_arch])
         if output:
-            arch = _first_real_arch(_ARCH_LINE_RE.findall(output))
-            if arch:
-                return arch
+            archs = _real_archs(_ARCH_LINE_RE.findall(output))
+            if archs:
+                return archs, True
 
-    rocminfo = _tool("bin", "rocminfo")
+    rocminfo = _tool(_ROCMINFO_RELPATHS)
     if rocminfo:
         output = _run([rocminfo])
         if output:
-            arch = _first_real_arch(_ROCMINFO_AGENT_RE.findall(output))
-            if arch:
-                return arch
+            archs = _real_archs(_ROCMINFO_AGENT_RE.findall(output))
+            if archs:
+                return archs, True
 
-    if not amdgpu_arch and not rocminfo:
+    return [], bool(amdgpu_arch or rocminfo)
+
+
+def detect_gpu_archs():
+    """One architecture name per GPU the runtime reports, in enumeration order.
+
+    Repeats are kept, so ``[deviceId]`` names that device. Empty when nothing
+    could be read, whether or not ROCm is installed; callers that need to tell
+    those apart should say so themselves.
+    """
+    return _probe()[0]
+
+
+def detect_gpu_arch():
+    """The architecture name the runtime reports for the first GPU, or None."""
+    archs, any_tool_found = _probe()
+    if archs:
+        return archs[0]
+
+    if not any_tool_found:
         print(
             "Error: neither 'amdgpu-arch' nor 'rocminfo' found. Please install ROCm.",
             file=sys.stderr,

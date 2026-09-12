@@ -58,22 +58,43 @@ def _stepping_base(name: str) -> Optional[str]:
     """The architecture a stepping subtree belongs to, or None if it is not one.
 
     Subtree names are otherwise bare -- target features never reach them -- so a
-    hyphen is the stepping, as in library/gfx1250-strict/. A stepping shares its
-    architecture's ISA and Tensile names files from the ISA, so the files inside
-    such a subtree carry the architecture's token, not the subtree's.
+    hyphen is the stepping, as in library/gfx1250-strict/. The architecture it
+    returns is only for rules that are about the shared ISA; the files inside are
+    validated against the subtree's own name, since that is the name the runtime
+    reports for the silicon and therefore the one it forms filenames from.
     """
     base, sep, _ = name.partition("-")
     return base if sep and _arch_dir_name_is_base(base) else None
 
 
-def _filename_arch_matches_dir(filename: str, base_arch: str) -> bool:
-    pattern = re.compile(r"(?:^|[._-])(?P<arch>gfx[0-9a-z]+(?:[-+][0-9a-z]+)*)")
-    for m in pattern.finditer(filename):
+_ARCH_IN_FILENAME_RE = re.compile(
+    # The trailing [-+] is the feature's state, and it has to be captured: it is
+    # what tells gfx942-xnack+ apart from gfx1250-strict.
+    r"(?:^|[._-])(?P<arch>gfx[0-9a-z]+(?:[-+][0-9a-z]+[-+]?)*)"
+)
+
+# A target feature always carries its state, as in gfx942-xnack+; a stepping
+# never does, as in gfx1250-strict. That sign is the only thing separating the
+# two spellings, and the distinction decides which subtree a file belongs in.
+# A name may carry several features, as in gfx942-sramecc+-xnack-, so every
+# token has to be signed -- requiring it of only the first would reject that.
+_TARGET_FEATURE_RE = re.compile(r"^[a-z0-9]+[-+](?:-[a-z0-9]+[-+])*$")
+
+
+def _filename_arch_matches_dir(filename: str, accepted: str) -> bool:
+    """Whether the architecture in ``filename`` is the one the subtree accepts.
+
+    A name may carry target features on top of it, but it may not carry a
+    stepping: gfx1250-strict is its own architecture with its own subtree, and
+    a code object for it cannot load on the gfx1250 silicon whose directory it
+    would be sitting in.
+    """
+    for m in _ARCH_IN_FILENAME_RE.finditer(filename):
         found = m.group("arch")
-        if (
-            found == base_arch
-            or found.startswith(base_arch + "-")
-            or found.startswith(base_arch + "+")
+        if found == accepted:
+            return True
+        if found.startswith(accepted + "-") and _TARGET_FEATURE_RE.match(
+            found[len(accepted) + 1 :]
         ):
             return True
     return False
@@ -145,8 +166,9 @@ def validate(install_root: Path) -> List[str]:
             )
 
     for arch_dir in base_arch_dirs:
-        # A stepping subtree is validated against its architecture, because that
-        # is the name every file inside it carries.
+        # `base` is the architecture a stepping subtree belongs to, used only
+        # where a rule is about the ISA. Everything the runtime opens by name is
+        # keyed on the subtree's own name instead (see _stepping_base).
         stepping_of = _stepping_base(arch_dir.name)
         base = stepping_of or arch_dir.name
         if not _arch_dir_name_is_base(base):
@@ -162,26 +184,26 @@ def validate(install_root: Path) -> List[str]:
                     f"the producer must remove the uncompressed sibling)"
                 )
 
-        # ExtOp and Transform are resolved at runtime from gcnArchName, which is
-        # the architecture name on either stepping, so they live in the
-        # architecture's subtree only; copies under a stepping subtree would be
-        # dead files nothing opens.
-        if not stepping_of:
-            for template in REQUIRED_PER_BASE_FILES:
-                if not _has_required_file(entries, template, base):
-                    violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")
+        # ExtOp and Transform are resolved at runtime from gcnArchName, which
+        # getExtOpLibraryPath trims only at ':' -- so on a stepping device both
+        # the directory and the filename it opens carry the stepping, and the
+        # subtree needs its own copies rather than inheriting the
+        # architecture's.
+        for template in REQUIRED_PER_BASE_FILES:
+            if not _has_required_file(entries, template, arch_dir.name):
+                violations.append(
+                    f"missing required file in {arch_dir}: {template.format(arch=arch_dir.name)}"
+                )
 
-        master_present = any(
-            t.format(arch=base) in entries for t in TENSILE_MASTER_CANDIDATES
-        )
-        lazy_present = any(
-            t.format(arch=base) in entries for t in TENSILE_LAZY_CANDIDATES
-        )
+        # Every subtree, stepping or not, is named for what the runtime reports
+        # and opens the master spelled the same way, so one name serves both.
+        master_present = any(t.format(arch=arch_dir.name) in entries for t in TENSILE_MASTER_CANDIDATES)
+        lazy_present = any(t.format(arch=arch_dir.name) in entries for t in TENSILE_LAZY_CANDIDATES)
         if not (master_present or lazy_present):
             violations.append(
-                f"missing TensileLibrary master/lazy file for {base} in {arch_dir} "
-                f"(expected one of: TensileLibrary_{base}.{{dat,dat.zlib,yaml}} or "
-                f"TensileLibrary_lazy_{base}.{{dat,dat.zlib,yaml}})"
+                f"missing TensileLibrary master/lazy file for {arch_dir.name} in {arch_dir} "
+                f"(expected one of: TensileLibrary_{arch_dir.name}.{{dat,dat.zlib,yaml}} or "
+                f"TensileLibrary_lazy_{arch_dir.name}.{{dat,dat.zlib,yaml}})"
             )
 
         for extra in PER_ARCH_REQUIRED.get(base, ()):
@@ -193,17 +215,19 @@ def validate(install_root: Path) -> List[str]:
         for fname in entries:
             if fname == "metadata.yaml":
                 continue
-            if not _filename_arch_matches_dir(fname, base):
+            if not _filename_arch_matches_dir(fname, arch_dir.name):
                 if stepping_of:
                     violations.append(
-                        f"filename in the {arch_dir.name} subtree is not named for the "
-                        f"architecture {base}: {arch_dir / fname} (the stepping belongs "
-                        f"in the directory only; the runtime forms filenames from the "
-                        f"architecture, so this one is never opened)"
+                        f"filename in the {arch_dir.name} subtree is not named for it: "
+                        f"{arch_dir / fname} (a stepping is what the runtime reports for "
+                        f"the silicon, so it forms filenames from {arch_dir.name}, not "
+                        f"from the {base} it shares an ISA with; this file is never opened)"
                     )
                 else:
                     violations.append(
-                        f"filename arch suffix does not match dir {base}: {arch_dir / fname}"
+                        f"filename arch does not match dir {base}: {arch_dir / fname} "
+                        f"(a stepping is a separate architecture with its own subtree; "
+                        f"its code objects carry an ELF machine code {base} cannot load)"
                     )
 
     for arch, extras in PER_ARCH_REQUIRED.items():

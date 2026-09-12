@@ -233,7 +233,12 @@ Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
 To build asm only:
 
 ```
-# modify an assembly file in tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/source/build_tmp/SOURCE/assembly
+# modify an assembly file in
+# tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/caches/<key>/source/build_tmp/SOURCE/assembly
+# The scratch directory is SOURCE, except when a silicon stepping was asked for.
+# A stepping shares its ISA with the architecture it steps, so both would otherwise
+# claim the same directory; it gets SOURCE-<stepping> instead, and only it does
+# (gfx1250 -> SOURCE, gfx1250-strict -> SOURCE-gfx1250-strict).
 make co TENSILE_OUT=tensile-out
 # re-run the client
 ```

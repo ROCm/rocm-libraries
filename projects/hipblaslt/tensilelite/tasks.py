@@ -19,7 +19,7 @@ if str(_TASKS_DIR) not in sys.path:
 
 from Tensile.RocisaStatus import _rocisa_install_status
 
-# gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
+# Architecture detection, steppings included, lives in the packaged Tensile tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
 # wrappers only expose it on the invoke command line.
 from Tensile.GpuArch import detect_gpu_arch

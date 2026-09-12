@@ -29,6 +29,7 @@ from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
 from .Utilities import print1
+from ..GpuArch import detect_gpu_archs
 
 import rocisa
 
@@ -222,6 +223,30 @@ def baseArchName(spec: str) -> str:
     return spec.split("[")[0].split(":")[0].strip()
 
 
+def archMacroNames(isa: IsaVersion) -> List[str]:
+    """The macros clang predefines for every architecture sharing an ISA.
+
+    A stepping shares its base architecture's ISA but is its own compiler
+    target, and clang names the macro after the target, spelling hyphens as
+    underscores. Guarding source on the base's macro alone would drop it from
+    the stepping's compilation, so guard on all of them.
+
+    Args:
+        isa: An object representing the major, minor, and step version of the ISA.
+
+    Returns:
+        The predefined macro name of each architecture with that ISA, sorted.
+        Empty if the ISA names no architecture; `all` is not one, and matching
+        it would yield a macro no compilation ever defines.
+    """
+    if isa is None:
+        return []
+    names = sorted(
+        {baseArchName(name) for name in architectureMap if gfxToIsa(name) == isa}
+    )
+    return ["__" + name.replace("-", "_") + "__" for name in names]
+
+
 def steppingArchOf(spec: str) -> Optional[str]:
     """The architecture a stepping name belongs to.
 
@@ -244,6 +269,113 @@ def steppingArchOf(spec: str) -> Optional[str]:
     return derived if derived != base else None
 
 
+def archNamesByIsa(specs: List[str]) -> Dict[IsaVersion, str]:
+    """The architecture each ISA is being built as, keyed by ISA version.
+
+    Two architectures can share an ISA -- gfx1250 and gfx1250-strict both spell
+    12.5.0 -- yet they are distinct compiler targets whose code objects carry
+    different ELF machine codes and will not load on each other. So the ISA alone
+    names neither the compiler target, nor the code object, nor the output
+    subtree; the requested name has to travel from the command line to each.
+
+    Qualifiers are dropped: ``gfx942:xnack+`` names an architecture its ISA
+    already describes, and forwarding it would pin the code object to one xnack
+    setting instead of leaving it xnack-agnostic.
+
+    Args:
+        specs: The requested architecture specs, qualified or not.
+
+    Returns:
+        ISA version -> architecture name.
+
+    Raises:
+        ValueError: If two requested architectures share an ISA. One key cannot
+            name both, and silently keeping either would assemble one
+            architecture's kernels for the other and write them under its name.
+    """
+    names: Dict[IsaVersion, str] = {}
+    for spec in specs:
+        name = baseArchName(spec)
+        isa = gfxToIsa(name)
+        if isa is None:
+            continue
+        if names.setdefault(isa, name) != name:
+            raise ValueError(
+                f"Architectures {names[isa]!r} and {name!r} share ISA "
+                f"{tuple(isa)}, so one build cannot name both; build each "
+                "one separately."
+            )
+    return names
+
+
+def archNameForIsa(isa: IsaVersion, archNames: Optional[List[str]] = None) -> str:
+    """The architecture one ISA is being built as.
+
+    The ISA-derived name is the answer for every architecture that is the only
+    one on its ISA. It is the wrong answer for a stepping, which shares an ISA
+    with the architecture it steps from, so a requested name outranks it.
+
+    Entry paths that never learn a name -- ``ISA:`` in a config, and auto-detect
+    before it has a device -- pass nothing and get the derived name, which is
+    what they had before steppings existed.
+
+    Args:
+        isa: The ISA version being built.
+        archNames: The requested architecture specs, qualified or not.
+
+    Returns:
+        The architecture name to build this ISA as.
+    """
+    return archNamesByIsa(archNames or []).get(isa) or isaToGfx(isa)
+
+
+def isaCollisionFreeGroups(specs: List[str]) -> List[List[str]]:
+    """Partitions requested architectures into groups one build can each cover.
+
+    A build names its target by ISA, so two architectures sharing one — a
+    stepping and the architecture it steps from — cannot appear together; see
+    ``archNamesByIsa``. Splitting them into groups lets a caller cover every
+    requested architecture by running once per group. Nothing collides in the
+    common case, which yields a single group.
+
+    Membership is derived rather than listed, so a new stepping is partitioned
+    correctly without being registered here. Specs keep their qualifiers and
+    their requested order, and ``all`` is expanded first.
+
+    Args:
+        specs: The requested architecture specs, qualified or not.
+
+    Returns:
+        Groups of specs, each free of ISA collisions. Empty if specs is empty.
+    """
+    def collides(spec: str, group: List[str]) -> bool:
+        """Whether adding spec to group is the pairing archNamesByIsa rejects.
+
+        Sharing an ISA is not enough: qualified specs of one architecture
+        (``gfx942:xnack+`` and ``gfx942:xnack-``) share both the ISA and the
+        name, and one run covers them together. Only a differing name over the
+        same ISA -- a stepping beside what it steps from -- has to split.
+        """
+        name = baseArchName(spec)
+        isa = gfxToIsa(name)
+        if isa is None:
+            # Names no ISA, so it collides with nothing. The run that has to make
+            # sense of it rejects it; the partitioning does not.
+            return False
+        return any(
+            gfxToIsa(baseArchName(o)) == isa and baseArchName(o) != name for o in group
+        )
+
+    groups: List[List[str]] = []
+    for spec in expandAllArchitectures(specs):
+        for group in groups:
+            if not collides(spec, group):
+                group.append(spec)
+                break
+        else:
+            groups.append([spec])
+    return groups
+
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:
     """Extracts the ISA version from a given gfx architecture name.
@@ -259,13 +391,15 @@ def gfxToIsa(name: str) -> Optional[IsaVersion]:
     if not match:
         return None
     ipart = match.group(1)
-    step = int(ipart[-1], 16)
-
-    ipart = ipart[:-1]
-    minor = int(ipart[-1])
-
-    ipart = ipart[:-1]
-    major = int(ipart)
+    try:
+        # Only the step is hexadecimal. A letter anywhere else matches the shape
+        # without spelling a version, and callers are written against the None
+        # this promises rather than against an exception from int().
+        step = int(ipart[-1], 16)
+        minor = int(ipart[-2])
+        major = int(ipart[:-2])
+    except ValueError:
+        return None
     return IsaVersion(major, minor, step)
 
 
@@ -313,49 +447,151 @@ def cliArchsToIsa(cliArchs: str) -> List[IsaVersion]:
     return SUPPORTED_ISA if "all" in archs else [gfxToIsa(''.join(map(str, arch))) for arch in archs]
 
 
-def _detectGlobalCurrentISA(detectionTool, deviceId: int):
+# The architecture in a line of tool output. Stops before ``:xnack+`` and
+# ``[cu=64]`` the way baseArchName would, but keeps a stepping's hyphenated
+# suffix, which is the one part of the name its ISA cannot recover.
+_REPORTED_ARCH_RE = re.compile(r"gfx[0-9a-z]+(?:-[0-9a-z]+)*")
+
+
+def _supportedArchNames(reported) -> List[str]:
+    """The names Tensile knows, out of what a detection tool reported.
+
+    One entry per accepted agent, in enumeration order, repeats kept: callers
+    index this positionally to answer "what is device N". Answering "which
+    architectures are present" means de-duplicating it afterwards.
+
+    A name Tensile does not know is dropped rather than accepted on the strength
+    of its ISA. ``gfxToIsa``'s regex stops at the first non-hex character, so a
+    name that merely looks like a stepping (gfx1250v1) still resolves to
+    (12,5,0) and would otherwise be built as gfx1250 without a word.
+
+    A line is searched for the name rather than being one: an enumerator may
+    label it (``hipinfo`` prints ``gcnArchName: gfx1100``), and splitting such a
+    line on its colon would yield the label.
     """
-    Returns returncode if detection failure
+    archs: List[str] = []
+    for line in reported:
+        match = _REPORTED_ARCH_RE.search(str(line))
+        if match is None:
+            continue
+        arch = match.group(0)
+        isa = gfxToIsa(arch)
+        if isa is not None and isa in SUPPORTED_ISA and arch in architectureMap:
+            archs.append(arch)
+    return archs
+
+
+def _detectArchNames(detectionTool) -> List[str]:
+    """Every architecture Tensile recognises on this host, best source first.
+
+    ``detectionTool`` is asked first, as it always was: it alone reads a
+    ``target.lst`` or ``HSA_OVERRIDE_GFX_VERSION`` pin, which a sandboxed image
+    or a near-miss card depends on. ``detect_gpu_archs`` (amdgpu-arch, then
+    rocminfo) answers from the hardware, and is the fallback for hosts where the
+    enumerator cannot answer -- previously such a host simply failed.
+
+    What steppings changed is not the order but what survives the answer: the
+    name used to be rebuilt from its ISA, and gfx1250-strict shares (12,5,0)
+    with gfx1250, so the rebuild silently reported the wrong stepping.
+    """
+    return _fromEnumerator(detectionTool) or _supportedArchNames(detect_gpu_archs())
+
+
+def _fromEnumerator(detectionTool) -> List[str]:
+    """Every architecture Tensile recognises, according to one named tool."""
+    if detectionTool is None:
+        return []
+
+    try:
+        # stderr is captured, not inherited: both tools are chatty about a
+        # missing render group, and this path is reached on exactly the hosts
+        # that have that problem.
+        process = run([detectionTool], stdout=PIPE, stderr=PIPE)
+    except OSError:
+        return []
+    if process.returncode:
+        print(f"{detectionTool} exited with code {process.returncode}")
+        return []
+    return _supportedArchNames(process.stdout.decode(errors="replace").split("\n"))
+
+
+def _detectGlobalCurrentArch(detectionTool, deviceId: int):
+    """The architecture name detected for one device.
+
+    The name, not the ISA: gfx1250 and gfx1250-strict both spell (12,5,0), so an
+    ISA handed back here could no longer say which of them was seen, and every
+    caller would resolve it to the shipping stepping.
+
+    Returns:
+        The gfx name, or 1 on failure.
     """
     # Belt-and-suspenders for the GPU-less --cpu-only switch: when CpuOnly is set,
-    # return a spoofed per-arch IsaVersion (derived from gfxToIsa) instead of shelling
-    # out to a device-enumeration tool. The arch comes from the CpuOnlyArch plumbing key.
-    # This backstops any entry path that reaches detection without passing an arch (the
-    # primary path supplies the arch via --gpu-targets and never reaches here). Returning
-    # an IsaVersion makes the isinstance(...) guard in detectGlobalCurrentISA pass so the
-    # "Failed to detect currect ISA" raise never fires GPU-less.
+    # return the spoofed arch instead of shelling out to a device-enumeration tool.
+    # This backstops any entry path that reaches detection without passing an arch
+    # (the primary path supplies the arch via --gpu-targets and never reaches here),
+    # so the "Failed to detect" raises never fire GPU-less.
     # Imported lazily to avoid a circular import (GlobalParameters imports from this module).
     from .GlobalParameters import globalParameters
     if globalParameters.get("CpuOnly"):
-        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
-        if isa is not None:
-            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
-            return isa
-    process = run([detectionTool], stdout=PIPE)
-    archList = []
-    for line in process.stdout.decode().split("\n"):
-        arch = gfxToIsa(line.strip())
-        if arch is not None:
-            if arch in SUPPORTED_ISA:
-                print(f"# Detected GPU {deviceId} with ISA: " + isaToGfx(arch))
-                archList.append(arch)
-    if process.returncode:
-        print(f"{detectionTool} exited with code {process.returncode}")
-    return archList[deviceId] if (len(archList) > 0 and process.returncode == 0) else process.returncode
+        arch = baseArchName(globalParameters.get("CpuOnlyArch", "gfx942"))
+        # "all" is a key in architectureMap but not an architecture; spoofing it
+        # would put the literal string into -mcpu and into a directory name.
+        if arch != "all" and arch in architectureMap:
+            print(f"# CpuOnly: spoofing GPU {deviceId} as " + arch)
+            return arch
+
+    # Positional: one entry per agent, so this names the requested device rather
+    # than the first architecture that happens to be present.
+    archList = _detectArchNames(detectionTool)
+    if deviceId >= len(archList):
+        return 1
+    print(f"# Detected GPU {deviceId}: " + archList[deviceId])
+    return archList[deviceId]
+
+
+def _detectGlobalCurrentISA(detectionTool, deviceId: int):
+    """The ISA of one device, or 1 if it could not be detected.
+
+    Detection has a fallback source now, so there is no one exit code to hand
+    back; the public wrappers only ever check the type before raising.
+    """
+    arch = _detectGlobalCurrentArch(detectionTool, deviceId)
+    return gfxToIsa(arch) if isinstance(arch, str) else arch
+
+
+def detectGlobalCurrentArch(deviceId: int, enumerator: str) -> str:
+    """The architecture name of a given device.
+
+    Prefer this over ``detectGlobalCurrentISA`` wherever the answer names an
+    artifact, a compiler target, or a capability set: those are per-architecture,
+    and two architectures can share one ISA.
+
+    Args:
+        deviceId: an integer indicating the device to inspect.
+        enumerator: the device-enumeration tool to ask.
+
+    Raises:
+        Exception if nothing could detect an architecture.
+    """
+    result = _detectGlobalCurrentArch(enumerator, deviceId)
+    if not isinstance(result, str):
+        raise Exception("Failed to detect current architecture")
+    return result
 
 
 def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     """Returns the ISA version for a given device.
 
-    Given an integer ID for a device, the ISA version tuple
-    of the form (X, Y, Z) is computed using first amdgpu-arch.
-    If amdgpu-arch fails, rocm_agent_enumerator is used.
+    The ISA tuple (X, Y, Z) of the architecture ``detectGlobalCurrentArch``
+    names for that device. Two architectures can share one ISA, so prefer the
+    name wherever the answer names an artifact, a compiler target, or a
+    capability set.
 
     Args:
         deviceID: an integer indicating the device to inspect.
 
     Raises:
-        Exception if both tools fail to detect ISA.
+        Exception if no source could detect an ISA.
     """
     result = _detectGlobalCurrentISA(enumerator, deviceId)
     if not isinstance(result, IsaVersion):
@@ -366,58 +602,48 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
 def detectHostGfxArchs() -> List[str]:
     """Enumerate the supported GPU architectures physically present on this host.
 
-    Reuses the same device-enumeration tool selection as the rest of the
-    toolchain (``ToolchainDefaults.DEVICE_ENUMERATOR`` -> ``rocm_agent_enumerator``
-    or ``amdgpu-arch``) and the canonical ``gfxToIsa``/``isaToGfx`` maps. Each
-    enumerated line is normalized through ``gfxToIsa`` (which strips ``:xnack±``
-    and other suffixes) and filtered to ``SUPPORTED_ISA``, so CPU agents
-    (``gfx000``) and unsupported devices are dropped.
+    Asks the same sources in the same order as per-device detection -- the
+    toolchain's enumerator, then amdgpu-arch and rocminfo -- and de-duplicates the
+    answer, which per-device detection must not. Names keep the spelling the tool
+    reported, stripped of target features (``:xnack±``) and checked against the
+    known architectures, so CPU agents (``gfx000``) and unsupported devices are
+    dropped.
+
+    The name is not rebuilt from the ISA: gfx1250 and gfx1250-strict share
+    (12,5,0), so a round trip through it would report gfx1250 for either and tell
+    the caller it can benchmark on hardware whose code objects it cannot load.
 
     Returns:
-        A de-duplicated list of canonical gfx names (e.g. ``["gfx950"]``).
-        Returns an empty list when no enumerator is available or it fails --
-        callers should treat "empty" as "cannot benchmark here".
+        A de-duplicated list of gfx names (e.g. ``["gfx950"]``).
+        Returns an empty list when nothing could be detected -- callers should
+        treat "empty" as "cannot benchmark here".
     """
     # Lazy import: keep this module free of a load-time dependency on the
-    # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
+    # Toolchain package (which imports Common.Utilities) and avoid a cycle.
+    # Nothing here is worth failing a benchmark-capability question over, so any
+    # failure reaching this point is answered the documented way.
     try:
         from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+
+        archs = _fromEnumerator(validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR))
     except Exception:
-        return []
+        archs = []
 
-    tool = ToolchainDefaults.DEVICE_ENUMERATOR
-    try:
-        toolPath = validateToolchain(tool)
-    except (FileNotFoundError, ValueError):
-        return []
-
-    try:
-        process = run([toolPath], stdout=PIPE, stderr=PIPE)
-    except OSError:
-        return []
-    if process.returncode:
-        return []
-
-    archs: List[str] = []
-    for line in process.stdout.decode(errors="replace").splitlines():
-        isa = gfxToIsa(line.strip())
-        if isa is not None and isa in SUPPORTED_ISA:
-            gfx = isaToGfx(isa)
-            if gfx not in archs:
-                archs.append(gfx)
-    return archs
+    return list(dict.fromkeys(archs or _supportedArchNames(detect_gpu_archs())))
 
 
 def hostHasArch(arch: str) -> bool:
     """Return True iff ``arch`` matches a supported GPU present on this host.
 
-    Comparison is done on the normalized ISA version, so ``:xnack±`` / CU
-    variants on either side (requested arch or enumerated arch) compare equal.
+    Compared as bare names, so ``:xnack±`` and CU predicates on either side
+    compare equal while gfx1250 and gfx1250-strict do not. Comparing their shared
+    ISA instead would answer True for each on the other's silicon, and the caller
+    would benchmark code objects the agent rejects.
     """
-    target = gfxToIsa(arch)
-    if target is None:
+    target = baseArchName(arch)
+    if gfxToIsa(target) is None:
         return False
-    return any(gfxToIsa(a) == target for a in detectHostGfxArchs())
+    return target in detectHostGfxArchs()
 
 
 class ArchInfo(NamedTuple):
@@ -441,7 +667,9 @@ class _RawArchHeader(NamedTuple):
 
 
 _LIST_MINVER_RE = re.compile(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)")
-_LIST_ARCH_WITH_CU_RE = re.compile(r"- \{Architecture: (\w+), CUCount: (\d+)\}")
+# [\w-], not \w: a stepping's name carries a hyphen, and \w would stop short of
+# it and then fail to find the comma that has to follow.
+_LIST_ARCH_WITH_CU_RE = re.compile(r"- \{Architecture: ([\w-]+), CUCount: (\d+)\}")
 _LIST_ARCH_RE = re.compile(r"- gfx(\w+)")
 _LIST_DEVICE_LINE_RE = re.compile(r"- \[Device")
 
@@ -714,7 +942,10 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
 
         architectures.add(arch)
 
-    return list(architectures), predicateMap or None
+    # Sorted, not set order: this list goes on to name output directories and
+    # order compiler flags, and string hashing is salted per process, so an
+    # unsorted set makes two runs of one build disagree.
+    return sorted(architectures), predicateMap or None
 
 
 def _addVariantMap(
@@ -833,9 +1064,11 @@ def filterLogicFilesByPredicates(
     for logicFile in logicFiles:
         _populateVariantMap(variantMap, Path(logicFile), fallbackKey)
 
-    return [
+    # Sorted: `files` is a set, and this order becomes the logic-file merge
+    # order, which the solution indices written into the library follow.
+    return sorted(
         str(p / file)
         for gfxPredicateMap in variantMap.values()
         for files in gfxPredicateMap.values()
         for p, file in files
-    ]
+    )

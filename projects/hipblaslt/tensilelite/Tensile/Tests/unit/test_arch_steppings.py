@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the gfx1250 stepping split via a distinct architecture name.
 
-gfx1250 ships in two steppings that report the same ISA and use the same
-compiler target. v0 is modelled as the architecture name ``gfx1250-strict``; v1 keeps
-the plain ``gfx1250`` name. Both canonicalize to ``IsaVersion(12,5,0)`` and both
-assemble at ``-mcpu=gfx1250``, so the stepping is invisible below the build's
-capability map.
+gfx1250 ships in two steppings that report the same ISA but are separate compiler
+targets. v0 is modelled as the architecture name ``gfx1250-strict``; v1 keeps the
+plain ``gfx1250`` name. Both canonicalize to ``IsaVersion(12,5,0)``, so the
+stepping is invisible below the build's capability map and has to be carried by
+name to reach the assembler as ``-mcpu=gfx1250-strict``. Getting that wrong is not
+cosmetic: the two targets emit different ELF machine codes (0xEB and 0x49) and
+their code objects will not load on each other's silicon.
 
 Because the two steppings are indistinguishable by ISA, the assembler-probed
 capability table cannot tell them apart. The v0 deltas are therefore *declared*
@@ -24,20 +26,29 @@ targeting gfx1250) and are skipped when the toolchain is unavailable.
 import copy
 import inspect
 import os
+import re
+import stat
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from Tensile.Common.Architectures import (
-    ARCH_CAP_OVERRIDES,
+    _REPORTED_ARCH_RE,
     SUPPORTED_GFX,
+    SUPPORTED_ISA,
+    archMacroNames,
+    archNameForIsa,
     architectureMap,
+    baseArchName,
     expandAllArchitectures,
     gfxToIsa,
     isaToGfx,
     steppingArchOf,
 )
+from Tensile import GpuArch
+from Tensile.CustomYamlLoader import archMatch
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.Types import IsaInfo, IsaVersion
@@ -80,9 +91,10 @@ def test_gfx1250_strict_is_registered_as_an_architecture():
 
 
 def test_both_steppings_canonicalize_to_the_gfx1250_compiler_target():
-    """The whole design rests on this: the arch name carries the stepping, the
-    ISA tuple does not, so every target string derived from the tuple
-    (``-mcpu``, ``--offload-arch``, ``.amdgcn_target``) stays gfx1250 for both."""
+    """The whole design rests on this asymmetry: the arch name carries the
+    stepping, the ISA tuple does not, so anything derived from the tuple can only
+    ever say gfx1250. That is why the requested name, not the ISA, is what reaches
+    the compiler target and the output subtree."""
     assert gfxToIsa(GFX1250_STRICT) == ISA_GFX1250
     assert gfxToIsa(GFX1250) == ISA_GFX1250
     assert isaToGfx(gfxToIsa(GFX1250_STRICT)) == GFX1250
@@ -90,10 +102,31 @@ def test_both_steppings_canonicalize_to_the_gfx1250_compiler_target():
 
 def test_gfx1250_strict_is_absent_from_the_isa_derived_names():
     """``SUPPORTED_GFX`` -- what ``all`` expands to -- is derived from ISA tuples,
-    so it can name only one architecture per ISA and that one is v1. v0 is a
-    bring-up target and must be requested explicitly."""
+    so it can name only one architecture per ISA, and for (12,5,0) that one is
+    gfx1250. The stepping is a bring-up target and must be requested by name."""
     assert GFX1250_STRICT not in SUPPORTED_GFX
     assert GFX1250 in SUPPORTED_GFX
+
+
+def test_generated_source_is_guarded_on_both_steppings_macros():
+    """Generated helper-kernel source is guarded on the macro clang predefines,
+    which is named after the compiler target, not the ISA. Guarding on the
+    ISA-derived ``__gfx1250__`` alone drops the code from every strict build."""
+    assert archMacroNames(ISA_GFX1250) == ["__gfx1250__", "__gfx1250_strict__"]
+
+
+@pytest.mark.parametrize("isa", [isa for isa in SUPPORTED_ISA if isa != ISA_GFX1250])
+def test_every_other_isa_still_names_exactly_one_macro(isa):
+    """gfx1250 is the only ISA two architectures share, so the guard other
+    architectures get is unchanged -- including gfx942 and gfx950, whose xnack
+    spellings must collapse to one macro rather than repeat it."""
+    assert archMacroNames(isa) == ["__" + isaToGfx(isa) + "__"]
+
+
+def test_an_isa_naming_no_architecture_yields_no_macro():
+    """``all`` has no ISA, and matching it would emit a macro no compilation
+    defines -- a guard that silently never fires."""
+    assert archMacroNames(None) == []
 
 
 def test_all_keeps_architectures_its_expansion_does_not_cover():
@@ -175,10 +208,6 @@ def test_gfx1250_leaves_both_capabilities_at_their_default():
     assert CAP_FP4_32X16 not in iim[ISA_GFX1250].asmCaps
 
 
-def test_overrides_declared_only_for_strict():
-    assert set(ARCH_CAP_OVERRIDES) == {GFX1250_STRICT}
-
-
 def test_unknown_arch_name_is_ignored_by_the_override_step():
     """Names without declared deltas must pass through untouched rather than
     raising, since every build passes its full requested-arch list."""
@@ -231,16 +260,6 @@ def test_requested_stepping_missing_from_the_capability_map_is_an_error():
     carry the declared deltas has to fail loudly."""
     with pytest.raises(ValueError, match=GFX1250_STRICT):
         applyArchCapOverrides({}, [GFX1250_STRICT])
-
-
-def test_makeisainfomap_keeps_its_two_argument_signature():
-    """Suites across the repo stub this seam with ``lambda isa_list, _compiler``.
-    Applying the overrides is therefore a separate step at the entry points
-    rather than an extra argument here, which would break every one of them."""
-    assert list(inspect.signature(makeIsaInfoMap).parameters) == [
-        "targetIsas",
-        "cxxCompiler",
-    ]
 
 
 # =========================================================================== #
@@ -1030,6 +1049,374 @@ def test_mixed_steppings_in_the_config_architecture_are_rejected(
         TensileModule.Tensile([config, str(tmp_path / "out")])
 
 
+@pytest.mark.parametrize(
+    "detected,expected",
+    [
+        (GFX1250_STRICT, {"gfx1250-strict_Cijk_A.yaml"}),
+        (GFX1250, {"gfx1250_Cijk_A.yaml"}),
+        ("gfx942", {"aquavanjaram_Cijk_A.yaml"}),
+    ],
+)
+def test_the_summation_step_selects_exactly_one_steppings_logic_files(
+    tmp_path, detected, expected
+):
+    """``gfx1250-strict`` is a literal prefix extension of ``gfx1250``, so the
+    unanchored glob this step used to run matched both. On plain gfx1250 silicon
+    that benchmarked the other stepping's solutions -- against code objects the
+    agent cannot load -- and wrote the resulting model back into its logic files.
+    Every logic filename is ``<codename>_...``, so the separator separates them."""
+    import glob
+
+    from Tensile.Common.Architectures import gfxToSwCodename
+
+    for name in (
+        "gfx1250_Cijk_A.yaml",
+        "gfx1250-strict_Cijk_A.yaml",
+        "aquavanjaram_Cijk_A.yaml",
+    ):
+        (tmp_path / name).touch()
+
+    pattern = os.path.join(str(tmp_path), "{}_*".format(gfxToSwCodename(detected)))
+    assert {os.path.basename(p) for p in glob.glob(pattern)} == expected
+
+
+# =========================================================================== #
+# Which tool is asked, and what is kept of its answer. `GpuArch` is the source
+# the rest of Tensile names architectures from, so what it decides here is what
+# ends up in file names, directory names and `-mcpu`.
+# =========================================================================== #
+def _fakeTool(path, *lines):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + "".join(f"echo {line}\n" for line in lines))
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
+@pytest.fixture
+def rocmRoot(tmp_path, monkeypatch):
+    """An empty ROCM_PATH, with nothing of interest left on PATH."""
+    root = tmp_path / "rocm"
+    root.mkdir()
+    monkeypatch.setenv("ROCM_PATH", str(root))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    return root
+
+
+@pytest.mark.parametrize("layout", ["llvm/bin", "lib/llvm/bin"])
+def test_amdgpu_arch_is_found_in_either_install_layout(rocmRoot, layout):
+    """ROCm puts it under llvm/bin; TheRock and the Windows SDK under lib/llvm/bin."""
+    _fakeTool(rocmRoot / layout / "amdgpu-arch", "gfx950")
+
+    assert GpuArch.detect_gpu_archs() == ["gfx950"]
+
+
+def test_the_install_is_searched_ahead_of_PATH(rocmRoot, tmp_path, monkeypatch):
+    """Both amdgpu-arch layouts have to be tried before PATH is consulted at all.
+
+    Resolving one layout the whole way to PATH before trying the next would let
+    a stray amdgpu-arch beat the one inside the install ROCM_PATH names -- and
+    the two layouts differ only by a "lib" prefix, so the miss is routine. A
+    test pointing ROCM_PATH at a fixture would then be answered by the real
+    machine, which is how this was found.
+    """
+    strayDir = tmp_path / "stray"
+    _fakeTool(strayDir / "amdgpu-arch", "gfx942")
+    monkeypatch.setenv("PATH", str(strayDir))
+
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch", GFX1250_STRICT)
+
+    assert GpuArch.detect_gpu_archs() == [GFX1250_STRICT]
+
+
+def test_PATH_still_answers_when_the_install_has_neither_layout(rocmRoot, tmp_path, monkeypatch):
+    strayDir = tmp_path / "stray"
+    _fakeTool(strayDir / "amdgpu-arch", "gfx942")
+    monkeypatch.setenv("PATH", str(strayDir))
+
+    assert GpuArch.detect_gpu_archs() == ["gfx942"]
+
+
+def test_the_stepping_suffix_survives_the_probe(rocmRoot):
+    """gfx1250 and gfx1250-strict reject each other's code objects, so a name
+    truncated to its hex part is not a smaller answer, it is a wrong one."""
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch", GFX1250_STRICT)
+
+    assert GpuArch.detect_gpu_archs() == [GFX1250_STRICT]
+    assert GpuArch.detect_gpu_arch() == GFX1250_STRICT
+
+
+def test_every_device_is_reported_in_enumeration_order(rocmRoot):
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch", "gfx950", "gfx942")
+
+    assert GpuArch.detect_gpu_archs() == ["gfx950", "gfx942"]
+    assert GpuArch.detect_gpu_arch() == "gfx950"
+
+
+def test_repeated_devices_are_each_reported(rocmRoot):
+    """One entry per agent, not per distinct architecture.
+
+    Callers index this positionally to answer "what is device N", so collapsing
+    a homogeneous four-GPU box to one entry makes every device but 0 undetectable.
+    """
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch", "gfx950", "gfx950", "gfx950")
+
+    assert GpuArch.detect_gpu_archs() == ["gfx950", "gfx950", "gfx950"]
+
+
+def test_a_list_valued_ROCM_PATH_is_searched_entry_by_entry(rocmRoot, tmp_path, monkeypatch):
+    """ROCM_PATH holds an os.pathsep-separated list often enough that
+    validateToolchain splits it -- and a box with two ROCm SDKs installed is
+    both when it does and when picking the wrong one picks the wrong stepping.
+    Reading it as a single directory name matches nothing and falls to PATH.
+    """
+    strayDir = tmp_path / "stray"
+    _fakeTool(strayDir / "amdgpu-arch", "gfx942")
+    monkeypatch.setenv("PATH", str(strayDir))
+
+    second = tmp_path / "rocm-strict"
+    _fakeTool(second / "lib/llvm/bin/amdgpu-arch", GFX1250_STRICT)
+    monkeypatch.setenv("ROCM_PATH", os.pathsep.join([str(rocmRoot), str(second)]))
+
+    assert GpuArch.detect_gpu_archs() == [GFX1250_STRICT]
+
+
+def test_a_GPU_less_machine_reports_nothing(rocmRoot):
+    """gfx000 is the placeholder such a host enumerates, not an architecture."""
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch", GpuArch._PLACEHOLDER_ARCH)
+
+    assert GpuArch.detect_gpu_archs() == []
+    assert GpuArch.detect_gpu_arch() is None
+
+
+def test_rocminfo_answers_when_amdgpu_arch_cannot(rocmRoot):
+    """amdgpu-arch needs a device it can open, so it is not always the one that
+    answers; rocminfo names the agent in a line this parses."""
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch")  # runs, prints nothing
+    _fakeTool(
+        rocmRoot / "bin/rocminfo",
+        "'  Name:                    {}'".format(GFX1250_STRICT),
+    )
+
+    assert GpuArch.detect_gpu_archs() == [GFX1250_STRICT]
+
+
+def test_no_ROCm_at_all_is_reported_differently_from_no_GPU(rocmRoot, capsys):
+    """Both answer None, and the two need different things done about them."""
+    assert GpuArch.detect_gpu_arch() is None
+    assert "Please install ROCm" in capsys.readouterr().err
+
+    _fakeTool(rocmRoot / "lib/llvm/bin/amdgpu-arch")
+
+    assert GpuArch.detect_gpu_arch() is None
+    assert "Failed to detect" in capsys.readouterr().err
+
+
+def _detectionReturning(monkeypatch, stdout, returncode=0):
+    """Detection with the enumerator fallback wired to ``stdout``.
+
+    ``detect_gpu_archs`` is silenced because it is consulted first: left alone it
+    answers from the real device on any machine with a GPU, and the fixture would
+    never be reached.
+
+    The pin variables are cleared for the same reason: they reorder the sources,
+    so a machine that happens to set one would otherwise change what these tests
+    are measuring. Tests about the pins set them back.
+    """
+    import Tensile.Common.Architectures as Arch
+
+    class _Proc:
+        pass
+
+    _Proc.returncode = returncode
+    _Proc.stdout = stdout
+    monkeypatch.delenv("HSA_OVERRIDE_GFX_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_TARGET_LST", raising=False)
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
+    monkeypatch.setattr(Arch, "run", lambda *a, **k: _Proc())
+    return Arch
+
+
+def test_the_stepping_survives_detection(monkeypatch):
+    """The name used to be rebuilt from its ISA, and the two steppings share
+    (12,5,0), so the rebuild reported gfx1250 for a gfx1250-strict agent. They
+    reject each other's code objects, so that answer was silently wrong. What
+    the tool said is now what detection reports.
+    """
+    Arch = _detectionReturning(monkeypatch, GFX1250_STRICT.encode() + b"\n")
+
+    assert Arch.detectGlobalCurrentArch(0, "/my/enum") == GFX1250_STRICT
+    # The ISA is still derivable from it, so the older callers are unaffected.
+    assert tuple(Arch.detectGlobalCurrentISA(0, "/my/enum")) == ISA_GFX1250
+
+
+def test_the_enumerator_is_asked_before_the_hardware(monkeypatch):
+    """It is the only source that reads a target.lst or HSA_OVERRIDE_GFX_VERSION
+    pin -- amdgpu-arch and rocminfo answer from the hardware. That is how a
+    sandboxed image or a near-miss card is built for, so asking the hardware
+    first would discard the pin without a word. It is also the tool
+    --rocm-agent-enumerator names, which would otherwise do nothing.
+    """
+    Arch = _detectionReturning(monkeypatch, b"gfx90a\n")
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: ["gfx942"])
+
+    assert Arch.detectGlobalCurrentArch(0, "/my/enum") == "gfx90a"
+    assert Arch.detectHostGfxArchs() == ["gfx90a"]
+
+
+def test_the_hardware_answers_when_the_enumerator_cannot(monkeypatch):
+    """The enumerator needs the render group and a device it can open, so it is
+    not always the one that answers. Such a host used to fail detection outright.
+    """
+    Arch = _detectionReturning(monkeypatch, b"")
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: ["gfx942"])
+
+    assert Arch.detectGlobalCurrentArch(0, "/my/enum") == "gfx942"
+
+
+def test_every_device_stays_addressable_on_a_homogeneous_box(monkeypatch):
+    """Detection answers "what is device N" positionally, so the list it indexes
+    has to keep one entry per agent. De-duplicating it first collapses a
+    four-GPU box to a single entry, and `-d 1` upwards then fails to detect at
+    all -- which is the ordinary way to tune on one GPU of a multi-GPU node.
+    """
+    Arch = _detectionReturning(monkeypatch, (GFX1250_STRICT + "\n").encode() * 4)
+
+    for deviceId in range(4):
+        assert Arch.detectGlobalCurrentArch(deviceId, "/my/enum") == GFX1250_STRICT
+
+    # The set-shaped question still gets a set-shaped answer.
+    assert Arch.detectHostGfxArchs() == [GFX1250_STRICT]
+
+
+def test_a_mixed_box_names_each_device_separately(monkeypatch):
+    """The two steppings cannot be told apart by ISA, so an index that slipped
+    would hand one device the other's compiler target with nothing to catch it."""
+    Arch = _detectionReturning(
+        monkeypatch, "gfx950\n{}\ngfx1250\n".format(GFX1250_STRICT).encode()
+    )
+
+    assert Arch.detectGlobalCurrentArch(0, "/my/enum") == "gfx950"
+    assert Arch.detectGlobalCurrentArch(1, "/my/enum") == GFX1250_STRICT
+    assert Arch.detectGlobalCurrentArch(2, "/my/enum") == "gfx1250"
+
+
+def test_a_labelled_enumerator_line_still_yields_its_architecture(monkeypatch):
+    """hipinfo, the enumerator on Windows, prints properties as `key: value`.
+    Splitting such a line at its colon to strip target features would keep the
+    label and drop the name, leaving Windows with no detection at all."""
+    Arch = _detectionReturning(monkeypatch, b"gcnArchName:                gfx1100\n")
+
+    assert Arch.detectGlobalCurrentArch(0, "hipinfo") == "gfx1100"
+
+
+def test_target_features_are_still_stripped_from_a_reported_name(monkeypatch):
+    """The reason the colon was being split on in the first place."""
+    Arch = _detectionReturning(monkeypatch, b"gfx942:sramecc+:xnack-\ngfx950[cu=64]\n")
+
+    assert Arch.detectGlobalCurrentArch(0, "/my/enum") == "gfx942"
+    assert Arch.detectGlobalCurrentArch(1, "/my/enum") == "gfx950"
+
+
+def test_detection_falls_back_to_the_enumerator_when_nothing_else_answers(monkeypatch):
+    """amdgpu-arch needs a device it can open and rocminfo needs the render
+    group, so the enumerator is kept as the last source rather than dropped."""
+    Arch = _detectionReturning(monkeypatch, b"gfx942\n")
+
+    assert Arch.detectGlobalCurrentArch(0, "rocm_agent_enumerator") == "gfx942"
+
+
+def test_detection_reports_the_architecture_the_enumerator_named(monkeypatch):
+    """amdgpu-arch and rocminfo both print the full name; it is Tensile that used
+    to throw it away by round-tripping through the ISA."""
+    Arch = _detectionReturning(monkeypatch, b"gfx1250-strict\n")
+
+    assert Arch.detectGlobalCurrentArch(0, "amdgpu-arch") == GFX1250_STRICT
+    # The ISA is still derivable from it, so the older callers are unaffected.
+    assert tuple(Arch.detectGlobalCurrentISA(0, "amdgpu-arch")) == ISA_GFX1250
+
+
+def test_detection_refuses_a_name_that_only_looks_like_a_stepping(monkeypatch):
+    """gfxToIsa runs a regex that stops at the first non-hex character, so
+    gfx1250v1 resolves to (12,5,0) too. Accepting it on the strength of its ISA
+    would build it as gfx1250 without a word; there is no such architecture, so
+    failing loudly is the only honest answer."""
+    Arch = _detectionReturning(monkeypatch, b"gfx1250v1\n")
+
+    # Matched on the message: a bare `Exception` would also be satisfied by an
+    # OSError out of `run`, which is a different failure entirely.
+    with pytest.raises(Exception, match="Failed to detect current architecture"):
+        Arch.detectGlobalCurrentArch(0, "amdgpu-arch")
+
+
+def test_detection_failure_still_raises(monkeypatch):
+    Arch = _detectionReturning(monkeypatch, b"", returncode=5)
+
+    with pytest.raises(Exception, match="Failed to detect current architecture"):
+        Arch.detectGlobalCurrentArch(0, "amdgpu-arch")
+
+
+def test_auto_detect_tunes_for_the_architecture_it_found(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """With neither --gpu-targets nor ISA:, the enumerator is the only statement of
+    what to build, and it names the architecture. Keeping only its ISA would tune
+    gfx1250-strict silicon under gfx1250's capabilities and then build code
+    objects that silicon rejects -- on the one path that runs on the very hardware
+    it is tuning for."""
+    captured = {}
+    TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
+    monkeypatch.setattr(
+        TensileModule, "detectGlobalCurrentArch", lambda *a, **kw: GFX1250_STRICT
+    )
+    config = _write_min_config(tmp_path)
+
+    TensileModule.Tensile([config, str(tmp_path / "out")])
+
+    assert captured["archNames"] == [GFX1250_STRICT]
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert info.archCaps[CAP_MULTICAST] is False
+    assert info.asmCaps[CAP_FP4_32X16] is False
+
+
+def test_auto_detect_on_the_base_architecture_is_unchanged(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The regression guard: detection reporting a name rather than an ISA must
+    leave every architecture that does not share one deriving exactly what it
+    derived before."""
+    captured = {}
+    TensileModule = _stub_tensile_pipeline(monkeypatch, captured)
+    monkeypatch.setattr(
+        TensileModule, "detectGlobalCurrentArch", lambda *a, **kw: GFX1250
+    )
+    config = _write_min_config(tmp_path)
+
+    TensileModule.Tensile([config, str(tmp_path / "out")])
+
+    assert captured["archNames"] == [GFX1250]
+    info = captured["isaInfoMap"][ISA_GFX1250]
+    assert CAP_MULTICAST not in info.archCaps
+    assert CAP_FP4_32X16 not in info.asmCaps
+
+
+def test_auto_detect_still_rejects_a_misspelt_config_architecture(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """Auto-detect supplying the name must not cost the config its spellcheck.
+    The key no longer decides which architecture is built here, but a typo in it
+    is still a mistake worth reporting rather than silently dropping."""
+    TensileModule = _stub_tensile_pipeline(monkeypatch, {})
+    monkeypatch.setattr(
+        TensileModule, "detectGlobalCurrentArch", lambda *a, **kw: GFX1250
+    )
+    config = _write_min_config(tmp_path, Architecture="gfx1250-stict")
+
+    with pytest.raises(ValueError) as excinfo:
+        TensileModule.Tensile([config, str(tmp_path / "out")])
+
+    assert "gfx1250-stict" in str(excinfo.value)
+
+
 def test_tensile_entry_point_records_the_requested_names(
     monkeypatch, tmp_path, restore_global_parameters
 ):
@@ -1109,9 +1496,9 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
     for architectureName, scheduleName, *tag in logicFiles:
-        # The filter reads only the second and third sequence items
-        # (CustomYamlLoader's load_logic_schedule_name and load_logic_gfx_arch),
-        # so a full logic file is not needed to exercise it.
+        # The filter reads only the third sequence item (CustomYamlLoader's
+        # load_logic_gfx_arch), so a full logic file is not needed to exercise
+        # it; the ScheduleName is written anyway to keep the file well formed.
         (logic_dir / _logicFileName(architectureName, scheduleName, *tag)).write_text(
             "- {MinimumRequiredVersion: 4.33.0}\n"
             f"- {scheduleName}\n"
@@ -1209,11 +1596,13 @@ def test_createlibrary_entry_point_applies_the_strict_overrides(
     assert info.asmCaps[CAP_FP4_32X16] is False
 
 
-def test_createlibrary_entry_point_normalizes_the_compiler_target(
+def test_createlibrary_entry_point_forwards_the_requested_name(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The stepping name must not reach the kernel writers: they pass it to
-    ``--offload-arch``, where clang rejects it as an unsupported architecture."""
+    """The stepping name has to reach the kernel writers intact: it is what they
+    hand ``--offload-arch``, and it is the only thing that decides the ELF machine
+    code the code objects carry. Normalizing it to gfx1250 here would assemble the
+    whole build for silicon that cannot load it."""
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
 
     assert captured["cmdlineArchs"] == [GFX1250_STRICT]
@@ -1232,33 +1621,25 @@ def test_createlibrary_entry_point_leaves_gfx1250_capabilities_untouched(
     assert captured["cmdlineArchs"] == [GFX1250]
 
 
-# One logic tree holds both revisions' tuning, so every selection test below
+# One logic tree holds both steppings' tuning, so every selection test below
 # runs against a directory holding both: what has to be pinned is the partition,
-# not that a lone file survives. Each entry is (ArchitectureName, ScheduleName);
-# the revision's tuning declares the architecture's name because the two share
-# one ISA and one compiler target, leaving ScheduleName as the only difference.
+# not that a lone file survives. Each entry is (ArchitectureName, ScheduleName),
+# and each stepping declares its own name -- the two are separate architectures
+# here, and sharing an ISA is not enough to make them share tuning.
 _ARCH_LOGIC = (GFX1250, GFX1250)
-# A second architecture file, so the report's selected and dropped counts can be
-# made to differ. Equal counts let the two be swapped in the message unnoticed.
-_ARCH_LOGIC_2 = (GFX1250, GFX1250, "_b")
-_STRICT_LOGIC = (GFX1250, GFX1250_STRICT)
+_STRICT_LOGIC = (GFX1250_STRICT, GFX1250_STRICT)
 _OTHER_ARCH_LOGIC = ("gfx942", "aquavanjaram")
 
 
 def test_strict_build_selects_only_the_steppings_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """Reaching the revision's own logic at all rests entirely on ``archMatch``'s
-    ``a.startswith(arch)`` clause, written for xnack variants, and so on the
-    revision name extending its architecture's: a name that is not a
-    prefix-extension (``gfx1250-v0``) selects nothing.
+    """Excluding the base architecture's own logic is the half that fails
+    silently: those solutions were selected under capabilities the stepping does
+    not have, and the build would report success having shipped them.
 
-    Excluding the architecture's own logic is the other half. Those solutions
-    were selected under capabilities v0 does not have, and ``ArchitectureName``
-    cannot tell the two apart.
-
-    Both halves fail silently -- the build reports success having written a
-    library that is empty, or full of the wrong revision's solutions.
+    It rests on ``archMatch`` comparing whole names -- a prefix match would let
+    a request for ``gfx1250-strict`` claim ``gfx1250``'s logic as well.
     """
     captured = _run_createlibrary(
         monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC]
@@ -1270,11 +1651,10 @@ def test_strict_build_selects_only_the_steppings_logic(
 def test_gfx1250_build_selects_only_the_architectures_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The mirror, and the isolation the gfx1250 revision needs: gfx1250-strict's logic
-    sits in the same tree and declares the same architecture, so a plain
-    gfx1250 build globs it up unless ``ScheduleName`` excludes it. It would
-    otherwise ship v0-derived solutions in every gfx1250 library built after v0
-    lands, while the build itself stays byte-identical to before the split.
+    """The mirror, and the isolation gfx1250 needs: gfx1250-strict's logic sits
+    in the same tree, so a plain gfx1250 build globs it up unless the declared
+    architecture excludes it. It would otherwise ship strict-derived solutions
+    in every gfx1250 library built after the stepping lands.
     """
     captured = _run_createlibrary(
         monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC]
@@ -1286,11 +1666,10 @@ def test_gfx1250_build_selects_only_the_architectures_logic(
 def test_all_build_excludes_the_steppings_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """``all`` is the default distribution build and reaches the filter as the
-    architectures it expands to -- a list that cannot name an stepping,
-    since a revision shares its architecture's ISA. The revision's logic must
-    therefore be excluded from it for the same reason as a plain gfx1250 build,
-    and every other architecture's must survive.
+    """``all`` is the default distribution build and reaches the selection as the
+    architectures it expands to -- a list built from ISAs, which cannot name a
+    stepping. The stepping's logic must therefore be excluded from it, and every
+    other architecture's must survive.
     """
     captured = _run_createlibrary(
         monkeypatch,
@@ -1304,13 +1683,12 @@ def test_all_build_excludes_the_steppings_logic(
     )
 
 
-def test_stepping_filter_spares_other_architectures(
+def test_stepping_selection_spares_other_architectures(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The filter is scoped to architectures that have steppings. A
-    multi-architecture build that includes the revision must still consume
-    every other architecture's logic, whose ``ScheduleName`` names neither
-    revision and would be dropped if the scoping were lost.
+    """A multi-architecture build that includes the stepping must still consume
+    every other architecture's logic. Tightening the name comparison to exclude
+    the stepping's base is what could take these with it.
     """
     captured = _run_createlibrary(
         monkeypatch,
@@ -1327,8 +1705,8 @@ def test_stepping_filter_spares_other_architectures(
 def test_strict_build_ignores_an_unrelated_architectures_logic_files(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The control for the prefix rule above: it must stay a prefix match on the
-    requested name, not degrade into accepting whatever logic is on disk."""
+    """The control for the rule above: it must stay a match on the requested
+    name, not degrade into accepting whatever logic is on disk."""
     captured = _run_createlibrary(
         monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_OTHER_ARCH_LOGIC]
     )
@@ -1337,189 +1715,59 @@ def test_strict_build_ignores_an_unrelated_architectures_logic_files(
 
 
 # =========================================================================== #
-# What the build says it did. The filter replaces an arch's tuning, so an
-# incomplete v0 build writes a library missing problem types that only fail at
-# runtime -- the build log is the only place to catch it. These tests pin the
-# report line and the warning.
-# =========================================================================== #
-def test_a_strict_build_reports_the_revision_and_what_it_dropped(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """The plain file total looks the same whether v0 tuning was found or the
-    arch's whole tree was discarded, so the per-arch counts must show it. Counts
-    differ here so swapping them in the message is visible."""
-    _run_createlibrary(
-        monkeypatch,
-        tmp_path,
-        GFX1250_STRICT,
-        logicFiles=[_ARCH_LOGIC, _ARCH_LOGIC_2, _STRICT_LOGIC],
-    )
-
-    out = capsys.readouterr().out
-    assert f"{GFX1250} tuning: {GFX1250_STRICT} (1 selected, 2 dropped" in out
-
-
-def test_a_strict_build_warns_that_the_dropped_tuning_has_no_replacement(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """A dropped file is a problem type the gfx1250-strict library will not serve, so the
-    warning names the replacement semantics, the counts, and the remedy."""
-    _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC]
-    )
-
-    out = capsys.readouterr().out
-    assert "WARNING" in out
-    assert f"replaces {GFX1250}'s rather than adding to it" in out
-    assert "1 selected, 1 dropped" in out
-    assert "fail at runtime" in out
-    assert f"Build {GFX1250} itself for the base architecture" in out
-
-
-def test_the_gfx1250_build_reports_itself_without_warning(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """A v1 build drops the revision's logic the other way -- the correct, full
-    outcome. Warning here would train readers to ignore the one that matters."""
-    _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC]
-    )
-
-    out = capsys.readouterr().out
-    assert f"{GFX1250} tuning: {GFX1250}" in out
-    assert "WARNING" not in out
-
-
-def test_a_build_without_a_revisioned_architecture_stays_silent(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """Most builds have nothing to do with revisions and should print no line.
-    The revision's logic is dropped even here, so drop-counting alone would
-    wrongly report on every build."""
-    _run_createlibrary(
-        monkeypatch, tmp_path, "gfx942", logicFiles=[_STRICT_LOGIC, _OTHER_ARCH_LOGIC]
-    )
-
-    assert "stepping" not in capsys.readouterr().out
-
-
-def test_a_strict_build_that_finds_no_logic_at_all_says_so(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """A v0 directory never added, or a ``--logic-filter`` on the arch's own
-    path, leaves the revision with nothing while the build still succeeds."""
-    _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_ARCH_LOGIC])
-
-    out = capsys.readouterr().out
-    assert f"{GFX1250} tuning: {GFX1250_STRICT}" in out
-    assert "0 selected" in out
-    assert "WARNING" in out
-    assert f"replaces {GFX1250}'s rather than adding to it" in out
-    assert "fail at runtime" in out
-
-
-def test_a_strict_build_warns_even_when_it_dropped_nothing_either(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """Zero selected and zero dropped is the emptiest library and the case a
-    drop-counting warning misses: a LogicPath or ``--logic-filter`` that reached
-    neither revision's tree leaves nothing to count."""
-    _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_OTHER_ARCH_LOGIC])
-
-    out = capsys.readouterr().out
-    assert f"{GFX1250} tuning: {GFX1250_STRICT} (0 selected, 0 dropped" in out
-    assert "WARNING" in out
-    assert f"replaces {GFX1250}'s rather than adding to it" in out
-    assert "fail at runtime" in out
-
-
-def test_a_complete_strict_tree_is_reported_without_a_warning(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    """The goal state: every type the build sees has v0 tuning, nothing dropped.
-    A warning here would be permanent and so ignored -- the failure this block
-    guards against."""
-    _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT, logicFiles=[_STRICT_LOGIC])
-
-    out = capsys.readouterr().out
-    assert f"{GFX1250} tuning: {GFX1250_STRICT} (1 selected, 0 dropped" in out
-    assert "WARNING" not in out
-
-
-# =========================================================================== #
 # Tuning flow. `Tensile` re-spawns `TensileCreateLibrary` to build the client
 # library from the logic it just tuned. That re-spawn is a fresh process whose
 # only statement of what to build is `--architecture=`, so it is the one place
 # the stepping can be lost after being correctly applied everywhere else.
 # =========================================================================== #
-def _buildTargetGfx(archNames):
-    from Tensile.ClientWriter import buildTargetGfx
-
-    return buildTargetGfx(_stub_iim(), archNames)
-
-
 def test_client_library_is_rebuilt_for_the_requested_stepping():
-    assert _buildTargetGfx([GFX1250_STRICT]) == GFX1250_STRICT
+    assert archNameForIsa(ISA_GFX1250, [GFX1250_STRICT]) == GFX1250_STRICT
 
 
 def test_client_library_target_falls_back_to_the_isa_derived_name():
     """The ISA and auto-detect entry paths never learn a name, so the ISA-derived
-    target stays the default rather than the lookup being mandatory. Both an empty
-    list and an omitted argument have to behave that way."""
-    assert _buildTargetGfx([]) == GFX1250
-    assert _buildTargetGfx(None) == GFX1250
-
-    from Tensile.ClientWriter import buildTargetGfx
-
-    assert buildTargetGfx(_stub_iim()) == GFX1250
+    target stays the default rather than the lookup being mandatory. An empty
+    list, an explicit None, and an omitted argument all have to behave that way."""
+    assert archNameForIsa(ISA_GFX1250, []) == GFX1250
+    assert archNameForIsa(ISA_GFX1250, None) == GFX1250
+    assert archNameForIsa(ISA_GFX1250) == GFX1250
 
 
 def test_client_library_target_ignores_names_from_other_architectures():
     """A multi-architecture build must not label this ISA with an unrelated
     requested name; the lookup is keyed by ISA, not by position."""
-    assert _buildTargetGfx(["gfx942"]) == GFX1250
+    assert archNameForIsa(ISA_GFX1250, ["gfx942"]) == GFX1250
 
 
 def test_client_library_target_ignores_qualifiers_of_other_architectures():
-    """Only an stepping needs a name the ISA cannot express. Forwarding a requested
+    """Only a stepping needs a name the ISA cannot express. Forwarding a requested
     qualifier verbatim would rebuild the client library for one xnack setting where
     an xnack-agnostic code object is wanted -- and since the library directory and
     the .co filter both still resolve, that surfaces when the device loads it, not
     at build time."""
-    iim = {IsaVersion(9, 4, 2): IsaInfo({"SupportedISA": True}, {}, {}, {})}
-
-    from Tensile.ClientWriter import buildTargetGfx
-
-    assert buildTargetGfx(iim, ["gfx942:xnack+"]) == "gfx942"
+    assert archNameForIsa(IsaVersion(9, 4, 2), ["gfx942:xnack+"]) == "gfx942"
 
 
 def test_client_library_target_keeps_the_stepping_under_a_predicate():
     """The predicate is dropped -- the re-spawn resolves logic files itself, and an
     unqualified name is what every other architecture already gets here -- but the
     stepping must survive, or the tuning flow rebuilds the client library for the
-    shipping stepping while reporting v0."""
-    assert _buildTargetGfx(["gfx1250-strict[cu=64]"]) == GFX1250_STRICT
+    shipping stepping while reporting the stepping."""
+    assert archNameForIsa(ISA_GFX1250, ["gfx1250-strict[cu=64]"]) == GFX1250_STRICT
 
 
 def test_client_library_target_picks_the_name_matching_the_rebuilt_isa():
     """A multi-architecture build (``--gpu-targets 'gfx942;gfx1250-strict'`` is allowed,
     the ISAs differ) must resolve the name for the ISA actually being rebuilt.
-    Taking the sole requested name, or the first one, would rebuild gfx1250-strict's client
-    library against the shipping stepping the moment a second architecture is asked
-    for -- silently, since the name it lands on is still a valid target."""
-    from Tensile.ClientWriter import buildTargetGfx
-
-    caps = ({"SupportedISA": True}, {}, {}, {})
+    Taking the sole requested name, or the first one, would rebuild gfx1250-strict's
+    client library against the shipping stepping the moment a second architecture is
+    asked for -- silently, since the name it lands on is still a valid target."""
     both = ["gfx942", GFX1250_STRICT]
 
-    assert buildTargetGfx(
-        {ISA_GFX1250: IsaInfo(*caps), IsaVersion(9, 4, 2): IsaInfo(*caps)}, both
-    ) == GFX1250_STRICT
-    # The other order rebuilds gfx942, which needs no alias, so the gfx1250-strict name in the
-    # list must not follow it there.
-    assert buildTargetGfx(
-        {IsaVersion(9, 4, 2): IsaInfo(*caps), ISA_GFX1250: IsaInfo(*caps)}, both
-    ) == "gfx942"
+    assert archNameForIsa(ISA_GFX1250, both) == GFX1250_STRICT
+    # The other ISA rebuilds gfx942, which needs no alias, so the gfx1250-strict
+    # name in the same list must not follow it there.
+    assert archNameForIsa(IsaVersion(9, 4, 2), both) == "gfx942"
 
 
 def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
@@ -1554,13 +1802,12 @@ def test_client_writer_receives_the_requested_names(monkeypatch, tmp_path):
 
 
 # =========================================================================== #
-# Logic-file architecture names. v0 ships its own tuned logic, tagged by
-# ScheduleName gfx1250-strict, but every v0 logic file must still declare
-# ArchitectureName gfx1250 -- the ISA-derived name the two revisions share. A
-# logic file that names the stepping in ArchitectureName instead is a
-# mistake, and one that would otherwise cost a whole build to notice --
-# masterLibraries is keyed by the declared name while the per-architecture
-# writes are keyed by the ISA-derived one.
+# Logic-file architecture names. A logic file declares the architecture it was
+# tuned for, and gfx1250-strict declares itself -- it is not gfx1250 tuning with
+# a tag on it. That is what makes the two agree: masterLibraries is keyed by the
+# declared name and the per-architecture writes are keyed by the requested name,
+# so a file that declared the ISA-derived name instead would key a library no
+# write ever addresses, and the build would ship an empty subtree in silence.
 # =========================================================================== #
 SCHEDULE_NAME = "Aldebaran_Cijk_Ailk_Bljk_SB"
 
@@ -1627,35 +1874,28 @@ def _generateLogicData(monkeypatch, *architectureNames):
     "stepping, architecture",
     sorted((n, steppingArchOf(n)) for n in architectureMap if steppingArchOf(n)),
 )
-def test_logic_file_naming_the_stepping_is_rejected(
+def test_logic_file_naming_the_stepping_keys_its_own_library(
     monkeypatch, _restore_type_mismatch_collector, stepping, architecture
 ):
-    """Silently dropping it is the failure mode to avoid: the key would not match
-    the ISA-derived name the writes are gated on, so the build would report
-    success and ship an empty library.
+    """A stepping is an architecture here, so its logic keys a library of its own
+    rather than merging into its base's. Sharing a key is the failure to avoid:
+    the two are tuned under different capabilities, and one write would land on
+    whichever name the writes happen to be gated on.
 
     Driven from the alias table so a second stepping is covered the day it is
     added, not the day someone remembers this test.
     """
-    with pytest.raises(ValueError) as excinfo:
-        _generateLogicData(monkeypatch, stepping)
+    (_, masterLibraries, _), _ = _generateLogicData(monkeypatch, stepping)
 
-    message = str(excinfo.value)
-    assert stepping in message
-    # Quoted, because the architecture name is a *substring* of the stepping name:
-    # a bare `architecture in message` is satisfied by the stepping name alone and
-    # pins nothing, which is exactly the requirement this test exists for.
-    assert f"'{architecture}'" in message
-    # Without this a user is told a name is wrong but not which of hundreds of
-    # logic files says it.
-    assert SCHEDULE_NAME in message
+    assert list(masterLibraries) == [stepping]
+    assert architecture not in masterLibraries
 
 
 def test_logic_file_naming_the_architecture_is_accepted(
     monkeypatch, _restore_type_mismatch_collector
 ):
-    """The control: gfx1250 logic is what a v0 build is *meant* to consume, so the
-    guard must not narrow the fallback the whole stepping design depends on."""
+    """The control: the base architecture's own logic still keys its own library,
+    unaffected by the stepping sharing its ISA."""
     (_, masterLibraries, _), _ = _generateLogicData(monkeypatch, GFX1250)
 
     assert list(masterLibraries) == [GFX1250]
@@ -1680,47 +1920,490 @@ def test_fallback_logic_is_still_merged_and_popped(
 
 
 # =========================================================================== #
-# Library output identity. A silicon stepping (gfx1250-strict) collapses to its
-# architecture's ISA and compiler target for every internal key and for
-# compilation, but its library must ship in its own library/<stepping>/ subtree
-# so the runtime can select it by stepping. computeOutputArchNames() is the
-# single source of truth for that base -> output-name mapping; it is the identity
-# for every ordinary architecture, which is what keeps their output byte-identical.
+# The one place the ISA-derived name is still the right answer: the Processor
+# predicate inside the master library. The runtime derives its own Processor by
+# substring match on the agent name, so a gfx1250-strict agent reports
+# Processor::gfx1250 -- there is no gfx1250-strict enumerator in AMDGPU.hpp, and
+# the msgpack loader hard-fails on an enum name its table does not list. The two
+# steppings are kept apart by their directories, not by this predicate.
 # =========================================================================== #
-def test_output_arch_names_is_identity_for_ordinary_archs():
-    """An ordinary build maps every architecture to itself, so threading the map
-    through the writers cannot move or rename a single non-stepping artifact."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+def _hardwareRowFor(arch):
+    from unittest.mock import MagicMock
 
-    assert computeOutputArchNames(["gfx942"]) == {"gfx942": "gfx942"}
-    assert computeOutputArchNames(["gfx90a", "gfx942"]) == {
-        "gfx90a": "gfx90a",
-        "gfx942": "gfx942",
+    from Tensile.SolutionLibrary import MasterSolutionLibrary
+
+    return MasterSolutionLibrary.hardware(
+        {"ArchitectureName": arch, "CUCount": None},
+        MagicMock(),
+        "TensileLibrary_lazy",
+        lazyLibrary=True,
+    )
+
+
+def test_a_steppings_predicate_names_the_architecture_it_shares_an_isa_with():
+    """Writing "gfx1250-strict" here would make the .dat unloadable: the enum
+    table in Serialization/Predicates.hpp has no such case, and the loader turns
+    an unlisted name into a null library and a bare "Could not initialize Tensile
+    library" with no mention of the cause."""
+    lib, _ = _hardwareRowFor(GFX1250_STRICT)
+
+    processor = lib.rows[0]["predicate"].value
+    assert processor.tag == "Processor"
+    assert processor.value == GFX1250
+
+    # Identical to the base architecture's, which is what lets one runtime
+    # Processor value serve both steppings.
+    baseLib, _ = _hardwareRowFor(GFX1250)
+    assert baseLib.rows[0]["predicate"].value.value == GFX1250
+
+
+def test_a_steppings_placeholder_name_carries_the_stepping():
+    """The sibling invariant, and the reason the two must not be unified: the
+    shard filename does take the requested name, so TensileCreateLibrary's Mapping
+    filter (``endswith("_" + archName)``) keeps the stepping's entries. Predicate
+    and filename deliberately disagree."""
+    _, placeholderName = _hardwareRowFor(GFX1250_STRICT)
+
+    assert placeholderName == "TensileLibrary_lazy_" + GFX1250_STRICT
+
+
+# =========================================================================== #
+# Architecture identity. gfx1250 and gfx1250-strict share ISA 12.5.0, so the ISA
+# names neither the compiler target, nor the code object, nor the output subtree.
+# archNamesByIsa() carries the requested name to all three. It is the identity
+# for every architecture that does not share its ISA, which is what keeps their
+# output byte-identical.
+# =========================================================================== #
+def test_arch_names_by_isa_is_identity_for_ordinary_archs():
+    """An ordinary build maps every ISA back to the name it was asked for, so
+    threading the map through the writers cannot move or rename a single
+    non-stepping artifact."""
+    from Tensile.Common.Architectures import SUPPORTED_ISA, archNamesByIsa
+
+    for isa in SUPPORTED_ISA:
+        if isa == ISA_GFX1250:
+            continue
+        name = isaToGfx(isa)
+        assert archNamesByIsa([name]) == {isa: name}
+
+
+def test_arch_names_by_isa_names_the_stepping_not_its_base():
+    """The whole point: 12.5.0 resolves to whichever of the two architectures was
+    requested, so a strict build never falls back onto gfx1250's name."""
+    from Tensile.Common.Architectures import archNamesByIsa
+
+    assert archNamesByIsa([GFX1250_STRICT]) == {ISA_GFX1250: GFX1250_STRICT}
+    assert archNamesByIsa([GFX1250]) == {ISA_GFX1250: GFX1250}
+
+
+def test_arch_names_by_isa_drops_qualifiers_and_predicates():
+    """Qualifiers name an architecture the ISA already describes; forwarding
+    gfx942:xnack+ to --offload-arch would pin the code object to one xnack setting
+    instead of leaving it xnack-agnostic. Predicates are resolved elsewhere."""
+    from Tensile.Common.Architectures import archNamesByIsa
+
+    assert archNamesByIsa(["gfx942:xnack+", "gfx942:xnack-"]) == {
+        gfxToIsa("gfx942"): "gfx942"
     }
-    # A qualified name round-trips to identity too, so no ordinary artifact moves.
-    assert computeOutputArchNames(["gfx942:xnack+"]) == {"gfx942": "gfx942"}
+    assert archNamesByIsa([GFX1250_STRICT + "[cu=64]"]) == {
+        ISA_GFX1250: GFX1250_STRICT
+    }
 
 
-def test_output_arch_names_maps_a_stepping_to_its_own_subtree():
-    """gfx1250-strict shares gfx1250's ISA, so its base is gfx1250, but the value is the
-    stepping name: that is what redirects its master/mapping/shard writes into
-    library/gfx1250-strict/ while leaving the ISA-keyed internals on gfx1250."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+def test_a_build_matching_no_logic_files_says_so(
+    monkeypatch, tmp_path, capsys, restore_global_parameters
+):
+    """It otherwise exits 0 having written a subtree with no master and no
+    Mapping, and the only trace is a zero in the log that looks like every other
+    zero-match build. A strict build is the likely victim: it is the one whose
+    logic lives in a tree of its own, so a path or filter mistake matches nothing
+    at all rather than merely less than expected."""
+    _run_createlibrary_to_writes(
+        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250_STRICT, "prefix_" + GFX1250_STRICT
+    )
 
-    assert computeOutputArchNames([GFX1250_STRICT]) == {GFX1250: GFX1250_STRICT}
-    # The plain architecture is still the identity, so a v1 build is unchanged.
-    assert computeOutputArchNames([GFX1250]) == {GFX1250: GFX1250}
+    warning = capsys.readouterr().out
+    assert "No logic files matched" in warning, warning
+    assert GFX1250_STRICT in warning, warning
 
 
-def test_output_arch_names_rejects_two_names_sharing_one_isa():
-    """A stepping and its base (or two steppings) would name two output subtrees
-    for one ISA, so the map cannot pick one. Reject it here rather than silently
-    resolve it by dict-insertion order, since the inverse the helper cache relies
-    on would otherwise be ill-defined."""
-    from Tensile.TensileCreateLibrary.Run import computeOutputArchNames
+def test_arch_names_by_isa_rejects_two_architectures_sharing_one_isa():
+    """One key cannot name both. Keeping either silently would give the master and
+    the mapping the requested names -- those loops iterate the names -- while the
+    assembler target, the code object filename and its subtree all resolved
+    through this one key, so one architecture would ship a library whose kernels
+    were assembled for, and written under, the other."""
+    from Tensile.Common.Architectures import archNamesByIsa
 
-    with pytest.raises(ValueError, match="share an ISA"):
-        computeOutputArchNames([GFX1250, GFX1250_STRICT])
+    with pytest.raises(ValueError, match="share ISA"):
+        archNamesByIsa([GFX1250, GFX1250_STRICT])
+    # A predicate must not be able to hide the conflict.
+    with pytest.raises(ValueError, match="share ISA"):
+        archNamesByIsa([GFX1250_STRICT + "[cu=64]", GFX1250])
+
+
+# =========================================================================== #
+# Scratch space. The runs covering two architectures that share an ISA write one
+# output directory, so each has to keep its intermediates to itself: kernel
+# basenames are derived from the ISA, making them identical across the two while
+# the machine code inside differs.
+# =========================================================================== #
+def test_two_steppings_get_different_scratch_directories():
+    """The collision this exists to prevent: same output directory, same kernel
+    basenames, different machine code."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    assert buildTmpDir("/out/Tensile", [GFX1250]) != buildTmpDir(
+        "/out/Tensile", [GFX1250_STRICT]
+    )
+
+
+def test_scratch_directory_ignores_order_and_qualifiers():
+    """One run's scratch has to resolve to one directory however its
+    architectures were spelled, or the cleanup would not find what the writer
+    made."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    assert buildTmpDir("/out/Tensile", ["gfx942", GFX1250]) == buildTmpDir(
+        "/out/Tensile", [GFX1250, "gfx942"]
+    )
+    assert buildTmpDir("/out/Tensile", ["gfx942:xnack+", "gfx942:xnack-"]) == (
+        buildTmpDir("/out/Tensile", ["gfx942"])
+    )
+
+
+def test_scratch_stays_under_the_output_directory():
+    """It is removed with rmtree, so the tag must not be able to steer that
+    anywhere but inside build_tmp."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    path = buildTmpDir("/out/Tensile", [GFX1250_STRICT])
+
+    assert path.parent == Path("/out/Tensile/build_tmp")
+    assert path.name.isascii() and "/" not in path.name and ".." not in path.name
+
+
+def test_scratch_keeps_its_old_name_when_no_stepping_was_asked_for():
+    """Every architecture set that could be built before steppings existed has to
+    land where it always did, or upgrading orphans the scratch of every build in
+    flight and every tool that reaches into it by path."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    for archs in ([], ["gfx942"], ["gfx942", "gfx950", "gfx1200"], ["gfx942:xnack+"]):
+        assert buildTmpDir("/out/Tensile", archs) == Path("/out/Tensile/build_tmp/TENSILE")
+
+
+def test_only_the_stepping_side_of_a_shared_isa_is_renamed():
+    """The two runs covering a shared ISA never occupy one group, so naming only
+    the stepping's group apart is enough to separate them -- and it leaves the
+    other run on the path it had."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    assert buildTmpDir("/out/Tensile", [GFX1250]) == Path("/out/Tensile/build_tmp/TENSILE")
+    assert buildTmpDir("/out/Tensile", [GFX1250_STRICT]) == (
+        Path(f"/out/Tensile/build_tmp/TENSILE-{GFX1250_STRICT}")
+    )
+
+
+def test_scratch_name_survives_an_output_path_with_no_stem():
+    """Path("/").stem is empty, and "<root>" / "" is "<root>" -- the run would
+    take the shared parent as its own scratch and rmtree a sibling's work."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    for outputPath in ("/", ""):
+        path = buildTmpDir(outputPath, [GFX1250_STRICT])
+        assert path.name and path.parent.name == "build_tmp"
+
+
+def test_scratch_name_ignores_architectures_the_table_does_not_know():
+    """An architecture spec is free text and gfxToIsa reads only the leading gfx
+    digits, so "gfx1250/.." parses as a stepping. The name reaches rmtree, so
+    only names the table vouches for may reach the name."""
+    from Tensile.TensileCreateLibrary.Run import buildTmpDir
+
+    for hostile in ("gfx1250/..", "gfx1250-../..", "gfx1250 ", "../gfx1250-x"):
+        path = buildTmpDir("/out/Tensile", [hostile])
+        assert path.parent == Path("/out/Tensile/build_tmp")
+        assert "/" not in path.name and ".." not in path.name
+
+
+def test_gfx_names_that_spell_no_version_are_not_an_error():
+    """buildTmpDir asks whether a spec is a stepping, so gfxToIsa has to answer
+    for anything a user can type. The hex digits its pattern accepts are not all
+    parseable as a version, and the promise it makes for those is None."""
+    from Tensile.Common.Architectures import gfxToIsa
+
+    assert gfxToIsa("gfx1250") == (12, 5, 0)
+    assert gfxToIsa("gfx90a") == (9, 0, 10)
+    for unparseable in ("gfxabc", "gfxa00", "gfxbeef"):
+        assert gfxToIsa(unparseable) is None
+
+
+# =========================================================================== #
+# Partitioning. One run cannot name two architectures sharing an ISA, so the
+# build asks isaCollisionFreeGroups how many runs it takes to cover what was
+# requested. The groups feed one run each, all writing one output directory.
+# =========================================================================== #
+def test_ordinary_architectures_all_fit_in_one_group():
+    """Nothing collides among them, so the partitioning has to stay invisible:
+    one group means one run, which is what every build did before steppings
+    existed."""
+    from Tensile.Common.Architectures import isaCollisionFreeGroups
+
+    assert isaCollisionFreeGroups(["gfx942", "gfx950", "gfx1200"]) == [
+        ["gfx942", "gfx950", "gfx1200"]
+    ]
+    assert isaCollisionFreeGroups([]) == []
+
+
+def test_a_stepping_and_its_base_land_in_different_groups():
+    """The pairing archNamesByIsa rejects is exactly the one that must split."""
+    from Tensile.Common.Architectures import isaCollisionFreeGroups
+
+    assert isaCollisionFreeGroups([GFX1250, GFX1250_STRICT]) == [
+        [GFX1250],
+        [GFX1250_STRICT],
+    ]
+    # Requested order is kept, so neither is privileged.
+    assert isaCollisionFreeGroups([GFX1250_STRICT, GFX1250]) == [
+        [GFX1250_STRICT],
+        [GFX1250],
+    ]
+
+
+def test_qualified_specs_of_one_architecture_are_not_split():
+    """They share an ISA *and* a name, so one run covers both. Splitting them
+    would double a build that has no collision in it at all."""
+    from Tensile.Common.Architectures import isaCollisionFreeGroups
+
+    assert isaCollisionFreeGroups(["gfx942:xnack+", "gfx942:xnack-"]) == [
+        ["gfx942:xnack+", "gfx942:xnack-"]
+    ]
+
+
+def test_specs_come_back_out_of_a_group_unchanged():
+    """Groups are handed to a build as-is, so a spec has to survive whole. A
+    predicate carries commas of its own, which is what makes the separator
+    between specs a matter of correctness rather than taste."""
+    from Tensile.Common.Architectures import isaCollisionFreeGroups
+
+    spec = "gfx942[id=74a0,cu=80]"
+    assert isaCollisionFreeGroups([spec, "gfx950"]) == [[spec, "gfx950"]]
+    # A predicate must not hide a collision either.
+    assert isaCollisionFreeGroups([GFX1250_STRICT + "[cu=64]", GFX1250]) == [
+        [GFX1250_STRICT + "[cu=64]"],
+        [GFX1250],
+    ]
+
+
+def test_every_group_is_one_archNamesByIsa_accepts():
+    """The partitioning is only useful if each group can actually be built, which
+    is what archNamesByIsa raising on a group would deny."""
+    from Tensile.Common.Architectures import archNamesByIsa, isaCollisionFreeGroups
+
+    for group in isaCollisionFreeGroups(["all", GFX1250_STRICT]):
+        archNamesByIsa(group)
+
+
+def test_all_is_expanded_before_partitioning():
+    """``all`` cannot name a stepping, so a request for both arrives as the
+    keyword beside a name it does not cover; the stepping has to survive into its
+    own group rather than be absorbed or dropped."""
+    from Tensile.Common.Architectures import isaCollisionFreeGroups
+
+    groups = isaCollisionFreeGroups(["all", GFX1250_STRICT])
+
+    assert len(groups) == 2
+    assert GFX1250 in groups[0] and "gfx942" in groups[0]
+    assert groups[1] == [GFX1250_STRICT]
+
+
+# =========================================================================== #
+# Fan-out. Each group is handed to its own process, because a run settles
+# arch-dependent state process-wide. The children are this same entry point
+# re-invoked, so what they are handed has to be a faithful narrowing of what
+# this process was handed.
+# =========================================================================== #
+PARENT_ARGV = [
+    "--architecture=gfx1250;gfx1250-strict",
+    "--cxx-compiler=/opt/rocm/bin/amdclang++",
+    "--jobs=64",
+    "--disable-asm-comments",
+    "/src/library",
+    "/build/Tensile",
+    "HIP",
+]
+
+
+def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
+    """The argv and environment of every child _buildGroupsSeparately starts.
+
+    ``requestedJobs`` is the parsed ``CpuThreads``; -1 is its default, meaning
+    "every CPU".
+    """
+    from Tensile.TensileCreateLibrary import Run
+
+    spawned = []
+
+    class _Proc:
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    def _popen(cmd, env=None):
+        spawned.append((cmd, env))
+        return _Proc()
+
+    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + argv)
+    monkeypatch.setattr(Run.subprocess, "Popen", _popen)
+    # Pinned so the job split is the machine-independent part of the arithmetic.
+    monkeypatch.setattr(Run, "_cpuCount", lambda: 128)
+    Run._buildGroupsSeparately(groups, requestedJobs)
+    return spawned
+
+
+def test_each_group_is_built_for_exactly_the_architectures_it_holds(monkeypatch):
+    spawned = _spawnedCommands(monkeypatch, [[GFX1250, "gfx942"], [GFX1250_STRICT]])
+
+    archArgs = [[t for t in cmd if t.startswith("--architecture=")] for cmd, _ in spawned]
+
+    assert archArgs == [
+        ["--architecture=gfx1250;gfx942"],
+        ["--architecture=gfx1250-strict"],
+    ]
+
+
+def test_everything_the_caller_asked_for_survives_into_the_children(monkeypatch):
+    """A group is the same build, only narrower. Anything dropped here is a
+    setting that silently stops applying the moment a stepping is requested."""
+    spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
+
+    for cmd, _ in spawned:
+        # The three leading tokens are the interpreter and -m entry point.
+        passedThrough = [
+            t for t in cmd[3:] if not t.startswith(("--architecture=", "--jobs="))
+        ]
+        assert passedThrough == [
+            "--cxx-compiler=/opt/rocm/bin/amdclang++",
+            "--disable-asm-comments",
+            "/src/library",
+            "/build/Tensile",
+            "HIP",
+        ]
+
+
+def test_the_requested_parallelism_is_split_across_the_groups(monkeypatch):
+    """Each group is a whole build, so passing the count through unchanged would
+    spend it per group and oversubscribe the machine by the number of groups.
+
+    The count comes from the parsed argument, not from re-reading argv: argparse
+    accepts ``-j=8`` and any unambiguous abbreviation of ``--jobs``, and a
+    scanner that misses one hands the group an invented number instead.
+    """
+    spawned = _spawnedCommands(
+        monkeypatch, [[GFX1250], [GFX1250_STRICT]], requestedJobs=64
+    )
+
+    for cmd, _ in spawned:
+        assert "--jobs=32" in cmd
+        assert "--jobs=64" not in cmd
+
+
+def test_the_larger_group_gets_the_larger_share(monkeypatch):
+    """The split that actually happens is lopsided: a stepping collides with the
+    one architecture it steps from, so it builds alone while every other
+    architecture goes in the other group. Splitting evenly would run that group at
+    half speed and leave half the machine idle as soon as the single-architecture
+    group finishes."""
+    spawned = _spawnedCommands(
+        monkeypatch,
+        [["gfx942", "gfx950", "gfx1200"], [GFX1250_STRICT]],
+        requestedJobs=64,
+    )
+
+    jobs = [t for cmd, _ in spawned for t in cmd if t.startswith("--jobs=")]
+    assert jobs == ["--jobs=48", "--jobs=16"]
+    # Still bounded by what the caller asked for, so the machine is not
+    # oversubscribed the way one count per group would do.
+    assert sum(int(j.split("=")[1]) for j in jobs) <= 64
+
+
+def test_disabled_threading_survives_the_split(monkeypatch):
+    """0 means "no threading", not "a number to divide" -- 0 // n is 0 either way,
+    but rounding it up to 1 would start a worker the caller switched off."""
+    spawned = _spawnedCommands(
+        monkeypatch, [[GFX1250], [GFX1250_STRICT]], requestedJobs=0
+    )
+
+    for cmd, _ in spawned:
+        assert "--jobs=0" in cmd
+
+
+def test_children_can_import_tensile(monkeypatch):
+    """The children are started with -m, which does not inherit the sys.path
+    edit that bin/TensileCreateLibrary makes when Tensile is not installed."""
+    import Tensile
+
+    spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
+    packageRoot = str(Path(Tensile.__file__).resolve().parent.parent)
+
+    for _, env in spawned:
+        assert packageRoot in env["PYTHONPATH"].split(os.pathsep)
+
+
+def test_children_are_told_they_share_a_scratch_parent(monkeypatch):
+    """Scratch cleanup is the one place a group build must behave differently: a
+    child may take only its own subdirectory, because a sibling is writing into
+    the same parent. Every other run reclaims the whole tree, so the children
+    have to be marked or a fan-out would delete a live sibling's scratch."""
+    from Tensile.TensileCreateLibrary import Run
+
+    spawned = _spawnedCommands(monkeypatch, [[GFX1250], [GFX1250_STRICT]])
+
+    for _, env in spawned:
+        assert env[Run._GROUP_BUILD_ENV] == "1"
+
+
+def test_a_failed_group_is_not_swallowed(monkeypatch):
+    """A group that fails while the other succeeds has to fail the run: a zero
+    exit here lets the build be stamped with one stepping's library missing."""
+    from Tensile.TensileCreateLibrary import Run
+
+    class _Proc:
+        def __init__(self, rc):
+            self._rc = rc
+
+        def wait(self):
+            return self._rc
+
+        def poll(self):
+            return self._rc
+
+    returnCodes = iter([0, 1])
+    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + PARENT_ARGV)
+    monkeypatch.setattr(
+        Run.subprocess, "Popen", lambda cmd, env=None: _Proc(next(returnCodes))
+    )
+
+    with pytest.raises(SystemExit):
+        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1)
+
+
+def test_the_architecture_flag_is_replaced_whatever_its_spelling(monkeypatch):
+    """Replaced, not merely overridden. argparse's last-wins would pick the
+    appended one either way, so what this pins is that the child's target does
+    not rest on that: its command line says one architecture, the one it builds.
+    """
+    argv = ["--architecture", "gfx1250;gfx1250-strict", "/src", "/out", "HIP"]
+    spawned = _spawnedCommands(monkeypatch, [[GFX1250_STRICT]], argv=argv)
+
+    cmd = spawned[0][0]
+
+    assert "--architecture" not in cmd
+    assert "gfx1250;gfx1250-strict" not in cmd
+    assert "--architecture=gfx1250-strict" in cmd
 
 
 def _run_createlibrary_to_writes(
@@ -1753,7 +2436,6 @@ def _run_createlibrary_to_writes(
         bound = writeSignature.bind(*args, **kwargs)
         bound.apply_defaults()
         captured["wsk"]["cmdlineArchs"] = bound.arguments["cmdlineArchs"]
-        captured["wsk"]["outputArchNames"] = bound.arguments.get("outputArchNames")
         return (0, [], [])
 
     def _glds(logicFiles, *a, **kw):
@@ -1822,43 +2504,43 @@ def _run_createlibrary_to_writes(
 def test_strict_build_writes_master_and_mapping_into_its_own_subtree(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The runtime selects the subtree by stepping and only then forms the
-    filename, from the compiler target -- so the master and Mapping must land in
-    library/gfx1250-strict/ while keeping the plain gfx1250 token. A write into
-    library/gfx1250/ is the silent-empty-library failure this prevents."""
+    """The runtime forms both the subtree and the filename from the architecture
+    the driver reports, which for v0 silicon is gfx1250-strict -- so both must
+    carry the stepping. A master written as TensileLibrary_lazy_gfx1250 into
+    library/gfx1250-strict/ is a file no lookup ever asks for."""
     captured = _run_createlibrary_to_writes(
-        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250, "prefix_" + GFX1250
+        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250_STRICT, "prefix_" + GFX1250_STRICT
     )
 
     writes = captured["writes"]
     assert any(
-        w.endswith(f"library/{GFX1250_STRICT}/TensileLibrary_lazy_{GFX1250}")
+        w.endswith(f"library/{GFX1250_STRICT}/TensileLibrary_lazy_{GFX1250_STRICT}")
         for w in writes
     ), writes
     assert any(
-        w.endswith(f"library/{GFX1250_STRICT}/TensileLiteLibrary_lazy_{GFX1250}_Mapping")
+        w.endswith(
+            f"library/{GFX1250_STRICT}/TensileLiteLibrary_lazy_{GFX1250_STRICT}_Mapping"
+        )
         for w in writes
     ), writes
-    # Nothing for this build may fall back into the ISA-derived subtree.
+    # Nothing for this build may fall back into the base architecture's subtree.
     assert not any(f"library/{GFX1250}/" in w for w in writes), writes
 
 
-def test_a_strict_builds_shards_route_to_its_subtree_keeping_the_isa_token(
+def test_a_strict_builds_shards_route_to_its_subtree_under_its_own_name(
     monkeypatch, tmp_path, restore_global_parameters
 ):
     """The shards are the actual kernel payload: a master in library/gfx1250-strict/
     whose shards landed in library/gfx1250/ is the silent-empty-library failure
-    this whole design exists to prevent. Drive the shard write loop and assert
-    each shard lands in the gfx1250-strict subtree under its ISA-derived name -- the stepping
-    lives in the directory and in no filename, which is what lets the same tree
-    load on v1 silicon and keeps the helper kernels shared."""
-    shard = "TensileLibrary_lazy_" + GFX1250 + "_0"
+    this whole design exists to prevent. The shard name comes from the master's
+    own name, so it carries the stepping too."""
+    shard = "TensileLibrary_lazy_" + GFX1250_STRICT + "_0"
     captured = _run_createlibrary_to_writes(
         monkeypatch,
         tmp_path,
         GFX1250_STRICT,
-        GFX1250,
-        "prefix_" + GFX1250,
+        GFX1250_STRICT,
+        "prefix_" + GFX1250_STRICT,
         shardNames=(shard,),
     )
 
@@ -1866,46 +2548,31 @@ def test_a_strict_builds_shards_route_to_its_subtree_keeping_the_isa_token(
     assert any(
         w.endswith(f"library/{GFX1250_STRICT}/{shard}") for w in writes
     ), writes
-    # No write for this build may fall into the ISA-derived subtree, and the
-    # stepping token appears in no filename at all.
     assert not any(f"library/{GFX1250}/" in w for w in writes), writes
-    for w in writes:
-        assert GFX1250_STRICT not in Path(w).name, w
 
 
-def test_a_strict_build_precreates_only_its_own_subtree(
-    monkeypatch, tmp_path, restore_global_parameters
-):
-    """LibraryIO.write cannot create directories, so the write loops depend on the
-    pre-create loop having made library/gfx1250-strict/. A stray library/gfx1250/ would
-    be shipped by a packaging glob as an empty v1 subtree, so assert it is absent."""
-    _run_createlibrary_to_writes(
-        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250, "prefix_" + GFX1250
-    )
-
-    assert (tmp_path / "out" / "library" / GFX1250_STRICT).is_dir()
-    assert not (tmp_path / "out" / "library" / GFX1250).exists()
-
-
-def test_a_strict_build_forwards_the_output_map_into_both_code_object_builders(
+def test_strict_build_hands_its_own_name_to_the_code_object_builders(
     monkeypatch, tmp_path
 ):
     """run() -> writer -> the two builders is the chain that routes every .co and
-    .hsaco. The writer receiving the map (asserted elsewhere) is worthless if it
-    forwards nowhere, so pin that writeSolutionsAndKernelsTCL hands the same map to
-    both buildAssemblyCodeObjectFiles and buildSourceCodeObjectFiles."""
+    .hsaco. The writer must resolve the requested name itself: the assembly builder
+    gets it keyed by ISA (its kernels carry only ISAs), the source builder gets the
+    command line verbatim and reads it back off the bundler's targets."""
     from unittest.mock import MagicMock
 
     import Tensile.TensileCreateLibrary.Run as RunModule
 
     seen = {}
+    srcSignature = inspect.signature(RunModule.buildSourceCodeObjectFiles)
 
     def _asm(*a, **kw):
-        seen["asm"] = kw.get("outputArchNames")
+        seen["asm"] = kw.get("archNames")
         return []
 
     def _src(*a, **kw):
-        seen["src"] = kw.get("outputArchNames")
+        bound = srcSignature.bind(*a, **kw)
+        bound.apply_defaults()
+        seen["src"] = bound.arguments["cmdlineArchs"]
         return []
 
     monkeypatch.setattr(RunModule, "buildAssemblyCodeObjectFiles", _asm)
@@ -1914,7 +2581,6 @@ def test_a_strict_build_forwards_the_output_map_into_both_code_object_builders(
     monkeypatch.setattr(RunModule, "writeHelpers", lambda *a, **kw: None)
     monkeypatch.setattr(RunModule, "rocisa", MagicMock())
 
-    outMap = {GFX1250: GFX1250_STRICT}
     RunModule.writeSolutionsAndKernelsTCL(
         str(tmp_path),          # outputPath
         MagicMock(),            # asmToolchain
@@ -1923,34 +2589,31 @@ def test_a_strict_build_forwards_the_output_map_into_both_code_object_builders(
         [],                     # kernels
         [],                     # kernelHelperObjs
         MagicMock(),            # kernelWriterAssembly
-        [GFX1250],              # cmdlineArchs
-        outputArchNames=outMap,
+        [GFX1250_STRICT],       # cmdlineArchs
     )
 
-    assert seen["asm"] == outMap
-    assert seen["src"] == outMap
+    assert seen["asm"] == {ISA_GFX1250: GFX1250_STRICT}
+    assert seen["src"] == [GFX1250_STRICT]
 
 
-def test_strict_build_threads_the_output_name_map_to_the_kernel_writer(
+def test_strict_build_threads_its_own_name_to_the_kernel_writer(
     monkeypatch, tmp_path, restore_global_parameters
 ):
     """The .co and helper kernels are routed by the writer, not this loop, so the
-    map has to reach it; the compiler target must still be the plain gfx1250 name
-    clang accepts for --offload-arch."""
+    requested name has to reach it intact rather than collapsing to gfx1250."""
     captured = _run_createlibrary_to_writes(
-        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250, "prefix_" + GFX1250
+        monkeypatch, tmp_path, GFX1250_STRICT, GFX1250_STRICT, "prefix_" + GFX1250_STRICT
     )
 
-    assert captured["wsk"]["outputArchNames"] == {GFX1250: GFX1250_STRICT}
     assert captured["wsk"]["cmdlineArchs"] == [GFX1250_STRICT]
 
 
 def test_ordinary_build_output_paths_are_unchanged(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """The regression guard: a gfx942 build must write exactly where it does today
-    and hand the writer an identity map, so the group-free output-naming change is
-    provably inert for every architecture but the stepping."""
+    """The regression guard: a gfx942 build must write exactly where it does today,
+    so the naming change is provably inert for every architecture but the
+    stepping."""
     captured = _run_createlibrary_to_writes(
         monkeypatch, tmp_path, "gfx942", "gfx942", "prefix_gfx942"
     )
@@ -1963,44 +2626,62 @@ def test_ordinary_build_output_paths_are_unchanged(
         w.endswith("library/gfx942/TensileLiteLibrary_lazy_gfx942_Mapping")
         for w in writes
     ), writes
-    assert captured["wsk"]["outputArchNames"] == {"gfx942": "gfx942"}
     assert captured["wsk"]["cmdlineArchs"] == ["gfx942"]
 
 
 # =========================================================================== #
-# Toolchain destination routing. The code objects and helper kernels are fanned
-# out into library/<base>/ by the assembly and source builders, keyed off the
-# ISA the kernel canonicalizes to. A stepping build must place them under
-# library/<stepping>/ instead -- but the *filenames* keep the ISA-derived token,
-# because the shards are resolved relative to the directory the runtime already
-# selected, and the helper kernel is loaded by the (unrevisioned) compiler-target
-# name. Only the directory moves; the mapping is the identity for ordinary archs.
+# Toolchain destination routing. Code objects and helper kernels are fanned out
+# into library/<arch>/ by the assembly and source builders. The assembly builder
+# groups kernels by the ISA they canonicalize to, so it is the one place that
+# cannot recover the architecture on its own and has to be told.
 # =========================================================================== #
-def test_assembly_co_routes_to_the_output_subtree_keeping_the_isa_token(tmp_path):
+def test_assembly_co_carries_the_stepping_in_both_subtree_and_filename(tmp_path):
+    """The default (non-lazy) code object is named after the architecture, and the
+    runtime looks it up by the name the driver reports. Deriving it from the ISA
+    would write TensileLibrary_gfx1250.co for a build no gfx1250 agent can use."""
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
 
-    kernel = {
-        "ISA": ISA_GFX1250,
-        "BaseName": "k0",
-        "codeObjectFile": "TensileLibrary_lazy_" + GFX1250,
-    }
     coFiles = buildAssemblyCodeObjectFiles(
         MagicMock(),
         MagicMock(),
-        [kernel],
+        [{"ISA": ISA_GFX1250, "BaseName": "k0"}],
         tmp_path,
         tmp_path,
         compress=True,
-        outputArchNames={GFX1250: GFX1250_STRICT},
+        archNames={ISA_GFX1250: GFX1250_STRICT},
     )
 
     assert len(coFiles) == 1
     assert str(coFiles[0]).endswith(
-        f"{GFX1250_STRICT}/TensileLibrary_lazy_{GFX1250}.co"
+        f"{GFX1250_STRICT}/TensileLibrary_{GFX1250_STRICT}.co"
     ), coFiles
     assert (tmp_path / GFX1250_STRICT).is_dir()
+    assert not (tmp_path / GFX1250).exists()
+
+
+def test_assembly_shard_keeps_its_recorded_name_in_the_stepping_subtree(tmp_path):
+    """A lazy shard is named by the master library that references it, so the
+    builder must not rename it -- only the subtree it lands in is the builder's
+    to choose."""
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+
+    shard = "TensileLibrary_lazy_" + GFX1250_STRICT + "_0"
+    coFiles = buildAssemblyCodeObjectFiles(
+        MagicMock(),
+        MagicMock(),
+        [{"ISA": ISA_GFX1250, "BaseName": "k0", "codeObjectFile": shard}],
+        tmp_path,
+        tmp_path,
+        compress=True,
+        archNames={ISA_GFX1250: GFX1250_STRICT},
+    )
+
+    assert len(coFiles) == 1
+    assert str(coFiles[0]).endswith(f"{GFX1250_STRICT}/{shard}.co"), coFiles
 
 
 def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
@@ -2021,7 +2702,54 @@ def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
     assert str(coFiles[0]).endswith("gfx942/TensileLibrary_lazy_gfx942.co"), coFiles
 
 
-def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs, outputArchNames):
+# =========================================================================== #
+# Compiler target. A stepping shares its ISA with the architecture it steps, so
+# the target cannot be derived from the ISA a kernel canonicalizes to; the
+# requested name is carried down to -mcpu and to the bundle entry instead.
+# =========================================================================== #
+def test_strict_is_assembled_for_its_own_target(monkeypatch):
+    from Tensile.Toolchain import Component as ComponentMod
+
+    captured = []
+    monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
+    monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append(args))
+    assembler = ComponentMod.Assembler(Path("amdclang++"), 5)
+    assembler(GFX1250_STRICT, 32, "k.s", "k.o")
+    assembler(GFX1250, 32, "k.s", "k.o")
+
+    strictArgs, baseArgs = captured
+    assert f"-mcpu={GFX1250_STRICT}" in strictArgs, strictArgs
+    # -mcpu decides the ELF machine code, and it is the only thing that differs;
+    # the stepping keeps gfx1250's +real-true16.
+    assert [a.replace(GFX1250_STRICT, GFX1250) for a in strictArgs] == baseArgs
+
+
+def _compressTargetOf(tmp_path, isa, archNames=None):
+    from unittest.mock import MagicMock
+
+    from Tensile.Toolchain.Assembly import buildAssemblyCodeObjectFiles
+
+    bundler = MagicMock()
+    kernel = {"ISA": isa, "BaseName": "k0", "codeObjectFile": "TensileLibrary_lazy_x"}
+    buildAssemblyCodeObjectFiles(
+        MagicMock(), bundler, [kernel], tmp_path, tmp_path, compress=True,
+        archNames=archNames,
+    )
+    return bundler.compress.call_args[0][2]
+
+
+def test_assembly_bundle_is_tagged_with_the_target_it_was_built_for(tmp_path):
+    """The runtime unbundles only the entry matching the agent it is loading onto,
+    so a strict bundle tagged gfx1250 yields no code object at all."""
+    from Tensile.Common.Architectures import archNamesByIsa
+
+    assert _compressTargetOf(
+        tmp_path, ISA_GFX1250, archNames=archNamesByIsa([GFX1250_STRICT])
+    ) == GFX1250_STRICT
+    assert _compressTargetOf(tmp_path, gfxToIsa("gfx942")) == "gfx942"
+
+
+def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs):
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain import Source as SourceMod
@@ -2042,65 +2770,66 @@ def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs, output
         tmp_path / "inc",
         kernelPath,
         cmdlineArchs,
-        outputArchNames=outputArchNames,
     )
 
 
-def test_source_helper_co_routes_to_the_output_subtree(tmp_path, monkeypatch):
+def test_source_helper_co_is_named_by_the_target_it_was_compiled_for(
+    tmp_path, monkeypatch
+):
+    """The helper kernel is compiled with --offload-arch=gfx1250-strict, so the
+    bundler reports that target back and both the subtree and the filename follow
+    it -- no separate map is needed, and none may override it."""
     coPaths = _run_build_source(
-        tmp_path, monkeypatch, GFX1250, [GFX1250], {GFX1250: GFX1250_STRICT}
+        tmp_path, monkeypatch, GFX1250_STRICT, [GFX1250_STRICT]
     )
 
     assert len(coPaths) == 1
     assert str(coPaths[0]).endswith(
-        f"{GFX1250_STRICT}/Kernels.so-000-{GFX1250}.hsaco"
+        f"{GFX1250_STRICT}/Kernels.so-000-{GFX1250_STRICT}.hsaco"
     ), coPaths
 
 
 def test_source_helper_co_is_unchanged_for_ordinary_archs(tmp_path, monkeypatch):
-    coPaths = _run_build_source(tmp_path, monkeypatch, "gfx942", ["gfx942"], None)
+    coPaths = _run_build_source(tmp_path, monkeypatch, "gfx942", ["gfx942"])
 
     assert len(coPaths) == 1
     assert str(coPaths[0]).endswith("gfx942/Kernels.so-000-gfx942.hsaco"), coPaths
 
 
-def test_helper_cache_restore_routes_to_the_output_subtree(tmp_path, monkeypatch):
-    """A v0 build compiles the helper for the plain gfx1250 target, so it shares a
-    cache key with a v1 build; the restored file must still be routed into the
-    stepping's subtree, not the ISA-derived one the cache entry was stored under."""
+# =========================================================================== #
+# Helper kernel cache. The entry is keyed on the command line, which now spells
+# the two steppings differently, so they no longer share one entry and the
+# subtree names inside it round trip unchanged.
+# =========================================================================== #
+HELPER_HSACO = f"Kernels.so-000-{GFX1250_STRICT}.hsaco"
+
+
+def test_the_two_steppings_do_not_share_a_cache_entry(tmp_path, monkeypatch):
+    """Sharing an entry would let a gfx1250 build restore code objects assembled
+    for gfx1250-strict, whose ELF machine code no gfx1250 agent will load."""
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain import HelperKernelCache as HKC
 
-    monkeypatch.setattr(HKC, "_computeCacheKey", lambda *a, **kw: "KEY")
-    entry = tmp_path / "cache" / "KEY" / GFX1250
-    entry.mkdir(parents=True)
-    (entry / "x.hsaco").write_text("data")
-    monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+    monkeypatch.setattr(HKC, "_STATIC_HEADER_FILES", ())
+    (tmp_path / "Kernels.cpp").write_text("")
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    (inc / "Kernels.h").write_text("")
 
-    cache = HKC.HelperKernelCache()
-    hit, coPaths = cache.restore(
-        tmp_path / "Kernels.cpp",
-        tmp_path / "inc",
-        [GFX1250],
-        MagicMock(),
-        tmp_path / "lib",
-        outputArchNames={GFX1250: GFX1250_STRICT},
-    )
+    compiler = MagicMock()
+    compiler.default_args = []
 
-    assert hit
-    assert len(coPaths) == 1
-    assert str(coPaths[0]).endswith(f"{GFX1250_STRICT}/x.hsaco"), coPaths
+    keys = {
+        HKC._computeCacheKey(tmp_path / "Kernels.cpp", inc, [arch], compiler)
+        for arch in (GFX1250, GFX1250_STRICT)
+    }
+    assert len(keys) == 2
 
 
-HELPER_HSACO = f"Kernels.so-000-{GFX1250}.hsaco"
-
-
-def _cacheAfterAV0Store(tmp_path, monkeypatch):
-    """Runs a v0 build's cache miss and subsequent store, and returns the cache
-    root. The v0 build's helper lives in the stepping's subtree, which is exactly
-    the name that must not become the stored one."""
+def _cacheAfterAStrictStore(tmp_path, monkeypatch):
+    """Runs a strict build's cache miss and subsequent store, and returns the cache
+    root."""
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain import HelperKernelCache as HKC
@@ -2110,71 +2839,64 @@ def _cacheAfterAV0Store(tmp_path, monkeypatch):
     monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cacheRoot))
     monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
 
-    v0Dir = tmp_path / "libv0" / GFX1250_STRICT
-    v0Dir.mkdir(parents=True)
-    (v0Dir / HELPER_HSACO).write_text("data")
+    libDir = tmp_path / "libstrict" / GFX1250_STRICT
+    libDir.mkdir(parents=True)
+    (libDir / HELPER_HSACO).write_text("data")
 
     cache = HKC.HelperKernelCache()
     hit, _ = cache.restore(
         tmp_path / "Kernels.cpp",
         tmp_path / "inc",
-        [GFX1250],
+        [GFX1250_STRICT],
         MagicMock(),
-        tmp_path / "libv0",
-        outputArchNames={GFX1250: GFX1250_STRICT},
+        tmp_path / "libstrict",
     )
     assert not hit
-    cache.store(
-        [str(v0Dir / HELPER_HSACO)], outputArchNames={GFX1250: GFX1250_STRICT}
-    )
+    cache.store([str(libDir / HELPER_HSACO)])
     return cacheRoot
 
 
-def test_helper_cache_stores_under_the_base_arch_not_the_output_subtree(
+def test_helper_cache_stores_the_stepping_subtree_under_its_own_name(
     tmp_path, monkeypatch
 ):
-    """The cache key is computed from the compiler targets, which are identical
-    for the two steppings, so a v0 build and a v1 build share an entry. Storing
-    under the directory the files happen to sit in would put the stepping's name
-    inside the shared entry; the stored name has to be the base arch, the same
-    name restore() maps forward from."""
-    cacheRoot = _cacheAfterAV0Store(tmp_path, monkeypatch)
+    """The stored layout mirrors the install layout, and the install layout for a
+    strict build is library/gfx1250-strict/. Rewriting it to the base name would
+    make the entry restore into the wrong subtree."""
+    cacheRoot = _cacheAfterAStrictStore(tmp_path, monkeypatch)
 
-    assert (cacheRoot / "KEY" / GFX1250 / HELPER_HSACO).is_file()
-    assert not (cacheRoot / "KEY" / GFX1250_STRICT).exists()
+    assert (cacheRoot / "KEY" / GFX1250_STRICT / HELPER_HSACO).is_file()
+    assert not (cacheRoot / "KEY" / GFX1250).exists()
 
 
-def test_a_gfx1250_build_restores_a_strict_builds_cache_entry_into_its_own_subtree(
+def test_a_strict_builds_cache_entry_restores_into_the_stepping_subtree(
     tmp_path, monkeypatch
 ):
-    """The end-to-end consequence of the above: build v0 then v1 in one workspace
-    and the gfx1250 tree must still get its helper kernel. A stepping-named cache entry
-    would silently deposit it in library/gfx1250-strict/ and ship a v1 tree with none."""
+    """The end-to-end consequence: a second strict build in the same workspace
+    hits the cache and must get its helper kernel back in library/gfx1250-strict/."""
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain import HelperKernelCache as HKC
 
-    _cacheAfterAV0Store(tmp_path, monkeypatch)
+    _cacheAfterAStrictStore(tmp_path, monkeypatch)
 
     cache = HKC.HelperKernelCache()
     hit, coPaths = cache.restore(
         tmp_path / "Kernels.cpp",
         tmp_path / "inc",
-        [GFX1250],
+        [GFX1250_STRICT],
         MagicMock(),
-        tmp_path / "libv1",
-        outputArchNames={GFX1250: GFX1250},
+        tmp_path / "libnext",
     )
 
     assert hit
     assert [str(p) for p in coPaths] == [
-        str(tmp_path / "libv1" / GFX1250 / HELPER_HSACO)
+        str(tmp_path / "libnext" / GFX1250_STRICT / HELPER_HSACO)
     ]
 
 
 def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatch):
-    """The regression guard: with no map, or an identity one, the stored layout is
-    the directory layout, exactly as before."""
+    """The regression guard: the stored layout is the directory layout, exactly as
+    before."""
     from unittest.mock import MagicMock
 
     from Tensile.Toolchain import HelperKernelCache as HKC
@@ -2199,3 +2921,182 @@ def test_helper_cache_store_is_unchanged_for_ordinary_archs(tmp_path, monkeypatc
     cache.store([str(libDir / "Kernels.so-000-gfx942.hsaco")])
 
     assert (cacheRoot / "KEY" / "gfx942" / "Kernels.so-000-gfx942.hsaco").is_file()
+
+
+# =========================================================================== #
+# The helper-kernel generators' auto-detect path.
+#
+# AMaxGenerator/SoftmaxGenerator/LayerNormGenerator take the architecture from
+# --arch; when it is missing they fall back to asking the device. That branch
+# lives in `if __name__ == '__main__'`, so it is only reachable by running the
+# script, which is why these spawn one rather than importing it.
+# =========================================================================== #
+_TENSILELITE = Path(__file__).resolve().parents[3]
+
+
+def _rocmShimReporting(tmp_path, arch):
+    """A ROCM_PATH whose detection tools all name ``arch``.
+
+    amdgpu-arch has to be here too, not just the enumerator: detection asks it
+    first, and a shim that left it out would fall through to the real one on
+    PATH and answer from the machine running the test. The tools are shimmed
+    through ROCM_PATH rather than PATH because both resolvers look under the
+    ROCm install first; everything else the script needs is still found on PATH.
+    """
+    root = tmp_path / "rocm"
+    for relative in ("bin/rocm_agent_enumerator", "lib/llvm/bin/amdgpu-arch"):
+        tool = root / relative
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.write_text(f"#!/bin/sh\necho {arch}\n")
+        tool.chmod(tool.stat().st_mode | stat.S_IEXEC)
+    return root
+
+
+@pytest.mark.parametrize(
+    "generator", ["AMaxGenerator.py", "SoftmaxGenerator.py", "LayerNormGenerator.py"]
+)
+@pytest.mark.parametrize("reported", [GFX1250, GFX1250_STRICT])
+def test_the_generators_build_for_the_architecture_the_device_reported(
+    tmp_path, generator, reported
+):
+    """Both steppings report ISA (12,5,0), so a generator that kept only the ISA
+    would build gfx1250 on either and hand the strict device code it rejects.
+    The gfx1250 case is the regression fence: naming the architecture must not
+    change what an ordinary architecture builds."""
+    script = _TENSILELITE / generator
+    out = tmp_path / "kernel.s"
+    env = dict(
+        os.environ,
+        ROCM_PATH=str(_rocmShimReporting(tmp_path, reported)),
+        PYTHONPATH=str(_TENSILELITE),
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--arch", "", "-o", str(out)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f'.amdgcn_target "amdgcn-amd-amdhsa--{reported}"' in out.read_text()
+
+
+# --- every architecture still parses the way it always did --------------------
+#
+# Giving one ISA two names changed the parsing every architecture goes through,
+# not just the stepping's, so these sweep all of them. The regression they exist
+# to catch is a legacy architecture quietly resolving differently, which no
+# gfx1250 test would notice.
+
+
+def _spellings(name):
+    """Every spelling CMake may put in GPU_TARGETS for one architecture."""
+    if ":" in name:
+        return [name]
+    return [name, f"{name}:xnack+", f"{name}:xnack-", f"{name}[cu=64]", f"{name}[id=74a0]"]
+
+
+_ARCH_NAMES = sorted(n for n in architectureMap if n != "all")
+_BARE_NAMES = sorted({baseArchName(n) for n in _ARCH_NAMES})
+_ALL_SPECS = [(baseArchName(n), s) for n in _ARCH_NAMES for s in _spellings(n)]
+_SPEC_IDS = [s for _, s in _ALL_SPECS]
+
+
+@pytest.mark.parametrize("bare,spec", _ALL_SPECS, ids=_SPEC_IDS)
+def test_an_architecture_matches_its_own_logic_header(bare, spec):
+    """A header naming the architecture claims every spelling of a request for it.
+
+    Logic file headers carry a bare name, so the qualifier and the predicate have
+    to come off the request before the comparison, or tuning is dropped for a
+    target that asked for it with either. Paired with the next test: this one
+    catches a filter tightened until it drops real files, that one catches a
+    filter loosened until "gfx1250" claims "gfx1250-strict". Neither alone would
+    have caught the regression they were written for.
+    """
+    assert archMatch(bare, [spec]) is True
+
+
+@pytest.mark.parametrize("bare,spec", _ALL_SPECS, ids=_SPEC_IDS)
+def test_an_architecture_claims_no_other_architectures_request(bare, spec):
+    """No header claims a request for a different architecture.
+
+    Whole-name, not prefix: "gfx1250" is a prefix of "gfx1250-strict", and the
+    two are separate compiler targets whose code objects will not load on each
+    other's silicon.
+    """
+    for other in _BARE_NAMES:
+        if other == bare:
+            continue
+        assert archMatch(other, [spec]) is False, f"{other!r} wrongly claimed {spec!r}"
+
+
+@pytest.mark.parametrize("bare,spec", _ALL_SPECS, ids=_SPEC_IDS)
+def test_qualifiers_and_predicates_do_not_change_the_isa(bare, spec):
+    """Target features and predicates describe a configuration, not a target."""
+    assert gfxToIsa(spec) == gfxToIsa(bare)
+
+
+@pytest.mark.parametrize("bare,spec", _ALL_SPECS, ids=_SPEC_IDS)
+def test_base_arch_name_strips_both_qualifier_and_predicate(bare, spec):
+    assert baseArchName(spec) == bare
+
+
+@pytest.mark.parametrize("name", [n for n in _BARE_NAMES if n != "gfx1250-strict"])
+def test_only_the_stepping_reports_a_base_architecture(name):
+    """A name that merely looks like a stepping must not answer.
+
+    If it did, the architecture it names would be built under another's
+    capability overrides.
+    """
+    assert steppingArchOf(name) is None
+
+
+@pytest.mark.parametrize(
+    "reported",
+    ["gfx942", "gfx90a", "gfx1250", "gfx1250-strict",
+     "gfx9-4-generic", "gfx12-5-generic", "gfx10-3-generic"],
+)
+def test_a_reported_name_is_captured_whole(reported):
+    """The stepping suffix survives detection.
+
+    rocm_agent_enumerator's own regex stops at the hyphen group it was written
+    for, so it answers "gfx1250" for a gfx1250-strict agent -- a name Tensile
+    accepts, which is why that truncation is silent rather than an error.
+    """
+    m = _REPORTED_ARCH_RE.search(f"  Name:   {reported}  ")
+    assert m is not None and m.group(0) == reported
+
+
+@pytest.mark.parametrize("reported", ["gfx942:sramecc+:xnack-", "gfx90a:xnack+"])
+def test_target_features_are_not_part_of_the_captured_name(reported):
+    assert _REPORTED_ARCH_RE.search(reported).group(0) == reported.split(":")[0]
+
+
+def test_the_isa_regex_reads_only_the_leading_hex_digits():
+    """gfxToIsa stops at the first non-hex character, by design and by hazard.
+
+    By design, because a stepping has to resolve to the ISA it shares. By hazard,
+    because a name that merely looks like one resolves too: "gfx1250v1" answers
+    (12,5,0), which is why detection filters against architectureMap rather than
+    trusting the parse.
+    """
+    assert gfxToIsa("gfx1250v1") == gfxToIsa("gfx1250")
+    assert "gfx1250v1" not in architectureMap
+
+
+@pytest.mark.parametrize("name", _BARE_NAMES)
+def test_every_known_architecture_resolves_to_an_isa(name):
+    assert gfxToIsa(name) is not None
+
+
+def test_a_name_cannot_smuggle_a_path_separator():
+    """Names become directory components, so a parse must not yield a path.
+
+    gfxToIsa reads the leading digits and ignores the rest, so "gfx1250/.."
+    parses as an ISA; what stops it is that architectureMap does not vouch for it.
+    """
+    assert gfxToIsa("gfx1250/..") == gfxToIsa("gfx1250")
+    assert "gfx1250/.." not in architectureMap
+    assert not re.fullmatch(r"[A-Za-z0-9_.+-]+", "gfx1250/..")

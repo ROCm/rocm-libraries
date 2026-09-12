@@ -50,7 +50,7 @@ def test_create_library_for_benchmark_success():
         current_path = str(tmpdir / "work")
 
         with patch("subprocess.run") as mock_run:
-            M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+            M.createLibraryForBenchmark(logic_path, lib_path, current_path, "gfx1250-strict")
 
             # Verify subprocess.run was called
             mock_run.assert_called_once()
@@ -64,7 +64,10 @@ def test_create_library_for_benchmark_success():
             assert "TensileCreateLibrary" in cmd[0]
             assert "--new-client-only" in cmd
             assert "--no-short-file-names" in cmd
-            assert "--architecture=all" in cmd
+            # Not "all": that is expanded from the supported ISAs, so it cannot
+            # name a stepping that shares another architecture's ISA, and the
+            # library would be built somewhere this does not read it back from.
+            assert "--architecture=gfx1250-strict" in cmd
             assert "--code-object-version=default" in cmd
             assert "--library-format=yaml" in cmd
             assert logic_path in cmd
@@ -100,7 +103,7 @@ def test_create_library_for_benchmark_error_handling():
             # We'll just verify the exception is handled without raising
             with patch("Tensile.Common.printExit") as mock_exit:
                 try:
-                    M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+                    M.createLibraryForBenchmark(logic_path, lib_path, current_path, "gfx942")
                 except SystemExit:
                     # printExit calls sys.exit, which is expected
                     pass
@@ -111,7 +114,7 @@ def test_create_library_for_benchmark_error_handling():
 
             with patch("Tensile.Common.printExit") as mock_exit:
                 try:
-                    M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+                    M.createLibraryForBenchmark(logic_path, lib_path, current_path, "gfx942")
                 except SystemExit:
                     # printExit calls sys.exit, which is expected
                     pass

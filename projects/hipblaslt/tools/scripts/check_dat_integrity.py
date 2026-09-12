@@ -20,9 +20,14 @@ except ImportError:
 
 _MSGPACK_ERRORS = (msgpack.exceptions.UnpackException,) if msgpack is not None else ()
 
-_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
+# The arch token admits a hyphen so a silicon stepping such as gfx1250-strict is
+# matched rather than skipped: an unmatched file leaves its subtree with no
+# masters and no Mappings, and _scanSubtrees then drops the subtree from the scan
+# entirely instead of reporting it.
+_ARCH_TOKEN = r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"
+_MASTER_RE = re.compile(rf"^TensileLibrary_lazy_(?P<arch>{_ARCH_TOKEN})\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
-    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
+    rf"^TensileLiteLibrary_lazy_(?P<arch>{_ARCH_TOKEN})_Mapping\.dat(?:\.zlib)?$"
 )
 
 
@@ -33,9 +38,10 @@ class _MappingLoadError(Exception):
 def _scanSubtrees(libDir: Path):
     """Every gfx* subtree, with the arch tokens its masters and Mappings carry.
     Keyed on the directory, not the token: library/gfx1250/ and library/gfx1250-strict/
-    each hold a complete set of files all named for gfx1250 (shared compiler
-    target), so merging by token would check one subtree twice and the other not
-    at all.
+    each hold a complete, independent set of files, so merging by token would
+    check one subtree twice and the other not at all. Old packages named a
+    stepping's files for the architecture it shares an ISA with, so the token
+    inside a subtree is not guaranteed to equal the subtree's name.
     """
     subtrees = {}
     for sub in sorted(libDir.iterdir()):

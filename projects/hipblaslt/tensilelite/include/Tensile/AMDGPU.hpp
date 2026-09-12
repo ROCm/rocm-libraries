@@ -51,6 +51,15 @@ namespace TensileLite
         {
             // matching enum used in hipGcnArch
             // only including supported types
+            //
+            // Silicon revisions sharing an ISA are deliberately absent: there is
+            // no gfx1250-strict, and toProcessor maps such a device onto the base
+            // entry. The master library file name keeps them apart -- it spells
+            // the architecture the runtime reports, and a device opens only the
+            // master named for itself, so a Processor value is only compared
+            // inside its own revision's library. Adding one would also break
+            // older loaders: the value is serialized by name, and a loader whose
+            // table lacks that name rejects the whole file.
             gfx000 = 0,
             //gfx701  =  1,
             //gfx801  =  2,

@@ -42,9 +42,9 @@ from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import architectureMap, baseArchName, \
-                                         detectGlobalCurrentISA, gfxToIsa, \
-                                         isaToGfx, steppingArchOf
+from Tensile.Common.Architectures import architectureMap, archNameForIsa, \
+                                         baseArchName, detectGlobalCurrentArch, \
+                                         gfxToIsa, steppingArchOf
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters, validateRuntimeLanguage
@@ -105,9 +105,10 @@ def executeStepsInConfig(
         buildOnly (bool): If True, generate and build kernels but skip benchmarking.
         solutionPoolFiles (list): Resolved paths to library logic YAMLs to use as solution pools.
         archNames (list): The gfx names this build was asked for, when the caller knows
-            them. Only the LibraryClient step needs them: it re-spawns
-            TensileCreateLibrary in a fresh process, and the ISA alone cannot say which
-            gfx1250 stepping to rebuild for.
+            them. The ISA alone cannot say which gfx1250 stepping is meant, so both
+            steps that reach a compiler need them: BenchmarkProblems to assemble the
+            tuning kernels for the right target, and LibraryClient because it re-spawns
+            TensileCreateLibrary in a fresh process.
     """
 
     buildTmpPath = outputPath / "build_tmp"
@@ -115,7 +116,11 @@ def executeStepsInConfig(
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
-    gfxName = isaToGfx(next(iter(isaInfoMap)))
+    # The requested name when this entry point knows one. Deriving it from the ISA
+    # names gfx1250 for either stepping, and gfxName is what selects the library
+    # directory to read back and -- by substring, in ClientWriter's code-object
+    # filter -- which .co files are handed to the benchmark client.
+    gfxName = archNameForIsa(next(iter(isaInfoMap)), archNames)
     if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
@@ -134,6 +139,7 @@ def executeStepsInConfig(
                 probSolDict,
                 buildOnly,
                 solutionPoolFiles,
+                archNames=archNames,
             )
         flush_timing_buffer()
         print1("")
@@ -681,10 +687,10 @@ def Tensile(userArgs):
         offloadBundler,
     )
 
-    # Requested gfx names, kept alongside the ISAs so architectures that share a
-    # compiler target (gfx1250's steppings) can still be told apart. The ISA and
-    # auto-detect paths identify hardware by ISA alone, which resolves to the
-    # shipping stepping; a config can name a stepping explicitly, see below.
+    # Requested gfx names, kept alongside the ISAs so architectures that share an
+    # ISA (gfx1250's steppings) can still be told apart. --gpu-targets and
+    # auto-detect both name the architecture; only the `ISA:` config path cannot,
+    # and it can say which stepping it means with `Architecture:` -- see below.
     archNames = []
     if args.gpuTargets:
         isaList = []
@@ -706,15 +712,22 @@ def Tensile(userArgs):
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
 
     else:
-        isaList = [detectGlobalCurrentISA(device_id, enumerator)]
+        # The enumerator reports the architecture's name, and that name is the
+        # only thing distinguishing a stepping from the architecture it shares an
+        # ISA with. Keeping just the ISA here would tune gfx1250-strict silicon
+        # under gfx1250's capabilities and build code objects it cannot load --
+        # and this is the path that runs on the silicon it is tuning for, so the
+        # detected name outranks anything the config says.
+        detected = detectGlobalCurrentArch(device_id, enumerator)
+        isaList = [gfxToIsa(detected)]
+        archNames = [detected]
 
-    # `Architecture:` predates the stepping split and was silently ignored here, so
-    # it is read for the one thing the ISA cannot express -- which stepping -- and
-    # deliberately not for ISA selection, which stays with `ISA:` and auto-detect.
-    # A name for an ISA this build does not cover is therefore ignored as before,
-    # rather than applying an unrelated architecture's capabilities; a stepping is
-    # the one name where ignoring it silently builds the other stepping instead.
-    if not archNames:
+    # `Architecture:` is read for the one thing `ISA:` cannot express -- which
+    # stepping -- and not for ISA selection. It cannot override a detected name:
+    # that would tune one stepping on the other's hardware. It is still validated
+    # there, so a typo is reported rather than ignored.
+    if not args.gpuTargets:
+        nameCameFromDetection = bool(archNames)
         for arch in str(config["GlobalParameters"].get("Architecture", "")).split(";"):
             arch = arch.strip()
             if not arch:
@@ -722,6 +735,8 @@ def Tensile(userArgs):
             isa = gfxToIsa(arch)
             if isa is None or baseArchName(arch) not in architectureMap:
                 raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+            if nameCameFromDetection:
+                continue
             if isa in isaList:
                 archNames.append(arch)
             elif steppingArchOf(arch):

@@ -37,7 +37,8 @@ import json
 import collections
 from contextlib import contextmanager
 from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
 from Tensile.Common.Types import IsaVersion
@@ -60,7 +61,7 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnac
     header += f'.p2align 6\n'
     header += f'.amdhsa_kernel {name}\n'
     header += f'  .amdhsa_user_sgpr_kernarg_segment_ptr 1\n'
-    # gfx12 rejects .amdhsa_accum_offset, so every gfx12 target must be listed.
+    # Targets with no accvgprs reject .amdhsa_accum_offset, so each must be listed.
     if gfx_arch not in ("gfx900", "gfx908", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx1250", "gfx1250-strict"):
         header += f'  .amdhsa_accum_offset {vgpr} // accvgpr offset\n'
     header += f'  .amdhsa_next_free_vgpr {vgpr} // vgprs\n'
@@ -964,11 +965,21 @@ if __name__ == '__main__':
 
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
-        assignGlobalParameters({})
         enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
-        isa = detectGlobalCurrentISA(0, enumerator)
-        arch = isaToGfx(isa)
+        # `arch` is the compile target for this kernel, so it has to be the name
+        # the device reported: gfx1250 and gfx1250-strict share an ISA, and
+        # deriving the name back from it would build for gfx1250 on either --
+        # code the strict device then refuses to load.
+        arch = detectGlobalCurrentArch(0, enumerator)
+        isa = gfxToIsa(arch)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
+        # Capabilities can only be built once the ISA is known, which is why this
+        # follows detection instead of preceding it. The overrides are what
+        # separate two architectures sharing an ISA, so a detected stepping is
+        # only actually honoured here.
+        isaInfoMap = makeIsaInfoMap([isa], toolchain_path)
+        applyArchCapOverrides(isaInfoMap, [arch])
+        assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
     waveFrontSize = 32 if isa[0] in [11, 12] else 64

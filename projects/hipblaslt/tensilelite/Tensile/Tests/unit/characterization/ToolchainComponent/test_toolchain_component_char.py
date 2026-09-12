@@ -254,23 +254,37 @@ def test_linker_call_short_no_response_file(fixed_version, captured_invoke):
 
 
 def test_linker_call_long_uses_response_file(fixed_version, captured_invoke, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(C.Linker, "_use_response_file", lambda self, args: True)
     lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
-    lk(["a.o", "b.o"], "out.co")
+    dest = tmp_path / "out.co"
+    lk(["a.o", "b.o"], str(dest))
     args = captured_invoke[0]
-    assert "@clang_args.txt" in args
-    assert (tmp_path / "clang_args.txt").read_text() == "a.o b.o"
+    assert f"@{dest}.linker_args" in args
+    assert (tmp_path / "out.co.linker_args").read_text() == "a.o b.o"
+
+
+def test_linker_response_file_is_named_after_its_code_object(fixed_version, tmp_path):
+    """Builds covering architectures that share an ISA link from one working
+    directory, so a shared response file name lets one link the other's
+    objects."""
+    lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    lk._response_file_args(["plain.o"], str(tmp_path / "a" / "TensileLibrary.co.raw"))
+    lk._response_file_args(["strict.o"], str(tmp_path / "b" / "TensileLibrary.co.raw"))
+
+    assert (tmp_path / "a" / "TensileLibrary.co.raw.linker_args").read_text() == "plain.o"
+    assert (tmp_path / "b" / "TensileLibrary.co.raw.linker_args").read_text() == "strict.o"
 
 
 def test_linker_response_file_args_windows(fixed_version, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(C, "os_name", "nt")
     lk = C.Linker("/x/amdclang++", build_id_kind="sha1")
-    out = lk._response_file_args(["a\\b.o", "c.o"], "out.co")
-    assert "@clang_args.txt" in out
+    dest = tmp_path / "out.co"
+    out = lk._response_file_args(["a\\b.o", "c.o"], str(dest))
+    assert f"@{dest}.linker_args" in out
     # backslashes are doubled on Windows
-    assert (tmp_path / "clang_args.txt").read_text() == "a\\\\b.o c.o"
+    assert (tmp_path / "out.co.linker_args").read_text() == "a\\\\b.o c.o"
 
 
 def test_linker_use_response_file_windows_true(fixed_version, monkeypatch):

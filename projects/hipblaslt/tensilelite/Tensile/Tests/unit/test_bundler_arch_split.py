@@ -49,6 +49,8 @@ pytestmark = pytest.mark.unit
         ("gfx942:sramecc-:xnack-",     "gfx942-xnack-",              "gfx942"),
         ("gfx950:sramecc+:xnack+",     "gfx950-xnack+",              "gfx950"),
         ("gfx1250",                    "gfx1250",                    "gfx1250"),
+        # The hyphen is part of the target name, not a feature separator.
+        ("gfx1250-strict",             "gfx1250-strict",             "gfx1250-strict"),
     ],
 )
 def test_archNamesFromBundlerTarget(rawArch, expectedFilename, expectedBase):

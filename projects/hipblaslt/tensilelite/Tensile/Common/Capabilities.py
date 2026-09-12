@@ -33,10 +33,10 @@ from .Types import IsaVersion, IsaInfo
 def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List[str]) -> None:
     """Applies declared capability deltas for the requested architecture names.
 
-    Capabilities are probed by assembling at the architecture's compiler target,
-    so architectures that share a target (gfx1250's two steppings) are
-    indistinguishable to the probe. ``ARCH_CAP_OVERRIDES`` declares their
-    differences and this applies them in place.
+    The capability map is keyed by ISA version, so architectures that share an
+    ISA (gfx1250 and its stepping) collapse to one entry and the probe cannot
+    tell them apart. ``ARCH_CAP_OVERRIDES`` declares their differences and this
+    applies them in place.
 
     Every entry point that knows the requested names runs this immediately after
     ``makeIsaInfoMap``; the capability map is the only channel a stepping travels
@@ -69,8 +69,8 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
         info = isaInfoMap.get(isa)
         if info is None:
             # Skipping would leave the map at the values probed for the shared
-            # compiler target, i.e. build this architecture with the other's
-            # capabilities -- the outcome this function exists to prevent.
+            # ISA, i.e. build this architecture with the other's capabilities --
+            # the outcome this function exists to prevent.
             raise ValueError(
                 f"Architecture {name} declares capability overrides but ISA "
                 f"{tuple(isa) if isa else isa} is absent from the capability map; "
@@ -114,7 +114,7 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
     and ASM bugs are computed and stored in a map.
 
     Capabilities that the compiler cannot be probed for, because they differ
-    between architectures sharing one target, are layered on afterwards by
+    between architectures sharing one ISA, are layered on afterwards by
     ``applyArchCapOverrides``.
 
     Args:

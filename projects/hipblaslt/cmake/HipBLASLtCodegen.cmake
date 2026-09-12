@@ -100,6 +100,11 @@ function(hipblaslt_create_device_library)
         USES_TERMINAL
     )
 
+    # All architectures go to this one command, a stepping included. Covering a
+    # stepping and the architecture it steps from takes more than one run, since
+    # a run names its target by the ISA and the two spell one ISA -- but that
+    # split is TensileCreateLibrary's: it cannot happen at configure time, when
+    # Tensile is not yet importable.
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
         ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary

@@ -148,8 +148,10 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             set(_stinkytofu_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
             if(IS_DIRECTORY "${_stinkytofu_sibling}")
                 set(STINKYTOFU_ENABLE_WERROR ON)
-                # Build the StinkyTofu Python bindings only for gfx1250.
-                if("gfx1250" IN_LIST GPU_TARGETS)
+                # Build the StinkyTofu Python bindings only for gfx1250. Both
+                # steppings need them: they are separate entries in GPU_TARGETS,
+                # so a strict-only build matches neither if only one is listed.
+                if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
                     set(STINKYTOFU_BUILD_PYTHON ON CACHE BOOL
                         "Build StinkyTofu Python bindings" FORCE)
                 else()

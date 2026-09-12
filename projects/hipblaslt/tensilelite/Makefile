@@ -56,20 +56,31 @@ ifneq ($(filter gfx1250,$(TARGET_ARCH)),)
 	TRUE16_FEATURE += -Xclangas -target-feature -Xclangas +real-true16
 endif
 
+# One directory up, without the trailing slash $(dir) leaves, so it composes.
+# Used to walk from a file back to the caches/<key>/source holding it, one per
+# architecture. When two architectures share an ISA both trees sit under one
+# caches/ and their assembly carries the same basenames -- only the machine code
+# differs -- so a wildcard would assemble one architecture's kernels for the
+# other and link both into each code object.
+up = $(patsubst %/,%,$(dir $(1)))
+
 .SECONDEXPANSION:
 co: COFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/*/00_Final/caches/*/source/library -name '*.co')
 co: $$(COFILES)
 
 .SECONDEXPANSION:
+# $@ is <...>/caches/<key>/source/library/<arch>/TensileLibrary_<arch>.co
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: PROBLEM  = $(firstword $(subst /, ,$*))
-                                        SRCFILES = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/build_tmp/SOURCE/assembly -name '*.s')
+                                        SOURCEDIR = $(call up,$(call up,$(call up,$@)))
+                                        SRCFILES = $(shell find $(SOURCEDIR)/build_tmp -path '*/assembly/*' -name '*.s')
                                         OBJFILES = $(patsubst %.s,%.o,$(SRCFILES))
 ${TENSILE_OUT}/1_BenchmarkProblems%.co: $$(OBJFILES)
 	@echo relinking $(PROBLEM) $(lastword $(subst /, ,$@))
 	@$(LDD) -target amdgcn-amd-amdhsa -Xlinker --build-id=sha1 ${TRUE16_FEATURE} ${LINK_ARGS} -o $@ $^
 
-%.o: PROBLEM = $(word 3, $(subst /, ,$*))
-     COFILE = $(shell find ${TENSILE_OUT}/1_BenchmarkProblems/$(PROBLEM)/00_Final/caches/*/source/library -name '*.co')
+# $@ is <...>/caches/<key>/source/build_tmp/<scratch>/assembly/<kernel>.o
+%.o: SOURCEDIR = $(call up,$(call up,$(call up,$(call up,$@))))
+     COFILE = $(shell find $(SOURCEDIR)/library -name '*.co')
      ARCH ?= $(subst .co,,$(subst TensileLibrary_,,$(lastword $(subst /, ,$(COFILE)))))
 %.o: %.s
 	@echo rebuilding $(lastword $(subst /, ,$@)) for $(ARCH)
