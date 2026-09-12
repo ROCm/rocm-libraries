@@ -1,171 +1,98 @@
-# Workload identity, coverage and runtime evidence
+# Workload identity and runtime evidence
 
-[RUNBOOK.md](RUNBOOK.md) alone owns the ordered create/extend workflow. This page
-specifies corpus selection, semantic accounting and final runtime joins; it does
-not define a competing sequence. The [sweep reference](../../../IngestorGenerator/tools/README-sweeps.md)
-owns declarative YAML, measurement, correctness gates and resume.
+[RUNBOOK.md](RUNBOOK.md) owns execution and command order. The
+[sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) owns its Python
+CLI and YAML schema; this page defines evidence and accounting contracts.
 
-## Corpus provenance and scope
+## Provenance, scope and semantic identity
 
-Kernel-side dispatchers, spec predicates and tuning documentation say what a kernel
-can build or serve, not what callers ask for. An AOT set that lacks a candidate for
-a supported real shape still declines that caller. Inventory both external workloads
-and the kernel owners' benchmark/published shapes before approving the baseline.
-Keep their results separate rather than hiding one population in a mixed aggregate.
+Inventory external workloads and the owners' benchmarks/published results. Kernel
+predicates say what can build or serve, not what callers ask for. Keep populations
+separate by source. The external `ROCm/dnn-benchmarking` project supplies the benchmark
+CLI and graph corpora; use its current setup and workload manifests, not an assumed
+provider-installed executable. `microbench/` is a provenance label, not proof of
+synthetic data.
 
-The separate `ROCm/dnn-benchmarking` project provides caller graphs and the benchmark
-CLI. Use its current README/setup guidance and each workload's `MANIFEST.md`; do not
-assume the executable ships in the provider build. A `microbench/` path is a
-provenance label, not proof of synthetic data. Read manifests before excluding
-library-derived shape collections. Published result CSVs can preserve resolved
-shapes and priorities that source-only benchmark mining cannot reconstruct.
+Each declared source needs total, parsed, servable, covered and excluded counts with
+reasons and original identities. Missing/unreadable input is not an empty population.
+Request JSON feeds mining/parity; actual graph JSON directories feed the sweep.
+`mine_shapes.py` accepts published CSV, graph directories and optional `--rocke-bench`
+input. Omit sources only when outside the approved scope.
 
-Record every declared source's total, parsed, servable, proposed-covered and
-excluded populations, with reasons and original identities. A missing/unreadable
-source does not establish a zero population. Approved exclusions remain visible;
-never silently reduce the denominator to successful timing rows.
+Every semantic request field participates in identity, including unmasked/causal/window
+and sink semantics and independent Q/K/V dimensions. Provenance does not split the
+semantic key, but deduplication must retain **all original corpus/source/graph
+occurrences**. Inspect real dims/strides, attributes and UID topology; filenames do
+not define semantics. Distinguish unsupported, malformed/unrepresentable and missing-
+variant outcomes. Never reduce the denominator to successful timing rows.
 
-## Graph semantics and request identity
+## Applicability and reference contract
 
-Inspect real graphs as well as in-tree bundles. Compare per-operand dims/strides,
-optional/deprecated attribute spelling, topology/UID edges and shape magnitude.
-Use the complete graph/kernel restrictions, not a convenient subset that overstates
-support. Distinguish valid unsupported requests from missing compiled variants and
-from malformed or unrepresentable input.
+rocKE profiles scope the candidate registry to the actual kernel family/algorithm
+and required opt-in selector. Reference candidates must implement
+`admits(request) -> (bool, str)`; **there is no `_supports` fallback**. False requires
+a nonempty reason. Missing/noncallable APIs, bad signatures, exceptions, invalid
+returns and generic constructor/factory failures are operational errors: reconciliation
+exits 2, including under escape flags. They are not unsupported-shape evidence.
 
-All semantic request fields participate in identity. In particular, preserve
-unmasked versus causal versus bounded-window attention, sink semantics and
-independent Q/K/V dimensions; a Q/K contraction dimension does not fix V/output
-width. Provenance alone does not split semantic identity, but deduplication must
-retain **every original corpus/source/graph occurrence** for runtime accounting.
-Never infer semantics from a filename or drop a field to fit a request schema.
+Reference-only support requires investigation of variants, matcher semantics or the
+reference claim and an explicit scope decision for exclusions. Applicability does
+not prove numerical truth; use [graph-contract.md](graph-contract.md)'s reference
+capability rules. Direct-load engines use their own explicit corpus/reference,
+without a fictitious rocKE profile.
 
-The supported miner interface, using absolute script/input paths, is:
+## Installed measurement contract
 
-```text
-<PY> <GEN>/tools/mine_shapes.py --published <owner-results.csv> --graphs <graph-directory> --arch gfx942 --include-windowed --out <request-shapes.json>
-```
+Each arm retains source/config, descriptor/payload, plugin/runtime and installation
+identities from a coherent stack. The exact installed UED name must map to the expected
+benchmark engine name/ID; another engine, a name prefix or a reference-provider row
+cannot satisfy attribution. The sweep supplies the benchmark's `--engine` argument
+from that discovered ID; phase-owned arguments must not be overridden.
 
-`<PY>` is the generator's `.venv/bin/python`. An actual benchmark source tree can
-also be supplied through `--rocke-bench`. Omit a source only when explicitly absent
-from the approved scope. Request JSON is for authoring/parity analysis; the sweep
-consumes actual graph JSON directories. Reconcile source counts and exclusions
-across both forms.
+The YAML example is not an inventory. Replace corpus counts, total installed KDP-entry
+counts, paths and served floors with actual inputs. Paths resolve from the YAML
+directory with no shell/environment interpolation. Hazard exclusions fail if present,
+not silently filter; use `exclude_tensors: none` when appropriate.
 
-## Offline applicability is not runtime coverage
+Comparisons require one device/node/session/job, baseline-first fixed arm order,
+a discarded **gated** warmup, at least three rounds, isolated caches/logs and separate
+correctness once per corpus/arm. Reference capability must cover the approved features
+and shapes; keep runtime affordable without silently dropping correctness obligations.
+Diagnostic cross-session resume is not a single-session comparative cohort. Final
+measurements use fresh output after final generation/build/install.
 
-For a rocKE integration, use its actual scoped profile and request list:
-
-```text
-<PY> <GEN>/tools/reconcile_applicability.py --profile <profile.yaml> --shapes <request-shapes.json>
-```
-
-A validated false predicate with a valid reason is an ordinary decline. Missing or
-noncallable APIs, signature/binding failure, invocation exception and invalid return
-values are `ParityError`/exit 2, including under narrowing/escape flags. Generic
-constructor/factory exceptions are operational errors, not evidence of unsupported
-input. `_supports` is a degraded fallback only when `admits` is absent, not when it
-is present but broken.
-
-Reference-only supported rows identify missing variants, matcher mistakes or a
-reference claim requiring investigation. An explicit scope decision is required
-for exclusions; an escape flag cannot erase a broken reference API or justify a
-coverage gap. Applicability agreement is not numerical truth. Direct-load engines
-use their own explicit semantic corpus and reference; no fictitious rocKE profile
-is required.
-
-## Installed measurement inputs
-
-Keep each arm's source/config, descriptors/payload, plugin/runtime and installation
-identities. Use bindings and plugins from the accepted coherent stack, not a setup
-helper's unrelated default checkout or an arbitrary wheel plugin directory.
-Check the actual capability/production build flags, installed descriptor shard and
-engine discovery. A plugin file or an empty registry alone does not diagnose why an
-engine is unavailable; missing descriptors, disabled capability, wrong architecture,
-wrong install paths and failed native registration need distinct evidence.
-
-Baseline installed discovery must connect the exact UED name to the exact benchmark
-`engine_name` and engine ID. Prefixes, another engine's rows and a reference provider
-cannot satisfy attribution. The RUNBOOK's separate engine-pinned integration
-registration proves targeted device behavior; do not invent a benchmark selection
-flag to replace it.
-
-Use the Python sweep with explicit declarative input:
-
-```text
-<PY> <GEN>/tools/sweep.py --config <absolute-YAML>
-```
-
-Start with `configs/sweep-isolation.sweep.yaml.example`. Its ordered corpus/arm
-lists, counts, installed paths and served floor must describe the actual run;
-example counts are not measurements. Paths resolve from the YAML directory, not
-cwd, and configuration has no environment interpolation. Hazard exclusions are a
-fail-if-present gate, never implicit filtering; declare `exclude_tensors: none`
-when appropriate.
-
-Comparative measurement uses one device/node/session/job, baseline-first fixed arm
-order, discarded gated warmup, at least three rounds and separate correctness.
-Cache/log isolation and content-bound completion sidecars prevent other arms or
-stale results from satisfying a phase. Diagnostic resume across sessions is not a
-single-session comparative cohort. Final comparisons use a fresh output directory
-after final selection, regeneration, rebuild and installation.
-
-`SWEEP_DONE` means validated completion only. Explicit
-`correctness.enabled: false` permits `SWEEP_TIMING_ONLY`/exit 0, never final RUNBOOK
-success. Unmet gates produce `SWEEP_INCOMPLETE`/exit 1; invalid configuration exits 2.
-A correctness command failure, missing comparison, mismatch, NaN or unwritten output
-cannot be excused by successful timing.
-
-Reference capability must cover the actual feature and shapes. Neither current CPU
-nor GPU SDPA reference supports a sink UID. Without an actually capable independent
-reference, the claimed feature is **BLOCKED**; CPU fallback and unverified golden
-output are not remedies. Keep numerical work affordable without silently excluding
-production shapes from the approved correctness obligation. Allocation/container
-failure is infrastructure evidence, not a kernel test result.
+`SWEEP_DONE` means all required phases/gates completed with correctness enabled.
+`correctness.enabled: false` can yield `SWEEP_TIMING_ONLY`/exit 0, not final success.
+Unmet gates produce `SWEEP_INCOMPLETE`/exit 1; invalid config, operational errors and
+interruption exit 2. Timing cannot excuse a failed/missing comparison, mismatch,
+NaN or unwritten output. Infrastructure failure is not a kernel test result.
 
 ## Complete final runtime join
 
-After the final installed sweep, harvest its result files and available engine logs
-into an outcome ledger for every input in every corpus/phase. Retain:
+Every input in every final corpus/phase needs an outcome ledger containing:
 
-| Identity/evidence | Required content |
+| Field | Required evidence |
 |---|---|
-| Semantic key | Every semantic request field, excluding provenance only |
-| Original occurrence | Corpus, source, original graph identity and staged file identity |
-| Input binding | Current phase key/fingerprint and final artifact identities |
-| Attribution | Exact expected engine and observed engine ID/name |
+| Semantic key | All request fields except provenance |
+| Original occurrence | Corpus/source/graph identity and staged file identity |
+| Input binding | Phase key/fingerprint and final artifact identities |
+| Attribution | Exact expected and observed engine ID/name |
 | Outcome | Served, explicitly declined, execution error, missing or ambiguous |
-| Evidence | Result/log location and an actually observed decline reason when applicable |
+| Evidence | Result/log path and actually observed decline reason where applicable |
 
-A missing timing row is not a decline. An unavailable runtime reason remains
-unavailable; do not reconstruct it from offline source or policy. Join within each
-corpus/phase, reject duplicate/ambiguous graph names, mismatched fingerprints and
-missing outcomes, and preserve all source occurrences even when mining merged
-semantic requests. Missing, ambiguous or execution-error outcomes block acceptance.
+Absence of a timing row is not a decline. Reasons unavailable in runtime evidence
+cannot be reconstructed from offline policy. The join is corpus/phase-local and
+rejects missing outcomes, duplicate/ambiguous names and mismatched fingerprints;
+semantic deduplication must not discard original occurrences. Missing/ambiguous/error
+outcomes block runtime acceptance.
 
-Only a complete join permits construction of the existing graph-name-to-reason
-JSON for that corpus:
+Only the complete join supports the per-corpus graph-name-to-reason JSON consumed by
+`reconcile_applicability.py --declines`. Do not mix same-named graphs across corpora or
+present a sparse accepted mapping as complete runtime evidence. Without the join,
+reconciliation is **offline only**.
 
-```text
-<PY> <GEN>/tools/reconcile_applicability.py --profile <profile.yaml> --shapes <this-corpus-requests.json> --declines <this-corpus-runtime-declines.json>
-```
-
-Do not mix same-named graphs across corpora or feed a sparse mapping as complete
-runtime evidence. Without the join, label reconciliation **offline only**, even
-if the CLI accepts the file. The integration walkthrough includes a disposable
-negative join probe for omitted and same-named mismatched outcomes.
-
-## Reporting boundary
-
-Report covered/servable/total populations by original source, exact-engine served
-and independently validated counts, all declines and exclusions, and every blocked
-outcome. A minimum served floor is not permission to omit the rest. Report
-geomean-of-ratios and time-weighted sum-baseline/sum-arm together, drift by round,
-and byte-identical controls selected from artifact hashes rather than timings.
-
-Claims refer to the final installed artifact and exercised device/graphs only.
-Regeneration or changed installed content invalidates results bound to old inputs
-and returns to the RUNBOOK's artifact/native/device gates. Extension acceptance
-must exercise the addition: the concrete pointwise walkthrough selects HALF/256
-on a one-element graph and retains old ADD/MUL/SUB coverage, not just the unchanged
-default-FLOAT case. Logs, proposed commands or queued jobs are not completed proof.
+Report covered/servable/total, exact-engine served and independently validated counts,
+all declines/exclusions and blocked outcomes by original source. A minimum served floor
+does not waive the rest. Report geomean-of-ratios and time-weighted sum-baseline/sum-arm,
+round drift and byte-identical controls determined from artifact hashes. Changed final
+installed content invalidates evidence bound to old inputs.

@@ -3,39 +3,8 @@ interface:
   short_description: "Integrate engines through final artifact, native, device and corpus proof"
   default_prompt: >-
     Use hipdnn-ingestor-engine for a complete create or extend integration. Read
-    SKILL.md's entry/completion contracts, then follow RUNBOOK.md as the sole ordered
-    workflow: (1) entry and early feasibility, (2) contracts/corpus/baseline approval,
-    (3) generate/implement/splice, (4) build/pack/install/host proof, (5) baseline
-    device proof, (6) measured tuning and final selection with stages 3–5 repeated,
-    (7) final corpora/runtime reconciliation, (8) evidence handoff. Use the generator
-    venv with absolute script paths. Early device_probe.py --mode early --arch
-    gfx942 --sweep-root <existing-root> has no install prerequisite and ignores
-    inherited INSTALL; device_probe.py --mode installed adds --install
-    <existing-install> only after installation. field_audit.py accepts one schema
-    and one or more native sources. sweep.py --config <absolute-YAML> uses
-    configs/sweep-isolation.sweep.yaml.example; never execute configuration as code.
-    Generate into scratch space and preserve existing IDs/hooks with addition-only
-    splices. Generic generation supplies declarations, not compiler evidence:
-    producing-compiler effective_spec is distinct from authored spec, None is not a
-    wildcard, and every consuming descriptor needs agreement. Native proof is actual
-    typed provider registration/loading plus finalized emitted census with explicit
-    HIPDNN_TEST_EXPECTED_ARCH and the corresponding shard, never source-text
-    certification. Host loading does not prove dispatch. Discover tests with component
-    hip-kernel; gfx942 dense requires the exact
-    hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests registration
-    and hipkernel:Gfx942AttentionDense pin, not the first provider-prefixed command.
-    Neither current CPU nor GPU SDPA reference supports a sink UID: require an
-    actually capable reference or record BLOCKED, never fabricated golden output.
-    Measure built/installed arms in fixed order with warmup, rounds, isolated caches,
-    exact engine attribution and separate correctness. SWEEP_DONE is validated
-    completion; explicit correctness.enabled=false yields SWEEP_TIMING_ONLY, never
-    final success; unmet gates yield SWEEP_INCOMPLETE. Resume is bound to current
-    input content. After final regeneration/rebuild/reinstallation, repeat artifact,
-    native, device and corpus gates. Join every final corpus/phase input to observed
-    served, explicitly declined, error, missing or ambiguous outcomes before
-    reconcile_applicability.py --declines; without a complete join report offline
-    only. Broken eligibility APIs fail with exit 2 even under escape flags. Report
-    actual commands/evidence and exact limitations; zero selected cases, skips,
-    another engine's work, timing-only output or a previous install cannot complete
-    the integration. Extension proof must dispatch the new variant, not only pass
-    unchanged baseline cases.
+    SKILL.md for entry/completion requirements, then execute RUNBOOK.md as the only
+    ordered workflow. Consult its linked domain pages for contracts; do not invent
+    a second sequence or unsupported CLI capabilities. Report final-installation
+    evidence and exact limitations, never generation, skipped work, another engine's
+    results or an unchanged extension baseline as completion.
