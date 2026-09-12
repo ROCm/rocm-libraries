@@ -23,6 +23,8 @@ integers. The integer is a stable-but-arbitrary index into that table, so a test
 keyed on it cannot see the rows no integer selects yet.
 """
 
+import re
+
 import pytest
 
 from Tensile.Components import TDMFuse as TF
@@ -241,3 +243,148 @@ def test_override_refuses_an_unknown_mechanism():
 def test_supported_counts_match_the_documented_mechanisms():
     assert DCP_THICK_GATE_SUPPORTED == {DCP_THICK_GATE_TEXT: 2,
                                         DCP_THICK_GATE_TOKENS: 1}
+
+
+# ---------------------------------------------------------------------------
+# The emitted-text half of the gate.
+#
+# Nothing above drives _dcpApplyThickWait1, and that is how a fail-closed
+# refusal cost six kernels unnoticed: the owner's *decision* was covered, the
+# text that has to carry it was not. The two schedules below are one kernel as
+# two cost tables emit it -- gfx1250 keeps a gate at each fill end, gfx1250v0
+# sinks the clone's reads and its gate past the convergence label so one drain
+# serves both. Only the second was refused, and only because the old check
+# counted retags against InitCIterWmma instead of reading the schedule.
+
+MARKER = "DcpEarlyFillA"          # ks() is a 2/1 pair, so A is the thick side
+GATE = ["s_wait_tensorcnt 0", "s_barrier_signal -1", "s_barrier_wait -1"]
+READS = ["ds_load_b128 v[0:3], v[64] offset:128",
+         "ds_load_b64 v[4:5], v[65] offset:512"]
+MATH = ["v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:23], v[24:31], 0"]
+FILL = ["tensor_load_to_lds s[0:3], s[8:15]"]
+
+
+def site(label, *body):
+    """One fill-end label and the lines the schedule left under it."""
+    return ["label_%s:" % label] + [line for part in body for line in part]
+
+
+def asm(*blocks):
+    """Those blocks as the one string the pass is handed."""
+    return "".join(line + "\n" for block in blocks for line in block)
+
+
+CLONE = "InitCIterWmma_label_DcpEarlyFillAEnd_0"
+MAIN = "DcpEarlyFillAEnd"
+TAIL = "InitCIterWmma_target_0"
+
+PER_SITE = (                                       # gfx1250
+    site(CLONE, GATE, READS, MATH, ["s_branch label_%s:" % TAIL]),
+    ["label_LoopBeginL:"] + FILL,
+    site(MAIN, GATE, READS, MATH),
+)
+MERGED = (                                         # gfx1250v0
+    site(CLONE, MATH, ["s_branch label_%s" % TAIL]),
+    ["label_LoopBeginL:"] + FILL,
+    site(MAIN, MATH),
+    ["label_%s:" % TAIL] + GATE + READS,
+)
+THREE_SITE = (                       # 33 of 72 in the shipped gfx1250 corpus
+    site(CLONE, GATE, READS),
+    site(MAIN, MATH),                # no gate of its own, and always accepted
+    site(MAIN + "_1", GATE, READS),
+)
+
+
+def uncovered(schedule, relaxed=DCP_THICK_GATE_SUPPORTED[DCP_THICK_GATE_TEXT]):
+    """The verdict on one schedule, after the pass has done its retagging.
+
+    Retagging every full drain stands in for the real loop here: in these
+    shapes each one is some site's own gate, and passing the rewritten indices
+    is what lets the check tell a gate this pass relaxed from one that merely
+    reads the same number.
+    """
+    lines = asm(*schedule).splitlines(keepends=True)
+    retagged = set()
+    for n, line in enumerate(lines):
+        swapped = re.sub(r"^(s_wait_tensorcnt\s+)0(\s|$)",
+                         r"\g<1>%d\2" % relaxed, line)
+        if swapped != line:
+            lines[n] = swapped
+            retagged.add(n)
+    return TF.dcpThickGateUncoveredSites(lines, MARKER, relaxed, retagged)
+
+
+@pytest.mark.parametrize("why,schedule", [("per-site", PER_SITE),
+                                          ("merged", MERGED),
+                                          ("three-site", THREE_SITE)])
+def test_every_schedule_the_compiler_emits_is_covered(why, schedule):
+    assert uncovered(schedule) == []
+
+
+def test_reads_ahead_of_the_gate_are_refused():
+    """The hazard the gate exists for, and the one shape none of the three has.
+
+    A fill end whose LDS reads precede its drain is reading data that may not
+    have landed. That is worth refusing to emit, and it is what the check is
+    for now that the count is gone.
+    """
+    bad = (site(CLONE, READS, GATE),)
+    assert [why.split(" at line")[0] for _, why in uncovered(bad)] == [
+        "reaches ds_load_b128"]
+
+
+def test_a_gate_the_pass_did_not_write_is_refused():
+    """Still fail-closed, just about the right thing.
+
+    Reaching a gate this pass did not rewrite means the emitted shape is not
+    the one it assumes, so it may not claim the site is relaxed -- and this
+    holds even when that gate already reads the relaxed count, because the next
+    gate down drains the thin tensor into the block its reads are about to
+    touch.
+    """
+    foreign = (site(CLONE, ["s_wait_tensorcnt 1"], READS),)
+    assert [why.split(" at line")[0] for _, why in uncovered(foreign)] == [
+        "first gate is s_wait_tensorcnt 1"]
+
+
+def test_a_header_copy_with_nothing_below_it_is_covered_vacuously():
+    """A loop copy can emit a fill end with no gate and no reads after it.
+    There is nothing to hold back, so there is nothing to refuse -- and the
+    pre-existing test_thick_wait_ignores_header_copies_* says the same thing
+    about the pass itself.
+    """
+    assert uncovered((site(CLONE, GATE, READS), site(MAIN, MATH))) == []
+
+
+def test_no_fill_label_at_all_is_refused():
+    assert [why for _, why in uncovered((["label_LoopBeginL:"] + FILL,))] == [
+        "no DcpEarlyFillA label was emitted at all"]
+
+
+@pytest.mark.parametrize("initCIterWmma", [0, 1])
+def test_acceptance_does_not_depend_on_how_many_waits_were_retagged(
+        initCIterWmma):
+    """The regression. Fails against the check this replaced.
+
+    Both schedules are correct and the pass relaxes both, but it retags two
+    waits in one and one in the other, and InitCIterWmma is 1 either way. Any
+    check derived from that parameter -- which is what `expected` was -- has to
+    reject one of these, so reintroducing one fails here. Parametrising the
+    parameter is the point: the verdict may not move with it.
+
+    `self` is unused on the text path, so the pass is driven unbound rather
+    than standing up a KernelWriter.
+    """
+    from Tensile.KernelWriter import KernelWriter
+
+    solution = ks(InitCIterWmma=initCIterWmma)
+    gate = decoupledThickGateRelaxation(solution)
+    assert gate.mechanism == DCP_THICK_GATE_TEXT
+    relaxed = "s_wait_tensorcnt %d" % gate.tensorcnt
+
+    perSite = KernelWriter._dcpApplyThickWait1(None, solution, asm(*PER_SITE))
+    merged = KernelWriter._dcpApplyThickWait1(None, solution, asm(*MERGED))
+
+    assert (perSite.count(relaxed), merged.count(relaxed)) == (2, 1)
+    assert "s_wait_tensorcnt 0" not in perSite + merged
