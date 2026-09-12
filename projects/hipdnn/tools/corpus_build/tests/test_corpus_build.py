@@ -141,19 +141,32 @@ def test_every_emitted_shape_tuple_is_distinct(tmp_path, sources):
 # -------------------------------------------------------------------- regime tagging
 
 
-@pytest.mark.parametrize("shape,expected", [
-    (dict(seqlen_q=1, seqlen_kv=512, heads_q=32, heads_kv=8), "decode_short_gqa"),
-    (dict(seqlen_q=1, seqlen_kv=32768, heads_q=32, heads_kv=1), "decode_long_mqa"),
-    (dict(seqlen_q=512, seqlen_kv=512, heads_q=12, heads_kv=12), "prefill_short_mha"),
-    (dict(seqlen_q=8192, seqlen_kv=8192, heads_q=64, heads_kv=8), "prefill_long_gqa"),
-    (dict(seqlen_q=256, seqlen_kv=4096, heads_q=16, heads_kv=16), "append_long_mha"),
-    (dict(seqlen_q=512, seqlen_kv=256, heads_q=8, heads_kv=8), "cross_short_mha"),
+@pytest.mark.parametrize("shape,expected,causal", [
+    (dict(seqlen_q=1, seqlen_kv=512, heads_q=32, heads_kv=8), "decode_short_gqa", True),
+    (dict(seqlen_q=1, seqlen_kv=32768, heads_q=32, heads_kv=1), "decode_long_mqa", True),
+    (dict(seqlen_q=512, seqlen_kv=512, heads_q=12, heads_kv=12), "prefill_short_mha", True),
+    (dict(seqlen_q=8192, seqlen_kv=8192, heads_q=64, heads_kv=8), "prefill_long_gqa", True),
+    (dict(seqlen_q=256, seqlen_kv=4096, heads_q=16, heads_kv=16), "append_long_mha", True),
+    # Cross attention is never causal: the two sequences come from different tensors, so
+    # there is no diagonal to mask against -- and Shape refuses the combination.
+    (dict(seqlen_q=512, seqlen_kv=256, heads_q=8, heads_kv=8), "cross_short_mha", False),
 ])
-def test_the_regime_names_the_population_a_problem_belongs_to(shape, expected):
+def test_the_regime_names_the_population_a_problem_belongs_to(shape, expected, causal):
     """Phase, context length and head grouping, which are the three axes a heuristic
     can be excellent on one side of and useless on the other. `2048` is the boundary
     because it is the middle bucket of the declaration's own `seqlen_k` regimes."""
-    assert Shape(dtype="bf16", batch=1, head_dim=128, causal=True, **shape).regime == expected
+    assert Shape(dtype="bf16", batch=1, head_dim=128, causal=causal, **shape).regime == expected
+
+
+def test_a_causal_cross_attention_shape_is_refused_rather_than_emitted_unlabellable():
+    """`sdpa_fwd.opmeta.json` counts a causal problem's work as Sq*Sk - Sq*(Sq-1)/2,
+    which goes non-positive once the queries outrun the keys. The graph is legal and an
+    engine will run it; what cannot exist is a training row, because the label is derived
+    from that count -- "full-graph graph.flops must be a positive finite number" ended
+    AITER's 843-graph collection (run 67929589) on exactly these shapes."""
+    with pytest.raises(ValueError, match="causal cross attention"):
+        Shape(dtype="bf16", batch=1, head_dim=128, causal=True,
+              seqlen_q=512, seqlen_kv=256, heads_q=8, heads_kv=8)
 
 
 def test_the_regime_travels_on_the_graph_as_well_as_the_manifest(tmp_path, sources):

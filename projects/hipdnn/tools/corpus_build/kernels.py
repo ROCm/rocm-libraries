@@ -79,13 +79,20 @@ def from_pack(path: Path, min_candidates: int, max_bytes: int) -> tuple[list[Can
         if kernels < min_candidates:
             stats["too_few_candidates"] += 1
             continue
-        shape = Shape(dtype=geometry["dtype"].lower(), batch=int(geometry["batch"]),
-                      heads_q=int(geometry["num_query_heads"]),
-                      heads_kv=int(geometry["num_kv_heads"]),
-                      seqlen_q=int(geometry["seqlen_q"]),
-                      seqlen_kv=int(geometry["seqlen_kv"]),
-                      head_dim=int(geometry["head_size"]),
-                      causal=bool(geometry["causal"]))
+        try:
+            shape = Shape(dtype=geometry["dtype"].lower(), batch=int(geometry["batch"]),
+                          heads_q=int(geometry["num_query_heads"]),
+                          heads_kv=int(geometry["num_kv_heads"]),
+                          seqlen_q=int(geometry["seqlen_q"]),
+                          seqlen_kv=int(geometry["seqlen_kv"]),
+                          head_dim=int(geometry["head_size"]),
+                          causal=bool(geometry["causal"]))
+        except ValueError:
+            # A pack may carry a geometry no corpus can label -- causal cross attention,
+            # whose declared FLOP count is non-positive. The kernel exists and the engine
+            # will run it; there is simply no measurement a training row can be made of.
+            stats["unlabellable"] = stats.get("unlabellable", 0) + 1
+            continue
         if graphs.footprint_bytes(shape) > max_bytes:
             stats["over_byte_budget"] += 1
             continue
