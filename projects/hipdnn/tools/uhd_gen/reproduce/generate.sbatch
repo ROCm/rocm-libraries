@@ -58,6 +58,18 @@ rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
+if [ -n "${UHD_BUNDLE:-}" ]; then
+    # The compute sites do not all resolve github.com to the same mirror: a node can clone a
+    # branch tip hours behind the one `git ls-remote` reports from the login node (measured:
+    # runs 67930607/67930689 built a655f903 while the ref was aeed8422). A bundle carries the
+    # exact commits from the machine that pushed them, so verification cannot silently test
+    # a different tree than the one under review.
+    # `git bundle create <file> <base>..HEAD` names its tip HEAD, not a branch ref, so the
+    # fetch asks for exactly that and checks out FETCH_HEAD.
+    git -C "$SRC" fetch "$UHD_BUNDLE" "${UHD_COMMIT:-HEAD}" >> /tmp/uhd/clone.log 2>&1 \
+        && git -C "$SRC" checkout --detach FETCH_HEAD >> /tmp/uhd/clone.log 2>&1 \
+        || { echo "FATAL: bundle $UHD_BUNDLE did not apply"; tail -8 /tmp/uhd/clone.log; exit 1; }
+fi
 git -C "$SRC" log --oneline -1
 
 step "configure"
