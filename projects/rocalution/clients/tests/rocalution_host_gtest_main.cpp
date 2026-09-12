@@ -25,6 +25,8 @@
 
 #include <gtest/gtest.h>
 #include <rocalution/rocalution.hpp>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 
 #define VAL(str) #str
@@ -59,7 +61,22 @@ int main(int argc, char** argv)
         }
     }
 
-    rocalution::set_device_rocalution(device);
+    // Host-only test jobs must not initialize HIP. In particular, this keeps
+    // the host-ASAN CTest category runnable on CPU-only workers without even
+    // probing a GPU device node.
+    const char* host_only_env = std::getenv("ROCALUTION_HOST_ONLY");
+    const bool  host_only
+        = host_only_env != nullptr && std::strcmp(host_only_env, "0") != 0;
+
+    if(host_only)
+    {
+        rocalution::disable_accelerator_rocalution(true);
+    }
+    else
+    {
+        rocalution::set_device_rocalution(device);
+    }
+
     rocalution::init_rocalution();
     rocalution::info_rocalution();
     rocalution::stop_rocalution();

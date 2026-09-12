@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: ff84df3afa97867586d2196cfb013b3f506946a4
+          ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -97,7 +97,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ff84df3afa97867586d2196cfb013b3f506946a4
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@a85f17faf1cffc5827fa4a353ad788339152bbfa
     with:
       build_variant: "asan"
       # Host instrumentation is architecture-independent, so presubmit builds
@@ -117,7 +117,7 @@ jobs:
       build_stages: ${{ github.event_name == 'pull_request' && 'compiler-runtime,math-libs' || '' }}
       build_native_linux: ${{ github.event_name != 'pull_request' }}
       repository: ROCm/TheRock
-      ref: ff84df3afa97867586d2196cfb013b3f506946a4
+      ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
       changed_projects: ${{ needs.configure.outputs.changed_projects }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -130,7 +130,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ff84df3afa97867586d2196cfb013b3f506946a4
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@a85f17faf1cffc5827fa4a353ad788339152bbfa
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -144,7 +144,7 @@ jobs:
       # the explicit phased host-ASAN admission list in TheRock.
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
-      ref: ff84df3afa97867586d2196cfb013b3f506946a4
+      ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
     permissions:
       contents: read
       id-token: write
@@ -162,7 +162,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ff84df3afa97867586d2196cfb013b3f506946a4
+          ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
