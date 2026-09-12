@@ -209,3 +209,27 @@ def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifac
     assert np.all(np.abs(predictions - np.asarray([2 * (1 + index / 240) for index in range(24)])) < 0.3)
     ued = json.loads((root / "engine.ued.json").read_text(encoding="utf-8"))
     assert ued[ROLE]["gfx942"] == installed.descriptor["id"]
+
+
+def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifact():
+    """A physical TFLOPS prediction that is not positive is one EnginePredictor reports as
+    INVALID, falling back to static ordering for that graph. The model is fitted on log1p
+    and inverted with expm1, so a log-space prediction below zero lands in (-1, 0) -- a few
+    rows at the bottom of the range. Failing the artifact discarded a trained AITER model
+    over 4 rows in 495 (run 67929709); the rows are now reported and skipped."""
+    good, bad = measurement(), measurement(engine=8, graph="other")
+    report = evaluate_immediate(pd.DataFrame([good, bad]),
+                                [bundle(good, 1200), bundle(bad, -5)],
+                                eval_fraction=1, seed=0)
+    assert report["metrics"]["unscored_rows"]["total"] == 1
+    assert report["metrics"]["unscored_rows"]["per_engine"][bad["engine_name"]] == 1
+    assert report["metrics"]["calibration"]["rows"] == 1
+    assert report["metrics"]["calibration"]["signed_bias_tflops"] == 200
+
+
+def test_a_model_that_can_score_nothing_is_still_a_failure():
+    """Reporting every row as a decline is not a model; it is an artifact that would leave
+    the engine on static ordering everywhere, which the generator must not publish."""
+    row = measurement()
+    with pytest.raises(ValueError, match="scored no evaluation row"):
+        evaluate_immediate(pd.DataFrame([row]), [bundle(row, -1)], eval_fraction=1, seed=0)
