@@ -355,6 +355,26 @@ protected:
         ASSERT_TRUE(recoveryError.empty()) << recoveryError;
     }
 
+    /// Offsets the seed by UID to distinguish this fixture's binary operands.
+    ///
+    /// `a + b` and `a + a` agree elementwise when both operands carry the same data, so a
+    /// pointwise comparison cannot tell an add that reads both inputs from one that reads
+    /// one twice. The base seeds every tensor alike, which is right for suites whose
+    /// reference is insensitive to it; this engine's whole catalog is elementwise binary
+    /// ops, so it is not right here.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
+        }
+    }
+
     static int64_t packedEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(PACKED_ENGINE_NAME);
@@ -627,8 +647,9 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graph, /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 }
 
 // ---------------------------------------------------------------------------
@@ -647,8 +668,9 @@ TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graph, /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
