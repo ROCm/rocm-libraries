@@ -105,7 +105,13 @@ def compare_provenance(trained: object, actual: object) -> None:
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
     recorded_revision = trained.get("selector_revision")
-    if recorded_revision is not None and actual.get("selector_revision") != recorded_revision:
+    # Only when the other side carries one too. The loader has both -- the model's record
+    # and the provider's live report -- and refuses a mismatch. A descriptor tree does not:
+    # `provenance_for_engine` reads descriptors, which say nothing about the provider build,
+    # so comparing there would reject every descriptor-backed model that also records the
+    # revision it was measured on (run 67929708, promote of the gfx950 dense L1).
+    if recorded_revision is not None and "selector_revision" in actual \
+            and actual["selector_revision"] != recorded_revision:
         raise ProvenanceError(
             f"trained_against.selector_revision: model records {recorded_revision!r}, "
             f"the provider reports {actual.get('selector_revision')!r}")
