@@ -158,3 +158,42 @@ class Candidate:
     shape: Shape
     source: str
     origin: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Filter:
+    """Which shapes a corpus is allowed to carry, as facet whitelists.
+
+    A corpus exists to make engines compete, and an engine that cannot serve a shape
+    contributes nothing to it but a decline. The gate is usually narrow and always
+    published: AITER's gfx942 forward table (`asm_kernels/gfx942/fmha_v3_fwd/fmha_fwd.csv`)
+    holds four kernels, all `bf16`, all `hdim_v=128` -- so a corpus of `fp16`/`d64`
+    problems is one that engine declines in full, which is exactly what run 67928437
+    reported for all 24 graphs.
+
+    Empty means unrestricted, per facet: a filter nobody asked for admits everything,
+    and `--dtype bf16` alone must not silently also pin the head dimension.
+    """
+
+    dtypes: tuple[str, ...] = ()
+    head_dims: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        for dtype in self.dtypes:
+            if dtype not in DTYPES:
+                raise ValueError(f"dtype must be one of {list(DTYPES)}, got {dtype!r}")
+        for head_dim in self.head_dims:
+            if not isinstance(head_dim, int) or head_dim < 1:
+                raise ValueError(f"head dim must be a positive int, got {head_dim!r}")
+
+    def __bool__(self) -> bool:
+        return bool(self.dtypes or self.head_dims)
+
+    def admits(self, shape: Shape) -> bool:
+        if self.dtypes and shape.dtype not in self.dtypes:
+            return False
+        return not (self.head_dims and shape.head_dim not in self.head_dims)
+
+    def describe(self) -> dict:
+        """The filter as the manifest records it, so a corpus says what it excluded."""
+        return {"dtypes": list(self.dtypes), "head_dims": list(self.head_dims)}

@@ -29,7 +29,7 @@ import pytest
 
 from corpus_build import assemble, build as pipeline, graphs, kernels, model_shapes, sweep
 from corpus_build.__main__ import main
-from corpus_build.shapes import Shape
+from corpus_build.shapes import Filter, Shape
 
 REPO = pipeline.REPO
 SHIPPED = REPO / "dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd"
@@ -208,6 +208,43 @@ def test_a_different_seed_moves_the_sampled_shapes_and_nothing_else(tmp_path, so
     assert by_source(first, "kernel") == by_source(second, "kernel")
     assert by_source(first, "model") == by_source(second, "model")
     assert by_source(first, "sweep") != by_source(second, "sweep")
+
+
+# --------------------------------------------------------------------- facet filter
+
+
+def test_a_filtered_corpus_carries_only_the_facets_it_was_asked_for(tmp_path, sources):
+    """Every source obeys one gate. The pack fixture publishes `d64` geometries and the
+    declaration sweeps both dtypes, so a corpus asked for bf16/d128 that still contains
+    a packed `d64` row would be filtering by provenance rather than by shape -- and the
+    engine it was narrowed for would decline exactly those rows."""
+    (sources["shapes"] / "published.csv").write_text(
+        "model,batch,heads_q,heads_kv,seq_q,seq_kv,head_dim,dtype,mask\n"
+        "wide,1,8,8,512,512,128,bf16,none\n"
+        "narrow,1,8,8,512,512,64,bf16,none\n", encoding="utf-8")
+    manifest, out = _build(tmp_path, sources, count=60, shape_dirs=[sources["shapes"]],
+                           keep=Filter(dtypes=("bf16",), head_dims=(128,)))
+
+    assert manifest["emitted"] > 0
+    assert {(row["dtype"], row["head_dim"]) for row in manifest["graphs"]} == {("bf16", 128)}
+    assert {row["source"] for row in manifest["graphs"]} >= {"model", "sweep"}
+    assert manifest["reports"]["filtered_out"]["model"] >= 1
+    assert manifest["reports"]["filtered_out"]["kernel"] >= 1
+    assert manifest["reports"]["filter"] == {"dtypes": ["bf16"], "head_dims": [128]}
+
+
+def test_a_filtered_sweep_still_fills_the_count_it_was_given(tmp_path, sources):
+    """The filter is applied while drawing, not after. A narrow gate cut post-hoc would
+    hand back a fraction of the requested corpus -- here roughly an eighth, one dtype of
+    two against one head dim of four -- which is how a 24-graph validation corpus turns
+    into three graphs without anything reporting an error."""
+    wide, _ = _build(tmp_path, sources, count=40, name="wide")
+    narrow, _ = _build(tmp_path, sources, count=40, name="narrow",
+                       keep=Filter(dtypes=("bf16",), head_dims=(128,)))
+
+    assert narrow["emitted"] == wide["emitted"] == 40
+    assert narrow["reports"]["sweep"]["filtered"] > 0
+    assert narrow["reports"]["sweep"]["shapes"] >= wide["reports"]["sweep"]["shapes"]
 
 
 # --------------------------------------------------------------------- graph validity
