@@ -133,7 +133,13 @@ TDM_GROUPS = {
 # they cannot move; the parallel branch numbers the same groupings differently.
 # Keying the table on the name is what lets both numberings coexist.
 #
-TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX"}
+# 3 is the one integer that means the same grouping on both sides, which is why
+# it is the one that was wired here. It is not free of a caveat: the two wave
+# policies coincide at four waves and diverge above it, so `_acceptSharedScaleSet`
+# and Solution.py both pin NumWaves == 4. `AB` needs a number from 6 up if it is
+# ever wired -- its `.index` is 1, and 1 is occupied on both sides with
+# different meanings. Do not read `.index` as an integer assignment.
+TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX", 3: "B_MX"}
 
 
 def tdmBothTensors(ks):

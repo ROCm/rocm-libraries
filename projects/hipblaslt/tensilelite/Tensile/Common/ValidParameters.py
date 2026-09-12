@@ -1210,9 +1210,16 @@ validParameters = { # we need to make sure this matches develop
     #   1  {MXSA,A} + {MXSB,B}, crossed parity. NumWaves>1.
     #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
     #      wave 2, MXSB on wave 3. NumWaves==4.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same
+    # integers, and test_TDMFuse pins that. A value listed here but unmapped
+    # there used to build a kernel named for a grouping it did not have; a value
+    # mapped there but unlisted here is simply unreachable.
     #
     # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
-    "TDMFuse": [0, 1, 2],
+    "TDMFuse": [0, 1, 2, 3],
     # TDMCross -- which wave issues which member of a TDM descriptor group.
     # Orthogonal to TDMFuse: that picks the grouping, this rearranges the waves
     # over it. Components/TDMFuse.py:tdmWaveAssignment is the only consumer that
