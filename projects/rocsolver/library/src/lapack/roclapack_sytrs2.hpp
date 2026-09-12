@@ -89,9 +89,6 @@ static __global__
 
     T const one = 1;
 
-    auto idx2F
-        = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
-
     I const nb = ceildiv(nrhs_arg, nbx);
 
     I const col_start = ibx * nb;
@@ -126,6 +123,9 @@ static __global__
         // -------------------------------------------------------
         // Use 1-based indexing to match Fortran/matlab convention
         // -------------------------------------------------------
+        auto idx2F
+            = [](auto i, auto j, auto ld) { return ((i - 1) + (j - 1) * static_cast<int64_t>(ld)); };
+
         auto A = [=](I const i, I const j) -> T { return (A_bid[idx2F(i, j, lda)]); };
 
         auto B = [=](I const i, I const j) -> T& { return (B_with_offset[idx2F(i, j, ldb)]); };
