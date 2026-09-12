@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import assemble, kernels, model_shapes, sweep
+from .shapes import Filter
 
 #: The repository root, found from this file rather than from the working directory:
 #: the tool is run from `projects/hipdnn/tools` (like `uhd_gen`) but its inputs are
@@ -36,7 +37,8 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
           arch: str | None = None, batches=model_shapes.DEFAULT_BATCHES,
           declaration: Path | None = None,
           min_candidates: int = DEFAULT_MIN_CANDIDATES,
-          max_bytes: int = DEFAULT_MAX_BYTES, shares=None) -> dict:
+          max_bytes: int = DEFAULT_MAX_BYTES, shares=None,
+          keep: Filter | None = None) -> dict:
     """Assemble a corpus into `out` and return its manifest."""
     catalog = REPO / model_shapes.DEFAULT_CATALOG if catalog is None else Path(catalog)
     declaration = (REPO / sweep.DEFAULT_DECLARATION if declaration is None
@@ -53,13 +55,24 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
     model_pool, model_reports = model_shapes.collect(
         catalog if catalog.is_file() else None, shape_dirs, batches, arch, max_bytes)
     kernel_pool, kernel_reports = kernels.collect(packs, min_candidates, max_bytes)
+    # The filter lands on the measured sources before anything is deduplicated or
+    # allocated, and is handed to the sweep so its draws obey it too. Applied once
+    # here rather than per source: a corpus admitting a shape from a pack that it
+    # would reject from the declaration would be filtered by provenance, not shape.
+    keep = keep if keep is not None else Filter()
+    excluded = {}
+    if keep:
+        for source, pool in (("model", model_pool), ("kernel", kernel_pool)):
+            admitted = [candidate for candidate in pool if keep.admits(candidate.shape)]
+            excluded[source] = len(pool) - len(admitted)
+            pool[:] = admitted
 
     # The sweep is asked only for shapes the first two do not already have, so its
     # allocation is never spent on a duplicate that is then dropped. `count` is its
     # capacity: no corpus can need more sampled shapes than it has graphs.
     taken = {candidate.shape.key for candidate in model_pool + kernel_pool}
     declared = sweep.load(declaration)
-    sweep_pool, sweep_report = sweep.sample(declared, count, seed, max_bytes, taken)
+    sweep_pool, sweep_report = sweep.sample(declared, count, seed, max_bytes, taken, keep)
 
     pools, duplicates = assemble.deduplicate(
         {"model": model_pool, "kernel": kernel_pool, "sweep": sweep_pool})
@@ -75,5 +88,6 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
         reports={"model": model_reports, "kernel": kernel_reports,
                  "sweep": sweep_report,
                  "pool_sizes": {source: len(pool) for source, pool in pools.items()},
+                 "filter": keep.describe(), "filtered_out": excluded,
                  "shape_dirs": [str(directory) for directory in shape_dirs],
                  "shares": shares})

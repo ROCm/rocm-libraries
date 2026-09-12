@@ -24,7 +24,7 @@ import random
 from pathlib import Path
 
 from . import graphs
-from .shapes import Candidate, Shape
+from .shapes import Candidate, Filter, Shape
 
 #: The in-tree declaration, relative to the repository root.
 DEFAULT_DECLARATION = Path("projects/hipdnn/tools/corpus_gen/operations/sdpa_fwd.opmeta.json")
@@ -183,7 +183,7 @@ def _shape(rng: random.Random, declaration: dict, point: dict) -> Shape | None:
 
 
 def sample(declaration: dict, wanted: int, seed: int, max_bytes: int,
-           exclude=()) -> tuple[list[Candidate], dict]:
+           exclude=(), keep: Filter | None = None) -> tuple[list[Candidate], dict]:
     """`wanted` distinct shapes the other two sources do not already carry.
 
     Drawn one at a time with the source of each draw chosen from the declaration's
@@ -202,7 +202,7 @@ def sample(declaration: dict, wanted: int, seed: int, max_bytes: int,
     seen = set(exclude)
     candidates: list[Candidate] = []
     stats = {"draws": 0, "duplicate": 0, "constraint": 0, "over_byte_budget": 0,
-             "invalid": 0, "by_kind": {kind: 0 for kind in kinds}}
+             "invalid": 0, "filtered": 0, "by_kind": {kind: 0 for kind in kinds}}
     # Bounded: a declaration whose space is smaller than `wanted` must end the run
     # rather than spin. The multiplier is slack for the duplicate and constraint
     # rejections above, which are ordinary rather than exceptional.
@@ -222,6 +222,12 @@ def sample(declaration: dict, wanted: int, seed: int, max_bytes: int,
         shape = _shape(rng, declaration, point)
         if shape is None:
             stats["invalid"] += 1
+            continue
+        # Rejected here rather than after sampling: the filter is usually narrow
+        # (one dtype of two, one head dim of four), and a post-hoc cut would hand
+        # back a pool a fraction of `wanted` with no draws left to replace it.
+        if keep is not None and not keep.admits(shape):
+            stats["filtered"] += 1
             continue
         if shape.key in seen:
             stats["duplicate"] += 1
