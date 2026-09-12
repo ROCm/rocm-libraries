@@ -109,5 +109,12 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]   #2*DepthU
           - Exact: [512, 512, 1, 1024]
           - Exact: [512, 512, 1, 1152]  #tail
+          # M != N. The crossed arrangement swaps which parity carries MXSA and
+          # MXSB, so a wave that takes the other member's global-read increment
+          # only drifts when the two increments differ. They are equal while
+          # M == N, which is why a square-only sweep cannot witness TDMCross at
+          # all. Both directions, so neither scale is privileged.
+          - Exact: [512, 1024, 1, 1152]
+          - Exact: [1024, 512, 1, 1152]
         - ActivationArgs:
           - [Enum: none]
