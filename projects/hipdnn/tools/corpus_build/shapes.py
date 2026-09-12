@@ -22,6 +22,15 @@ OP = "sdpa_fwd"
 #: tools agreeing on one vocabulary is the point; a third spelling here would undo it.
 DTYPES = ("bf16", "fp16")
 
+
+#: The two anchors a causal diagonal can take, spelled as the hipDNN graph's
+#: `diagonal_alignment` enum spells them, lowercased. Top-left is the default the
+#: shipped bundles carry; bottom-right is what a generation step actually asks for,
+#: since its new queries sit at the end of the KV cache.
+TOP_LEFT = "top_left"
+BOTTOM_RIGHT = "bottom_right"
+ALIGNMENTS = (TOP_LEFT, BOTTOM_RIGHT)
+
 #: Above this KV length a problem is `long` rather than `short`. This is the middle
 #: bucket of `sdpa_fwd.opmeta.json`'s declared `seqlen_k` regimes
 #: ([128, 512, 2048, 8192, 32768]) -- the declaration's own opinion about where the
@@ -46,6 +55,13 @@ class Shape:
     seqlen_kv: int
     head_dim: int
     causal: bool
+    #: Where a causal mask's diagonal is anchored. Two engines can implement one and
+    #: not the other -- AITER's gfx942 forward table carries bottom-right causal
+    #: kernels and no top-left ones, so a corpus that spells causality one way makes
+    #: it decline every causal graph -- which is what makes this part of the shape
+    #: and not a detail of how the graph is written. Meaningless without `causal`,
+    #: and pinned to `top_left` there so a non-causal problem has one spelling.
+    alignment: str = TOP_LEFT
     op: str = OP
 
     def __post_init__(self) -> None:
@@ -60,6 +76,13 @@ class Shape:
                 f"head counts must divide: {self.heads_q} query heads against "
                 f"{self.heads_kv} KV heads is not a grouping any kernel implements"
             )
+        if self.alignment not in ALIGNMENTS:
+            raise ValueError(
+                f"alignment must be one of {list(ALIGNMENTS)}, got {self.alignment!r}")
+        if not self.causal and self.alignment != TOP_LEFT:
+            raise ValueError(
+                f"a non-causal shape has no diagonal to anchor, so it carries the "
+                f"canonical {TOP_LEFT!r}; got {self.alignment!r}")
         # No `seqlen_q <= seqlen_kv` check. That relation is a constraint on the
         # DECLARED space (`sdpa_fwd.opmeta.json` `constraints`), which the sweep reads
         # and obeys -- it is not a fact about attention. `gfx942_attention_dense`
@@ -70,9 +93,16 @@ class Shape:
 
     @property
     def key(self) -> tuple:
-        """The full shape tuple two sources are deduplicated on."""
+        """The full shape tuple two sources are deduplicated on.
+
+        The alignment is part of it: a top-left and a bottom-right causal problem of
+        the same geometry are two problems, served by different kernels and -- when
+        `seqlen_q != seqlen_kv` -- computing different outputs. Collapsing them would
+        drop whichever arrived second as a duplicate of a problem it is not.
+        """
         return (self.op, self.dtype, self.batch, self.heads_q, self.heads_kv,
-                self.seqlen_q, self.seqlen_kv, self.head_dim, bool(self.causal))
+                self.seqlen_q, self.seqlen_kv, self.head_dim, bool(self.causal),
+                self.alignment)
 
     @property
     def phase(self) -> str:
@@ -126,7 +156,8 @@ class Shape:
         rest of the tuple follows so the name is unique exactly when the shape is:
         two graphs with one name would be one graph on disk.
         """
-        mask = "causal" if self.causal else "nomask"
+        mask = ("causal_br" if self.alignment == BOTTOM_RIGHT else "causal_tl"
+                ) if self.causal else "nomask"
         return (f"{self.op}_{self.regime}_{self.dtype}_b{self.batch}"
                 f"_hq{self.heads_q}_hkv{self.heads_kv}"
                 f"_sq{self.seqlen_q}_skv{self.seqlen_kv}_d{self.head_dim}_{mask}")
@@ -142,7 +173,8 @@ class Shape:
         return {"dtype": self.dtype.upper(), "head_size": self.head_dim,
                 "num_query_heads": self.heads_q, "num_kv_heads": self.heads_kv,
                 "seqlen_q": self.seqlen_q, "seqlen_kv": self.seqlen_kv,
-                "batch": self.batch, "causal": bool(self.causal)}
+                "batch": self.batch, "causal": bool(self.causal),
+                "alignment": self.alignment}
 
 
 @dataclasses.dataclass(frozen=True)
