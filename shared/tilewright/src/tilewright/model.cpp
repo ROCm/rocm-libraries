@@ -1279,7 +1279,11 @@ int resolve_model_cell_index(const LoadedModel& mdl, const Problem& p) {
 
 // ── feasibility filter (byte-for-byte mirror of the analytical
 //     is_kernel_feasible check) ───────────────────────────────────────────
-bool is_kernel_feasible(const Problem& p, const Config& c) {
+// `pool_has_cache_hints` tells rule 3 whether the candidate pool actually
+// contains NonTemporal/TemporalHint variants. gfx1250 Origami ships none, and
+// the hint-requiring branches would otherwise reject every candidate instead
+// of choosing among them.
+bool is_kernel_feasible(const Problem& p, const Config& c, bool pool_has_cache_hints) {
   const long long M      = static_cast<long long>(p.size.m);
   const long long N      = static_cast<long long>(p.size.n);
   const long long K      = static_cast<long long>(p.size.k);
@@ -1314,10 +1318,10 @@ bool is_kernel_feasible(const Problem& p, const Config& c) {
   long long MT_K_mod_128b = (MT_K * a_bits) % 1024;
   if (K_mod_128b == 0 && MT_K_mod_128b == 0) {
     if (M <= MT_M * 2 && (!b_trans) && ((N * b_bits) / std::max<long long>(M * a_bits, 1) > 5)) {
-      if (chb != 4) return false;
+      if (pool_has_cache_hints && chb != 4) return false;
     } else if (N <= MT_N * 2 && a_trans &&
                ((M * a_bits) / std::max<long long>(N * b_bits, 1) > 5)) {
-      if (cha != 4) return false;
+      if (pool_has_cache_hints && cha != 4) return false;
     } else {
       if (cha || chb) return false;
     }
@@ -1400,6 +1404,14 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model,
     return false;
   };
 
+  // Rule 3 of is_kernel_feasible requires a NonTemporal/TemporalHint kernel on
+  // skinny shapes. gfx1250 Origami ships no such variants, so that requirement
+  // would reject the whole pool; derive it from the pool rather than assuming.
+  const bool pool_has_cache_hints =
+      std::any_of(configs.begin(), configs.end(), [](const Config& cc) {
+        return cc.cache_hints_a != 0 || cc.cache_hints_b != 0;
+      });
+
   // Two-pass survivor scan (LDS gate -> is_kernel_feasible -> optional
   // smart_K signature filter), with the C++/Python shared fallback: if the
   // signature filter rejects every config, re-scan without it.
@@ -1409,7 +1421,7 @@ std::vector<Result> rank_configs_impl(const LoadedModel& model,
       const Config& cc = configs[ci];
       // LDS budget gate (tilewright::check_lds_capacity).
       if (!check_lds_capacity(hardware, cc.mt, problem.a_dtype, problem.b_dtype)) continue;
-      if (!is_kernel_feasible(problem, cc)) continue;
+      if (!is_kernel_feasible(problem, cc, pool_has_cache_hints)) continue;
       if (use_sig_filter && have_sk) {
         if (!sig_in_set(sig_of(cc))) continue;
       }
