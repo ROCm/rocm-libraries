@@ -280,8 +280,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -442,8 +442,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -602,8 +602,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -762,8 +762,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -923,8 +923,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -1086,8 +1086,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -1267,8 +1267,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -1447,8 +1447,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -1625,8 +1625,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -1804,8 +1804,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -1982,8 +1982,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -2162,8 +2162,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -2341,8 +2341,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -2518,8 +2518,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -2697,8 +2697,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -2874,8 +2874,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -3049,8 +3049,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -3210,8 +3210,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -3371,8 +3371,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -3533,8 +3533,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -3695,8 +3695,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -3856,8 +3856,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -4026,8 +4026,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -4187,8 +4187,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -4350,8 +4350,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -4526,8 +4526,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -4689,8 +4689,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -4866,8 +4866,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -5045,8 +5045,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -5222,8 +5222,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -5402,8 +5402,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -5580,8 +5580,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -5759,8 +5759,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -5933,8 +5933,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -6096,8 +6096,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -6273,8 +6273,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -6454,8 +6454,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -6632,8 +6632,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -6814,8 +6814,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -6991,8 +6991,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -7170,8 +7170,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -7349,8 +7349,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -7529,8 +7529,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -7707,8 +7707,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -7885,8 +7885,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -8063,8 +8063,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -8242,8 +8242,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -8419,8 +8419,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -8596,8 +8596,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -8773,8 +8773,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -8936,8 +8936,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -9112,8 +9112,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -9275,8 +9275,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -9454,8 +9454,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -9632,8 +9632,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -9808,8 +9808,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 32
@@ -9969,8 +9969,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -10144,8 +10144,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -10321,8 +10321,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -10497,8 +10497,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -10676,8 +10676,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -10851,8 +10851,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -11014,8 +11014,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 32
@@ -11193,8 +11193,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -11367,8 +11367,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -11534,8 +11534,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -11694,8 +11694,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -11854,8 +11854,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -12015,8 +12015,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -12178,8 +12178,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -12355,8 +12355,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -12516,8 +12516,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 32
@@ -12676,8 +12676,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -12839,8 +12839,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -13016,8 +13016,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -13194,8 +13194,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -13369,8 +13369,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -13530,8 +13530,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -13691,8 +13691,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -13852,8 +13852,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 32
@@ -14012,8 +14012,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -14188,8 +14188,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -14361,8 +14361,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -14539,8 +14539,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -14717,8 +14717,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -14893,8 +14893,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -15071,8 +15071,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -15248,8 +15248,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -15427,8 +15427,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -15606,8 +15606,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -15785,8 +15785,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -15961,8 +15961,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -16141,8 +16141,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -16321,8 +16321,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -16500,8 +16500,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 224
@@ -16676,8 +16676,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -16840,8 +16840,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -17012,8 +17012,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 192
@@ -17187,8 +17187,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -17350,8 +17350,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 192
@@ -17525,8 +17525,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -17696,8 +17696,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -17872,8 +17872,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 192
@@ -18048,8 +18048,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -18226,8 +18226,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -18405,8 +18405,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -18583,8 +18583,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -18759,8 +18759,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -18936,8 +18936,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -19116,8 +19116,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -19294,8 +19294,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -19467,8 +19467,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -19631,8 +19631,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -19804,8 +19804,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -19972,8 +19972,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -20145,8 +20145,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -20313,8 +20313,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -20490,8 +20490,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -20665,8 +20665,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -20834,8 +20834,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -21012,8 +21012,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -21190,8 +21190,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 96
   LSCB: 64
@@ -21368,8 +21368,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -21548,8 +21548,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 96
   LSCB: 64
@@ -21726,8 +21726,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -21906,8 +21906,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -22084,8 +22084,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -22263,8 +22263,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -22441,8 +22441,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -22616,8 +22616,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -22775,8 +22775,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -22936,8 +22936,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -23114,8 +23114,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -23290,8 +23290,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -23465,8 +23465,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -23643,8 +23643,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -23822,8 +23822,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -23997,8 +23997,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 64
@@ -24172,8 +24172,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -24350,8 +24350,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 64
@@ -24525,8 +24525,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -24703,8 +24703,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 64
@@ -24880,8 +24880,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -25060,8 +25060,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -25237,8 +25237,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -25415,8 +25415,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -25593,8 +25593,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -25770,8 +25770,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -25947,8 +25947,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -26122,8 +26122,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -26283,8 +26283,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -26460,8 +26460,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -26634,8 +26634,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 64
@@ -26796,8 +26796,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 112
@@ -26973,8 +26973,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 80
@@ -27149,8 +27149,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 48
@@ -27326,8 +27326,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -27499,8 +27499,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -27669,8 +27669,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -27850,8 +27850,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 160
@@ -28028,8 +28028,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -28206,8 +28206,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -28381,8 +28381,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -28549,8 +28549,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -28727,8 +28727,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 128
@@ -28900,8 +28900,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -29079,8 +29079,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -29259,8 +29259,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -29438,8 +29438,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 96
@@ -29616,8 +29616,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -29793,8 +29793,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -29968,8 +29968,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -30143,8 +30143,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -30305,8 +30305,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -30480,8 +30480,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 128
@@ -30654,8 +30654,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -30824,8 +30824,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -31003,8 +31003,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -31179,8 +31179,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -31356,8 +31356,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 128
@@ -31529,8 +31529,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 128
@@ -31691,8 +31691,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -31867,8 +31867,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -32046,8 +32046,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 128
@@ -32222,8 +32222,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 128
@@ -32383,8 +32383,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -32558,8 +32558,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -32734,8 +32734,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -32912,8 +32912,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -33091,8 +33091,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 256
@@ -33269,8 +33269,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -33448,8 +33448,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -33624,8 +33624,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 128
@@ -33805,8 +33805,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -33985,8 +33985,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -34164,8 +34164,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -34341,8 +34341,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -34519,8 +34519,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -34698,8 +34698,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -34876,8 +34876,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 256
@@ -35054,8 +35054,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -35229,8 +35229,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 512
@@ -35391,8 +35391,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 32
   LSCB: 512
@@ -35569,8 +35569,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -35747,8 +35747,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 512
@@ -35921,8 +35921,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 512
@@ -36083,8 +36083,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 16
@@ -36260,8 +36260,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 16
   LSCB: 1024
@@ -36418,8 +36418,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 1
   LSCB: 512
@@ -36557,8 +36557,8 @@ Solutions:
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
   InnerUnroll: 4
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 1
   LSCB: 64
@@ -36697,8 +36697,8 @@ Solutions:
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
   InnerUnroll: 4
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 2
   LSCB: 64
@@ -36839,8 +36839,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -37003,8 +37003,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -37163,8 +37163,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -37327,8 +37327,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -37490,8 +37490,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 256
@@ -37652,8 +37652,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -37814,8 +37814,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -37978,8 +37978,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -38140,8 +38140,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -38305,8 +38305,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -38469,8 +38469,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 32
@@ -38648,8 +38648,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -38827,8 +38827,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -39006,8 +39006,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -39182,8 +39182,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -39351,8 +39351,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 64
   LSCB: 64
@@ -39525,8 +39525,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -39694,8 +39694,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -39873,8 +39873,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 32
@@ -40047,8 +40047,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -40212,8 +40212,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -40379,8 +40379,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -40546,8 +40546,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -40713,8 +40713,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -40881,8 +40881,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -41049,8 +41049,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 256
   LSCB: 64
@@ -41215,8 +41215,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 64
@@ -41386,8 +41386,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSTrInst: true
   LSCA: 128
@@ -41559,8 +41559,8 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: false,
-    UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    SupportUserGSU: false, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
   LSCB: 64
@@ -41735,8 +41735,8 @@ Solutions:
   HalfPLRB: false
   ISA: [9, 5, 0]
   InitCIterWmma: 0
-  InternalSupportParams: {SupportCustomStaggerU: false, SupportCustomWGM: true, SupportUserGSU: false,
-    UseSFC: false, UseUniversalArgs: true}
+  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: false, SupportCustomWGM: true,
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: null
   LSCA: 128
