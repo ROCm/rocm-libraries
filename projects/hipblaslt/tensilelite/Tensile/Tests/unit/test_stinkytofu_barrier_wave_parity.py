@@ -55,6 +55,9 @@ class _Writer:
             self.scheduleIterAlg = 0
             self.kernelName = "unit_test_kernel"
             self.overflowedResources = 0
+            # _ldsTokenBackEdgeMap reads this. None of these fixtures builds the
+            # three-buffer TDM path, so the real method returns an empty map.
+            self.kernel = {}
 
     class _DebugConfig:
         printSolutionRejectionReason = False
@@ -62,6 +65,14 @@ class _Writer:
     def __init__(self):
         self.states = _Writer._States()
         self.debugConfig = _Writer._DebugConfig()
+
+    def _ldsTokenBackEdgeMap(self):
+        """Delegate rather than return {} directly, so the fixture cannot drift
+        from what the pass actually calls. With TDMPlusLdsBuf absent the real
+        method returns the empty map -- no token rotation -- which is the shape
+        every module tree in this file builds.
+        """
+        return KernelWriter._ldsTokenBackEdgeMap(self)
 
 
 def _kernel(**overrides):
