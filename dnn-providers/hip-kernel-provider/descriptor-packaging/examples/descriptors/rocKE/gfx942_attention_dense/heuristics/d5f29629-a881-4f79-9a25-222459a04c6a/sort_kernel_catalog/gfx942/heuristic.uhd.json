@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "id": "9c217783-1a5d-4666-83e3-8a22827af6d2",
+  "name": "hipkernel:Gfx942AttentionDense catalog ranker (gfx942, 881 graphs)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$device.cu_count",
+    "$device.lds_size",
+    "$device.memory_bus_width",
+    "$device.memory_clock_rate",
+    "$device.multi_processor_count",
+    "$device.peak_memory_bandwidth",
+    "$device.total_global_mem",
+    "$device.warp_size",
+    "$kernel.batch",
+    "$kernel.block_m",
+    "$kernel.block_n",
+    "$kernel.causal",
+    "$kernel.dtype",
+    "$kernel.head_size",
+    "$kernel.num_kv_heads",
+    "$kernel.num_persistent",
+    "$kernel.num_query_heads",
+    "$kernel.persistent",
+    "$kernel.seqlen_kv",
+    "$kernel.seqlen_q",
+    "$kernel.use_exp2_fast",
+    "$kernel.waves_per_eu",
+    "$attention_dense.batch",
+    "$attention_dense.bytes",
+    "$attention_dense.causal",
+    "$attention_dense.dtype",
+    "$attention_dense.flops",
+    "$attention_dense.head_size",
+    "$attention_dense.k.uid",
+    "$attention_dense.num_kv_heads",
+    "$attention_dense.num_query_heads",
+    "$attention_dense.o.uid",
+    "$attention_dense.q.uid",
+    "$attention_dense.scale_bits",
+    "$attention_dense.seqlen_kv",
+    "$attention_dense.seqlen_q",
+    "$attention_dense.v.uid"
+  ],
+  "features_hash": "sha256:b2f419a44e57c4eb",
+  "trained_against": {
+    "ued": {
+      "id": "d5f29629-a881-4f79-9a25-222459a04c6a",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "28fe7e39-e7a2-44d5-a07a-9779aba34ef3",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "bac81370-8761-483d-ae3d-41e6527cc250",
+        "revision": "1.0"
+      }
+    ]
+  },
+  "objective": "min",
+  "score": {
+    "units": "ms",
+    "calibrated": false,
+    "transform": "log1p"
+  },
+  "tree_data": {
+    "artifact": "model.bin"
+  },
+  "categorical_encoding": {
+    "$kernel.dtype": {
+      "BF16": 0,
+      "FP16": 1
+    },
+    "$attention_dense.dtype": {
+      "bf16": 0,
+      "fp16": 1
+    }
+  }
+}

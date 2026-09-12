@@ -7,7 +7,7 @@
   },
   "metadata": "9e461663-31d6-4051-9267-196d2a226c10",
   "sort_kernel_catalog": {
-    "gfx950": "588c6a2e-853c-4a21-bc4b-7e02008db353"
+    "gfx950": "6d2ccdc4-2150-4e90-aa0f-d1798a264efe"
   },
   "knobs": [
     "head_size",
@@ -28,5 +28,8 @@
     "lazy_rescale",
     "wide_lds_dma",
     "lds_v_row_pad"
-  ]
+  ],
+  "predict_engine_tflops": {
+    "gfx950": "54c02c7f-c044-4d1e-97e3-66373ecbb3f2"
+  }
 }

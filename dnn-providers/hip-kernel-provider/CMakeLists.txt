@@ -590,3 +590,48 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPDNN_TEST_DESCRIPTOR_FILES and the generated model artifacts are deliberately
     # absent here. They are staged for the integration tests and stop at the build tree.
 endif()
+
+# ============================================================================
+# ASM SDPA engine heuristics
+# ============================================================================
+# AITER owns no descriptor set: it binds its L1 model by a UUID declared in provider code
+# (AsmSdpaEngine.hpp, RFC 0019 §4.1 / Open Question 7), and the loader resolves that UUID
+# out of the catalog it already walks. So the model has no pack to travel in -- it is a
+# loose UHD that must reach the same staged tree the ingestor descriptors do, or the engine
+# reports UNAVAILABLE with a model sitting in the source tree unread.
+#
+# Gated on the ingestor because that is what creates and walks the staged tree; the model
+# itself has nothing to do with the ingestor, and moves the day another loader roots it.
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPDNN_ASM_SDPA_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/asm_sdpa_engine/descriptors")
+    # Explicit, like every other descriptor list here: one list feeds staging and install,
+    # so the two cannot disagree about what ships.
+    set(HIPDNN_ASM_SDPA_DESCRIPTOR_FILES
+        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.uhd.json
+        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.bin
+        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.uhd.json
+        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.bin
+    )
+    foreach(_descriptor IN LISTS HIPDNN_ASM_SDPA_DESCRIPTOR_FILES)
+        add_custom_command(
+            OUTPUT "${HIPDNN_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${HIPDNN_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                    "${HIPDNN_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            DEPENDS "${HIPDNN_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            COMMENT "Staging asm_sdpa heuristic ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _asm_sdpa_staged "${HIPDNN_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}")
+        get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+        install(
+            FILES "${HIPDNN_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            DESTINATION
+                "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/asm_sdpa/${_descriptor_subdir}"
+        )
+    endforeach()
+    add_custom_target(asm_sdpa_engine_descriptors ALL DEPENDS ${_asm_sdpa_staged}
+                      COMMENT "Staging asm_sdpa engine heuristics")
+    add_dependencies(hip_kernel_provider_descriptors asm_sdpa_engine_descriptors)
+endif()

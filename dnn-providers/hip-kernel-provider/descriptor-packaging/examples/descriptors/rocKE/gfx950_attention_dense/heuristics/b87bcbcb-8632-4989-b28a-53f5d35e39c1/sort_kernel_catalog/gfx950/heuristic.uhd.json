@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "id": "6d2ccdc4-2150-4e90-aa0f-d1798a264efe",
+  "name": "hipkernel:Gfx950AttentionDense catalog ranker (gfx950, 619 graphs)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$device.cu_count",
+    "$device.lds_size",
+    "$device.memory_bus_width",
+    "$device.memory_clock_rate",
+    "$device.multi_processor_count",
+    "$device.peak_memory_bandwidth",
+    "$device.total_global_mem",
+    "$device.warp_size",
+    "$kernel.batch",
+    "$kernel.block_m",
+    "$kernel.block_n",
+    "$kernel.causal",
+    "$kernel.dtype",
+    "$kernel.head_size",
+    "$kernel.lazy_rescale",
+    "$kernel.lds_v_row_pad",
+    "$kernel.num_kv_heads",
+    "$kernel.num_persistent",
+    "$kernel.num_query_heads",
+    "$kernel.paged",
+    "$kernel.persistent",
+    "$kernel.ragged",
+    "$kernel.seqlen_kv",
+    "$kernel.seqlen_q",
+    "$kernel.sliding_window",
+    "$kernel.use_sinks",
+    "$kernel.varlen",
+    "$kernel.waves_per_eu",
+    "$kernel.wide_lds_dma",
+    "$gfx950_attention_dense.causal",
+    "$gfx950_attention_dense.k.uid",
+    "$gfx950_attention_dense.o.uid",
+    "$gfx950_attention_dense.q.uid",
+    "$gfx950_attention_dense.scale_bits",
+    "$gfx950_attention_dense.v.uid"
+  ],
+  "features_hash": "sha256:d1a3e81caac03b19",
+  "trained_against": {
+    "ued": {
+      "id": "b87bcbcb-8632-4989-b28a-53f5d35e39c1",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "9e461663-31d6-4051-9267-196d2a226c10",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "2005621f-2558-4346-bd94-c20c695e6bec",
+        "revision": "1.0"
+      }
+    ]
+  },
+  "objective": "min",
+  "score": {
+    "units": "ms",
+    "calibrated": false,
+    "transform": "log1p"
+  },
+  "tree_data": {
+    "artifact": "model.bin"
+  },
+  "categorical_encoding": {
+    "$kernel.dtype": {
+      "BF16": 0,
+      "FP16": 1
+    }
+  }
+}
