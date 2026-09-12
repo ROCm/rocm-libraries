@@ -53,7 +53,10 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <fstream>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Handle.hpp"
@@ -364,7 +367,9 @@ public:
         const auto blockThreads = static_cast<uint32_t>(
             getIntMetaOr(kernel, BLOCK_FIELD, TOY_BLOCK_THREADS));
 
-        const char* dir = std::getenv(FLYDSL_HSACO_DIR_ENV);
+        // getenv is deprecated in the Windows CRT; the data SDK wraps the platform call.
+        const std::string dirValue = hipdnn_data_sdk::utilities::getEnv(FLYDSL_HSACO_DIR_ENV, "");
+        const char* dir = dirValue.empty() ? nullptr : dirValue.c_str();
         if(dir == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -378,19 +383,17 @@ public:
 
         std::vector<char> blob;
         {
-            FILE* f = std::fopen(path.c_str(), "rb");
-            if(f == nullptr)
+            // std::fopen is deprecated in the Windows CRT; a stream reads the same bytes.
+            std::ifstream file(path, std::ios::binary | std::ios::ate);
+            if(!file)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM, std::string("cannot open HSACO: ") + path);
             }
-            std::fseek(f, 0, SEEK_END);
-            const long nbytes = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
+            const auto nbytes = static_cast<std::streamsize>(file.tellg());
+            file.seekg(0);
             blob.resize(static_cast<size_t>(nbytes));
-            const size_t got = std::fread(blob.data(), 1, static_cast<size_t>(nbytes), f);
-            std::fclose(f);
-            if(got != static_cast<size_t>(nbytes))
+            if(!file.read(blob.data(), nbytes))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "short read on HSACO");

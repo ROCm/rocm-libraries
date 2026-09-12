@@ -40,7 +40,10 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <fstream>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Handle.hpp"
@@ -301,7 +304,9 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& /*kernel*/) const override
     {
-        const char* hsacoPath = std::getenv(FLYDSL_HSACO_ENV);
+        // getenv is deprecated in the Windows CRT; the data SDK wraps the platform call.
+        const std::string hsacoPathValue = hipdnn_data_sdk::utilities::getEnv(FLYDSL_HSACO_ENV, "");
+        const char* hsacoPath = hsacoPathValue.empty() ? nullptr : hsacoPathValue.c_str();
         if(hsacoPath == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -311,20 +316,19 @@ public:
 
         std::vector<char> blob;
         {
-            FILE* f = std::fopen(hsacoPath, "rb");
-            if(f == nullptr)
+            // std::fopen is deprecated in the Windows CRT; a stream reads the same bytes.
+            std::ifstream file(hsacoPath, std::ios::binary | std::ios::ate);
+            if(!file)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                     std::string("cannot open HSACO: ") + hsacoPath);
             }
-            std::fseek(f, 0, SEEK_END);
-            const long n = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
+            const auto n = static_cast<std::streamsize>(file.tellg());
+            file.seekg(0);
             blob.resize(static_cast<size_t>(n));
-            const size_t got = std::fread(blob.data(), 1, static_cast<size_t>(n), f);
-            std::fclose(f);
-            if(got != static_cast<size_t>(n))
+            const bool got = static_cast<bool>(file.read(blob.data(), n));
+            if(!got)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "short read on HSACO");
