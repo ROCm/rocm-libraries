@@ -1444,7 +1444,6 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
 
     def gfx90a_flags  = pipelineEnv.gfx90a_flags
     def gfx942_flags  = pipelineEnv.gfx942_flags
-    def NOMLIR_flags  = pipelineEnv.NOMLIR_flags
     def Smoke_targets = pipelineEnv.Smoke_targets
 
     addStageIf(stages, true, 'Mark Build As Nightly') {
@@ -1455,84 +1454,11 @@ def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def w
         }
     }
 
-    def fp32NomlirGfx90a = 'Fp32 Hip Debug NOMLIR gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NomlirGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 ninja -j\$(nproc) check"
-                        buildHipClangJob(build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: nomlirBuildCmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32StaticGfx90a = 'Fp32 Hip Static gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32StaticGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32NormalFindGfx90a = 'Fp32 Hip Normal-Find gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NormalFindGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "bin/test_conv2d --disable-verification-cache", find_mode: "Normal", build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32FastFindGfx90a = 'Fp32 Hip Fast-Find gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FastFindGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache", build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32SqlitePerfdbGfx90a = 'Fp32 Hip SqlitePerfdb gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32SqlitePerfdbGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
-    def fp32FinInterfaceGfx90a = 'Fp32 Hip Fin Interface gfx90a'
-    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FinInterfaceGfx90a) {
-        node(rocmnodeFn("gfx90a")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags, make_targets: "test_unit_FinInterface", execute_cmd: "bin/test_unit_FinInterface", gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
     def fp32DebugGfx90a = 'Fp32 Hip Debug gfx90a'
     addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32DebugGfx90a) {
