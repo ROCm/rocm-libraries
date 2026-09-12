@@ -40,11 +40,38 @@ def _dependency(value: object, where: str) -> dict:
 def validate_provenance(snapshot: object) -> dict:
     """Validate a recorded snapshot without consulting or inventing dependencies.
 
-    RFC 0019 Section 4.1: a UHD names the descriptor set it was generated against, and
-    only that. Every role -- L1 included -- is reached through the owning UED's role map,
-    so there is no engine-selector variant to record.
+    RFC 0019 §4.1: a UHD names what it was generated against, and only that. Two things
+    can be named, and a model names whichever applies to the engine that will bind it --
+    the same two the loader accepts (`UhdParser.hpp:146-188`):
+
+      - the descriptor set (`ued`/`kmd`/`umd`, all three or none) for a model a UED role
+        map binds;
+      - `selector_revision`, the provider build whose behaviour was measured, for a model
+        an engine with NO UED binds by declared UUID (Open Question 7, RESOLVED). AITER
+        and MIOpen have no UED, KMD or UMD to name; their behaviour is decided by the
+        library they wrap, so the revision string is the only thing to be trained against.
+
+    The loader learned the second form when opaque engines gained L1; this validator did
+    not, so every opaque L1 collection died here with "requires exactly ued, kmd and umd"
+    after measuring its whole corpus (runs 67929293, 67929294).
     """
-    if not isinstance(snapshot, dict) or set(snapshot) != {"ued", "kmd", "umd"}:
+    if not isinstance(snapshot, dict):
+        raise ProvenanceError("trained_against must be an object")
+    unknown = set(snapshot) - {"ued", "kmd", "umd", "selector_revision"}
+    if unknown:
+        raise ProvenanceError(f"trained_against has unknown members: {sorted(unknown)}")
+    names_descriptor_set = bool({"ued", "kmd", "umd"} & set(snapshot))
+    if not names_descriptor_set:
+        if "selector_revision" not in snapshot:
+            raise ProvenanceError(
+                "trained_against must name a descriptor set or a selector_revision")
+        revision_text = snapshot["selector_revision"]
+        if not isinstance(revision_text, str) or not revision_text:
+            raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
+        return {"selector_revision": revision_text}
+    # All three or none: two thirds of a descriptor set is not a weaker claim, it is an
+    # unverifiable one.
+    if not {"ued", "kmd", "umd"} <= set(snapshot):
         raise ProvenanceError("trained_against requires exactly ued, kmd and umd")
     if not isinstance(snapshot["umd"], list):
         raise ProvenanceError("trained_against.umd must be an array")
@@ -52,20 +79,40 @@ def validate_provenance(snapshot: object) -> dict:
     ids = [item["id"] for item in matchers]
     if len(ids) != len(set(ids)):
         raise ProvenanceError("trained_against.umd has duplicate matcher identities")
-    return {
+    recorded = {
         "ued": _dependency(snapshot["ued"], "trained_against.ued"),
         "kmd": _dependency(snapshot["kmd"], "trained_against.kmd"),
         "umd": sorted(matchers, key=lambda item: item["id"]),
     }
+    if "selector_revision" in snapshot:
+        # A descriptor-backed engine MAY also record the provider build it was measured
+        # on; the loader accepts both together and checks each on its own terms.
+        if not isinstance(snapshot["selector_revision"], str) or not snapshot["selector_revision"]:
+            raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
+        recorded["selector_revision"] = snapshot["selector_revision"]
+    return recorded
 
 
 def compare_provenance(trained: object, actual: object) -> None:
     """Existing dependencies must retain identity/major and not regress minor.
 
     Additional pack matchers are coverage changes, not contract breakages.
+
+    A selector revision is compared for equality, not compatibility: it is an opaque
+    provider build string that only the provider can interpret, and the loader refuses a
+    model whose recorded revision is not the one the provider reports (`UhdParser.hpp:140`).
     """
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
+    recorded_revision = trained.get("selector_revision")
+    if recorded_revision is not None and actual.get("selector_revision") != recorded_revision:
+        raise ProvenanceError(
+            f"trained_against.selector_revision: model records {recorded_revision!r}, "
+            f"the provider reports {actual.get('selector_revision')!r}")
+    if "ued" not in trained:
+        return
+    if "ued" not in actual:
+        raise ProvenanceError("trained_against names a descriptor set the engine does not have")
     for kind in ("ued", "kmd", "umd"):
         recorded = trained[kind] if kind == "umd" else [trained[kind]]
         available = actual[kind] if kind == "umd" else [actual[kind]]

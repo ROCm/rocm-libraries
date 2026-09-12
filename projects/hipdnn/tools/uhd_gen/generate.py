@@ -61,6 +61,28 @@ def _write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def _absent_as_null(value):
+    """Raw collected rows, with every non-finite float replaced by null.
+
+    `allow_nan=False` is the right guard for a model, a provenance snapshot or a manifest:
+    NaN is not JSON, and a number that cannot be written is a number that should not have
+    been computed. It is the wrong guard for the raw measurement log, where a missing
+    optional field -- `stddevMs` on a single-iteration run, `iters` on a run that reported
+    none -- arrives as NaN through pandas and means "absent", which JSON spells null.
+
+    Without this, an engine that measured its whole corpus successfully loses the lot at
+    the final write: run 67929365 collected 600 gfx950 graphs and died on
+    "Out of range float values are not JSON compliant: nan" after the measurement was done.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _absent_as_null(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_absent_as_null(item) for item in value]
+    return value
+
+
 def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
     matches = []
     for path in sorted(tree.rglob("*" + suffix)):
@@ -352,7 +374,7 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("the graph/device corpus contains duplicate candidate measurements")
         _write_json(stage / "provenance.json", provenance)
         frame.to_csv(stage / "corpus.csv", index=False)
-        _write_json(stage / "corpus.json", rows)
+        _write_json(stage / "corpus.json", _absent_as_null(rows))
         usable = frame.copy() if immediate else frame[frame["is_valid"] & frame["succeeded"].eq(True)].copy()
         if usable.empty:
             raise ValueError("the benchmark produced no successful valid timings")
@@ -416,7 +438,7 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("multiple observed architectures require an explicit --arch promotion target")
         _write_json(stage / "features.json", signature)
         train_frame.to_csv(stage / "train.csv", index=False)
-        _write_json(stage / "train.json", train_frame.to_dict(orient="records"))
+        _write_json(stage / "train.json", _absent_as_null(train_frame.to_dict(orient="records")))
         train_args = ["train", "--input", str(stage / "train.json"), "--feature-signature", str(stage / "features.json"),
                       "--provenance", str(stage / "provenance.json"),
                       "--target", target, "--objective", objective, "--score-units", units,
