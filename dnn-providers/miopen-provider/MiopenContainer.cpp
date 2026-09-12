@@ -9,6 +9,9 @@
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
+#include <map>
+#include <string>
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -33,6 +36,29 @@ namespace miopen_plugin
 // the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
 // ============================================================================
 
+// ============================================================================
+// L1 throughput models (RFC 0019 Open Question 7, RESOLVED)
+// ============================================================================
+// MIOpen ships no UED, so it cannot bind a `predict_engine_tflops` UHD through a role
+// map (RFC 0019 §3.1). It binds one the other sanctioned way instead: by naming that
+// UHD's UUID here, in the provider's own engine definition. The loader resolves the id
+// out of the descriptor catalog it already parses and validates provenance exactly as it
+// does for a UED role reference; the UHD keeps §4.1's shape and carries no `engine`,
+// `role` or `arch` member, so no document can attach itself to an engine by claiming one.
+//
+// One id per engine, not one per provider: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC
+// run different solvers over different operations and perform differently, so a single
+// model cannot answer for both. `default` covers every architecture with one model;
+// splitting an engine per architecture is an edit to its map here, nothing else.
+//
+// Nothing is deployed for these ids today. An unresolved id is UNAVAILABLE -- no
+// estimate, engine unaffected, static ordering as before (§11.2's "no declared model"
+// row) -- so the ids can ship ahead of the models they name.
+const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS{
+    {"default", "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"}};
+const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS{
+    {"default", "2d95f8e7-16c4-4b03-a8f1-7be25390c4da"}};
+
 const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngineDefinitions()
 {
     using namespace hipdnn_data_sdk::utilities;
@@ -43,7 +69,8 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
          []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
                                                             HipdnnMiopenSettings,
                                                             HipdnnMiopenContext>> {
-             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
+             auto engine = std::make_unique<MiopenEngine>(
+                 MIOPEN_ENGINE_ID, MIOPEN_ENGINE_NAME, MIOPEN_ENGINE_L1_MODELS);
 
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
@@ -59,7 +86,9 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
          []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
                                                             HipdnnMiopenSettings,
                                                             HipdnnMiopenContext>> {
-             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID,
+                                                          MIOPEN_ENGINE_DETERMINISTIC_NAME,
+                                                          MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS);
 
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));

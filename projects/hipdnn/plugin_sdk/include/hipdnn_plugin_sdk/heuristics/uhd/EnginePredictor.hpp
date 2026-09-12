@@ -5,11 +5,16 @@
 
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
@@ -161,15 +166,16 @@ inline void
 } // namespace prediction_detail
 
 /// @brief Describe or evaluate a graph-only engine throughput model.
-/// A UHD reaches an engine only through that engine's UED `predict_engine_tflops`
-/// role map, which the descriptor loader resolves (RFC 0019 §3.1); there is no
-/// discovery here and an engine without a UED contributes no prediction. Description
-/// never loads or evaluates a model. Missing coverage and malformed models leave engine
-/// applicability unchanged. Binding/features JSON is emitted only for description,
-/// not policy evaluation.
-/// @param config The resolved role model, or a default-constructed config when the
-///               UED binds none: description still names the binding an author must
-///               train against, which is how the first model is bootstrapped.
+/// A UHD reaches an engine only through a binding that lives in compiled code -- the
+/// UED's `predict_engine_tflops` role map for a descriptor-backed engine (RFC 0019
+/// §3.1), or the UUID a provider names in its own engine definition for an engine that
+/// ships no UED (RFC 0019 Open Question 7, RESOLVED). There is no discovery here and no
+/// document claims an engine. Description never loads or evaluates a model. Missing
+/// coverage and malformed models leave engine applicability unchanged. Binding/features
+/// JSON is emitted only for description, not policy evaluation.
+/// @param config The bound model, or a default-constructed config when nothing binds
+///               one: description still names the binding an author must train
+///               against, which is how the first model is bootstrapped.
 /// @param compiled @p config compiled by prediction_detail::model() and cached by the
 ///                 caller; null whenever nothing is deployed for this architecture.
 ///                 Only read when @p evaluate, so description cannot touch a model.
@@ -256,4 +262,146 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     }
     return result;
 }
+
+/// @brief One engine's L1 throughput binding: the models bound to it per architecture,
+/// the architectures whose bound model this build refused, and the compiled-model cache
+/// those queries share.
+///
+/// A binding always comes from compiled code, never from the document. A
+/// descriptor-backed engine fills it from its UED's `predict_engine_tflops` role map,
+/// which the loader resolves (RFC 0019 §3.1); an engine that ships no UED fills it from
+/// the UUID its provider names in its own engine definition (RFC 0019 Open Question 7,
+/// RESOLVED). Either way the UHD keeps §4.1's shape -- no `engine`, `role` or `arch`
+/// member -- so no document can attach itself to an engine by claiming one.
+///
+/// Held by the engine, so a model is compiled once and shared by every later query.
+class EngineModelBinding
+{
+public:
+    /// @param arch `default`, or a gcnArchName prefix, exactly as the binding spelled it.
+    void bind(const std::string& arch, UhdConfig config)
+    {
+        _byArch.insert_or_assign(arch, std::move(config));
+    }
+
+    /// @brief Record an architecture whose bound model this build will not use.
+    ///
+    /// RFC 0019 §11.2 separates two refusals, and @p status is which one this is:
+    ///   - UNAVAILABLE -- "I do not answer this question". The model is fine, it just is
+    ///     not this build's: a model trained against another provider revision (§4.1
+    ///     `trained_against.selector_revision`) says nothing about this one.
+    ///   - INVALID -- "I answer, and the answer is bad". A model that is present and
+    ///     failed its contract is a claim: do not pick me.
+    /// @param reason Surfaced verbatim to the caller, so it must name what was compared.
+    void markUnusable(const std::string& arch,
+                      hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status,
+                      std::string reason)
+    {
+        _refused.insert_or_assign(arch, Refusal{status, std::move(reason)});
+    }
+
+    /// @brief This engine's L1 prediction for @p arch, described or evaluated.
+    /// @param arch The device `gcnArchName`, feature suffix included.
+    /// @param evaluate False describes the binding without touching a model.
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        predict(int64_t engineId,
+                const std::string& engineName,
+                const std::string& selectorRevision,
+                const std::string& arch,
+                const FeatureExtractionContext& features,
+                bool evaluate) const
+    {
+        // RFC 0019 §8.3: the longest matching architecture wins, with `default` used
+        // only when nothing more specific matched.
+        std::string selectedArch;
+        const UhdConfig* selected = nullptr;
+        const Refusal* refused = nullptr;
+        for(const auto& [target, model] : _byArch)
+        {
+            if((target == "default" && selectedArch.empty())
+               || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
+                   && (selectedArch == "default" || target.size() > selectedArch.size())))
+            {
+                selected = &model;
+                selectedArch = target;
+            }
+        }
+        // `>=`, not `>`: a refusal at the same specificity as a bound model wins, so an
+        // exact-arch failure can never silently fall through to another arch's model.
+        for(const auto& [target, refusal] : _refused)
+        {
+            if((target == "default" && selectedArch.empty())
+               || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
+                   && (selectedArch == "default" || target.size() >= selectedArch.size())))
+            {
+                refused = &refusal;
+            }
+        }
+        // Nothing outside this binding can attach a model to the engine, so an engine
+        // with no bound model for this architecture simply has none.
+        static const UhdConfig UNBOUND;
+        const bool evaluateModel = evaluate && refused == nullptr;
+        std::shared_ptr<const prediction_detail::Model> compiled;
+        if(evaluateModel && selected != nullptr)
+        {
+            compiled = compiledModel(selectedArch, *selected);
+        }
+        auto result = predictEngine(engineId,
+                                    engineName,
+                                    selectorRevision,
+                                    arch,
+                                    features,
+                                    evaluateModel,
+                                    selected != nullptr ? *selected : UNBOUND,
+                                    compiled);
+        if(refused != nullptr)
+        {
+            result.status = refused->status;
+            result.reason = refused->reason;
+            // A disabled model still took the description branch to get here. Ranking is
+            // not a description request, so the payload it built is dropped rather than
+            // serialized across the plugin ABI for every candidate engine.
+            if(evaluate)
+            {
+                result.binding_json.clear();
+                result.features_json.clear();
+            }
+        }
+        return result;
+    }
+
+private:
+    struct Refusal
+    {
+        hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status;
+        std::string reason;
+    };
+
+    /// Compiling a UHD rebuilds its feature contract and reads its artifact off disk.
+    /// A usable model is compiled once and shared by every later query on this engine.
+    /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
+    /// an artifact that is still being installed, or a transient read error, must not
+    /// disable the model for the rest of the provider's lifetime.
+    std::shared_ptr<const prediction_detail::Model> compiledModel(const std::string& arch,
+                                                                  const UhdConfig& config) const
+    {
+        const std::lock_guard<std::mutex> lock(_modelMutex);
+        if(const auto cached = _modelCache.find(arch); cached != _modelCache.end())
+        {
+            return cached->second;
+        }
+        auto compiled = prediction_detail::model(config);
+        if(compiled != nullptr
+           && compiled->status == hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+        {
+            _modelCache.emplace(arch, compiled);
+        }
+        return compiled;
+    }
+
+    std::map<std::string, UhdConfig> _byArch;
+    std::map<std::string, Refusal> _refused;
+    mutable std::mutex _modelMutex;
+    mutable std::map<std::string, std::shared_ptr<const prediction_detail::Model>> _modelCache;
+};
 } // namespace hipdnn_plugin_sdk::uhd

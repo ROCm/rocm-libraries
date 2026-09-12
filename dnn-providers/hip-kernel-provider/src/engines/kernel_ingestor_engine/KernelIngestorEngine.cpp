@@ -26,21 +26,15 @@ std::filesystem::path descriptorSearchDirectory()
 {
     // Three sources, in falling order of specificity. Env var first: it's the only one an
     // operator or test can set (tests and run-from-build-dir use it, like the ASM engine's
-    // HIPDNN_AITER_ASM_DIR), but only if it names a real directory -- a stale value is
-    // common (install-tree CTestTestfile.cmake bakes in the build's staging path, which
-    // won't exist on a test machine), and trusting it blindly would load nothing at all.
-    if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-       !override.empty())
+    // HIPDNN_AITER_ASM_DIR). The SDK's reader has already dropped it if it does not name a
+    // real directory -- a stale value is common (install-tree CTestTestfile.cmake bakes in
+    // the build's staging path, which won't exist on a test machine), and trusting it
+    // blindly would load nothing at all -- so an empty replacement means "fall through".
+    if(const auto replacement
+       = hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().replacement;
+       !replacement.empty())
     {
-        std::error_code notFound;
-        if(std::filesystem::is_directory(override, notFound))
-        {
-            return override;
-        }
-        HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_DIR is set to '"
-                               << override
-                               << "', which is not a directory; ignoring it and resolving "
-                                  "the descriptor tree from the loaded module instead");
+        return replacement;
     }
 
     // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR bakes in
@@ -77,40 +71,10 @@ std::vector<std::filesystem::path> descriptorSearchDirectories()
     std::vector<std::filesystem::path> roots{descriptorSearchDirectory()};
 
     // Additive, where HIPDNN_DESCRIPTOR_DIR above replaces: this is where descriptors are
-    // dropped in beside a shipped install rather than instead of it. Validated the same
-    // way, since a stale path here would otherwise be a silent no-op -- the loader treats
-    // a missing root as "nothing to add", which is exactly what a typo looks like.
-    if(const auto runtime = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
-       !runtime.empty())
+    // dropped in beside a shipped install rather than instead of it.
+    for(auto& additional : hipdnn_plugin_sdk::ingestor::environmentDescriptorRoots().additional)
     {
-        std::error_code notFound;
-        if(std::filesystem::is_directory(runtime, notFound))
-        {
-            roots.emplace_back(runtime);
-        }
-        else
-        {
-            HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_RUNTIME_DIR is set to '"
-                                   << runtime << "', which is not a directory; ignoring it");
-        }
-    }
-
-    const auto pathList = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH");
-#ifdef _WIN32
-    constexpr char PATH_SEPARATOR = ';';
-#else
-    constexpr char PATH_SEPARATOR = ':';
-#endif
-    size_t begin = 0;
-    while(begin < pathList.size())
-    {
-        const auto end = pathList.find(PATH_SEPARATOR, begin);
-        const auto root = pathList.substr(begin, end == std::string::npos ? end : end - begin);
-        if(!root.empty())
-        {
-            roots.emplace_back(root);
-        }
-        begin = end == std::string::npos ? pathList.size() : end + 1;
+        roots.push_back(std::move(additional));
     }
 
     return roots;
@@ -156,6 +120,17 @@ void registerNativeIngestorSymbols()
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
+const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
+{
+    // Memoized: the descriptor-backed engines and every opaque engine's declared L1 model
+    // (resolveDeclaredEnginePredictions) come out of the same trees, and walking them
+    // once per consumer would both cost a second parse and let two consumers disagree.
+    static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog
+        = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
+
+    return s_catalog;
+}
+
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
 {
     // Memoized: Container's static engine-id enumeration and its constructor both call
@@ -166,7 +141,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
         // at first use.
         registerNativeIngestorSymbols();
         return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
-            descriptorSearchDirectories());
+            descriptorCatalog());
     }();
 
     return s_sets;

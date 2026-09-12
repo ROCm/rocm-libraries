@@ -159,9 +159,10 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(predict(cfg).status, PredictionStatus::UNAVAILABLE);
 }
 
-/// RFC 0019 §11.2 and Open Question 7: an engine whose UED binds no prediction role
-/// contributes no score, yet must still describe the binding an author would train
-/// against -- that description is how the very first model gets collected.
+/// RFC 0019 §11.2: an engine nothing binds a prediction model to -- no UED role map and
+/// no UUID declared in provider code (Open Question 7) -- contributes no score, yet must
+/// still describe the binding an author would train against: that description is how the
+/// very first model gets collected.
 TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclinesToScore)
 {
     const UhdConfig unbound;

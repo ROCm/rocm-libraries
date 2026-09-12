@@ -425,7 +425,22 @@ def _string(value, where):
 
 
 def _validate_provenance(value, where):
-    _known_keys(value, ("ued", "kmd", "umd"), where)
+    # RFC 0019 4.1: trained_against names ONE of two things. A model a UED role map binds
+    # names the descriptor set (ued/kmd/umd, all three or none); a model an engine with no
+    # UED binds by provider-declared UUID names selector_revision, the provider build that
+    # was measured, because it has no descriptor set to be trained against. Loader is
+    # authoritative: UhdParser.hpp parser_detail::provenance.
+    _known_keys(value, ("ued", "kmd", "umd", "selector_revision"), where)
+    names_descriptor_set = any(key in value for key in ("ued", "kmd", "umd"))
+    if "selector_revision" in value:
+        revision = value["selector_revision"]
+        if not isinstance(revision, str) or not revision:
+            raise HkpPackError(f"{where}.selector_revision must be a nonempty string")
+    elif not names_descriptor_set:
+        raise HkpPackError(
+            f"{where} must name a descriptor set (ued/kmd/umd) or a selector_revision")
+    if not names_descriptor_set:
+        return
     _require(value, ("ued", "kmd", "umd"), where)
     if not isinstance(value["umd"], list):
         raise HkpPackError(f"{where}.umd must be an array")

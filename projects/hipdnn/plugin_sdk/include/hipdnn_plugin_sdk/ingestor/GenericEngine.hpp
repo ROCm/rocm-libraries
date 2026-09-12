@@ -8,8 +8,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
-#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -73,7 +74,6 @@ public:
         , _stateManager(std::move(stateManager))
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
         , _planBuilder(_engine, *_stateManager, deviceResolver)
-        , _unavailablePredictionArches(std::move(unavailablePredictionArches))
         , _selectorRevision(selectorRevision.empty() ? "generic-untuned-v1/" + toString(_engine.id)
                                                            + "/" + _engine.revision.str()
                                                      : std::move(selectorRevision))
@@ -85,9 +85,20 @@ public:
             throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + *undeclared
                                         + "', which its metadata schema does not declare");
         }
+        // RFC 0019 §3.1: the UED's role map is this engine's L1 binding, and it lives in
+        // the loader's resolution rather than in the UHD the map names.
         for(const auto& [arch, descriptor] : predictions)
         {
-            _predictions.emplace(arch, UhdKernelHeuristic::configFrom(descriptor));
+            _binding.bind(arch, UhdKernelHeuristic::configFrom(descriptor));
+        }
+        // A UED named this architecture's model and the loader refused it: RFC 0019
+        // §11.2's distrust signal, which is a claim ("do not pick me") rather than the
+        // silence an engine with no model at all reports.
+        for(const auto& arch : unavailablePredictionArches)
+        {
+            _binding.markUnusable(arch,
+                                  hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
+                                  "The selected engine-prediction UHD is missing or incompatible");
         }
     }
 
@@ -191,46 +202,12 @@ public:
         }
         std::string arch;
         const auto features = _planBuilder.predictionFeatures(handle, graph, config, arch);
-        std::string selectedArch;
-        const uhd::UhdConfig* selected = nullptr;
-        bool invalid = false;
-        for(const auto& [target, model] : _predictions)
-        {
-            if((target == "default" && selectedArch.empty())
-               || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
-                   && (selectedArch == "default" || target.size() > selectedArch.size())))
-            {
-                selected = &model;
-                selectedArch = target;
-            }
-        }
-        for(const auto& target : _unavailablePredictionArches)
-        {
-            if((target == "default" && selectedArch.empty())
-               || (target != "default" && archMatches(arch, target, ArchMatchMode::PREFIX)
-                   && (selectedArch == "default" || target.size() >= selectedArch.size())))
-            {
-                invalid = true;
-            }
-        }
-        // Nothing outside the UED role map can bind a model to this engine, so an
-        // engine with no resolved `predict_engine_tflops` role simply has none.
-        static const uhd::UhdConfig UNBOUND;
-        const auto& uhdConfig = selected != nullptr ? *selected : UNBOUND;
-        const bool evaluateEngine = evaluate && !invalid && kind == HIPDNN_ENGINE_PREDICTION_ENGINE;
-        std::shared_ptr<const uhd::prediction_detail::Model> compiled;
-        if(evaluateEngine && selected != nullptr)
-        {
-            compiled = compiledModel(selectedArch, *selected);
-        }
-        auto result = uhd::predictEngine(_id,
-                                         _engine.name,
-                                         _selectorRevision,
-                                         arch,
-                                         features,
-                                         evaluateEngine,
-                                         uhdConfig,
-                                         compiled);
+        auto result = _binding.predict(_id,
+                                       _engine.name,
+                                       _selectorRevision,
+                                       arch,
+                                       features,
+                                       evaluate && kind == HIPDNN_ENGINE_PREDICTION_ENGINE);
         if(!result.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(result.binding_json);
@@ -254,19 +231,6 @@ public:
                 binding["role"] = "sort_kernel_catalog";
                 binding.erase("uhd_id");
                 result.binding_json = binding.dump();
-            }
-        }
-        else if(invalid)
-        {
-            result.status = PredictionStatus::INVALID;
-            result.reason = "The selected engine-prediction UHD is missing or incompatible";
-            // A disabled model still took the description branch to get here. Ranking is
-            // not a description request, so the payload it built is dropped rather than
-            // serialized across the plugin ABI for every candidate engine.
-            if(evaluate)
-            {
-                result.binding_json.clear();
-                result.features_json.clear();
             }
         }
         return result;
@@ -293,38 +257,13 @@ public:
     }
 
 private:
-    /// Compiling a UHD rebuilds its feature contract and reads its artifact off disk.
-    /// A usable model is compiled once and shared by every later query on this engine.
-    /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
-    /// an artifact that is still being installed, or a transient read error, must not
-    /// disable the model for the rest of the provider's lifetime.
-    std::shared_ptr<const uhd::prediction_detail::Model>
-        compiledModel(const std::string& arch, const uhd::UhdConfig& config) const
-    {
-        const std::lock_guard<std::mutex> lock(_modelMutex);
-        if(const auto cached = _modelCache.find(arch); cached != _modelCache.end())
-        {
-            return cached->second;
-        }
-        auto compiled = uhd::prediction_detail::model(config);
-        if(compiled != nullptr
-           && compiled->status == hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
-        {
-            _modelCache.emplace(arch, compiled);
-        }
-        return compiled;
-    }
-
     EngineDescriptor _engine;
     std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
     GenericPlanBuilder<THandle, TSettings, TContext> _planBuilder;
-    std::map<std::string, uhd::UhdConfig> _predictions;
-    std::set<std::string> _unavailablePredictionArches;
+    uhd::EngineModelBinding _binding;
     std::string _selectorRevision;
     nlohmann::json _provenance;
-    mutable std::mutex _modelMutex;
-    mutable std::map<std::string, std::shared_ptr<const uhd::prediction_detail::Model>> _modelCache;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

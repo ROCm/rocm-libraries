@@ -128,11 +128,43 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
     revision(text(value, "revision", where), where);
 }
 
-/// RFC 0019 §4.1: a UHD names the descriptor set it was generated against, and only
-/// that. The loader's UUID and major/minor rule (§8.1) is what binds it to an engine.
+/// RFC 0019 §4.1: a UHD names what it was generated against, and only that. Two things
+/// can be named, and a model names whichever one applies to the engine that will bind it:
+///
+///   - the descriptor set -- `ued`/`kmd`/`umd`, all three or none -- for a model a UED
+///     role map binds. The loader's UUID and major/minor rule (§8.1) checks it.
+///   - `selector_revision`, the provider build whose behaviour was actually measured, for
+///     a model an engine with no UED binds by declared UUID (Open Question 7, RESOLVED).
+///     That engine has no UED, KMD or UMD to name, and its behaviour is decided by the
+///     vendor library it wraps, so this is the only thing there is to be trained against.
+///     The loader refuses a model whose recorded revision is not the one the provider
+///     reports: L1 is the one score compared ACROSS engines, so a stale estimate does not
+///     merely misreport a number, it changes which engine is selected.
+///
+/// Neither names an engine. A UHD still cannot say what it attaches to -- the binding is
+/// the UED role map or the provider-declared UUID, both of which live in compiled code.
 inline void provenance(const nlohmann::json& value, const std::string& where)
 {
-    keys(value, {"ued", "kmd", "umd"}, where);
+    keys(value, {"ued", "kmd", "umd", "selector_revision"}, where);
+    const bool namesDescriptorSet
+        = value.contains("ued") || value.contains("kmd") || value.contains("umd");
+    const bool namesSelector = value.contains("selector_revision");
+    if(!namesDescriptorSet && !namesSelector)
+    {
+        fail("trained_against must name a descriptor set or a selector_revision in " + where);
+    }
+    if(namesSelector)
+    {
+        // text() rejects a non-string and an empty one; the value itself is opaque here,
+        // since only the provider that produced it can say what it means.
+        (void)text(value, "selector_revision", where);
+    }
+    if(!namesDescriptorSet)
+    {
+        return;
+    }
+    // All three or none: two thirds of a descriptor set is not a weaker claim, it is an
+    // unverifiable one, and required() below is what says which third is missing.
     dependency(required(value, "ued", where), where + " ued");
     dependency(required(value, "kmd", where), where + " kmd");
     const auto& matchers = required(value, "umd", where);

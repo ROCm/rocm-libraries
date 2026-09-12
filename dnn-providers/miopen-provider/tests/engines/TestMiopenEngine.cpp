@@ -19,6 +19,11 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+
+#include "MiopenContainer.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnMiopenContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
@@ -32,7 +37,7 @@ TEST(TestMiopenEngine, ConstructorAndId)
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(42);
+    const MiopenEngine engine(42, "test:miopen", {});
     EXPECT_EQ(engine.id(), 42);
 }
 
@@ -40,7 +45,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(1);
+    const MiopenEngine engine(1, "test:miopen", {});
 
     const HipdnnMiopenHandle dummyHandle;
     const MockGraph mockGraph;
@@ -63,7 +68,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const HipdnnMiopenHandle dummyHandle;
@@ -97,7 +102,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder2, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(45000u));
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -117,7 +122,7 @@ TEST(TestMiopenEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const HipdnnMiopenHandle dummyHandle;
@@ -137,7 +142,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
 
-    MiopenEngine engine(0);
+    MiopenEngine engine(0, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
@@ -158,7 +163,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
 
-    MiopenEngine engine(0);
+    MiopenEngine engine(0, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -173,7 +178,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(0);
+    const MiopenEngine engine(0, "test:miopen", {});
 
     const MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
@@ -190,7 +195,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    MiopenEngine engine(0);
+    MiopenEngine engine(0, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     const MockGraph mockGraph;
@@ -204,7 +209,7 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(1);
+    const MiopenEngine engine(1, "test:miopen", {});
     HipdnnMiopenHandle dummyHandle;
     const MockGraph mockGraph;
 
@@ -220,7 +225,7 @@ TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(1);
+    const MiopenEngine engine(1, "test:miopen", {});
     HipdnnMiopenHandle dummyHandle;
     const MockGraph mockGraph;
 
@@ -286,7 +291,7 @@ TEST(TestMiopenEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     // This should NOT be called because we break after first non-empty custom knobs
     EXPECT_CALL(*mockPlanBuilder2, getCustomKnobs(::testing::_, ::testing::_)).Times(0);
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -337,7 +342,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuild
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -354,7 +359,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextThrowsOnInvalidBenchmarkingKnob
 {
     SKIP_IF_NO_DEVICES();
 
-    const MiopenEngine engine(1);
+    const MiopenEngine engine(1, "test:miopen", {});
     const MockGraph mockGraph;
     const HipdnnMiopenHandle dummyHandle;
     MockHipdnnMiopenContext ctx;
@@ -411,7 +416,7 @@ protected:
         return *_handle;
     }
 
-    MiopenEngine _engine{1};
+    MiopenEngine _engine{1, "test:miopen", {}};
     MockGraph _graph;
     MockHipdnnMiopenContext _context;
 
@@ -562,7 +567,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -595,7 +600,7 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
-    MiopenEngine engine(1);
+    MiopenEngine engine(1, "test:miopen", {});
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -606,4 +611,71 @@ TEST(TestMiopenEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoApplica
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+}
+
+/// RFC 0019 Open Question 7 (RESOLVED) plus §11.2: with nothing deployed for the UUID its
+/// container declared -- the state of every machine that has not installed a model -- the
+/// engine answers UNAVAILABLE. Absence is a normal outcome, never an exception and never
+/// a crash, and it costs the engine nothing.
+TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(
+        1, "test:miopen", {{"default", "0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}});
+
+    auto builder = createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const EngineConfigWrapper config(nullptr, 0);
+    HipdnnMiopenHandle handle;
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
+    ASSERT_NO_THROW(prediction = engine.getPrediction(
+                        handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true));
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.engine_id, 1);
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
+}
+
+/// MIOpen selects its own solution, so it has no exact configuration of ours to predict:
+/// RFC 0019 §11.2's "A only (opaque)" row. Declining must stay a decline rather than
+/// becoming an error once the engine started answering the ENGINE query.
+TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(1, "test:miopen", {});
+
+    auto builder = createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const EngineConfigWrapper config(nullptr, 0);
+    HipdnnMiopenHandle handle;
+
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::CONFIGURATION);
+}
+
+/// The two MIOpen engines are different engines with different performance, so each must
+/// declare its own model. One id shared by both would silently make one engine answer
+/// with the other's model.
+TEST(TestMiopenEngine, EachDeclaredEngineNamesADistinctWellFormedModelId)
+{
+    std::set<std::string> seen;
+    for(const auto* ids : {&MIOPEN_ENGINE_L1_MODELS, &MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS})
+    {
+        EXPECT_FALSE(ids->empty());
+        for(const auto& [arch, id] : *ids)
+        {
+            EXPECT_FALSE(arch.empty());
+            // A malformed literal would not fail the build -- it would silently mean
+            // "this engine never binds a model" -- so it is checked here.
+            EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
+                << id;
+            EXPECT_TRUE(seen.insert(id).second) << "two engines declare " << id;
+        }
+    }
 }

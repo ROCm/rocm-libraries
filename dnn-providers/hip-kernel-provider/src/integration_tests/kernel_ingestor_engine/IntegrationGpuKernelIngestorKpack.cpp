@@ -22,9 +22,9 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -763,6 +763,8 @@ TEST_F(IntegrationGpuKernelIngestorKpack, TheModelsChoiceExecutesCorrectly)
 
     executeAndVerify(*graph, workspace.get(), /*seed=*/0);
 }
+
+// ---------------------------------------------------------------------------
 // The reset sweep reaches the attention packs too
 //
 // resetIngestorModuleCachesForTesting() is driven off the SAME ingestorPacks() table
@@ -774,6 +776,15 @@ TEST_F(IntegrationGpuKernelIngestorKpack, TheModelsChoiceExecutesCorrectly)
 // hipkernel:pointwise_packed, so a broken reset wire on either attention pack's entry
 // would pass every existing suite, GPU and host alike.
 // ---------------------------------------------------------------------------
+
+// SDPA-GATED, and the gate is this file's own. Graph::sdpa and SdpaAttributes live
+// behind HIPDNN_ENABLE_SDPA (hipdnn_frontend/Graph.hpp), but integration_tests/
+// CMakeLists.txt compiles this translation unit on HIPDNN_ENABLE_KERNEL_INGESTOR
+// alone -- the two options are independent and an ingestor-on/SDPA-off build is a
+// configuration this branch ships. Unguarded, that build fails to COMPILE rather
+// than merely omitting a suite it could never have run: with SDPA off there is no
+// sdpa node for any of these graphs to carry.
+#ifdef HIPDNN_ENABLE_SDPA
 
 namespace
 {
@@ -934,6 +945,8 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<AttentionDenseFixture>& info) {
         return info.param.engineName == "hipkernel:Gfx942AttentionDense" ? "Gfx942" : "Gfx950";
     });
+
+#endif // HIPDNN_ENABLE_SDPA
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 
