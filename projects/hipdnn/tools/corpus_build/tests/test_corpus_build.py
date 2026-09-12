@@ -21,6 +21,7 @@ Four properties, and each of them has a specific way of going wrong silently:
 """
 from __future__ import annotations
 
+import collections
 import json
 import uuid
 from pathlib import Path
@@ -130,7 +131,8 @@ def test_every_emitted_shape_tuple_is_distinct(tmp_path, sources):
     """The corpus-wide invariant behind the test above, over all three sources at once."""
     manifest, _ = _build(tmp_path, sources, count=200)
     keys = [(row["op"], row["dtype"], row["batch"], row["heads_q"], row["heads_kv"],
-             row["seqlen_q"], row["seqlen_kv"], row["head_dim"], row["causal"])
+             row["seqlen_q"], row["seqlen_kv"], row["head_dim"], row["causal"],
+             row["alignment"])
             for row in manifest["graphs"]]
     assert len(set(keys)) == len(keys)
     assert len({row["name"] for row in manifest["graphs"]}) == len(keys)
@@ -267,6 +269,27 @@ def test_no_emitted_graph_pins_the_mma_core_mode(real_corpus):
     for path in sorted((out / "graphs").glob("*.json")):
         node = json.loads(path.read_text(encoding="utf-8"))["nodes"][0]
         assert node["attributes"]["mma_core_mode"] is None, path.name
+
+
+def test_every_causal_shape_is_carried_at_both_diagonal_anchors(real_corpus):
+    """A causal problem is served by different kernels depending on where its diagonal
+    is anchored -- AITER's gfx942 forward table has bottom-right causal kernels and no
+    top-left ones, and served 0 of 15 causal graphs in run 67928906 for exactly that
+    reason. Both anchors must reach the corpus, and the graph document must say which:
+    `SdpaPlanUtils::getMaskType` reads `diagonal_alignment` off the bounds trio."""
+    manifest, out = real_corpus
+    causal = [row for row in manifest["graphs"] if row["causal"]]
+    assert causal, "the tree's own inputs carry causal shapes"
+    anchors = collections.Counter(row["alignment"] for row in causal)
+    assert anchors["top_left"] > 0 and anchors["bottom_right"] > 0
+
+    written = {row["alignment"]: json.loads(
+        (out / row["file"]).read_text(encoding="utf-8"))["nodes"][0]["attributes"]
+        for row in causal}
+    assert written["bottom_right"]["diagonal_alignment"] == "BOTTOM_RIGHT"
+    assert written["top_left"]["diagonal_alignment"] == "TOP_LEFT"
+    for attributes in written.values():
+        assert (attributes["left_bound"], attributes["right_bound"]) == (-1, 0)
 
 
 def test_every_emitted_graph_reads_back_as_the_shape_it_claims(real_corpus):
