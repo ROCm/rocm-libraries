@@ -820,9 +820,13 @@ namespace
                        "HIPBLAS_STATUS_INVALID_VALUE";
 
                 const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+                // Name the solution: this assertion is the one CI reports, and
+                // without the name its log says only that some algorithm in a
+                // sweep of hundreds broke, which is not enough to reproduce.
                 EXPECT_EQ(badRow, -1)
-                    << "Row " << badRow
-                    << " of D differs bitwise from row 0 with uniform summation order enabled";
+                    << "Row " << badRow << " of D differs bitwise from row 0 for "
+                    << harness.solutionName(candidate)
+                    << " with uniform summation order enabled";
                 if(badRow < 0)
                     ++honored;
             }
