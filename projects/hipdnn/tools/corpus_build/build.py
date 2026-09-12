@@ -9,10 +9,11 @@ it runnable on a laptop before the cluster time it is preparing for.
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from . import assemble, kernels, model_shapes, sweep
-from .shapes import Filter
+from .shapes import BOTTOM_RIGHT, Filter
 
 #: The repository root, found from this file rather than from the working directory:
 #: the tool is run from `projects/hipdnn/tools` (like `uhd_gen`) but its inputs are
@@ -30,6 +31,29 @@ DEFAULT_MAX_BYTES = 2 * 1024 ** 3
 #: `make_sdpa_bundles`' rule for the packs: a geometry served by fewer kernels than
 #: this has nothing to rank, so it teaches a ranking model nothing.
 DEFAULT_MIN_CANDIDATES = 3
+
+
+def both_anchors(pool: list) -> list:
+    """`pool` with a bottom-right twin beside every causal candidate it carries.
+
+    A top-left and a bottom-right causal problem are two problems, not two spellings
+    of one: where `seqlen_q != seqlen_kv` they compute different outputs, and engines
+    implement them separately. AITER's gfx942 forward table has bottom-right causal
+    kernels and no top-left ones, so the single-anchor corpus of run 67928906 had it
+    serving none of its 15 causal graphs. The twin keeps the provenance of the shape
+    it came from, because it is the same measurement seen under the other convention.
+
+    Beside, not appended: `assemble.select` takes a prefix of each pool, so twins
+    collected at the end would be cut off by every allocation short of the whole pool
+    -- which is a corpus that carries the second anchor only when nothing needed it.
+    """
+    twinned = []
+    for candidate in pool:
+        twinned.append(candidate)
+        if candidate.shape.causal:
+            twinned.append(dataclasses.replace(candidate, shape=dataclasses.replace(
+                candidate.shape, alignment=BOTTOM_RIGHT)))
+    return twinned
 
 
 def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
@@ -67,12 +91,15 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
             excluded[source] = len(pool) - len(admitted)
             pool[:] = admitted
 
+    model_pool, kernel_pool = both_anchors(model_pool), both_anchors(kernel_pool)
+
     # The sweep is asked only for shapes the first two do not already have, so its
     # allocation is never spent on a duplicate that is then dropped. `count` is its
     # capacity: no corpus can need more sampled shapes than it has graphs.
     taken = {candidate.shape.key for candidate in model_pool + kernel_pool}
     declared = sweep.load(declaration)
     sweep_pool, sweep_report = sweep.sample(declared, count, seed, max_bytes, taken, keep)
+    sweep_pool = both_anchors(sweep_pool)
 
     pools, duplicates = assemble.deduplicate(
         {"model": model_pool, "kernel": kernel_pool, "sweep": sweep_pool})

@@ -145,6 +145,7 @@ def write(out: Path, selected: list, *, seed: int, count: int, inputs: list,
             "seqlen_kv": shape.seqlen_kv,
             "head_dim": shape.head_dim,
             "causal": shape.causal,
+            "alignment": shape.alignment,
             "bytes": graphs.footprint_bytes(shape),
         })
 
@@ -175,7 +176,7 @@ def write(out: Path, selected: list, *, seed: int, count: int, inputs: list,
 
     columns = ["benchmark", "name", "regime", "phase", "context", "grouping", "source",
                "origin", "op", "dtype", "batch", "heads_q", "heads_kv", "seqlen_q",
-               "seqlen_kv", "head_dim", "causal", "bytes", "file"]
+               "seqlen_kv", "head_dim", "causal", "alignment", "bytes", "file"]
     with (out / "manifest.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()

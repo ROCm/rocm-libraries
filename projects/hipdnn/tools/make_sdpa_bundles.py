@@ -107,6 +107,12 @@ def bundle_for(geom: dict, *, mma_core_mode: str | None = "float") -> dict:
         # causal bundles carry left_bound/right_bound and leave causal_mask False.
         attributes["left_bound"] = -1
         attributes["right_bound"] = 0
+        # Where that window's diagonal is anchored. `SdpaPlanUtils::getMaskType` reads
+        # exactly this trio, and the two anchors select different kernels: AITER's
+        # gfx942 forward table has BOTTOM_RIGHT causal kernels and no TOP_LEFT ones.
+        # Default top-left, as the shipped bundles are.
+        if geom.get("alignment") == "bottom_right":
+            attributes["diagonal_alignment"] = "BOTTOM_RIGHT"
 
     inputs = {k: None for k in (
         "attn_mask_tensor_uid", "scale_tensor_uid", "seq_len_q_tensor_uid",
