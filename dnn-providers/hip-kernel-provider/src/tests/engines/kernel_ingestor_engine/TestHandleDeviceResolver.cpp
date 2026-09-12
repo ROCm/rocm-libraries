@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <thread>
 #include <vector>
 
@@ -49,6 +50,26 @@ public:
                               hipdnn_plugin_sdk::ingestor::DeviceId /*deviceId*/) const override
     {
         return hipErrorInvalidDevice;
+    }
+};
+
+/// Distinguishes a concrete stream's owner from the caller's changing current device.
+class ChangingCurrentDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int STREAM_DEVICE = 7;
+    int currentDevice = 3;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* deviceId) const override
+    {
+        *deviceId = STREAM_DEVICE;
+        return hipSuccess;
+    }
+
+    hipError_t queryCurrentDevice(int* deviceId) const override
+    {
+        *deviceId = currentDevice;
+        return hipSuccess;
     }
 };
 
@@ -116,6 +137,38 @@ TEST(TestHandleDeviceResolver, ResolvesTheCurrentDeviceForANullStream)
     ASSERT_EQ(hipGetDevice(&currentDevice), hipSuccess);
 
     EXPECT_EQ(resolver.deviceId(handle), currentDevice);
+}
+
+TEST(TestHandleDeviceResolver, ResolvesDefaultStreamsFromTheLiveCurrentDevice)
+{
+    ChangingCurrentDeviceResolver resolver;
+    Handle handle;
+    const std::array<hipStream_t, 3> defaultStreams
+        = {nullptr, hipStreamLegacy, hipStreamPerThread};
+
+    for(const auto stream : defaultStreams)
+    {
+        SCOPED_TRACE(stream);
+        handle.setStream(stream);
+
+        resolver.currentDevice = 3;
+        EXPECT_EQ(resolver.deviceId(handle), 3);
+
+        resolver.currentDevice = 5;
+        EXPECT_EQ(resolver.deviceId(handle), 5);
+    }
+}
+
+TEST(TestHandleDeviceResolver, KeepsTheConcreteStreamOwnerAcrossCurrentDeviceChanges)
+{
+    ChangingCurrentDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_EQ(resolver.deviceId(handle), ChangingCurrentDeviceResolver::STREAM_DEVICE);
+
+    resolver.currentDevice = 5;
+    EXPECT_EQ(resolver.deviceId(handle), ChangingCurrentDeviceResolver::STREAM_DEVICE);
 }
 
 TEST(TestHandleDeviceResolver, ResolvesTheStreamsOwnDeviceWhenItDiffersFromCurrent)

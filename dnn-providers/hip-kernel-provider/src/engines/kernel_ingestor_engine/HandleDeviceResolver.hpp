@@ -31,10 +31,11 @@ public:
         // to device 0 and looks right on a single-device machine.
         int deviceId = -1;
 
-        // Null stream: default stream belongs to the current device.
-        if(handle.getStream() != nullptr)
+        // Default stream tokens are relative to the live current device.
+        const auto stream = handle.getStream();
+        if(stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread)
         {
-            if(queryStreamDevice(handle.getStream(), &deviceId) == hipSuccess && deviceId >= 0)
+            if(queryStreamDevice(stream, &deviceId) == hipSuccess && deviceId >= 0)
             {
                 return deviceId;
             }
