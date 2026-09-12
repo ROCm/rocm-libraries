@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 
 from . import assemble, build as pipeline, model_shapes
+from .shapes import DTYPES, Filter
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -53,6 +54,16 @@ def parse_args(argv=None) -> argparse.Namespace:
                              f"(default {pipeline.DEFAULT_MIN_CANDIDATES})")
     parser.add_argument("--max-bytes", type=int, default=pipeline.DEFAULT_MAX_BYTES,
                         help="skip shapes whose Q/K/V/O exceed this (default 2 GiB)")
+    parser.add_argument("--dtype", action="append", default=[], choices=list(DTYPES),
+                        dest="dtypes",
+                        help="keep only shapes of this dtype (repeatable; default all). "
+                             "AITER's gfx942 forward kernels are bf16 only, so a corpus "
+                             "meant to make it compete asks for `--dtype bf16`")
+    parser.add_argument("--head-dim", type=int, action="append", default=[],
+                        dest="head_dims",
+                        help="keep only shapes of this head dimension (repeatable; "
+                             "default all). AITER's gfx942 forward table carries "
+                             "hdim_v=128 exclusively")
     for source, share in assemble.DEFAULT_SHARES.items():
         parser.add_argument(f"--{source}-share", type=float, default=share,
                             dest=f"{source}_share",
@@ -72,6 +83,15 @@ def report(manifest: dict) -> None:
     print("regimes")
     for regime, total in manifest["regimes"].items():
         print(f"  {regime:<26} {total:5d}")
+    applied = manifest["reports"]["filter"]
+    if applied["dtypes"] or applied["head_dims"]:
+        excluded = manifest["reports"]["filtered_out"]
+        dropped = manifest["reports"]["sweep"].get("filtered", 0)
+        print(f"filter                  dtypes={applied['dtypes'] or 'any'} "
+              f"head_dims={applied['head_dims'] or 'any'}")
+        for source, total in sorted(excluded.items()):
+            print(f"  {source:<10} {total:5d} excluded")
+        print(f"  {'sweep':<10} {dropped:5d} draws rejected")
     for skipped in manifest["reports"]["model"]:
         for entry in skipped.get("skipped", []):
             print(f"  model skipped: {entry['model']:<10} {entry['reason']}")
@@ -85,6 +105,7 @@ def main(argv=None) -> int:
         arch=args.arch, batches=tuple(args.model_batches),
         declaration=args.declaration, min_candidates=args.min_candidates,
         max_bytes=args.max_bytes,
+        keep=Filter(dtypes=tuple(args.dtypes), head_dims=tuple(args.head_dims)),
         shares={source: getattr(args, f"{source}_share")
                 for source in assemble.DEFAULT_SHARES})
     report(manifest)
