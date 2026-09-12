@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "id": "f1d50000-0006-4a00-9000-000000000006",
+  "name": "hipkernel:flydsl_add",
+  "matchers": [
+    "f1d50000-0005-4a00-9000-000000000005"
+  ],
+  "engine": "f1d50000-0001-4a00-9000-000000000001",
+  "dispatch": "f1d50000-0004-4a00-9000-000000000004",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "f1d50000-0007-4a00-9000-000000000007",
+      "name": "flydsl_add.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseAdd.cpp",
+        "entry_point": "PointwiseAdd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "ADD"
+      },
+      "priority": 0
+    }
+  ]
+}

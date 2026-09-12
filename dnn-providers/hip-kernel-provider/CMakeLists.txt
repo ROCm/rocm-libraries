@@ -371,6 +371,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # descriptor staging in src/ then copies alongside that pack's JSON. Ahead of src/ so
     # the target exists to depend on.
     add_subdirectory(tools/uhd_model_gen)
+    # The flyDSL POC skipped descriptor-packaging, because its selection path uses a
+    # compiled-in native pack (IngestorPacks.cpp + FlydslNative.cpp) and it wanted to
+    # avoid rocm_kpack's Python packer. That skip is not carried onto this branch: the
+    # rocKE attention descriptors are staged and packed here, and a compiled-in pack does
+    # not need packaging disabled in order to work.
 endif()
 
 add_subdirectory(src)

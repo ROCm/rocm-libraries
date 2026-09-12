@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "id": "b87bcbcb-8632-4989-b28a-53f5d35e39c1",
+  "name": "hipkernel:Gfx950AttentionDense",
+  "graph_match": {
+    "native": "hipkernel.gfx950_attention_dense.graph_match"
+  },
+  "metadata": "9e461663-31d6-4051-9267-196d2a226c10",
+  "heuristic": "588c6a2e-853c-4a21-bc4b-7e02008db353",
+  "knobs": [
+    "head_size",
+    "num_query_heads",
+    "num_kv_heads",
+    "seqlen_q",
+    "seqlen_kv",
+    "batch",
+    "causal",
+    "block_m",
+    "block_n",
+    "waves_per_eu",
+    "persistent",
+    "num_persistent",
+    "ragged",
+    "sliding_window",
+    "use_sinks",
+    "lazy_rescale",
+    "wide_lds_dma",
+    "lds_v_row_pad"
+  ]
+}

@@ -1,0 +1,30 @@
+# Throwaway POC: check in SOURCE only. Everything below is a compiled binary or
+# regenerable intermediate — rebuild with the checked-in drivers/scripts:
+#   *.hsaco            -> flydsl_build/build_*.py         (needs FlyDSL repo + flydsl-venv)
+#   rocke_pack_out/    -> rocke_build/build_rocke_attention_pack.sh (from rocke_pack_src/)
+#   app/build/         -> cmake + ninja on app/CMakeLists.txt
+
+# compiled flyDSL kernels
+*.hsaco
+*.o
+*.so
+# rocKE packed kernel tree (binary .kpack + generated descriptors) — regenerate from rocke_pack_src/
+rocke_pack_out/
+*.kpack
+# compiled host harnesses (built from the .cpp sources checked in here)
+run_hsaco
+run_rmsnorm
+# CMake / ninja build trees
+app/build/
+build/
+# flyDSL compiler IR dumps (regenerated on demand from the kernel sources)
+ir_dump/
+ir_rms/
+module_dump.mlir
+# python + packer intermediates
+__pycache__/
+*.pyc
+hkp-intermediate/
+# editor/backup/log noise
+*.bak
+*.log

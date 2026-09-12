@@ -54,6 +54,21 @@ void resetPointwiseModuleCache();
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
+/// @see packs/FlydslNative.cpp -- THROWAWAY POC pack. Raw-loads a build-time flyDSL HSACO
+/// via the escape hatch; no kpack, no embedded-source compile, so no module cache.
+void registerFlydslSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/FlydslRmsNormNative.cpp -- THROWAWAY POC pack. A FAMILY of flyDSL RMSNorm
+/// HSACOs (one per hidden size N); kernel_match selects the instance whose baked N matches
+/// the graph. Raw-loads via the escape hatch; no kpack, no module cache.
+void registerFlydslRmsNormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
+/// @see packs/FlydslAttentionNative.cpp -- THROWAWAY POC pack (M3). A FAMILY of flyDSL
+/// flash-attention HSACOs (one per num_heads/head_dim/causal/dtype tuple); kernel_match
+/// selects the instance whose baked config matches the SDPA graph. Raw-loads via the
+/// escape hatch; no kpack, no module cache.
+void registerFlydslAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
 /// @see packs/Gfx942AttentionDenseNative.cpp
 void registerGfx942AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx942AttentionDenseModuleCache();

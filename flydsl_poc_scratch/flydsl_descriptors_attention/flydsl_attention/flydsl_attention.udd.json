@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "f1d5b1a7-0004-4a00-9000-000000000004",
+  "name": "flydsl attention dispatch (bf16)",
+  "dispatch_symbol": "hipkernel.flydsl_attention.dispatch"
+}

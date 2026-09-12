@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "f1d50001-0003-4a00-9000-000000000003",
+  "name": "flydsl rmsnorm variant fields",
+  "fields": [
+    {
+      "name": "N",
+      "type": "int"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}
