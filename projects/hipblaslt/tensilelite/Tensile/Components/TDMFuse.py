@@ -12,6 +12,7 @@ Two separate questions live here and must not be confused:
 TDMFuse=0  {A,B} + {MXSA,MXSB}   default two-way parity
 TDMFuse=1  {A,MXSA} + {MXSB,B}   crossed parity (tdmFusePaired)
 TDMFuse=2  {A,MXSA,MXSB} + {B}   2/1/1 remainder split, NumWaves==4 (tdmFuseAMx)
+TDMFuse=3  {B,MXSA,MXSB} + {A}   the mirror of 2, same split and wave count
 
 The groupings are rows of TDM_GROUPS below, keyed on name.  The TDMFuse integer
 is not an index into that table.  It is a key into TDM_FUSE_GROUPING, which maps
@@ -71,19 +72,36 @@ class TdmGrouping:
         self.layout = layout
 
 
-# Declarative grouping table, keyed on name.  Nothing below branches on a
-# specific name or index, so adding a grouping is adding a row plus one entry in
-# TDM_FUSE_GROUPING pointing an integer at it -- no new rejection and no new
-# naming case.
+# Declarative grouping table, keyed on name.
 #
-# It is not true that a row needs no new wave rule.  Two rules are only as
-# general as the wave shapes they can spell: `tdmWaveComponents` can express a
-# one-wave share, a contiguous share starting at wave 0, and a stride-two share,
-# and refuses anything else; and the TDMFuse=2 shared-set increment in
-# `KernelWriterAssembly.tdmSetupIncrementWaveSeparated` is one compare per
-# single-wave scale member.  A row whose partition falls outside those shapes
-# now fails the build loudly instead of miscompiling, but it does need work
-# there before an integer may point at it.
+# What adding a row costs, measured by wiring `B_MX` end to end rather than
+# argued from the shape of the code.  Three edits are REQUIRED and they are the
+# whole of it:
+#
+#   1. the row here (pure data: name, index, groups, layout);
+#   2. an entry in `_GROUPING_ACCEPTED` -- the preconditions the row needs.  A
+#      mirror row shares its mirror's entry, so `B_MX` reuses `A_MX`'s;
+#   3. an entry in `TDM_FUSE_GROUPING` pointing an integer at the row, plus the
+#      same integer in `ValidParameters` and in any yaml that sweeps it.
+#
+# The three are order-free.  A row with no acceptance entry is not selectable --
+# `tdmGrouping` raises rather than resolving it -- so the window in which an
+# integer is reachable but unguarded cannot be opened.  Before that, step 3
+# ahead of step 2 built kernels named for a grouping they did not have.
+#
+# Everything else is derived and inherited: the wave layout (`_waveShares`), the
+# crossing rejection (`tdmCrossRejectReason`), the naming (`Naming.py`), the
+# descriptor-set owner (`tdmSetOwner`), the SGPR aliasing `defineTdmSgprs`
+# emits, the PAP rejection (`tdmPapRejectReason`), the shared-set increment
+# dispatch and the thick gate.  None of them branch on a name or an index.
+#
+# Two rules stay only as general as the wave shapes they can spell:
+# `tdmWaveComponents` expresses a one-wave share, a contiguous share starting at
+# wave 0, and a stride-two share; `tdmSoleWave` expresses a single wave.  Both
+# refuse anything else by raising, so a row whose partition falls outside them
+# fails the build loudly instead of miscompiling -- but it needs work there
+# before an integer may point at it.  That is the one thing on this list a new
+# row can still owe.
 #
 #   name     groups (each = one fused tensor_load_to_lds)
 #   None     none -- every part loads on its own instruction
@@ -102,11 +120,10 @@ TDM_GROUPS = {
     "MX_AB": TdmGrouping("MX_AB", 4, (("A", "B"), ("MXSA", "MXSB"))),
     "paired": TdmGrouping("paired", 5, (("A", "MXSA"), ("MXSB", "B"))),
     "A_MX": TdmGrouping("A_MX", 2, (("A", "MXSA", "MXSB"), ("B",)), layout="block"),
-    # Rows no TDMFuse integer selects yet. They are data, and they already get
-    # the right answers out of every function here -- B_MX in particular
-    # inherits A_MX's "nothing to cross" rejection mirrored, for free, because
-    # the rule counts partitioned groups rather than testing a value.
     "B_MX": TdmGrouping("B_MX", 3, (("B", "MXSA", "MXSB"), ("A",)), layout="block"),
+    # Rows no TDMFuse integer selects, and which no _GROUPING_ACCEPTED entry
+    # covers either, so they are unreachable rather than merely unswept. They
+    # are data: every derived function here already answers correctly for them.
     "AB": TdmGrouping("AB", 1, (("A", "B"), ("MXSA",), ("MXSB",))),
     "None": TdmGrouping("None", 0, (("A",), ("B",), ("MXSA",), ("MXSB",))),
 }
@@ -115,6 +132,7 @@ TDM_GROUPS = {
 # shipped solution names, the frozen 00_Final.yaml and the silicon evidence, so
 # they cannot move; the parallel branch numbers the same groupings differently.
 # Keying the table on the name is what lets both numberings coexist.
+#
 TDM_FUSE_GROUPING = {0: "MX_AB", 1: "paired", 2: "A_MX"}
 
 
@@ -138,32 +156,121 @@ def _tdmFuseCanShareDescriptors(ks):
     return bool(pt.get("MXBlockA") and pt.get("MXBlockB"))
 
 
-def tdmFuseAMx(ks):
-    """TDMFuse=2: {A,MXSA,MXSB} share one set, B owns its own. NumWaves==4."""
-    return (ks.get("TDMFuse") == 2
-            and _tdmFuseCanShareDescriptors(ks)
-            and ks.get("NumWaves", 1) == 4)
+def _acceptSharedScaleSet(ks):
+    """Preconditions for a row seating both MX scales on one data tensor's set.
+
+    `A_MX` and `B_MX` are mirror images -- {A,MXSA,MXSB}+{B} against
+    {B,MXSA,MXSB}+{A} -- so one entry serves both. NumWaves==4 is not a
+    conservative choice: the 2/1/1 split is `divmod` remainder-to-leading-member,
+    which at eight waves is 3/3/2, a trailing two-wave share that
+    `tdmWaveComponents` cannot spell. Four waves is the only count where the
+    remainder policy and an emittable partition coincide.
+    """
+    return _tdmFuseCanShareDescriptors(ks) and ks.get("NumWaves", 1) == 4
 
 
-def tdmFusePaired(ks):
-    """TDMFuse=1: {MXSA,A} and {MXSB,B}, crossed parity. NumWaves>1."""
-    return (ks.get("TDMFuse") == 1
-            and _tdmFuseCanShareDescriptors(ks)
-            and ks.get("NumWaves", 1) > 1)
+def _acceptPairedSets(ks):
+    """Preconditions for a row giving each data tensor its own scale."""
+    return _tdmFuseCanShareDescriptors(ks) and ks.get("NumWaves", 1) > 1
+
+
+def _acceptAlways(ks):
+    """The default row. `defineTdmSgprs` programs it for any solution, which is
+    what makes it the fallback a declined grouping can land on."""
+    return True
+
+
+# Acceptance predicate per row name. A row is selectable only with an entry
+# here: `tdmGrouping` raises on a row that has none rather than resolving it, so
+# an integer can never be reachable while its preconditions are unwritten. Rows
+# absent from this table (`AB`, `None`) are therefore unreachable, not merely
+# unswept.
+_GROUPING_ACCEPTED = {
+    "MX_AB": _acceptAlways,
+    "paired": _acceptPairedSets,
+    "A_MX": _acceptSharedScaleSet,
+    "B_MX": _acceptSharedScaleSet,
+}
+
+# The row a declined grouping falls back to, which is also TDMFuse=0's row.
+TDM_GROUPING_DEFAULT = TDM_FUSE_GROUPING[0]
+
+
+def tdmGroupingName(ks):
+    """The row name TDMFuse asks for, before acceptance.
+
+    Fail-closed on both halves of the lookup, because both used to fail open in
+    the same direction -- towards the default grouping, under the name of a
+    different one:
+
+      unmapped integer   resolved to the default row silently, so a kernel built
+                         with it was named `_TDMF<n>` and was byte-for-byte the
+                         default grouping. No error, no warning, no rejection.
+      row with no
+      acceptance entry   would resolve as soon as a mapping named it, with
+                         nothing left to enforce the preconditions it needs.
+
+    Raising here rather than returning a default is what lets the three wiring
+    edits be done in any order.
+    """
+    fuse = ks.get("TDMFuse", 0)
+    name = TDM_FUSE_GROUPING.get(fuse)
+    if name is None:
+        raise ValueError(
+            "TDMFuse=%r names no grouping; TDM_FUSE_GROUPING maps %s. Add the "
+            "integer there (and to ValidParameters) rather than relying on a "
+            "fallback: an unmapped integer resolving to the %s row would name "
+            "the kernel for a grouping it does not have."
+            % (fuse, sorted(TDM_FUSE_GROUPING), TDM_GROUPING_DEFAULT))
+    if name not in TDM_GROUPS:
+        raise ValueError(
+            "TDMFuse=%r maps to %r, which is not a row of TDM_GROUPS (%s)"
+            % (fuse, name, sorted(TDM_GROUPS)))
+    if name not in _GROUPING_ACCEPTED:
+        raise ValueError(
+            "TDMFuse=%r maps to the %r row, which has no _GROUPING_ACCEPTED "
+            "entry, so nothing would enforce the preconditions it needs. Add "
+            "the entry -- a mirror row may share its mirror's -- before "
+            "pointing an integer at the row." % (fuse, name))
+    return name
+
+
+def tdmGroupingAccepted(ks):
+    """True when the row TDMFuse asks for can actually be produced here.
+
+    Solution.py's per-integer guards must reject exactly where this is False:
+    a declined grouping falls back to the default while the kernel name still
+    carries the integer, so a missing rejection is a kernel that lies.
+    """
+    return bool(_GROUPING_ACCEPTED[tdmGroupingName(ks)](ks))
 
 
 def tdmGrouping(ks):
     """The grouping row this solution actually gets.
 
-    TDMFuse names a grouping, but tdmFuseAMx / tdmFusePaired can decline it --
-    on TDMSplit, subtile, a missing scale, the wrong wave count. A declined
+    TDMFuse names a grouping, but its acceptance predicate can decline it -- on
+    TDMSplit, subtile, a missing scale, the wrong wave count. A declined
     grouping falls back to the default, exactly as the writer does.
     """
-    if tdmFuseAMx(ks):
-        return TDM_GROUPS["A_MX"]
-    if tdmFusePaired(ks):
-        return TDM_GROUPS["paired"]
-    return TDM_GROUPS[TDM_FUSE_GROUPING[0]]
+    name = tdmGroupingName(ks)
+    if not _GROUPING_ACCEPTED[name](ks):
+        return TDM_GROUPS[TDM_GROUPING_DEFAULT]
+    return TDM_GROUPS[name]
+
+
+def tdmFuseAMx(ks):
+    """TDMFuse=2: {A,MXSA,MXSB} share one set, B owns its own. NumWaves==4.
+
+    Asks which row resolved rather than restating the integer and its guards, so
+    it cannot drift from the resolver the way a second copy of the preconditions
+    could. Only TDMFuse=2 maps to `A_MX`, so this is the same answer.
+    """
+    return tdmGrouping(ks).name == "A_MX"
+
+
+def tdmFusePaired(ks):
+    """TDMFuse=1: {MXSA,A} and {MXSB,B}, crossed parity. NumWaves>1."""
+    return tdmGrouping(ks).name == "paired"
 
 
 def tdmWaveSeparated(ks):
@@ -276,6 +383,116 @@ def tdmScaleSharesDataSet(ks, grouping=None):
     return tuple(g for g in liveGroups(ks, grouping)
                  if any(tc in TDM_DATA_TENSORS for tc in g)
                  and any(tc in TDM_SCALE_TENSORS for tc in g))
+
+
+def tdmSetGroup(ks, tc):
+    """The group `tc` rides, or None when no row names it.
+
+    The full group, not the live one: a set keeps its shape when a member is
+    absent (see liveGroups).
+    """
+    for group in tdmGrouping(ks).groups:
+        if tc in group:
+            return group
+    return None
+
+
+def tdmSetOwner(ks, tc):
+    """The member whose name programs the descriptor set that carries `tc`.
+
+    One member of each set is allocated by `defineTdmSgprs` and the rest are
+    RegSet aliases of it, so per-set mutations -- the LDS buffer swap above all
+    -- must be applied under the owner only: applied under an alias too, the
+    even count cancels silently instead of failing to build.
+
+    The owner is the set's data tensor, or its first member when it has none.
+    That is a reading of the table, not a new convention: it reproduces every
+    allocation `defineTdmSgprs` already emits -- `MX_AB` allocates A and aliases
+    B onto it, and allocates MXSA and aliases MXSB; `paired` allocates A and B
+    and aliases each scale onto its own data tensor, so the {MXSB,B} set is
+    owned by B even though the table writes MXSB first; `A_MX` allocates A and
+    B and puts both scales on A. `B_MX` inherits the mirror of the last one with
+    no branch here.
+
+    A set cannot have two data tensors and an alias to resolve at the same time:
+    {A,B} is one register range whichever name allocates it, and A is the name
+    that does.
+    """
+    group = tdmSetGroup(ks, tc)
+    if group is None:
+        return tc
+    for member in group:
+        if member in TDM_DATA_TENSORS:
+            return member
+    return group[0]
+
+
+def tdmSharedScaleSet(ks):
+    """The set seating both MX scales on one data tensor's set, or None.
+
+    The shape `A_MX` names and `B_MX` mirrors: three members, one data tensor
+    and both scales, dispatched 2/1/1 across four waves. The writer needs to ask
+    for it by structure rather than by TDMFuse value, because everything it then
+    does -- the three-way dispatch guard, which increment the shared register
+    falls through to, which name gets the RegSet alias -- is the same code with
+    the owner substituted.
+    """
+    for group in tdmGrouping(ks).groups:
+        if len(group) < 2 or not set(TDM_SCALE_TENSORS) <= set(group):
+            continue
+        if len([tc for tc in group if tc in TDM_DATA_TENSORS]) == 1:
+            return group
+    return None
+
+
+def tdmSharedScaleSetOwner(ks):
+    """The data tensor whose descriptor set both MX scales ride, or None."""
+    group = tdmSharedScaleSet(ks)
+    if group is None:
+        return None
+    return next(tc for tc in group if tc in TDM_DATA_TENSORS)
+
+
+def tdmFuseSharedScales(ks):
+    """True when both MX scales ride one data tensor's descriptor set.
+
+    True for `A_MX` and for `B_MX`. The writer's own `tdmFuseAMx` asks the
+    narrower question -- is this specifically A's set -- and the difference is
+    exactly the set of sites that had A hardcoded as the owner.
+    """
+    return tdmSharedScaleSet(ks) is not None
+
+
+def tdmSharedSetOrder(ks, tcA, tcB):
+    """(shared, separate) of a data-tensor pair, the shared set's owner first.
+
+    Exchanged for `B_MX`, where B holds the shared set. A function of the two
+    names so the writer's callers need no `if owner == "A"`, and a module
+    function for the reason `tdmSharedScaleSetActive` gives.
+    """
+    owner = tdmSharedScaleSetOwner(ks)
+    return (tcA, tcB) if owner is None or tcA == owner else (tcB, tcA)
+
+
+def tdmSharedScaleSetActive(ks):
+    """True when the writer emits a shared-scale-set dispatch for this solution.
+
+    The grouping question above plus the wave-separation precondition: with one
+    wave, or with the TDM moving only one of A and B, there is no wave partition
+    to dispatch over and the default shared set is programmed whatever TDMFuse
+    asked for.
+
+    A module function rather than a writer method, deliberately, and the reason
+    is a measurement. Several writer tests drive real method bodies through
+    hand-rolled stub objects that forward a FIXED LIST of method names. Adding
+    this predicate as a `KernelWriterAssembly` method broke 44 of them with
+    `AttributeError` while the generated corpus stayed byte-identical -- the
+    stubs do not fake the answers, they forward to the real bodies, so nothing
+    about the behaviour had changed. A method is a name every stub must know; a
+    module function is not. `tdmWaveRangeText` is a plain function for the same
+    reason, and says so.
+    """
+    return tdmWaveSeparated(ks) and tdmFuseSharedScales(ks)
 
 
 def tdmPapRejectReason(ks):
