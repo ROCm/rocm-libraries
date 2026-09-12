@@ -10,7 +10,10 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <memory>
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <vector>
 
 using namespace hip_kernel_provider;
@@ -80,67 +83,207 @@ TEST(TestKernel, LaunchesVectorAdd)
     ASSERT_EQ(hipSuccess, hipFree(devC));
 }
 
-TEST(TestKernelDeviceBinding, RefusesALaunchItCannotBindTheDeviceFor)
+namespace
 {
-    SKIP_IF_NO_DEVICES();
 
-    int devices = 0;
-    ASSERT_EQ(hipSuccess, hipGetDeviceCount(&devices));
-
-    // An ordinal one past the last device can never be made current, so this stays
-    // discriminating on the single-GPU hosts CI runs. The null function handle is never
-    // dereferenced: the refusal lands before hipModuleLaunchKernel is reached.
-    Kernel kernel(nullptr, "unbindable", devices);
-    kernel.setBlockSize(1);
-    kernel.setGridSize(1);
-
-    try
-    {
-        kernel.launch(nullptr);
-        FAIL() << "expected a launch onto a device that cannot be made current to be refused";
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& failure)
-    {
-        const std::string message = failure.what();
-        EXPECT_NE(message.find("cannot make device " + std::to_string(devices)), std::string::npos)
-            << message;
-        EXPECT_NE(message.find("unbindable"), std::string::npos)
-            << "the message must name the kernel: " << message;
-    }
-
-    // The refused hipSetDevice left HIP error state behind on purpose; clear it or the
-    // HipErrorHandler listener fails this test for it. Both stores, because the listener
-    // reads hipExtGetLastError and clearing only the other one leaves it holding the error.
-    static_cast<void>(hipGetLastError());
-    static_cast<void>(hipExtGetLastError());
+void freeDeviceBuffer(float* buffer)
+{
+    EXPECT_EQ(hipSuccess, hipFree(buffer));
 }
 
-TEST(TestKernelDeviceBinding, AKernelWithNoDeviceBindsNothing)
+void destroyStream(hipStream_t stream)
 {
-    SKIP_IF_NO_DEVICES();
+    EXPECT_EQ(hipSuccess, hipStreamDestroy(stream));
+}
 
-    // Program-sourced kernels carry NO_DEVICE and must reach the launch without binding:
-    // one Program is shared across devices, so a bind here would pin every MLOps launch to
-    // whichever device compiled first.
-    Kernel kernel(nullptr, "unbound", Kernel::NO_DEVICE);
-    kernel.setBlockSize(1);
+class TestKernelDeviceBinding : public ::testing::Test
+{
+protected:
+    static constexpr int N = 256;
+
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        ASSERT_EQ(hipSuccess, hipGetDeviceCount(&_deviceCount));
+        ASSERT_EQ(hipSuccess, hipGetDevice(&_moduleDevice));
+
+        for(auto* buffer : {&_a, &_b, &_c})
+        {
+            float* allocation = nullptr;
+            const hipError_t status = hipMalloc(&allocation, N * sizeof(float));
+            buffer->reset(allocation);
+            ASSERT_EQ(hipSuccess, status);
+        }
+        const std::vector<float> hostA(N, 1.0f);
+        const std::vector<float> hostB(N, 2.0f);
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(_a.get(), hostA.data(), N * sizeof(float), hipMemcpyHostToDevice));
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(_b.get(), hostB.data(), N * sizeof(float), hipMemcpyHostToDevice));
+        ASSERT_EQ(hipSuccess, hipMemset(_c.get(), 0, N * sizeof(float)));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        _program = std::make_unique<Program>("vector_add.cpp",
+                                             std::vector<std::string>{"-O3", "-DFLOAT=float"});
+    }
+
+    ~TestKernelDeviceBinding() override
+    {
+        // The fixture owns every HIP resource and restores the device captured in SetUp,
+        // including when a fatal assertion or exception interrupts a cross-device test.
+        if(_stream)
+        {
+            EXPECT_EQ(hipSuccess, hipSetDevice(_streamDevice));
+            EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
+            _stream.reset();
+        }
+        if(_moduleDevice >= 0)
+        {
+            EXPECT_EQ(hipSuccess, hipSetDevice(_moduleDevice));
+            EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
+            _program.reset();
+            _a.reset();
+            _b.reset();
+            _c.reset();
+        }
+    }
+
+    void createStream(int ordinal)
+    {
+        ASSERT_EQ(hipSuccess, hipSetDevice(ordinal));
+        _streamDevice = ordinal;
+        hipStream_t stream = nullptr;
+        const hipError_t status = hipStreamCreate(&stream);
+        _stream.reset(stream);
+        ASSERT_EQ(hipSuccess, status);
+    }
+
+    void expectOutput(float expected)
+    {
+        ASSERT_EQ(hipSuccess, hipSetDevice(_moduleDevice));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        std::vector<float> output(N);
+        ASSERT_EQ(hipSuccess,
+                  hipMemcpy(output.data(), _c.get(), N * sizeof(float), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < output.size(); ++i)
+        {
+            EXPECT_FLOAT_EQ(expected, output[i]) << "element " << i;
+        }
+    }
+
+    int _deviceCount = 0;
+    int _moduleDevice = -1;
+    int _streamDevice = -1;
+    std::unique_ptr<Program> _program;
+    std::unique_ptr<float, decltype(&freeDeviceBuffer)> _a{nullptr, freeDeviceBuffer};
+    std::unique_ptr<float, decltype(&freeDeviceBuffer)> _b{nullptr, freeDeviceBuffer};
+    std::unique_ptr<float, decltype(&freeDeviceBuffer)> _c{nullptr, freeDeviceBuffer};
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&destroyStream)> _stream{
+        nullptr, destroyStream};
+};
+
+enum class StreamKind
+{
+    Null,
+    Legacy,
+    PerThread,
+    Concrete
+};
+
+class TestKernelStreamDeviceBinding
+    : public TestKernelDeviceBinding,
+      public ::testing::WithParamInterface<std::tuple<StreamKind, bool>>
+{
+};
+
+TEST_P(TestKernelStreamDeviceBinding, LaunchesOnModuleDeviceAndRestoresCaller)
+{
+    const auto [kind, differentCurrentDevice] = GetParam();
+    if(differentCurrentDevice && _deviceCount < 2)
+    {
+        GTEST_SKIP() << "cross-device launches require two devices";
+    }
+
+    hipStream_t stream = nullptr;
+    switch(kind)
+    {
+    case StreamKind::Null:
+        break;
+    case StreamKind::Legacy:
+        stream = hipStreamLegacy;
+        break;
+    case StreamKind::PerThread:
+        stream = hipStreamPerThread;
+        break;
+    case StreamKind::Concrete:
+        ASSERT_NO_FATAL_FAILURE(createStream(_moduleDevice));
+        stream = _stream.get();
+        break;
+    default:
+        FAIL() << "unknown stream kind";
+    }
+
+    Kernel kernel(_program->getKernel("vector_add"), "vector_add", _moduleDevice);
+    kernel.setBlockSize(N);
+    kernel.setGridSize(1);
+    const int callerDevice
+        = differentCurrentDevice ? (_moduleDevice + 1) % _deviceCount : _moduleDevice;
+    ASSERT_EQ(hipSuccess, hipSetDevice(callerDevice));
+
+    int afterLaunch = -1;
+    kernel.launch(stream, _a.get(), _b.get(), _c.get(), N);
+    ASSERT_EQ(hipSuccess, hipGetDevice(&afterLaunch));
+    EXPECT_EQ(callerDevice, afterLaunch);
+    expectOutput(3.0f);
+}
+
+INSTANTIATE_TEST_SUITE_P(StreamKinds,
+                         TestKernelStreamDeviceBinding,
+                         ::testing::Combine(::testing::Values(StreamKind::Null,
+                                                              StreamKind::Legacy,
+                                                              StreamKind::PerThread,
+                                                              StreamKind::Concrete),
+                                            ::testing::Bool()));
+
+TEST_F(TestKernelDeviceBinding, RejectsAConcreteStreamFromAnotherDevice)
+{
+    if(_deviceCount < 2)
+    {
+        GTEST_SKIP() << "foreign-stream rejection requires two devices";
+    }
+    const int peerDevice = (_moduleDevice + 1) % _deviceCount;
+    Kernel kernel(_program->getKernel("vector_add"), "vector_add", _moduleDevice);
+    kernel.setBlockSize(N);
+    kernel.setGridSize(1);
+    ASSERT_NO_FATAL_FAILURE(createStream(peerDevice));
+
+    int afterLaunch = -1;
+    EXPECT_THROW(kernel.launch(_stream.get(), _a.get(), _b.get(), _c.get(), N),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    ASSERT_EQ(hipSuccess, hipGetDevice(&afterLaunch));
+    EXPECT_EQ(peerDevice, afterLaunch);
+    ASSERT_EQ(hipSuccess, hipSetDevice(peerDevice));
+    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+    expectOutput(0.0f);
+}
+
+TEST_F(TestKernelDeviceBinding, RefusesALaunchItCannotBindTheDeviceFor)
+{
+    // The loaded function and buffers are valid; only the requested ordinal is invalid.
+    Kernel kernel(_program->getKernel("vector_add"), "vector_add", _deviceCount);
+    kernel.setBlockSize(N);
     kernel.setGridSize(1);
 
-    try
-    {
-        kernel.launch(nullptr);
-        FAIL() << "expected a null function handle to be refused by HIP";
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& failure)
-    {
-        const std::string message = failure.what();
-        EXPECT_NE(message.find("hipModuleLaunchKernel"), std::string::npos)
-            << "a NO_DEVICE kernel must fail at the launch, never at a device bind: " << message;
-        EXPECT_EQ(message.find("cannot make device"), std::string::npos)
-            << "a NO_DEVICE kernel must not attempt a bind: " << message;
-    }
+    int afterLaunch = -1;
+    EXPECT_THROW(kernel.launch(nullptr, _a.get(), _b.get(), _c.get(), N),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    const hipError_t deviceStatus = hipGetDevice(&afterLaunch);
 
-    // The refused launch left HIP error state behind; clear both stores, as above.
+    // A refused hipSetDevice leaves both HIP error slots populated.
     static_cast<void>(hipGetLastError());
     static_cast<void>(hipExtGetLastError());
+    ASSERT_EQ(hipSuccess, deviceStatus);
+    EXPECT_EQ(_moduleDevice, afterLaunch);
+    expectOutput(0.0f);
 }
+
+} // namespace
