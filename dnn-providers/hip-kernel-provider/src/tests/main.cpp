@@ -34,7 +34,7 @@ public:
         }
     }
 
-    void OnTestIterationStart(const testing::UnitTest&, int) override
+    void OnTestIterationStart(const testing::UnitTest& /*unitTest*/, int /*iteration*/) override
     {
         for(auto& [test, completed] : _completed)
         {
@@ -58,7 +58,7 @@ public:
         }
     }
 
-    void OnTestIterationEnd(const testing::UnitTest&, int iteration) override
+    void OnTestIterationEnd(const testing::UnitTest& /*unitTest*/, int iteration) override
     {
         _completedIteration = true;
         for(const auto& [test, completed] : _completed)
@@ -176,5 +176,9 @@ int main(int argc, char** argv)
 
     const int result = RUN_ALL_TESTS();
     const bool censusPassed = censusResult == nullptr || censusResult->passed();
-    return result != 0 ? result : (censusPassed ? 0 : 1);
+    if(result != 0)
+    {
+        return result;
+    }
+    return censusPassed ? 0 : 1;
 }
