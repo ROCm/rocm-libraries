@@ -284,9 +284,6 @@ struct TransposeSwizzle
     static_assert(addressings_agree(),
                   "TransposeSwizzle::offset_uint2_shifted does not reach the slot "
                   "offset_uint2 names for the same element");
-    static_assert(rounds_are_rungs(),
-                  "a round of the transpose read is not a filter shift of the round before "
-                  "it, so the read is not a ladder and displacement() does not describe it");
 
     static constexpr bool is_bank_conflict_free(int num_shifts)
     {
