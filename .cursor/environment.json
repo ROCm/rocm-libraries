@@ -1,0 +1,5 @@
+{
+  "name": "ROCm Libraries (CPU tooling)",
+  "user": "ubuntu",
+  "install": "./.cursor/install.sh"
+}
