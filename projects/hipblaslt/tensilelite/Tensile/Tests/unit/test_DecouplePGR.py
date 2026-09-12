@@ -925,18 +925,42 @@ def test_thick_wait_leaves_equal_pairs_untouched():
 
 
 def test_thick_wait_does_not_claim_a_wait_past_the_next_fill_label():
+    """The retag loop stops at the next fill label, so the drain past it is
+    never rewritten -- and the coverage check will not accept a gate the pass
+    did not write, so the kernel is still refused rather than credited with a
+    wait belonging to another group."""
     asm = _asm(_fillBlock("B", wait=None), tail=["label_DcpLateFillAEnd:",
                                                  "s_wait_tensorcnt 0", "s_endpgm"])
-    with pytest.raises(RuntimeError, match="found 0"):
+    with pytest.raises(RuntimeError, match="did not relax"):
         _applyThickWait(_thickWaitKernel(), asm)
 
 
+def test_thick_wait_accepts_a_schedule_that_merges_the_two_gates():
+    """One retag can cover two fill ends, so a retag count is not the test.
+
+    gfx1250v0's cost table sinks the iter0 clone's LDS reads and its gate below
+    the convergence label, leaving one drain that gates both paths. This shape
+    used to be refused as a shortfall against InitCIterWmma=1, which cost six
+    kernels -- all of them TDMFuse=0, the default grouping. Nothing reads ahead
+    of the surviving gate, so there is nothing to refuse.
+    """
+    asm = _asm(_fillBlock("B", clone=True, wait=None), _fillBlock("B"))
+    out = _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    assert out.count("s_wait_tensorcnt 2") == 1
+    assert "s_wait_tensorcnt 0" not in out
+
+
 def test_thick_wait_shortfall_drops_one_kernel_instead_of_the_build():
-    asm = _asm(_fillBlock("B", clone=True), _fillBlock("B", wait=None))
-    with pytest.raises(
-            RuntimeError,
-            match=r"expected 2 s_wait_tensorcnt 2 on thick B \(1/2 LDS blocks\), found 1"):
-        _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    """A real shortfall still raises per kernel, so the caller drops that
+    kernel and not the build. What makes it real is reads starting ahead of the
+    drain that gates them, which is what the gate exists to prevent -- not a
+    retag total falling short of a solution parameter.
+    """
+    asm = _asm(["label_DcpEarlyFillBEnd:",
+                "ds_load_b128 v[0:3], v[64] offset:128",
+                "s_wait_tensorcnt 0"], tail=["s_endpgm"])
+    with pytest.raises(RuntimeError, match="before any s_wait_tensorcnt"):
+        _applyThickWait(_thickWaitKernel(), asm)
 
 
 def test_thick_wait_refuses_to_walk_past_the_thick_gate_to_the_thin_drain():
@@ -946,7 +970,7 @@ def test_thick_wait_refuses_to_walk_past_the_thick_gate_to_the_thin_drain():
     assumes -- reject the kernel instead of relaxing a real dependency."""
     asm = _asm(_fillBlock("B", wait="s_wait_tensorcnt 2"),
                tail=["s_wait_tensorcnt 0", "s_endpgm"])
-    with pytest.raises(RuntimeError, match="found 0"):
+    with pytest.raises(RuntimeError, match="did not relax"):
         _applyThickWait(_thickWaitKernel(), asm)
 
 
@@ -1007,7 +1031,7 @@ def test_thick_wait_target_follows_the_label_the_fill_emitted(pgrA, pgrB, thick)
     other tensor's name matches no label in the emitted kernel."""
     other = "A" if thick == "B" else "B"
     asm = _asm(_fillBlock(other), tail=["s_endpgm"])
-    with pytest.raises(RuntimeError, match="found 0"):
+    with pytest.raises(RuntimeError, match="label was emitted at all"):
         _applyThickWait(_thickWaitKernel(pgrA, pgrB), asm)
 
 
@@ -1061,6 +1085,6 @@ def test_the_ordered_pair_is_the_pair_the_emission_is_gated_on(pgrA, pgrB, thick
     assert relaxed.count("s_wait_tensorcnt 2") == 1, \
         "the thick tensor named by the helper is not the one whose gate was relaxed"
 
-    with pytest.raises(RuntimeError, match="found 0"):
+    with pytest.raises(RuntimeError, match="label was emitted at all"):
         _applyThickWait(_thickWaitKernel(pgrA, pgrB),
                         _asm(_fillBlock(thin), tail=["s_endpgm"]))

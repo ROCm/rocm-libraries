@@ -54,7 +54,7 @@ from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
 from .Components.TDMFuse import tdmWaveIssueOrder, decoupledThickGateRelaxation, \
-     dcpThickGateCountOverridden, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
+     dcpThickGateCountOverridden, dcpThickGateUncoveredSites, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -921,6 +921,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     relaxed = gate.tensorcnt
 
     changed = 0
+    retagged = set()
     for i, line in enumerate(lines):
       if marker not in line or not line.rstrip().endswith(":"):
         continue
@@ -938,16 +939,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if re.match(r"^s_wait_tensorcnt\s+0(?:\s|$)", candidate):
           lines[j] = re.sub(r"^(s_wait_tensorcnt\s+)0(\s|$)",
                             r"\g<1>%u\2" % relaxed, candidate, count=1)
+          retagged.add(j)
           changed += 1
         break
 
-    # Only InitCIterWmma's iter0 clone adds a second thick fill to retag.
-    expected = 2 if kernel.get("InitCIterWmma", 0) == 1 else 1
-    if changed != expected:
+    # Whether the emitted text carries the gate belongs to the owner that
+    # priced it, so ask it rather than counting retags against InitCIterWmma:
+    # that parameter says a second fill exists, not that the schedule kept a
+    # second wait for it. A schedule free to merge the two would read as a
+    # shortfall, and one retag can cover both sites.
+    uncovered = dcpThickGateUncoveredSites(lines, marker, relaxed, retagged)
+    if uncovered:
       raise RuntimeError(
-          "decoupled PGR cannot honour its divergent thick-wait: expected %u "
-          "s_wait_tensorcnt %u on thick %s (%d/%d LDS blocks), found %u"
-          % (expected, relaxed, thickTc, numLdsBlkA, numLdsBlkB, changed))
+          "decoupled PGR cannot honour its divergent thick-wait: retagged %u "
+          "s_wait_tensorcnt %u on thick %s (%d/%d LDS blocks), leaving %u of "
+          "%u %s site(s) uncovered -- %s"
+          % (changed, relaxed, thickTc, numLdsBlkA, numLdsBlkB, len(uncovered),
+             sum(1 for l in lines if marker in l and l.rstrip().endswith(":")),
+             marker,
+             "; ".join("line %d %s" % (i, why) for i, why in uncovered)))
     return "".join(lines)
 
   ##############################################################################

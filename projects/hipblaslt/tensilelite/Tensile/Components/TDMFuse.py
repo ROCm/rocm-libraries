@@ -22,6 +22,7 @@ are baked into solution names and cannot move, so a name is the only stable key.
 """
 
 import os
+import re
 from typing import NamedTuple
 
 from .DecouplePGR import (decouplePGRBlocks, dcpThickThinIssueOrder,
@@ -904,6 +905,84 @@ def decoupledThickGateRelaxation(ks):
         mechanism = DCP_THICK_GATE_TEXT
     return DcpThickGate(mechanism, _THICK_GATE_COUNT_OVERRIDE.get(
         mechanism, DCP_THICK_GATE_SUPPORTED[mechanism]))
+
+
+_DCP_TENSORCNT_RE = re.compile(r"^s_wait_tensorcnt\s+(\d+)(?:\s|$)")
+_DCP_LDS_READ_RE = re.compile(r"^ds_(?:load|read)\w*\s")
+
+
+def dcpThickGateUncoveredSites(lines, marker, relaxed, retagged):
+    """Thick-fill sites the text pass left un-relaxed, as [(lineIndex, why)].
+
+    LAYER 3, and the verification half of decoupledThickGateRelaxation: that
+    function owns which count a divergent pair earns, this one owns whether the
+    emitted text actually carries it. `retagged` is the set of line indices the
+    pass rewrote on this kernel. Empty return means every site is covered.
+
+    Why this is a coverage question and not a count
+    -----------------------------------------------
+    The check this replaces asked whether the pass had retagged exactly
+    ``2 if InitCIterWmma == 1 else 1`` waits. That number comes from a solution
+    parameter and the waits come from the scheduler, so nothing held the two
+    together -- and on gfx1250v0 they came apart. Its cost table lets the whole
+    InitCIterWmma iter0 clone sink past its own gate: the clone keeps its
+    fill-end label, but its LDS reads and its ``s_wait_tensorcnt`` both move
+    below the convergence label, so one drain gates both paths. One retag,
+    correct code, and a refusal to emit it -- six kernels, every one TDMFuse=0,
+    which is the default grouping.
+
+    The count was never the property worth checking. What has to hold is that
+    no thick-fill site reaches an LDS read through a gate this pass did not
+    relax, so that is what is asked, of the emitted lines and nothing else:
+
+      - a site whose first ``s_wait_tensorcnt`` is one this pass relaxed is
+        covered, whether it relaxed it for this site or for a sibling that
+        shares the same drain;
+      - a site with no gate and no read below it is covered vacuously: a
+        header copy the loop emitted with nothing after it to hold back. The
+        shipped gfx1250 corpus emits a gateless site in 33 of its 72 decoupled
+        kernels, and the old count accepted those only because two of their
+        three sites happened to make the total come out right;
+      - a site that reaches ``ds_load`` first is NOT covered -- its reads would
+        begin ahead of the drain that gates them;
+      - a site whose first gate is one the pass did NOT rewrite is NOT covered,
+        even when that gate already reads `relaxed`. Reaching an unrewritten
+        gate means the emitted shape is not the one this pass assumes, and the
+        next gate down drains the thin tensor's refill into the single block
+        its reads are about to touch. Refuse rather than claim a gate that was
+        put there by something else;
+      - no sites at all is NOT covered, because the caller only runs this pass
+        for groupings this owner said have a fill to relax.
+
+    Reading the schedule's own output is the whole point. A guard decoupled
+    from the thing it governs is the root cause the owner above names, and the
+    old check was another instance of it -- failing closed rather than open,
+    which is why it cost kernels instead of correctness. This one cannot
+    diverge from the schedule, because the schedule is its only input.
+    """
+    sites = [i for i, line in enumerate(lines)
+             if marker in line and line.rstrip().endswith(":")]
+    if not sites:
+        return [(-1, "no %s label was emitted at all" % marker)]
+    uncovered = []
+    for i in sites:
+        why = None
+        for j in range(i + 1, len(lines)):
+            candidate = lines[j]
+            if _DCP_LDS_READ_RE.match(candidate):
+                why = ("reaches %s at line %d before any s_wait_tensorcnt"
+                       % (candidate.split()[0], j))
+                break
+            gate = _DCP_TENSORCNT_RE.match(candidate)
+            if gate:
+                if j not in retagged:
+                    why = ("first gate is s_wait_tensorcnt %s at line %d, which "
+                           "this pass did not relax to %d"
+                           % (gate.group(1), j, relaxed))
+                break
+        if why:
+            uncovered.append((i, why))
+    return uncovered
 
 
 def tdmWaveLdsBytes(ks, problemType=None):
