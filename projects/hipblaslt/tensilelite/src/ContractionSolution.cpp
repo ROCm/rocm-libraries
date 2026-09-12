@@ -204,8 +204,18 @@ namespace TensileLite
         // and every tile is data-parallel. Force-DP-only is a persistent
         // DP-only use of StreamK=3: skTiles of zero keeps every output tile in
         // the DP region.
+        // A grid that divides the tile count hands every workgroup the same
+        // whole number of tiles, so skTiles must be zero here: the split it
+        // would otherwise pack (skTiles == skGrid) has skItersPerWG ==
+        // itersPerTile and extraIters == 0, i.e. each Stream-K workgroup spans
+        // exactly one whole tile and sums it in one piece. Those tiles are
+        // data-parallel in all but name, and routing them through the Stream-K
+        // region instead is not free: the partials workspace and the flag-region
+        // clamp both key off this same divisibility test and reserve nothing for
+        // it, so the device is left fixing up a region it has no budget for and
+        // the tiles in it never reach D.
         const bool bigEnough = tiles > skGrid;
-        uint32_t   skTiles   = forceDPOnly ? 0u : static_cast<uint32_t>(skGrid);
+        uint32_t   skTiles   = 0u;
         if(!forceDPOnly && tiles % skGrid != 0)
         {
             skTiles = bigEnough ? static_cast<uint32_t>(skGrid * skFullTiles + tiles % skGrid)
