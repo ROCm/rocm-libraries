@@ -368,3 +368,66 @@ def test_train_mints_identity_when_omitted(tmp_path):
 def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
     assert _train(tmp_path, "--uhd-id", malformed) == 1
     assert not (tmp_path / "model" / "heuristic.uhd.json").exists()
+
+
+# ------------------------------------------------------- engines that own no descriptors
+
+
+def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1"):
+    """A model for an engine with no UED: trained against a selector revision only."""
+    provenance = {"selector_revision": revision}
+    doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
+           "objective": "max", "features_signature": ["$graph.work"],
+           "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
+           "score": {"units": "tflops", "calibrated": True, "transform": "identity"},
+           "tree_data": {"artifact": "model.bin"}}
+    _write(root / "heuristic.uhd.json", doc)
+    _write(root / "train_manifest.json",
+           {"training_arches": ["gfx950"], "trained_against": provenance,
+            "role": "predict_engine_tflops"})
+    (root / "model.bin").write_bytes(b"incoming model")
+    return root
+
+
+def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(tmp_path):
+    """AITER and MIOpen own no descriptor set: RFC 0019 4.1 / Open Question 7 binds their
+    model by a UUID declared in provider code, so promotion writes the document where the
+    loader scans and edits nothing. Before this, `select_engine` ended the run with
+    "expected one UED for --engine 'ASM_SDPA_ENGINE', found 0" -- after the model had
+    already trained (run 67929588)."""
+    tree = _tree(tmp_path / "tree")
+    before = _read(tree / "engine.ued.json")
+    model = _opaque_model(tmp_path / "model")
+
+    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+    _apply(plan)
+
+    assert plan.ued_path is None
+    assert _read(tree / "engine.ued.json") == before, "no role map may change"
+    installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine_tflops" / "gfx950"
+    assert _read(installed / "heuristic.uhd.json")["id"] == NEW
+    assert (installed / "model.bin").read_bytes() == b"incoming model"
+
+
+def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
+    """The UUID is the whole binding: the provider looks for exactly one, so a second
+    document carrying it makes the engine's model ambiguous rather than replaced."""
+    tree = _tree(tmp_path / "tree")
+    _write(tree / "elsewhere" / "other.uhd.json", {"version": "1.0", "id": NEW, "name": "other",
+           "adapter": "tree_data", "objective": "max", "features_signature": ["$graph.work"],
+           "features_hash": "sha256:" + "0" * 16, "trained_against": {"selector_revision": "r"},
+           "tree_data": {"artifact": "other.bin"}})
+    model = _opaque_model(tmp_path / "model")
+    with pytest.raises(PromoteError, match="already installed"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+
+
+def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):
+    """sort_kernel_catalog ranks an engine's own enumerated configurations. An engine that
+    publishes none has nothing for that model to order, so the role is refused here rather
+    than installed and silently never consulted."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model")
+    (model / "train_manifest.json").unlink()
+    with pytest.raises(PromoteError, match="catalog it does not own"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="sort_kernel_catalog", arch="gfx950")
