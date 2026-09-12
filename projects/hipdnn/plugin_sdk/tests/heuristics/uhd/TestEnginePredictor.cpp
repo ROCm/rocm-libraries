@@ -152,9 +152,13 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(binding.at("role"), "predict_engine_tflops");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_EQ(binding.at("uhd_id"), cfg.uhdId);
-    // The engine, not the predictor, publishes trained_against: a staleness check needs
-    // the descriptor set the model is being compared against, which only the engine knows.
-    EXPECT_FALSE(binding.contains("trained_against"));
+    // A description says what a model collected from it would be trained against. For an
+    // engine with no descriptors that is the selector revision and nothing else (§4.1,
+    // Open Question 7); a descriptor-backed engine adds its set on top in GenericEngine.
+    // A description carrying none at all cannot be turned into a UHD, which is where every
+    // opaque L1 collection stopped before this (run 67929509).
+    EXPECT_EQ(binding.at("trained_against").at("selector_revision"), "selector-1");
+    EXPECT_FALSE(binding.at("trained_against").contains("ued"));
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
     EXPECT_EQ(predict(cfg).status, PredictionStatus::UNAVAILABLE);
 }
@@ -178,7 +182,7 @@ TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclin
     EXPECT_EQ(binding.at("arch"), "gfx942");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_FALSE(binding.contains("uhd_id"));
-    EXPECT_FALSE(binding.contains("trained_against"));
+    EXPECT_EQ(binding.at("trained_against").at("selector_revision"), "selector-1");
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
 }
 

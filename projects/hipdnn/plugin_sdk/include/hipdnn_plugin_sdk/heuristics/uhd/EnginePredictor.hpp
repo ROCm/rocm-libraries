@@ -203,13 +203,24 @@ inline hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
             nlohmann::json binding = {{"engine", engineName},
                                       {"role", ENGINE_ROLE},
                                       {"arch", targetArch},
-                                      {"selector_revision", selectorRevision}};
+                                      {"selector_revision", selectorRevision},
+                                      // What a model collected from this description would
+                                      // be trained against. An engine with no descriptors
+                                      // has exactly this and nothing else (§4.1, Open
+                                      // Question 7), so it is written here rather than
+                                      // left to a caller that has nothing to add: a
+                                      // description carrying no trained_against at all
+                                      // cannot be turned into a UHD, which is where every
+                                      // opaque L1 collection stopped (run 67929509).
+                                      {"trained_against",
+                                       {{"selector_revision", selectorRevision}}}};
             if(!config.uhdId.empty())
             {
                 binding["uhd_id"] = config.uhdId;
             }
-            // trained_against is left to the caller: the engine knows the descriptor set
-            // the model is being compared against, which is what a staleness check needs.
+            // A descriptor-backed engine ADDS its set to trained_against on top of this
+            // (GenericEngine.hpp:211-221): it is trained against both the descriptors it
+            // loaded and the provider build that ran them.
             result.uhd_id = config.uhdId;
             result.binding_json = binding.dump();
             result.features_json = features.toJson().dump();
