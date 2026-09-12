@@ -68,7 +68,11 @@ def document(shape: Shape) -> dict:
     free to carry the regime, and RFC 0019.13 §11.2's per-regime table is the reason
     to spend it.
     """
-    graph = bundles.bundle_for(shape.geometry())
+    # `mma_core_mode` is left unset. A corpus exists to let engines compete on a graph,
+    # and pinning the MMA core precision is a constraint that decides the contest before
+    # it starts: AITER declines every graph that sets it, so a corpus carrying the
+    # shipped bundles' `"float"` reports it as serving nothing at all.
+    graph = bundles.bundle_for(shape.geometry(), mma_core_mode=None)
     graph["name"] = shape.name
     return graph
 
