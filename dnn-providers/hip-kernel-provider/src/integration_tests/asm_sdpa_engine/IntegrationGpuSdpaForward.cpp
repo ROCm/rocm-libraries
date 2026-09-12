@@ -62,17 +62,18 @@ protected:
             << validationResult.get_message();
 
         // Register output tensor validator
+        GraphVerificationContext context(*graph);
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(*graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -167,17 +168,18 @@ protected:
         auto validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
+        GraphVerificationContext context(graph);
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;
