@@ -7,15 +7,18 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -28,7 +31,9 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -372,6 +377,73 @@ int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx9
         throw std::runtime_error("Loaded descriptor set yielded no applicable candidates");
     }
     return ranked.front().getIntMetadata("block_size");
+}
+
+/// A `predict_engine_tflops` model resolves through uhd::NativeScorerRegistry, which is a
+/// different registry from the ScoreRegistry a catalog ranker's comparator uses, so
+/// ScopedSymbols above cannot stand in for this one.
+const std::string L1_SCORER_SYMBOL = "descriptorloader.l1_scorer";
+
+double l1Score(const double* values, size_t count)
+{
+    return count == 0 ? 0.0 : values[0];
+}
+
+class ScopedL1Scorer
+{
+public:
+    ScopedL1Scorer()
+    {
+        hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SCORER_SYMBOL, &l1Score);
+    }
+
+    ~ScopedL1Scorer()
+    {
+        hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SCORER_SYMBOL);
+    }
+
+    ScopedL1Scorer(const ScopedL1Scorer&) = delete;
+    ScopedL1Scorer& operator=(const ScopedL1Scorer&) = delete;
+};
+
+/// What a test's "provider" reports as its build identity. An opaque engine's model is
+/// bound only when it recorded this exact string (RFC 0019 §4.1
+/// `trained_against.selector_revision`), so the mismatch cases vary it deliberately.
+const std::string L1_SELECTOR_REVISION = "test-provider/1.2.3/opaque-untuned-v1/library-4.5";
+
+/// An L1 UHD carrying only what RFC 0019 §4.1 gives a UHD. There is no `engine`, `role`
+/// or `arch` member to write -- the parser rejects one as an unknown key -- so what binds
+/// this model to an engine is entirely the engine's own declaration of its id
+/// (Open Question 7, RESOLVED). What the document does record is the provider build it
+/// was measured on, which is the one thing the loader can check for itself.
+///
+/// @param selectorRevision The provider build this model claims to have been measured on.
+nlohmann::json declaredL1Document(const std::string& id,
+                                  const std::string& selectorRevision = L1_SELECTOR_REVISION)
+{
+    const std::vector<nlohmann::json> signature = {"$graph.flops"};
+    return {{"version", "1.0"},
+            {"id", id},
+            {"name", "engine throughput"},
+            {"adapter", "native"},
+            {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+            {"features_signature", signature},
+            {"features_hash", hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature)},
+            {"objective", "max"},
+            {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}},
+            {"trained_against", {{"selector_revision", selectorRevision}}}};
+}
+
+/// The declaration an opaque engine's provider compiles in, in the shape the loader takes.
+std::map<std::string, DescriptorId>
+    declaration(const std::vector<std::pair<std::string, std::string>>& entries)
+{
+    std::map<std::string, DescriptorId> declared;
+    for(const auto& [arch, id] : entries)
+    {
+        declared.emplace(arch, hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+    }
+    return declared;
 }
 
 } // namespace
@@ -1782,6 +1854,246 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     EXPECT_TRUE(sets.front().heuristic.has_value());
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "outside the descriptor tree"));
+}
+
+/// RFC 0019 Open Question 7 (RESOLVED): an engine with no UED declares its L1 model's
+/// UUID in provider code, and the loader resolves it out of the catalog it already
+/// parses. End to end, because "resolves" is only half the claim -- what the engine owes
+/// the policy is a calibrated TFLOPS number it can be ranked on.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1"));
+    const auto modelId = testUuid('e', '1');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelId)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    ASSERT_EQ(resolved.byArch.size(), 1u);
+    EXPECT_TRUE(resolved.refused.empty());
+    // Backfilled from the declaration, exactly as resolveRole backfills them from a UED
+    // role map: the document itself said none of this.
+    const auto& model = resolved.byArch.at("default");
+    EXPECT_EQ(model.engineName, "test:opaque");
+    EXPECT_EQ(model.role, "predict_engine_tflops");
+    EXPECT_EQ(model.arch, "default");
+    EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.bind("default", UhdKernelHeuristic::configFrom(model));
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction = binding.predict(7,
+                                            "test:opaque",
+                                            L1_SELECTOR_REVISION,
+                                            "gfx942:sramecc+:xnack-",
+                                            features,
+                                            /*evaluate=*/true);
+
+    ASSERT_EQ(prediction.status, hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE);
+    EXPECT_NEAR(prediction.tflops, 42.0, 1e-12);
+    EXPECT_EQ(prediction.uhd_id, modelId);
+}
+
+/// An opaque engine has no UED, KMD or UMD, so a model claiming to be trained against a
+/// descriptor set has nothing to be compatible with -- RFC 0019 §8.1's rule, not an
+/// exemption from it. The refusal is per model: the engine keeps every other one.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_prov"));
+    const auto refusedId = testUuid('e', '2');
+    const auto cleanId = testUuid('e', '3');
+    auto refused = declaredL1Document(refusedId);
+    refused["trained_against"] = {{"ued", {{"id", testUuid('e', '4')}, {"revision", "1.0"}}},
+                                  {"kmd", {{"id", testUuid('e', '5')}, {"revision", "1.0"}}},
+                                  {"umd", nlohmann::json::array()}};
+    writeDocument(dir.path(), {".uhd.json", std::move(refused)});
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(cleanId)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(
+        loadDescriptorCatalog(dir.path()),
+        "test:opaque",
+        L1_SELECTOR_REVISION,
+        declaration({{"gfx942", refusedId}, {"gfx950", cleanId}}));
+
+    EXPECT_EQ(resolved.byArch.count("gfx942"), 0u);
+    EXPECT_EQ(resolved.byArch.count("gfx950"), 1u);
+    EXPECT_EQ(resolved.refused.count("gfx950"), 0u);
+    ASSERT_EQ(resolved.refused.count("gfx942"), 1u);
+    // A present model that failed its contract is a claim -- "do not pick me" -- not the
+    // silence an absent one reports (RFC 0019 §11.2).
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    EXPECT_EQ(resolved.refused.at("gfx942").status, PredictionStatus::INVALID);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot satisfy"));
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.bind("gfx950", UhdKernelHeuristic::configFrom(resolved.byArch.at("gfx950")));
+    for(const auto& [arch, refusal] : resolved.refused)
+    {
+        binding.markUnusable(arch, refusal.status, refusal.reason);
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    EXPECT_EQ(
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "gfx942", features, true).status,
+        PredictionStatus::INVALID);
+    EXPECT_EQ(
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "gfx950", features, true).status,
+        PredictionStatus::AVAILABLE);
+}
+
+/// RFC 0019 §4.1 `trained_against.selector_revision`, refused on mismatch: L1 is the one
+/// score compared ACROSS engines, so an estimate measured on another build of the
+/// provider does not merely misreport a number -- it changes which engine is selected.
+///
+/// Two engines over one catalog, which is the shape of a provider serving two engine ids
+/// (MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC): each carries its own model, each
+/// reports its own revision, and one engine's model is not usable by the other.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_stale"));
+    const std::string revisionA = "test-provider/1.2.3/engine-a-untuned-v1/library-4.5";
+    const std::string revisionB = "test-provider/1.2.3/engine-b-untuned-v1/library-4.5";
+    const auto modelA = testUuid('e', '8');
+    const auto modelB = testUuid('e', '9');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelA, revisionA)});
+    // Recorded against engine A's build; engine B declares it anyway.
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(modelB, revisionA)});
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    const auto engineA = resolveDeclaredEnginePredictions(
+        catalog, "test:opaqueA", revisionA, declaration({{"default", modelA}}));
+    const auto engineB = resolveDeclaredEnginePredictions(
+        catalog, "test:opaqueB", revisionB, declaration({{"default", modelB}}));
+
+    EXPECT_EQ(engineA.byArch.count("default"), 1u);
+    EXPECT_TRUE(engineA.refused.empty());
+    EXPECT_TRUE(engineB.byArch.empty());
+    ASSERT_EQ(engineB.refused.count("default"), 1u);
+
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto& refusal = engineB.refused.at("default");
+    // Silence, not a claim: the model is not bad, it is not this build's.
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find(revisionA), std::string::npos) << refusal.reason;
+    EXPECT_NE(refusal.reason.find(revisionB), std::string::npos) << refusal.reason;
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    binding.markUnusable("default", refusal.status, refusal.reason);
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction
+        = binding.predict(8, "test:opaqueB", revisionB, "gfx942", features, /*evaluate=*/true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.reason, refusal.reason);
+}
+
+/// A model that records no revision at all cannot be matched to any build, so it fails
+/// its contract rather than merely belonging to another one -- INVALID, not UNAVAILABLE,
+/// and visibly refused rather than silently absent: the deployer has to be told their
+/// model is being ignored.
+///
+/// A signature-less native model is the shape this reaches the binding through, and the
+/// only one: RFC 0019 §4.1 makes `trained_against` optional exactly for a model that
+/// featurizes from its own bindings. A feature-consuming UHD that simply drops
+/// `trained_against` never parses at all (parseUhdConfig refuses it), so that is a load
+/// error reported against the file, not a binding refusal.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRefused)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("declared_l1_unqualified"));
+    const auto modelId = testUuid('e', 'a');
+    writeDocument(
+        dir.path(),
+        {".uhd.json",
+         {{"version", "1.0"},
+          {"id", modelId},
+          {"name", "engine throughput"},
+          {"adapter", "native"},
+          {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+          {"objective", "max"},
+          {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}}}});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    EXPECT_TRUE(resolved.byArch.empty());
+    ASSERT_EQ(resolved.refused.count("default"), 1u);
+    EXPECT_EQ(resolved.refused.at("default").status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "records no trained_against.selector_revision"));
+}
+
+/// No descriptor tree installed is the normal state of a machine that has not deployed a
+/// model yet, so a declared id that resolves to nothing is silence, never an error and
+/// never a refusal: RFC 0019 §5 separates deployment from load.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNothing)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_empty"));
+
+    const auto resolved
+        = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                           "test:opaque",
+                                           L1_SELECTOR_REVISION,
+                                           declaration({{"default", testUuid('e', '6')}}));
+
+    EXPECT_TRUE(resolved.byArch.empty());
+    EXPECT_TRUE(resolved.refused.empty());
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto prediction = binding.predict(
+        7, "test:opaque", L1_SELECTOR_REVISION, "gfx942", features, /*evaluate=*/true);
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+}
+
+/// The prohibition the declaration mechanism preserves: a UHD cannot describe what it
+/// attaches to. DeclaredEnginePredictionResolvesAndScores already loads a document with
+/// no `engine`, `role` or `arch` member; this is the other half -- one that tries to grow
+/// such a member does not load at all, so discovery by document claim has no way in.
+/// `trained_against.selector_revision` is not a way back in: it names a provider build,
+/// never an engine, and it is checked only after a declared id has already selected the
+/// model.
+TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    for(const auto* claim : {"engine", "role", "arch"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(std::string("declared_l1_claims_") + claim));
+        const auto modelId = testUuid('e', '7');
+        auto document = declaredL1Document(modelId);
+        document[claim] = "test:opaque";
+        writeDocument(dir.path(), {".uhd.json", std::move(document)});
+
+        const auto catalog = loadDescriptorCatalog(dir.path());
+        EXPECT_TRUE(catalog.heuristics.empty()) << "a UHD claiming '" << claim << "' loaded";
+        EXPECT_TRUE(
+            resolveDeclaredEnginePredictions(
+                catalog, "test:opaque", L1_SELECTOR_REVISION, declaration({{"default", modelId}}))
+                .byArch.empty());
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key"));
 }
 
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)

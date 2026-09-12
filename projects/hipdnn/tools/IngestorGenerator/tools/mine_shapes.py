@@ -48,7 +48,15 @@ from pathlib import Path
 #: collapsed seven distinct shape keys in an earlier join. It is carried through with
 #: its own value so the dispatcher declines it explicitly instead of it silently
 #: becoming a causal duplicate.
-_MASK_TYPE = {"full": 0, "none": 0, "causal": 1, "swin": 2}
+#: Public for the same reason BACKWARD_GRADIENT_TENSOR_NAMES is: `tools/corpus_build`
+#: reads shape files through this module and has to agree with it about what a mask
+#: value means, and a second literal there is one that can silently drift from this one.
+#: `no_mask` and `top_left` are aiter/CK's spellings of the two it already had (see
+#: `composablekernel/tile_engine/ops/fmha`, whose published model shapes use them).
+#: `bottom_right` is deliberately ABSENT: causal aligned to the bottom right is a
+#: different mask from causal aligned to the top left whenever seqlen_q != seqlen_k,
+#: so it is refused by name rather than mapped onto `causal`.
+MASK_TYPE = {"full": 0, "none": 0, "no_mask": 0, "causal": 1, "top_left": 1, "swin": 2}
 
 #: Tensor names that mark a graph as backward rather than forward, in BOTH
 #: gradient spellings a corpus uses. `d_query`-style names alone let
@@ -85,11 +93,11 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
             mask = (row.get("mask") or "").strip().lower()
             if mask == "swin" and not include_windowed:
                 continue
-            mask_type = _MASK_TYPE.get(mask)
+            mask_type = MASK_TYPE.get(mask)
             if mask_type is None:
                 raise SystemExit(
                     f"FAIL: unknown mask spelling {mask!r} in {path}. Add it to "
-                    f"_MASK_TYPE rather than defaulting -- guessing a mask is how a "
+                    f"MASK_TYPE rather than defaulting -- guessing a mask is how a "
                     f"windowed graph gets served as plain causal."
                 )
             head_dim = int(row["head_dim"])
@@ -102,7 +110,7 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
                     "seqlen_k": int(row["seq_kv"]),
                     "hdim_q": head_dim,
                     "hdim_v": head_dim,
-                    "dtype": _normalise_dtype(row.get("dtype"), path, "bf16"),
+                    "dtype": normalise_dtype(row.get("dtype"), path, "bf16"),
                     "mask_type": mask_type,
                     # Provenance, carried not computed. `_provenance` is stripped
                     # before the request is constructed and kept for reporting.
@@ -152,11 +160,11 @@ def _mask_type_from_graph(graph: dict, path: Path) -> int:
         ):
             continue
         if attrs.get("causal_mask") or attrs.get("causal_mask_bottom_right"):
-            return _MASK_TYPE["causal"]
+            return MASK_TYPE["causal"]
         left = attrs.get("left_bound")
         right = attrs.get("right_bound")
         if left is None and right is None:
-            return _MASK_TYPE["full"]
+            return MASK_TYPE["full"]
         if left is not None and not isinstance(left, (int, float)):
             raise SystemExit(
                 f"FAIL: non-numeric left_bound {left!r} in {path}. Refusing rather "
@@ -167,11 +175,11 @@ def _mask_type_from_graph(graph: dict, path: Path) -> int:
         # left_bound < 0 means "all history": causal. A finite left_bound is a
         # sliding window, which is its own mask kind.
         if isinstance(left, (int, float)) and left >= 0:
-            return _MASK_TYPE["swin"]
-        return _MASK_TYPE["causal"]
+            return MASK_TYPE["swin"]
+        return MASK_TYPE["causal"]
     # No mask attributes at all: the graph does not describe one. Say so by falling
     # back to the path, and only then -- a directory name is a hint, not a contract.
-    return _MASK_TYPE["causal"] if "causal" in str(path).lower() else _MASK_TYPE["full"]
+    return MASK_TYPE["causal"] if "causal" in str(path).lower() else MASK_TYPE["full"]
 
 
 #: Every spelling a source uses for a dtype -> the spelling the rocKE spec takes.
@@ -181,7 +189,10 @@ def _mask_type_from_graph(graph: dict, path: Path) -> int:
 #: ("dtype must be one of ['bf16', 'fp16']"), which reads like the kernel declining
 #: a shape when it is really the miner mis-spelling one -- and the whole graph
 #: corpus disappears from the servable count that way.
-_DTYPE_SPELLINGS = {
+#: Public, with `normalise_dtype`, because `tools/corpus_build` normalises the same
+#: three vocabularies when it reads the cluster's shape files; a fourth table there
+#: would be a fourth opinion about what `half` means.
+DTYPE_SPELLINGS = {
     "bf16": "bf16",
     "bfloat16": "bf16",
     "torch.bfloat16": "bf16",
@@ -192,7 +203,7 @@ _DTYPE_SPELLINGS = {
 }
 
 
-def _normalise_dtype(raw, path: Path, fallback: str) -> str:
+def normalise_dtype(raw, path: Path, fallback: str) -> str:
     """One spelling for a dtype, or a refusal naming the source.
 
     Refuses rather than defaults, for the same reason the mask derivation does: a
@@ -203,11 +214,11 @@ def _normalise_dtype(raw, path: Path, fallback: str) -> str:
     if raw is None or str(raw).strip() == "":
         return fallback
     spelling = str(raw).strip().lower()
-    resolved = _DTYPE_SPELLINGS.get(spelling)
+    resolved = DTYPE_SPELLINGS.get(spelling)
     if resolved is None:
         raise SystemExit(
             f"FAIL: unknown dtype spelling {raw!r} in {path}. Add it to "
-            f"_DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
+            f"DTYPE_SPELLINGS rather than defaulting -- a guessed dtype builds the "
             f"wrong binary and still validates."
         )
     return resolved
@@ -226,8 +237,17 @@ def from_graph_corpus(root: Path) -> list[dict]:
             graph = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
+        # A shape directory holds more than graphs -- a published `model_shapes.json`
+        # is a LIST of records, and `.get` on it raises rather than mining nothing.
+        # A tree that mixes the two is the ordinary case for `~/model-shapes`, so a
+        # document that is not a graph object is skipped exactly like an unparseable
+        # one: this reader mines graphs, and says nothing about anything else.
+        if not isinstance(graph, dict):
+            continue
         tensors = {
-            str(t.get("name", "")).lower(): t for t in graph.get("tensors", []) or []
+            str(t.get("name", "")).lower(): t
+            for t in graph.get("tensors", []) or []
+            if isinstance(t, dict)
         }
         # A backward graph cannot be served by a prefill kernel, and one of them takes
         # the device down through a third-party backward FMHA. The filename is not
@@ -263,7 +283,7 @@ def from_graph_corpus(root: Path) -> list[dict]:
                 "seqlen_k": int(kdims[2]),
                 "hdim_q": int(qdims[3]),
                 "hdim_v": int(qdims[3]),
-                "dtype": _normalise_dtype(query.get("data_type"), path, "bf16"),
+                "dtype": normalise_dtype(query.get("data_type"), path, "bf16"),
                 "mask_type": _mask_type_from_graph(graph, path),
                 "_provenance": {
                     "source": "graphs",
@@ -380,16 +400,16 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             # mask kind alone does not encode the window; both must travel.
             sliding_window = 0
             if int(left) < 0 and int(right) < 0:
-                mask_type = _MASK_TYPE["causal"]
+                mask_type = MASK_TYPE["causal"]
             elif int(left) >= 0:
-                mask_type = _MASK_TYPE["swin"]
+                mask_type = MASK_TYPE["swin"]
                 # `[W, 0]` is a banded causal window of left-context W. The spec
                 # counts the window in TOKENS including the current one, matching
                 # the kernel's `q-W+1 <= k <= q` band, so a recorded left bound of
                 # 127 is a 128-token window.
                 sliding_window = int(left) + 1
             else:
-                mask_type = _MASK_TYPE["causal"]
+                mask_type = MASK_TYPE["causal"]
             head_size = record.get("head_size")
             seqlen_q = record.get("max_seqlen_q")
             seqlen_k = record.get("max_seqlen_k")
@@ -400,7 +420,7 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised through
             # the same table the graph corpus uses -- one vocabulary, one place to
             # add a spelling, rather than two that can disagree.
-            dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
+            dtype = normalise_dtype(record.get("q_dtype"), path, dtype_default)
             shapes.append(
                 {
                     "batch": int(record.get("num_seqs") or 1),

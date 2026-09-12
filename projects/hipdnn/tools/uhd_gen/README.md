@@ -602,10 +602,22 @@ UED role-map keys use the bare architecture (for example, `gfx942`); candidate
 collection retains feature-suffixed architecture strings in `device_arch`.
 
 The runtime lives in `hipdnn_plugin_sdk/heuristics/uhd/` and is available without
-`HIPDNN_ENABLE_KERNEL_INGESTOR`, but an engine only reaches it through its
-`predict_engine_tflops` UED role. An opaque engine has no UED, so no L1 model can be
-authored for it: it contributes no score and falls back to static ordering, which is
-the outcome RFC 0019 §11.2 and its Open Question 7 sanction.
+`HIPDNN_ENABLE_KERNEL_INGESTOR`, but an engine only reaches it through a binding that
+lives in compiled code: a `predict_engine_tflops` UED role for a descriptor-backed
+engine, or, for an engine that ships no UED, the UHD UUID its provider declares in its
+own engine definition (RFC 0019 Open Question 7, RESOLVED). Authoring an L1 model for an
+opaque engine therefore means publishing a UHD carrying one of the ids that engine
+already declares — `AsmSdpaEngine::L1_MODEL_IDS` for ASM SDPA,
+`MIOPEN_ENGINE_L1_MODELS` / `MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS` in `MiopenContainer.cpp`
+for MIOpen — into a descriptor root that provider reads. The document itself declares no
+engine, role or arch; an id no engine declares is unreachable, and an engine whose
+declared id resolves to nothing contributes no score and falls back to static ordering.
+An opaque engine's UHD must not name a descriptor set in `trained_against` -- it has no UED,
+KMD or UMD to be trained against, and one that names them is refused. It must instead record
+`trained_against.selector_revision`: the exact selector-revision string the engine reports in
+its prediction binding, which is the provider build the measurements were taken on. A model
+recording a different revision, or none, is refused -- the engine stays applicable and reports
+UNAVAILABLE naming both revisions.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 

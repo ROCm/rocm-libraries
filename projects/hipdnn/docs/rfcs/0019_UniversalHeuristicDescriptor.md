@@ -460,10 +460,32 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:…` | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding` ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | UED/KMD dependencies and a UMD dependency array | Identity and semantic revision of every descriptor used for collection ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `trained_against` | if the adapter features | object; see below | What the model was generated against, and nothing else. |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score. The UHD's author chooses it, because only they know what their model predicts: a model trained on TFLOPS ranks descending, one trained on latency ranks ascending. Both are ordinary; neither is a fallback. |
 | `score` | no | object | `units`, `calibrated`, `transform` — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. Keys inside it are the adapter's concern, not the loader's. |
+
+`trained_against` names one of two things, whichever applies to the engine that will bind the model.
+It never names an engine — the binding is the UED role map or the provider-declared UUID, both of which
+live in compiled code ([Open Question 7](#structural)).
+
+| Member | Required | Type | Meaning |
+|---|---|---|---|
+| `ued`, `kmd`, `umd` | all three, or none | dependency, dependency, dependency array | Identity and semantic revision of every descriptor used for collection ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Two thirds of a descriptor set is not a weaker claim, it is an unverifiable one. |
+| `selector_revision` | for a model bound by a provider-declared UUID | string | The provider build whose behaviour was measured — the same opaque string that build reports as its selector revision. An engine with no UED has no descriptor set to be trained against; what decides its throughput is the vendor library it wraps, and this is the only thing there is to record. |
+
+**A recorded `selector_revision` that is not the one the provider reports means the model is not used.**
+The loader refuses it: the model is ignored, the engine stays fully applicable, and the prediction
+reports UNAVAILABLE with a reason naming both revisions. Refusal rather than a warning, because L1 is
+the one score compared *across* engines ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)) —
+a stale estimate does not merely misreport a number, it changes which engine is selected. It is also the
+reversible direction: relaxing to warn-and-use later is a small change, while tightening later would
+break deployments that had come to rely on the looser rule. A model bound by a provider-declared UUID
+that records no `selector_revision` at all cannot be matched to any build and is refused the same way.
+
+This is **not** a `trained_against.engine {name, version}` in disguise. It carries no engine identity and
+no engine name, nothing resolves a model *from* it, and it is read only after a declared UUID has already
+selected the model. Its only job is to answer "which build of the vendor library was measured".
 
 Two header rules govern the split:
 
@@ -1537,8 +1559,9 @@ Shorthand in this section: **A** = `predict_engine_tflops`, **B** = `sort_kernel
 - **Quick policy.** Rank applicable engines by A (expected performance); pick the winner; if the winner
   has a config UHD (B), run it to pick the kernel. Only the winner drills down, so losers are never
   scored at the kernel level. Engines with no descriptor layer (e.g. MIOpen) contribute their high-level
-  estimate for the ranking and, if they win, use their own internal kernel selection.
-  **OPEN:** See [Open Question 7](#structural) (non-descriptor engine estimates).
+  estimate for the ranking and, if they win, use their own internal kernel selection. An engine that
+  ships no UED reaches A by declaring its UHD's UUID in provider code
+  ([Open Question 7](#structural), RESOLVED), so "no descriptor layer" no longer implies "no estimate".
 - **Thorough policy.** Run B for every applicable engine that has it (best config + its predicted perf),
   fall back to A for engines that don't, then compare the predicted performance across engines and pick
   the global best (engine + config). More work, more accurate.
@@ -1559,7 +1582,12 @@ policy therefore has to treat a missing estimate as a normal outcome rather than
 | A and B | Rank by A; winner runs B | Run B; compare its top score |
 | B only | Rank by B's top score (pays enumeration) | Run B; compare its top score |
 | A only (opaque) | Rank by A; engine does its own kernel selection | Compare A against others' B |
-| Neither | Falls back to static ordering; contributes no score | Same |
+| No declared model | Falls back to static ordering; contributes no score | Same |
+
+The last row is about a **declaration**, not about a descriptor layer. An engine with no UED can still
+declare A ([Open Question 7](#structural)), and a descriptor-backed engine whose UED names no
+`predict_engine_tflops` model has no A either. What puts an engine in that row is that nothing in
+compiled code binds a model to it — or that the model it binds is not deployed on this machine.
 
 **A missing estimate and a distrusted one are different signals.** An engine that supplies no estimate
 reports nothing and is ordered by the existing static rules; an engine whose heuristic failed its
@@ -1568,8 +1596,8 @@ claim rather than a silence — it says *do not pick me* and lets any engine wit
 it. Absence means "I do not answer this question"; zero means "I answer, and the answer is bad."
 
 An engine that supplies no estimate is ordered by the existing static rules and simply does not
-participate in performance-based comparison — the mixed case has to work, since it is the near-term
-reality for every non-descriptor engine.
+participate in performance-based comparison — the mixed case still has to work, since not every
+engine will have a trained model at the same time.
 
 ### 11.3 Cross-Engine Comparison
 
@@ -2298,9 +2326,35 @@ dependency-gated and land only when a concrete need appears.
    derived is one fewer model to train.
    *(Impacts [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker).)*
 
-7. **Non-descriptor engine estimates.** How does a non-descriptor engine (e.g. MIOpen) report an
-   A-level estimate through the plugin-query surface? If it cannot, the quick policy falls back to
-   static ordering for it — acceptable for v1, but limits performance-based engine ranking.
+7. **Non-descriptor engine estimates.** **RESOLVED.** An engine that ships no UED binds its A-level
+   model by **declaring that UHD's UUID in its provider's own engine definition**. The loader resolves
+   the id out of the descriptor catalog it already parses
+   (`resolveDeclaredEnginePredictions` in `DescriptorLoader.hpp`) and gives it the same pre-flight a
+   UED role reference gets: the provenance rule of [Section 8.1](#81-descriptor-versioning-and-provenance),
+   the native-symbol and artifact-containment checks of
+   [Section 11.2](#112-two-engine-selection-policies-rfc-0007), and the same per-engine compiled-model
+   cache. `predict_engine_tflops`, `engine` and `arch` are backfilled from the declaration, exactly as
+   [Section 3.1](#31-descriptor-relationships) backfills them from a role map.
+
+   **What this preserves: a UHD never describes itself.** The document keeps
+   [Section 4.1](#41-field-reference-normative)'s shape — no `engine`, `role` or `arch` member, no
+   `trained_against` variant that names an engine — and the parser still rejects those as unknown
+   keys. There is no filesystem scan keyed on a document's own claims and no self-attachment: the
+   binding identity is compiled-in provider code in both cases, and the only difference is whether that
+   code is a UED read off disk or an engine definition read out of the provider binary. A model an
+   engine did not declare is unreachable, so dropping a UHD into a descriptor root cannot make an
+   engine start answering with it.
+
+   Such an engine has no UED, KMD or UMD, so a `trained_against` naming a descriptor set has nothing to
+   be compatible with and is refused — the same
+   [Section 8.1](#81-descriptor-versioning-and-provenance) rule, not an exemption from it. What its
+   model records instead is `trained_against.selector_revision`
+   ([Section 4.1](#41-field-reference-normative)): the provider build that was measured. The loader
+   refuses a model that records a different one, or none — the model is ignored, the engine stays fully
+   applicable, and the prediction reports UNAVAILABLE naming both revisions. That member carries no
+   engine identity and nothing resolves a model from it, so it does not reopen self-attachment; it is
+   read only after a declared UUID has already selected the model. An id nothing deploys resolves to
+   nothing and the engine reports UNAVAILABLE, which is what it reported before it declared anything.
    *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007).)*
 
 8. **The `predict_applicable_kernels` output contract.** The UED already reserves the field
@@ -2495,7 +2549,9 @@ dependency-gated and land only when a concrete need appears.
   feature contract, so `features_hash` covers it; an unseen value at runtime is an out-of-distribution
   signal, not an error ([Section 6.5](#65-categorical-encoding)).
 
-- **`trained_against`:** The UED, UMD, and KMD semantic versions a heuristic was generated against.
+- **`trained_against`:** What a heuristic was generated against: the UED, UMD, and KMD semantic
+  versions for a model a UED role map binds, or `selector_revision` -- the provider build that was
+  measured -- for a model an engine with no UED binds by provider-declared UUID.
   Checked at load (`major ==`, `minor <=`) to disable a model whose descriptors have moved under it
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 

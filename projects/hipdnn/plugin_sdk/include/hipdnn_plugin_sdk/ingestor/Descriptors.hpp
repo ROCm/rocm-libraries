@@ -236,6 +236,17 @@ struct HeuristicDescriptor
     /// Required for feature-consuming models. Semantic revisions are checked against
     /// the engine, metadata schema and matcher identities before a model is used.
     std::optional<HeuristicProvenance> trainedAgainst;
+    /// RFC 0019 §4.1 `trained_against.selector_revision`: the provider build whose
+    /// behaviour this model was measured against. Empty unless authored.
+    ///
+    /// The other half of @ref trainedAgainst, for the engine that has no descriptor set
+    /// to be trained against: an engine with no UED binds this model by declaring its
+    /// UUID in provider code (Open Question 7, RESOLVED), and this is what lets the
+    /// loader tell a model measured on THIS build from one measured on another. Refused
+    /// on mismatch rather than warned about, because L1 is the one score compared across
+    /// engines -- a stale estimate changes which engine is selected, not just what a
+    /// number reads.
+    std::string trainedAgainstSelectorRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
     /// (RFC 0019 §3.1). Empty for a model no role map has resolved yet.
