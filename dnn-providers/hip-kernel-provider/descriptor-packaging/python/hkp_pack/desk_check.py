@@ -41,10 +41,9 @@ own 179 tests and all found by pointing the CLI at a real 32-kernel bundle:
 from __future__ import annotations
 
 import collections
-import json
 from pathlib import Path
 
-from . import agreement
+from . import agreement, descriptor_context
 from .errors import HkpPackError
 from .kpack_resolver import load_kpack
 
@@ -132,107 +131,17 @@ class DeskCheckNoSpecFound(RuntimeError):
     and "checked, found nothing wrong" rendered identically."""
 
 
-def resolve_entries(kdp_doc: dict, tree: dict, where: str) -> list[tuple[dict, bool]]:
-    """A KDP's kernel descriptors, with standalone-UKD id references resolved.
-
-    Post-pack a KDP keeps a referenced standalone UKD as a bare STRING and the UKD
-    ships as its own file in the same shard. A reader iterating the raw list
-    therefore meets a string where a descriptor should be -- and the standalone UKD
-    is the one case that carries a MULTI-consumer record, the strongest evidence in
-    the artifact, so leaving it unread would skip precisely what is hardest to
-    check. Resolved by id against the shard, which is the hop
-    `verify_variant_sets.resolve_bundles` already makes, so the two readers of one
-    artifact agree about what is in it.
-
-    Each element is `(descriptor, inline)`. `inline` says whether the descriptor
-    lives inside this KDP, which is what decides whether it inherits the KDP's
-    `specialization_contract`: a standalone UKD is its own file and several KDPs
-    may reference it, so it declares its own.
-    """
-    kernels = []
-    for item in kdp_doc.get("kernelDescriptors") or []:
-        if isinstance(item, dict):
-            kernels.append((item, True))
-        elif isinstance(item, str):
-            target = tree.get(item)
-            if target is None:
-                raise HkpPackError(
-                    f"{where}: kernelDescriptors references id '{item}', which "
-                    "resolves to no descriptor in this shard"
-                )
-            kernels.append((target, False))
-        else:
-            raise HkpPackError(
-                f"{where}: a kernelDescriptors entry is neither an inline object "
-                f"nor an id reference (got {type(item).__name__})"
-            )
-    return kernels
-
-
-def resolve_kernels(kdp_doc: dict, tree: dict, where: str) -> list[dict]:
-    """A KDP's kernel descriptors, standalone-UKD id references resolved."""
-    return [kernel for kernel, _inline in resolve_entries(kdp_doc, tree, where)]
-
-
 def load_kernels(kdp_path: Path) -> list[dict]:
     """A `.kdp.json`'s kernel descriptors, standalone-UKD references resolved."""
-    kdp_path = Path(kdp_path)
-    doc = json.loads(kdp_path.read_text(encoding="utf-8"))
-    return resolve_kernels(doc, load_tree(kdp_path), kdp_path.name)
+    kdp_path = Path(kdp_path).resolve()
+    index = descriptor_context.Index(str(kdp_path.parent))
+    kdp = next(d for d in index.of_type("kdp") if Path(d.path) == kdp_path)
+    return [entry.ukd for entry in descriptor_context.resolve_entries(index, kdp)]
 
 
-def load_tree(kdp_path: Path) -> dict:
-    """Every generic descriptor in the KDP's shard, indexed by its own ``id``.
-
-    The shard is the KDP's own directory and everything beneath it, which is how
-    the runtime loader reaches an engine's descriptors. Two documents claiming one
-    id is an error rather than a pick: which one won would depend on directory
-    order, and the losing engine would be checked against a schema it does not use.
-    """
-    root = Path(kdp_path).resolve().parent
-    by_id: dict[str, tuple[Path, dict]] = {}
-    for path in sorted(root.rglob("*.json")):
-        if path.name.endswith(".kdp.json"):
-            continue
-        try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        if not isinstance(doc, dict) or "id" not in doc:
-            continue
-        seen = by_id.get(doc["id"])
-        if seen is not None:
-            raise HkpPackError(
-                f"descriptor id '{doc['id']}' is claimed by both {seen[0]} and {path}"
-            )
-        by_id[doc["id"]] = (path, doc)
-    return {key: doc for key, (_path, doc) in by_id.items()}
-
-
-def resolve_schema(kdp_doc: dict, tree: dict) -> tuple[dict, dict]:
-    """``(engine, kmd)`` for a KDP, resolved by UUID at every hop.
-
-    ``KDP.engine`` names a UED and ``UED.metadata`` names a KMD, both by id. A
-    sibling file whose stem happens to match is not a reference and is never
-    substituted for one: a bundle can hold several engines, and binding by name
-    would check a variant set against another engine's schema and pass.
-    """
-    engine_id = kdp_doc.get("engine")
-    if engine_id not in tree:
-        raise HkpPackError(
-            f"KDP engine '{engine_id}' resolves to no descriptor in this shard"
-        )
-    engine = tree[engine_id]
-    kmd_id = engine.get("metadata")
-    if kmd_id not in tree:
-        raise HkpPackError(
-            f"engine '{engine_id}' metadata '{kmd_id}' resolves to no descriptor "
-            "in this shard"
-        )
-    return engine, tree[kmd_id]
-
-
-def _payload(kernel: dict, kdp_path: Path, arch: str, kpack_python_dir=None) -> bytes:
+def _payload(
+    entry: descriptor_context.Entry, arch: str, kpack_python_dir=None
+) -> bytes:
     """The archive bytes this descriptor names, read from the archive itself.
 
     A check that compares the descriptor's own ``sha256`` against a digest of that
@@ -240,16 +149,22 @@ def _payload(kernel: dict, kdp_path: Path, arch: str, kpack_python_dir=None) -> 
     binding real, and it needs the packaging archive reader only -- never the
     producer that emitted the kernel.
     """
+    kernel = entry.ukd
     source = kernel.get("kernel_source", {})
-    library = Path(kdp_path).resolve().parent / source.get("library", "")
+    library = (Path(entry.origin_dir) / source.get("library", "")).resolve()
     if not library.is_file():
         raise HkpPackError(
             f"kernel '{kernel.get('name')}' names library '{source.get('library')}', "
             f"which is not a file at {library}"
         )
     kpack, _compression = load_kpack(kpack_python_dir)
-    archive = kpack.PackedKernelArchive.read(str(library))
-    blob = archive.get_kernel(source.get("toc_key"), arch)
+    try:
+        archive = kpack.PackedKernelArchive.read(library)
+        blob = archive.get_kernel(source.get("toc_key"), arch)
+    except Exception as exc:
+        raise HkpPackError(
+            f"kernel '{kernel.get('name')}': cannot read {library}: {exc}"
+        ) from exc
     if blob is None:
         raise HkpPackError(
             f"kernel '{kernel.get('name')}': toc_key '{source.get('toc_key')}' is "
@@ -284,11 +199,12 @@ def compiled_agreement(
     specializing preprocessor defines is a real compiled specialization this check
     does not yet cover.
     """
-    kdp_path = Path(kdp_path)
-    doc = json.loads(kdp_path.read_text(encoding="utf-8"))
-    tree = load_tree(kdp_path)
-    engine, kmd = resolve_schema(doc, tree)
-    header = {k: v for k, v in doc.items() if k != "kernelDescriptors"}
+    kdp_path = Path(kdp_path).resolve()
+    index = descriptor_context.Index(str(kdp_path.parent))
+    schemas = index.schemas()
+    bundles = descriptor_context.resolve_bundles(index)
+    bundle = next(b for b in bundles if Path(b.kdp_path) == kdp_path)
+    doc, engine, kmd = bundle.kdp_doc, bundle.engine, bundle.kmd
     arches = doc.get("arch") or []
     if len(arches) != 1:
         return (
@@ -300,11 +216,12 @@ def compiled_agreement(
             0,
         )
     arch = arches[0]
-    header["arch"] = [arch]
+    all_records = descriptor_context.consumer_records(bundles, schemas, arch)
     failures: list[str] = []
     unclaimed: list[str] = []
     verified = 0
-    for kernel, inline in resolve_entries(doc, tree, kdp_path.name):
+    for entry in bundle.entries:
+        kernel = entry.ukd
         name = kernel.get("name")
         try:
             kind = kernel.get("kernel_source", {}).get("kind")
@@ -314,24 +231,19 @@ def compiled_agreement(
                     f"is {kind!r}. The producing compiler's evidence exists only "
                     f"once the bytes do; check the packed tree."
                 )
-            declaration = agreement.select_declaration(
-                kernel, engine, kmd, {kmd["id"]: kmd}, doc if inline else None
+            agreement.select_declaration(
+                kernel, engine, kmd, schemas, doc if entry.inline else None
             )
-            records = agreement.canonical_records(
-                [
-                    agreement.consumer_record(
-                        kernel, engine, kmd, header, arch, declaration
-                    )
-                ]
-            )
-            if not declaration["metadata_fields"]:
+            records = all_records[kernel["id"]]
+            claimed = any(r["declaration"]["metadata_fields"] for r in records)
+            if not claimed and "effective_spec" not in (kernel.get("provenance") or {}):
                 unclaimed.append(
                     f"{name}: declares no specialized metadata_fields, so there is "
                     f"no producing-build record to bind and nothing here was "
                     f"verified against a binary"
                 )
                 continue
-            payload = _payload(kernel, kdp_path, arch, kpack_python_dir)
+            payload = _payload(entry, arch, kpack_python_dir)
             agreement.verify(kernel, records, payload)
             verified += 1
         except HkpPackError as exc:

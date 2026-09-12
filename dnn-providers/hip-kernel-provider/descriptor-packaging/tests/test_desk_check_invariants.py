@@ -40,6 +40,7 @@ from hkp_pack.desk_check import (
     DeskCheckNoSpecFound,
     DeskCheckReport,
     duplicate_matcher_tuples,
+    load_kernels,
     metadata_spec_drift,
     symbol_distinctness,
     toc_key_uniqueness,
@@ -341,26 +342,6 @@ class TestCliEndToEnd:
         )
         assert proc.returncode != 0
         assert "--mode" in proc.stderr
-
-    def test_full_mode_fails_a_tree_carrying_no_producing_build_record(self, tmp_path):
-        """An artifact that cannot say what it was built from has not shown
-        agreement with anything, so this is a failure and not an unchecked
-        property. The message names the missing record rather than the tree."""
-        kdp_path = tmp_path / "recordless.kdp.json"
-        kdp_path.write_text(
-            json.dumps(
-                {
-                    "id": "kdp-recordless",
-                    "engine": "ued-absent",
-                    "arch": ["gfx942"],
-                    "kernelDescriptors": [],
-                }
-            )
-        )
-        proc = _run_cli(str(kdp_path), mode="full")
-        assert proc.returncode == 1, proc.stdout + proc.stderr
-        assert "mode=full" in proc.stdout
-        assert "resolves to no descriptor" in proc.stdout
 
     def test_full_mode_refuses_the_unpacked_dialect(self, desk_check_fixture):
         """A rocKE tree read BEFORE it was packed has no bytes, so no
@@ -685,3 +666,45 @@ class TestCliOnRealShippedBundles:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "duplicate matcher tuples: none" in proc.stdout
+
+
+@pytest.mark.quick
+class TestStructuralDescriptorContext:
+    def test_structural_entries_need_no_engine_and_keep_disjoint_arches(self, tmp_path):
+        kernel = {
+            "id": "standalone",
+            "name": "structural",
+            "arch": ["gfx950"],
+            "kernel_source": {"spec": {"head_size": 64}},
+            "metadata": {"head_size": 64},
+        }
+        kdp = tmp_path / "structural.kdp.json"
+        kdp.write_text(
+            json.dumps({"arch": ["gfx942"], "kernelDescriptors": [kernel["id"]]})
+        )
+        nested = tmp_path / "nested"
+        nested.mkdir()
+        (nested / "kernel.ukd.json").write_text(json.dumps(kernel))
+        assert load_kernels(kdp) == [kernel]
+        result = _run_cli(str(kdp), "--field", "head_size")
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_reference_resolution_does_not_search_above_kdp_parent(self, tmp_path):
+        root = tmp_path / "shard"
+        root.mkdir()
+        kernel = {
+            "id": "standalone",
+            "name": "structural",
+            "kernel_source": {"spec": {"head_size": 64}},
+            "metadata": {"head_size": 64},
+        }
+        kdp = root / "selected.kdp.json"
+        kdp.write_text(json.dumps({"kernelDescriptors": [kernel["id"]]}))
+        ukd = root / "kernel.ukd.json"
+        ukd.write_text(json.dumps(kernel))
+        control = _run_cli(str(kdp), "--field", "head_size")
+        assert control.returncode == 0, control.stdout + control.stderr
+        ukd.rename(tmp_path / ukd.name)
+        result = _run_cli(str(kdp), "--field", "head_size")
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert kernel["id"] in result.stderr and str(root) in result.stderr

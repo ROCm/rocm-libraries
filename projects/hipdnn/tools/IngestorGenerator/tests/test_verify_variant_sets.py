@@ -35,6 +35,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -1009,3 +1010,151 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
         assert failures == []
         assert any("COMPILED SPECIALIZATION AGREEMENT" in u for u in unchecked)
         assert "COMPILED SPECIALIZATION AGREEMENT" in capsys.readouterr().out
+
+
+@pytest.fixture
+def real_archive():
+    """Real rocm-kpack serialization; the payload is deliberately non-executable."""
+    from hkp_pack.kpack_resolver import load_kpack
+
+    python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
+    kpack, compression = load_kpack(python_dir)
+
+    def write(root):
+        path = root / "kpack" / "test.kpack"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        archive = kpack.PackedKernelArchive(
+            group_name="test",
+            gfx_arch_family=_ARCH,
+            gfx_arches=[_ARCH],
+            compressor=compression.ZstdCompressor(compression_level=3),
+        )
+        archive.add_kernel(
+            archive.prepare_kernel(
+                relative_path="v0", gfx_arch=_ARCH, hsaco_data=_PAYLOAD, metadata={}
+            )
+        )
+        archive.finalize_archive()
+        archive.write(path)
+
+    return write, python_dir
+
+
+class TestRealArchiveSelectedConsumer:
+    """Selected authority and packed-input gates cannot borrow sibling evidence."""
+
+    @staticmethod
+    def run(root, python_dir, tmp_path, mode="full", arch=None):
+        profile = tmp_path / "real-profile.json"
+        profile.write_text(
+            json.dumps(
+                {"bundle": "test_engine", "vocabulary": {"dtype": ["BF16", "FP16"]}}
+            )
+        )
+        args = [
+            sys.executable,
+            str(_TOOL),
+            "set",
+            str(root),
+            "--mode",
+            mode,
+            "--profile",
+            str(profile),
+        ]
+        if arch is not None:
+            args += ["--arch", arch]
+        if python_dir:
+            args += ["--kpack-python-dir", python_dir]
+        return subprocess.run(args, capture_output=True, text=True)
+
+    def test_requested_arch_without_consumer_records_is_classified_failure(
+        self, tmp_path, packed, real_archive
+    ):
+        write_archive, python_dir = real_archive
+        root = packed()
+        write_archive(root)
+        control = self.run(root, python_dir, tmp_path, arch=_ARCH)
+        assert control.returncode == 0, control.stdout + control.stderr
+        assert "GATE PASSED" in control.stdout
+        assert "NOT VERIFIED HERE" not in control.stdout
+
+        result = self.run(root, python_dir, tmp_path, arch="gfx950")
+        output = result.stdout + result.stderr
+        assert result.returncode == 1, output
+        assert "GATE FAILED" in result.stdout
+        assert "k_packed" in result.stdout
+        assert "gfx950" in result.stdout
+        assert "Traceback" not in output
+        assert "NOT VERIFIED HERE" not in output
+        assert "GATE PASSED" not in output
+
+    def test_selected_inline_consumer_cannot_borrow_sibling_declaration(
+        self, tmp_path, real_archive
+    ):
+        write_archive, python_dir = real_archive
+        root = tmp_path / "shared"
+        root.mkdir()
+        schema, engine = _kmd(), _ued()
+        sibling_engine = _ued(ident="ued-sibling")
+        ukd = _packed_ukd()
+        contract = ukd["provenance"].pop("specialization_contract")
+        selected = _kdp([ukd], arch=[_ARCH])
+        selected["provenance"] = {"specialization_contract": contract}
+        sibling = _kdp([ukd], ident="kdp-sibling", engine="ued-sibling", arch=[_ARCH])
+        sibling_contract = copy.deepcopy(contract)
+        sibling_contract["consumers"][0]["engine_id"] = "ued-sibling"
+        sibling["provenance"] = {"specialization_contract": sibling_contract}
+        _publish(ukd, schema, selected, engine)
+        observations = ukd["provenance"]["effective_spec"]["observations"]
+        records = []
+        for doc, ued in ((selected, engine), (sibling, sibling_engine)):
+            declaration = agreement.select_declaration(
+                ukd, ued, schema, {schema["id"]: schema}, doc
+            )
+            header = {k: v for k, v in doc.items() if k != "kernelDescriptors"}
+            records.append(
+                agreement.consumer_record(ukd, ued, schema, header, _ARCH, declaration)
+            )
+        agreement.publish(ukd, observations, agreement.canonical_records(records))
+        (root / "test_engine.kmd.json").write_text(json.dumps(schema))
+        (root / "test_engine.ued.json").write_text(json.dumps(engine))
+        (root / "sibling.ued.json").write_text(json.dumps(sibling_engine))
+        selected_path = root / "test_engine.kdp.json"
+        sibling_path = root / "sibling.kdp.json"
+        selected_path.write_text(json.dumps(selected))
+        sibling_path.write_text(json.dumps(sibling))
+        write_archive(root)
+        control = self.run(root, python_dir, tmp_path)
+        assert control.returncode == 0, control.stdout + control.stderr
+        assert "NOT VERIFIED HERE" not in control.stdout
+
+        # A valid sibling record copied with its inline UKD must not authorize a
+        # second KDP that declares nothing. The bytes and UKD binding still agree.
+        selected.pop("provenance")
+        agreement.publish(ukd, observations, agreement.canonical_records(records[1:]))
+        selected_path.write_text(json.dumps(selected))
+        sibling_path.write_text(json.dumps(sibling))
+        result = self.run(root, python_dir, tmp_path)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "no specialization declaration" in result.stdout
+
+    def test_unclaimed_hip_must_still_be_packed(self, tmp_path, real_archive):
+        write_archive, python_dir = real_archive
+        root = TestFullModeReportsAKernelWithNothingToBind.tree(tmp_path, [], "hip")
+        path = root / "test_engine.kdp.json"
+        doc = json.loads(path.read_text())
+        ukd = doc["kernelDescriptors"][0]
+        ukd["provenance"]["origin_kind"] = "hip"
+        path.write_text(json.dumps(doc))
+        write_archive(root)
+        control = self.run(root, python_dir, tmp_path)
+        assert control.returncode == 0, control.stdout + control.stderr
+        assert "NOT VERIFIED HERE" in control.stdout
+
+        ukd["kernel_source"]["kind"] = "hip"
+        path.write_text(json.dumps(doc))
+        result = self.run(root, python_dir, tmp_path)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "packed dialect" in result.stdout
+        structural = self.run(root, python_dir, tmp_path, mode="structural")
+        assert structural.returncode == 0, structural.stdout + structural.stderr

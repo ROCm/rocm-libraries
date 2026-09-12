@@ -82,8 +82,6 @@ declaration does not already state it. Everything else is read off the descripto
 from __future__ import annotations
 
 import argparse
-import dataclasses
-import glob
 import json
 import os
 import sys
@@ -97,10 +95,6 @@ SENTINEL = -1
 #: would let the weaker run print under the stronger one's name, or the stronger
 #: one fail a tree that was only ever meant to be checked structurally.
 MODES = ("full", "structural")
-
-#: Descriptor filename type tokens (`<name>.<type>.json`) this gate indexes. A JSON
-#: file carrying no type token is not a descriptor and is not resolvable by id.
-_DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
 
 
 def _agreement_python_root() -> Path:
@@ -127,7 +121,7 @@ def _agreement_python_root() -> Path:
 
 sys.path.insert(0, str(_agreement_python_root()))
 
-from hkp_pack import agreement  # noqa: E402
+from hkp_pack import agreement, descriptor_context  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
 
 
@@ -198,187 +192,9 @@ class Profile:
         return cls({})
 
 
-def _type_token(path: str) -> str | None:
-    """The `<type>` of a `<name>.<type>.json` descriptor filename."""
-    parts = os.path.basename(path).split(".")
-    return parts[-2] if len(parts) >= 3 else None
-
-
-@dataclasses.dataclass
-class Document:
-    """One descriptor file, with the type its filename declares."""
-
-    path: str
-    doc: dict
-    dtype: str
-
-
-class Index:
-    """Every descriptor under a root, indexed by the id the documents declare.
-
-    The index is what makes reference resolution real. Two documents claiming one id
-    are refused here, before any resolution, because the choice between them is not
-    the gate's to make: picking either would certify a bundle against a schema it may
-    not be wired to, and picking silently is indistinguishable from having checked.
-    """
-
-    def __init__(self, root: str):
-        self.root = root
-        self.documents: list[Document] = []
-        self.by_id: dict[str, Document] = {}
-        collisions: dict[str, list[str]] = {}
-        for path in sorted(glob.glob(f"{root}/**/*.json", recursive=True)):
-            dtype = _type_token(path)
-            if dtype not in _DESCRIPTOR_TYPES:
-                continue
-            try:
-                with open(path) as fh:
-                    doc = json.load(fh)
-            except (OSError, json.JSONDecodeError) as exc:
-                raise GateError(f"cannot read descriptor {path}: {exc}") from exc
-            if not isinstance(doc, dict):
-                raise GateError(f"descriptor {path} is not a JSON object")
-            document = Document(path, doc, dtype)
-            self.documents.append(document)
-            ident = doc.get("id")
-            if not isinstance(ident, str) or not ident:
-                continue
-            if ident in self.by_id:
-                collisions.setdefault(ident, [self.by_id[ident].path]).append(path)
-            else:
-                self.by_id[ident] = document
-        if collisions:
-            detail = "; ".join(
-                f"id {ident!r} is claimed by {', '.join(sorted(paths))}"
-                for ident, paths in sorted(collisions.items())
-            )
-            raise GateError(
-                f"ambiguous descriptor ids under {root}: {detail}. A reference to "
-                f"one of these resolves to two different documents, so nothing here "
-                f"can say which schema the bundle is actually wired to."
-            )
-
-    def of_type(self, dtype: str) -> list[Document]:
-        return [d for d in self.documents if d.dtype == dtype]
-
-    def schemas(self) -> dict:
-        """id -> KMD document, the mapping the declaration validator resolves against."""
-        return {d.doc["id"]: d.doc for d in self.of_type("kmd") if d.doc.get("id")}
-
-    def follow(self, document: Document, key: str, hop: str) -> Document:
-        """Resolve `document[key]` as an id reference, naming the hop when it dangles."""
-        ref = document.doc.get(key)
-        if not isinstance(ref, str) or not ref:
-            raise GateError(
-                f"{os.path.basename(document.path)}: '{key}' is not an id reference "
-                f"({ref!r}). The {hop} hop cannot be walked, and binding to a "
-                f"same-stem sibling instead would gate a schema nothing wires this "
-                f"bundle to."
-            )
-        target = self.by_id.get(ref)
-        if target is None:
-            raise GateError(
-                f"{os.path.basename(document.path)}: unresolved '{key}' reference -- "
-                f"id {ref!r} matches no descriptor under {self.root}."
-            )
-        return target
-
-
-@dataclasses.dataclass
-class Entry:
-    """One UKD a KDP ships, with where it was read from and what it covers.
-
-    `origin_dir` is the directory the runtime anchors a packed `library` on: the
-    UKD's own file for a standalone, the KDP's file for an inline entry.
-
-    `arch` is the EFFECTIVE coverage -- the KDP's list narrowed by the UKD's own --
-    where an empty list is a wildcard. Two candidates whose coverage does not
-    overlap never meet in one device's catalog, which is what makes an otherwise
-    identical pair legal.
-
-    `inline` says whether the UKD lives inside the KDP, which decides whether it
-    inherits the KDP's `specialization_contract`: a standalone UKD is its own file
-    and several KDPs may reference it, so it declares its own.
-    """
-
-    ukd: dict
-    origin_dir: str
-    arch: list
-    inline: bool = True
-
-
-@dataclasses.dataclass
-class Bundle:
-    """One KDP resolved through the id chain to the schema that governs it."""
-
-    kdp_path: str
-    kdp_doc: dict
-    engine: dict
-    kmd: dict
-    entries: list
-
-
-def _coverage(kdp_doc: dict, ukd: dict) -> list | None:
-    """Effective arch coverage of a UKD under a KDP; `[]` is a wildcard.
-
-    None means the pair intersects to nothing, so this entry ships on no device and
-    cannot collide with anything.
-    """
-    kdp_arch = list(kdp_doc.get("arch") or [])
-    ukd_arch = list(ukd.get("arch") or [])
-    if not kdp_arch:
-        return ukd_arch
-    if not ukd_arch:
-        return kdp_arch
-    shared = [a for a in kdp_arch if a in ukd_arch]
-    return shared or None
-
-
-def resolve_bundles(index: Index) -> list[Bundle]:
-    """Every KDP under the root, walked to its engine and its schema by id.
-
-    KDP -> UED is the `engine` hop, UED -> KMD the `metadata` hop, and a
-    `kernelDescriptors` entry that is a bare string is a standalone UKD resolved by
-    id like any other reference. Each hop fails on its own name so a broken bundle
-    says which link is missing rather than which file is absent.
-    """
-    bundles = []
-    for kdp in index.of_type("kdp"):
-        engine = index.follow(kdp, "engine", "KDP -> engine (UED)")
-        kmd = index.follow(engine, "metadata", "UED -> metadata (KMD)")
-        if kmd.dtype != "kmd":
-            raise GateError(
-                f"{os.path.basename(engine.path)}: 'metadata' resolves to "
-                f"{os.path.basename(kmd.path)}, which is a "
-                f"{kmd.dtype!r} document, not a KMD."
-            )
-        entries = []
-        for item in kdp.doc.get("kernelDescriptors") or []:
-            if isinstance(item, str):
-                target = index.by_id.get(item)
-                if target is None:
-                    raise GateError(
-                        f"{os.path.basename(kdp.path)}: unresolved "
-                        f"'kernelDescriptors' reference -- id {item!r} matches no "
-                        f"descriptor under {index.root}."
-                    )
-                ukd, origin, inline = target.doc, os.path.dirname(target.path), False
-            elif isinstance(item, dict):
-                ukd, origin, inline = item, os.path.dirname(kdp.path), True
-            else:
-                raise GateError(
-                    f"{os.path.basename(kdp.path)}: a kernelDescriptors entry is "
-                    f"neither an inline object nor an id reference."
-                )
-            coverage = _coverage(kdp.doc, ukd)
-            if coverage is None:
-                continue
-            entries.append(Entry(ukd, origin, coverage, inline))
-        bundles.append(Bundle(kdp.path, kdp.doc, engine.doc, kmd.doc, entries))
-    return bundles
-
-
-def select(bundles: list[Bundle], profile: Profile) -> list[Bundle]:
+def select(
+    bundles: list[descriptor_context.Bundle], profile: Profile
+) -> list[descriptor_context.Bundle]:
     """The bundles of the ONE engine this run gates.
 
     Several KDPs may declare one engine -- that is the shape the engine-wide desk
@@ -404,33 +220,6 @@ def select(bundles: list[Bundle], profile: Profile) -> list[Bundle]:
             f"engine would pass while the one under test is broken."
         )
     return bundles
-
-
-def declarations(bundles: list[Bundle], schemas: dict) -> dict:
-    """(engine_id, kmd_id, ukd_id) -> the consumer entry that UKD declares.
-
-    Read off `provenance.specialization_contract`, which is data: a reader with no
-    producer installed learns which metadata fields the compiled kernel specialises
-    on, which are the matcher's alone, and how each specialised field is read off
-    the builder's spec. The declaration may be carried once by the enclosing KDP and
-    inherited, so `agreement.resolved_contract` -- not a raw key lookup -- decides
-    whether a kernel has one. `agreement.select_declaration` owns the selection so a
-    UKD several engines reference is resolved by the (engine, KMD) PAIR rather than
-    by picking one of its entries.
-    """
-    found = {}
-    for bundle in bundles:
-        for entry in bundle.entries:
-            enclosing = bundle.kdp_doc if entry.inline else None
-            if agreement.resolved_contract(entry.ukd, enclosing) is None:
-                continue
-            declaration = agreement.select_declaration(
-                entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
-            )
-            found[(bundle.engine["id"], bundle.kmd["id"], entry.ukd["id"])] = (
-                declaration
-            )
-    return found
 
 
 def _binary_key(descriptor: dict) -> str:
@@ -535,7 +324,9 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
     return violations
 
 
-def effective_arch(bundles: list[Bundle], requested: str | None) -> str:
+def effective_arch(
+    bundles: list[descriptor_context.Bundle], requested: str | None
+) -> str:
     """The single architecture a full-mode run is about.
 
     The producing compiler wrote its evidence for one arch, so the reader has to be
@@ -554,37 +345,6 @@ def effective_arch(bundles: list[Bundle], requested: str | None) -> str:
         "for one arch cannot be matched against it. Pass --arch to say which shard "
         "is being checked."
     )
-
-
-def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
-    """ukd id -> the consumer records the producing compile bound its evidence to.
-
-    Built over EVERY KDP under the root, not only the gated engine's: a standalone
-    UKD two engines reference carries one record per pair, and rebuilding only half
-    of that list would fail a correct artifact. `agreement.consumer_record` and
-    `agreement.canonical_records` construct and order them, so the reader's list is
-    byte-identical to the producer's by construction rather than by two
-    implementations agreeing about key order.
-    """
-    collected: dict = {}
-    for bundle in bundles:
-        header = {k: v for k, v in bundle.kdp_doc.items() if k != "kernelDescriptors"}
-        header["arch"] = [arch]
-        for entry in bundle.entries:
-            if entry.arch and arch not in entry.arch:
-                continue
-            enclosing = bundle.kdp_doc if entry.inline else None
-            if agreement.resolved_contract(entry.ukd, enclosing) is None:
-                continue
-            declaration = agreement.select_declaration(
-                entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
-            )
-            collected.setdefault(entry.ukd["id"], []).append(
-                agreement.consumer_record(
-                    entry.ukd, bundle.engine, bundle.kmd, header, arch, declaration
-                )
-            )
-    return {k: agreement.canonical_records(v) for k, v in collected.items()}
 
 
 class Payloads:
@@ -610,7 +370,7 @@ class Payloads:
             self._archives[key] = self._module.PackedKernelArchive.read(path)
         return self._archives[key]
 
-    def read(self, entry: Entry, arch: str) -> bytes:
+    def read(self, entry: descriptor_context.Entry, arch: str) -> bytes:
         source = entry.ukd["kernel_source"]
         kind = source.get("kind")
         if kind != "kpack":
@@ -681,9 +441,9 @@ def check(
     there is no producing-build record to bind. That is a legitimate outcome, so it
     neither fails the gate nor joins the pass line's list of things established.
     """
-    index = Index(root)
+    index = descriptor_context.Index(root)
     schemas = index.schemas()
-    all_bundles = resolve_bundles(index)
+    all_bundles = descriptor_context.resolve_bundles(index)
     bundles = select(all_bundles, profile)
     kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
@@ -694,7 +454,7 @@ def check(
     # for it to bind, which is neither a failure nor a property established.
     unverified: list[str] = []
 
-    declared = declarations(bundles, schemas)
+    declared = descriptor_context.declarations(bundles, schemas)
     knobs = {f for d in declared.values() for f in d["metadata_fields"]}
     vocabulary = dict(profile.vocabulary)
     for declaration in declared.values():
@@ -895,15 +655,33 @@ def check(
     # checks that evidence against the descriptors and the payload bytes in hand;
     # structural mode cannot, and says so by name.
     if mode == "full":
-        records = consumer_records(all_bundles, schemas, arch)
+        records = descriptor_context.consumer_records(all_bundles, schemas, arch)
         for bundle in bundles:
             for entry in bundle.entries:
                 name = entry.ukd.get("name")
-                if entry.ukd.get("id") not in records:
+                enclosing = bundle.kdp_doc if entry.inline else None
+                if agreement.resolved_contract(entry.ukd, enclosing) is None:
                     failures.append(
                         f"{name}: no specialization declaration for engine "
                         f"{engine_id}, so this descriptor never states what its "
                         f"binary specialises on and agreement cannot be established"
+                    )
+                    continue
+                agreement.select_declaration(
+                    entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
+                )
+                kind = entry.ukd.get("kernel_source", {}).get("kind")
+                if kind != "kpack":
+                    failures.append(
+                        f"{name}: --mode full needs the packed dialect, and "
+                        f"kernel_source.kind is {kind!r}. Check the packed tree."
+                    )
+                    continue
+                if entry.ukd["id"] not in records:
+                    failures.append(
+                        f"{name}: no consumer records for requested architecture "
+                        f"{arch}, so compiled specialization agreement cannot be "
+                        f"established"
                     )
                     continue
                 bound = records[entry.ukd["id"]]
@@ -1022,7 +800,9 @@ def main(argv=None) -> int:
     try:
         arch = None
         if args.mode == "full":
-            probe = resolve_bundles(Index(roots[0][1]))
+            probe = descriptor_context.resolve_bundles(
+                descriptor_context.Index(roots[0][1])
+            )
             arch = effective_arch(probe, args.arch)
         for label, root in roots:
             binaries, descriptors, failures, unchecked, unbound, declared = check(
@@ -1034,7 +814,7 @@ def main(argv=None) -> int:
             skipped += unchecked
             unverified += [f"{label}: {u}" for u in unbound]
             knobs |= declared
-    except GateError as exc:
+    except (GateError, HkpPackError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
