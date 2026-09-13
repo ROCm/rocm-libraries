@@ -4425,8 +4425,13 @@ namespace TensileLite
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
-                    size_t splitk         = skGrid / tiles;
-                    size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
+                    // Sized from the resolved grid, the same way
+                    // resolveStreamKSettings() sizes the launch. skGrid already
+                    // carries the batch count through getNumTiles(), which
+                    // multiplies by it for every streamK != 0 solution, and the
+                    // partials are the whole requirement: no streamK solution
+                    // carries bias-gradient or amaxD workspace.
+                    size_t idealWorkspace = partialTileSize(skGrid);
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }

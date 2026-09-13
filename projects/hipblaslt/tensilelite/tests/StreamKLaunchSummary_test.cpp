@@ -85,12 +85,18 @@ namespace
         solution.sizeMapping.workspaceSizePerElemC = 4;
     }
 
-    ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
+    ContractionProblemGemm makeBatchedGemmProblem(size_t m, size_t n, size_t k, size_t batch)
     {
-        auto problem = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, 1);
+        auto problem
+            = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, batch);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
         return problem;
+    }
+
+    ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
+    {
+        return makeBatchedGemmProblem(m, n, k, 1);
     }
 
     struct AnalyticalEnv
@@ -929,15 +935,9 @@ TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
 // this has to be SK3.
 //
 // Parallel is the one reduction that reserves a partials workspace unconditionally
-// (the tree path only reserves when tiles % grid != 0). The snapshot sizes that
-// reservation with partialTileSize(finalGrid), while the caller-facing
-// requiredWorkspaceSize() sizes it with requiredWorkspaceSizeGsu(problem, hw,
-// grid/tiles) -- two different formulas for the same region. They agree here
-// because the parallel grid is an exact multiple of tiles (grid == tiles*skSplit
-// == 64*4), which makes requiredWorkspaceSizeGsu's tiles*gsu equal
-// partialTileSize's grid. The one triple where the formulas would disagree --
-// parallel at a split factor of 1 -- never reaches either of them, because
-// streamKReconcileReduction() demotes it to tree first; see the comment on
+// (the tree path only reserves when tiles % grid != 0). The snapshot and the
+// caller-facing requiredWorkspaceSize() both size that reservation with
+// partialTileSize(finalGrid); see the comment on
 // StreamKDecisions::requiredWorkspaceBytes.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
@@ -1000,9 +1000,8 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     EXPECT_EQ(d.requiredWorkspaceBytes, 16777216u) << "128*128*4 bytes * 256 work-groups";
     EXPECT_EQ(d.idealWorkspaceBytes, d.requiredWorkspaceBytes) << "it fits, so nothing was trimmed";
 
-    // In this regime -- and only because finalGrid is an exact multiple of tiles --
-    // the two independent sizings land on the same byte count.
-    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit) << "why the two sizings coincide here";
+    // The two independent sizings land on the same byte count.
+    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit);
     EXPECT_GT(solution.requiredWorkspaceSize(problem, env.device), 0u);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), d.requiredWorkspaceBytes);
 
@@ -1015,6 +1014,48 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     EXPECT_EQ(line.find("preFallback"), std::string::npos) << "nothing moved the grid";
     EXPECT_NE(line.find("isDynamic = no"), std::string::npos);
     EXPECT_NE(line.find("NA (work-queues not used)"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The batched parallel-reduction scenario, which is what separates the two
+// sizings. getNumTiles() folds the batch count into its result for every
+// streamK != 0 solution, so the batch is already carried by tiles, by the grid
+// derived from it, and therefore by partialTileSize(grid). A sizing that
+// multiplied by the batch a second time would over-report by exactly the batch
+// count, push the reported requirement past the caller's workspace cap, and
+// leave the launch running data-parallel on a zero-byte allocation.
+//
+// 128x128x4096 keeps one tile per batch entry, so batch entries and tiles are
+// the same count and select_reduction's "tiles <= cuCount/4" band still admits
+// parallel at a batch of 8.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
+{
+    constexpr size_t kBatch = 8;
+
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_parallel_batched";
+    initStreamKSolution(solution, 3);
+
+    auto problem = makeBatchedGemmProblem(128, 128, 4096, kBatch);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto d = solution.computeStreamKDecisions(problem, env.device);
+
+    ASSERT_EQ(d.reduction, origami::reduction_t::parallel)
+        << "scenario must actually select parallel reduction, otherwise the "
+           "assertions below are about the already-covered tree path";
+    ASSERT_EQ(d.tiles, kBatch) << "one 128x128 tile per batch entry";
+    EXPECT_EQ(problem.getNumTiles(solution.sizeMapping, 1), kBatch)
+        << "getNumTiles already folds the batch count in for streamK != 0";
+    ASSERT_TRUE(d.workspaceAllocated);
+
+    // Both sizings are partialTileSize(finalGrid); neither re-applies the batch.
+    const size_t expected = solution.partialTileSize(d.finalGrid);
+    EXPECT_EQ(d.requiredWorkspaceBytes, expected);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), expected)
+        << "the query must not scale the partials region by the batch count";
 }
 
 // ---------------------------------------------------------------------------
