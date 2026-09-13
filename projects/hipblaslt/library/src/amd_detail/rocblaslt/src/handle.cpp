@@ -75,12 +75,8 @@ _rocblaslt_handle::_rocblaslt_handle()
     // Device wavefront size
     wavefront_size = properties.warpSize;
 
-#if HIP_VERSION >= 307
     // ASIC revision
     asic_rev = properties.asicRevision;
-#else
-    asic_rev = 0;
-#endif
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);

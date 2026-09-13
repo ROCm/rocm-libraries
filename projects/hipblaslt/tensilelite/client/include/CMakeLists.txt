@@ -3,6 +3,7 @@
 
 target_sources(tensilelite-client-common
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientConfig.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaResultReporter.hpp"

@@ -73,30 +73,12 @@ namespace rocisa
             return "F8B8N";
         case rocisa::DataType::BFloat8Float8_fnuz:
             return "B8F8N";
-#ifdef TENSILE_USE_FP6
         case rocisa::DataType::Float6:
             return "F6";
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
         case rocisa::DataType::BFloat6:
             return "B6";
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
         case rocisa::DataType::Float4:
             return "F4";
-#endif // #ifdef TENSILE_USE_FP4
-#ifndef TENSILE_USE_FP6
-        case rocisa::DataType::Float6:
-            return "F6";
-#endif
-#ifndef TENSILE_USE_BF6
-        case rocisa::DataType::BFloat6:
-            return "B6";
-#endif
-#ifndef TENSILE_USE_FP4
-        case rocisa::DataType::Float4:
-            return "F4";
-#endif
         case rocisa::DataType::E8:
             return "E8";
         case rocisa::DataType::E5M3:
@@ -157,30 +139,12 @@ namespace rocisa
         case rocisa::DataType::Float4:
             return TensileLite::TypeInfo<TensileLite::Float4>::ElementSize;
 #else // _WIN32
-#ifdef TENSILE_USE_FP6
         case rocisa::DataType::Float6:
             return TensileLite::TypeInfo<TensileLite::Float6x32>::ElementSize;
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
         case rocisa::DataType::BFloat6:
             return TensileLite::TypeInfo<TensileLite::BFloat6x32>::ElementSize;
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
         case rocisa::DataType::Float4:
             return TensileLite::TypeInfo<TensileLite::Float4x2>::ElementSize;
-#endif // #ifdef TENSILE_USE_FP4
-#ifndef TENSILE_USE_FP6
-        case rocisa::DataType::Float6:
-            return 24.f / 32.f; // same as TypeInfo<Float6x32>, 32 x 6-bit in 24 bytes
-#endif
-#ifndef TENSILE_USE_BF6
-        case rocisa::DataType::BFloat6:
-            return 24.f / 32.f;
-#endif
-#ifndef TENSILE_USE_FP4
-        case rocisa::DataType::Float4:
-            return 0.5f; // TypeInfo<Float4x2>: 2 x fp4 in 1 byte
-#endif
 #endif // _WIN32
         case rocisa::DataType::E8:
             return TensileLite::TypeInfo<TensileLite::E8>::ElementSize;
@@ -202,44 +166,7 @@ namespace rocisa
         std::string strValue;
         stream >> strValue;
 
-#if 1
         t = TensileLite::DataTypeInfo::Get(strValue).dataType;
-
-#else
-
-        if(strValue == ToString(rocisa::DataType::Float))
-            t = rocisa::DataType::Float;
-        else if(strValue == ToString(rocisa::DataType::Double))
-            t = rocisa::DataType::Double;
-        else if(strValue == ToString(rocisa::DataType::ComplexFloat))
-            t = rocisa::DataType::ComplexFloat;
-        else if(strValue == ToString(rocisa::DataType::ComplexDouble))
-            t = rocisa::DataType::ComplexDouble;
-        else if(strValue == ToString(rocisa::DataType::Half))
-            t = rocisa::DataType::Half;
-        else if(strValue == ToString(rocisa::DataType::Int8x4))
-            t = rocisa::DataType::Int8x4;
-        else if(strValue == ToString(rocisa::DataType::Int32))
-            t = rocisa::DataType::Int32;
-        else if(strValue == ToString(rocisa::DataType::Int64))
-            t = rocisa::DataType::Int64;
-        else if(strValue == ToString(rocisa::DataType::Int8))
-            t = rocisa::DataType::Int8;
-        else if(strValue == ToString(rocisa::DataType::XFloat32))
-            t = rocisa::DataType::XFloat32;
-        else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
-        {
-            int value = atoi(strValue.c_str());
-            if(value >= 0 && value < static_cast<int>(rocisa::DataType::Count))
-                t = static_cast<DataType>(value);
-            else
-                throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-        else
-        {
-            throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-#endif
 
         return stream;
     }
@@ -310,52 +237,12 @@ namespace TensileLite
         registerTypeInfo<BFloat6>();
         registerTypeInfo<Float4>();
 #else // _WIN32
-#ifdef TENSILE_USE_FP6
         registerTypeInfo<Float6x32>();
-#endif // #ifdef TENSILE_USE_FP6
-#ifdef TENSILE_USE_BF6
         registerTypeInfo<BFloat6x32>();
-#endif // #ifdef TENSILE_USE_BF6
-#ifdef TENSILE_USE_FP4
         registerTypeInfo<Float4x2>();
-#endif // #ifdef TENSILE_USE_FP4
 #endif // _WIN32
         registerTypeInfo<E8>();
         registerTypeInfo<E5M3>();
-
-        registerThinOcpFpTypesWhenNoExtOcp();
-    }
-
-    void DataTypeInfo::registerThinOcpFpTypesWhenNoExtOcp()
-    {
-        auto* const data = getData();
-
-        auto addIfMissing = [data](rocisa::DataType         dt,
-                                   char const*              abbrev,
-                                   float                    elementSize,
-                                   size_t                   packing) {
-            if(data->find(dt) != data->end())
-                return;
-            DataTypeInfo info;
-            info.dataType    = dt;
-            info.name        = rocisa::toString(dt);
-            info.abbrev      = abbrev;
-            info.elementSize = elementSize;
-            info.packing     = packing;
-            info.isComplex   = false;
-            info.isIntegral  = false;
-            addInfoObject(info);
-        };
-
-#ifndef TENSILE_USE_FP6
-        addIfMissing(rocisa::DataType::Float6, "F6", 12.f / 16.f, 16);
-#endif
-#ifndef TENSILE_USE_BF6
-        addIfMissing(rocisa::DataType::BFloat6, "B6", 12.f / 16.f, 16);
-#endif
-#ifndef TENSILE_USE_FP4
-        addIfMissing(rocisa::DataType::Float4, "F4", 0.5f, 2);
-#endif
     }
 
     void DataTypeInfo::registerAllTypeInfoOnce()
