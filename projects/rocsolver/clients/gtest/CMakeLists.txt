@@ -206,7 +206,7 @@ if(WIN32)
     $ENV{rocblas_DIR}/bin/*.dll
     $ENV{HIP_DIR}/bin/*.dll
     $ENV{HIP_DIR}/bin/hipinfo.exe
-    ${CMAKE_SOURCE_DIR}/rtest.*
+    ${rocsolver_SOURCE_DIR}/rtest.*
   )
   foreach(file_i ${third_party_dlls})
     add_custom_command(TARGET rocsolver-test

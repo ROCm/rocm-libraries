@@ -154,7 +154,7 @@ if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
     ${HIP_DIR}/bin/rocm*.dll
     ${HIP_DIR}/bin/hiprt*.dll
     ${HIP_DIR}/bin/hipinfo.exe
-    ${CMAKE_SOURCE_DIR}/rtest.*
+    ${rocblas_SOURCE_DIR}/rtest.*
     C:/Windows/System32/libomp140*.dll
   )
   foreach( file_i ${third_party_dlls})

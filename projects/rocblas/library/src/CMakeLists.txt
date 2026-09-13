@@ -824,7 +824,7 @@ endif()
 rocm_install_targets(
   TARGETS ${package_targets}
   INCLUDE
-    ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
 )
 
 if( BUILD_WITH_TENSILE )
@@ -846,7 +846,7 @@ if( BUILD_WITH_TENSILE )
     # directly), and shipping it would also collide across kpack per-arch shards
     # since the filename has no arch suffix.
     rocm_install(
-      DIRECTORY ${CMAKE_BINARY_DIR}/Tensile/library
+      DIRECTORY ${PROJECT_BINARY_DIR}/Tensile/library
       DESTINATION ${ROCBLAS_TENSILE_LIBRARY_DIR}
       COMPONENT ${TENSILE_DATA_COMPONENT_NAME} # Use this cmake variable to be compatible with rocm-cmake 0.6 and 0.7
       PATTERN "TensileManifest.txt" EXCLUDE)
