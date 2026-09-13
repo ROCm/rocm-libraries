@@ -230,7 +230,8 @@ namespace rocsparse
               typename J,
               typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgemm_fill_wf_per_row_2x2_device(rocsparse_direction dir,
+        bsrgemm_fill_wf_per_row_2x2_device(J                   block_offset,
+                                           rocsparse_direction dir,
                                            J                   mb,
                                            J                   nkb,
                                            const J* __restrict__ offset,
@@ -266,8 +267,9 @@ namespace rocsparse
         // Wavefront id
         int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each (sub)wavefront processes a row (block_offset supplied by the grid-stride
+        // loop in the kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = block_offset + wid;
 
         // Hash table in shared memory
         __shared__ J stable[(BLOCKSIZE / WFSIZE) * HASHSIZE];
@@ -503,7 +505,8 @@ namespace rocsparse
               typename J,
               typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgemm_fill_block_per_row_2x2_device(rocsparse_direction dir,
+        bsrgemm_fill_block_per_row_2x2_device(J                   block_id,
+                                              rocsparse_direction dir,
                                               J                   mb,
                                               J                   nkb,
                                               const J* __restrict__ offset,
@@ -557,8 +560,9 @@ namespace rocsparse
 
         __syncthreads();
 
-        // Each block processes a row (apply permutation)
-        J row = perm ? perm[hipBlockIdx_x + *offset] : hipBlockIdx_x;
+        // Each block processes a row (block_id supplied by the grid-stride loop in the
+        // kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = perm ? perm[block_id + *offset] : block_id;
 
         // alpha * A * B part
         if(mul == true)
@@ -762,7 +766,8 @@ namespace rocsparse
               typename I,
               typename J,
               typename T>
-    ROCSPARSE_DEVICE_ILF void bsrgemm_fill_wf_per_row_device(rocsparse_direction dir,
+    ROCSPARSE_DEVICE_ILF void bsrgemm_fill_wf_per_row_device(J                   block_offset,
+                                                             rocsparse_direction dir,
                                                              J                   mb,
                                                              J                   nkb,
                                                              J                   block_dim,
@@ -804,8 +809,9 @@ namespace rocsparse
         int c = slid & (BLOCKDIM - 1);
         int r = slid / BLOCKDIM;
 
-        // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each (sub)wavefront processes a row (block_offset supplied by the grid-stride
+        // loop in the kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = block_offset + wid;
 
         // Hash table in shared memory
         __shared__ J stable[(BLOCKSIZE / WFSIZE) * HASHSIZE];
@@ -993,7 +999,8 @@ namespace rocsparse
               typename I,
               typename J,
               typename T>
-    ROCSPARSE_DEVICE_ILF void bsrgemm_fill_block_per_row_device(rocsparse_direction dir,
+    ROCSPARSE_DEVICE_ILF void bsrgemm_fill_block_per_row_device(J                   block_id,
+                                                                rocsparse_direction dir,
                                                                 J                   mb,
                                                                 J                   nkb,
                                                                 J                   block_dim,
@@ -1030,8 +1037,9 @@ namespace rocsparse
         int c = lid & (BLOCKDIM - 1);
         int r = lid / BLOCKDIM;
 
-        // Each block processes a row (apply permutation)
-        J row = perm ? perm[hipBlockIdx_x + *offset] : hipBlockIdx_x;
+        // Each block processes a row (block_id supplied by the grid-stride loop in the
+        // kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = perm ? perm[block_id + *offset] : block_id;
 
         // Hash table in shared memory
         __shared__ J table[HASHSIZE];
@@ -1207,7 +1215,8 @@ namespace rocsparse
               typename J,
               typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgemm_block_per_row_atomic_multipass_device(rocsparse_direction dir,
+        bsrgemm_block_per_row_atomic_multipass_device(J                   block_id,
+                                                      rocsparse_direction dir,
                                                       J                   nb,
                                                       J                   block_dim,
                                                       const J* __restrict__ offset_,
@@ -1244,8 +1253,9 @@ namespace rocsparse
         int c = lid & (BLOCKDIM - 1);
         int r = lid / BLOCKDIM;
 
-        // Each block processes a row (apply permutation)
-        J row = perm ? perm[hipBlockIdx_x + *offset_] : hipBlockIdx_x;
+        // Each block processes a row (block_id supplied by the grid-stride loop in the
+        // kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = perm ? perm[block_id + *offset_] : block_id;
 
         // Row entry marker and value accumulator
         __shared__ int table[CHUNKSIZE];
@@ -1538,7 +1548,8 @@ namespace rocsparse
               typename J,
               typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgemm_block_per_row_multipass_device(rocsparse_direction dir,
+        bsrgemm_block_per_row_multipass_device(J                   block_id,
+                                               rocsparse_direction dir,
                                                J                   nb,
                                                J                   block_dim,
                                                const J* __restrict__ offset_,
@@ -1572,8 +1583,9 @@ namespace rocsparse
         // Wavefront id
         int wid = hipThreadIdx_x / (BLOCKSIZE / BLOCKDIM);
 
-        // Each block processes a row (apply permutation)
-        J row = perm ? perm[hipBlockIdx_x + *offset_] : hipBlockIdx_x;
+        // Each block processes a row (block_id supplied by the grid-stride loop in the
+        // kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        J row = perm ? perm[block_id + *offset_] : block_id;
 
         // Row entry marker and value accumulator
         __shared__ bool table[CHUNKSIZE];
