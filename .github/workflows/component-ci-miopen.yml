@@ -210,3 +210,57 @@ jobs:
             --config rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
             -- ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list
+  miopen-clang-tidy:
+    name: MIOpen clang-tidy
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/miopen
+            shared/ctest
+          sparse-checkout-cone-mode: true
+      - name: Checkout TheRock
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: df3d451a3c054e14705ddf94e58498e1208df8d5 # 2026-09-08
+          path: TheRock
+      - name: Install base dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build python3-venv python3-dev lsb-release wget software-properties-common gnupg
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install boto3 cmake
+          pip install -r TheRock/requirements.txt
+      - name: Install ROCm
+        run: |
+          sudo .venv/bin/python3 TheRock/build_tools/install_rocm_from_artifacts.py --latest-release --amdgpu-family gfx94X-dcgpu --output-dir /opt/rocm --base-only
+      - name: Install deps (miopen)
+        run: |
+          . .venv/bin/activate
+          pip install 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-23
+          cp projects/miopen/requirements.txt /tmp/requirements.txt
+          cp projects/miopen/rbuild.ini /tmp/rbuild.ini
+          cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
+          sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
+          cd /tmp && CMAKE_GENERATOR=Ninja rbuild prepare -s develop -d /tmp/miopen-deps
+      - name: Run clang-tidy (miopen)
+        run: |
+          . .venv/bin/activate
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/miopen -B build-miopen -G Ninja \
+            -DMIOPEN_BACKEND=HIP \
+            -DBUILD_DEV=ON \
+            -DMIOPEN_USE_MLIR=OFF \
+            -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-23 \
+            -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
+            -DROCM_PATH=/opt/rocm
+          ninja -C build-miopen -k 0 analyze
