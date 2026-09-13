@@ -69,6 +69,11 @@ constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
 /// and a HALF one.
 constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
 
+/// The attention reset case runs the same one-epsilon budget its pre-context verification
+/// used, so the migration to GraphVerificationContext changes what is compared and on which
+/// type, never how close the answer has to be.
+constexpr float ATTENTION_DENSE_TOLERANCE_EPSILONS = 1.0f;
+
 /// Distinguishes the packaged FIXTURE's archive from every other root's in the shared
 /// descriptor tree. Each source root packs under its own archive group, so the group name
 /// is what names an archive to a particular root; this is the group the fixture root is
@@ -790,9 +795,10 @@ protected:
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        executeAndVerify(graph, workspace.get(), /*seed=*/0);
+        GraphVerificationContext context(graph);
+        registerValidatorsForOutputs(context, ATTENTION_DENSE_TOLERANCE_EPSILONS);
+        verifyBuiltGraph(context, /*seed=*/0);
     }
 };
 
