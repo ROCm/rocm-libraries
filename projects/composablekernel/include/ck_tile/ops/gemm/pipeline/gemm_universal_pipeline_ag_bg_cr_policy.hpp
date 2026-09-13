@@ -242,7 +242,7 @@ struct UniversalGemmBasePolicy
                         : KThreadRead;
 
                 // 1<=mpair<=n0
-                constexpr a_lds_bank_stride_mpair = AK1 * MPerXdl * sizeof(ADataType);
+                constexpr auto a_lds_bank_stride_mpair = AK1 * MPerXdl * sizeof(ADataType);
                 constexpr auto mpair =
                     (a_lds_bank_stride_mpair == 0 || a_lds_bank_stride_mpair > LdsBanksWidth)
                         ? 1
@@ -508,7 +508,7 @@ struct UniversalGemmBasePolicy
 
                 // check if we exceed all LDS banks
                 constexpr auto LdsBanksWidth = get_n_lds_banks() * get_n_dwords_per_128b();
-                constexpr b_lds_bank_stride = BK1 * N0 * sizeof(BDataType);
+                constexpr auto b_lds_bank_stride = BK1 * N0 * sizeof(BDataType);
                 constexpr auto kfold         = (b_lds_bank_stride == 0 || b_lds_bank_stride > LdsBanksWidth)
                                                    ? 1
                                                    : LdsBanksWidth / b_lds_bank_stride;
