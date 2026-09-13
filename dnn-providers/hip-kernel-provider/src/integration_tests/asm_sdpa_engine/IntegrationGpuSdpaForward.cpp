@@ -54,7 +54,9 @@ protected:
                          << " but current device architecture is " << deviceString;
         }
 
-        auto graph = buildSdpaFwdGraph(testCase);
+        const SdpaFwdGraph built = buildSdpaFwdGraph(testCase);
+        const auto& graph = built.graph;
+        const auto& stats = built.stats;
 
         auto validationResult = graph->validate();
         ASSERT_TRUE(validationResult.is_good())
@@ -66,7 +68,22 @@ protected:
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(!tensorAttr->get_is_virtual())
+                if(tensorAttr->get_is_virtual())
+                {
+                    continue;
+                }
+                if(tensorAttr == stats)
+                {
+                    // Every fully masked causal row has a log-sum-exp of -inf in the CPU
+                    // reference and in the device result alike.
+                    this->registerValidator(context,
+                                            tensorAttr,
+                                            createAllCloseMatchingInfinitiesValidator(
+                                                frontendToSdkDataType(tensorAttr->get_data_type()),
+                                                tolerance,
+                                                tolerance));
+                }
+                else
                 {
                     this->registerValidator(context, tensorAttr, tolerance);
                 }
