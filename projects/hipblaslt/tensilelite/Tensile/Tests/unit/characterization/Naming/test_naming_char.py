@@ -30,6 +30,7 @@ snapshot the returned name strings.
 
 import pytest
 
+from Tensile.SolutionStructs.KernelNameDecoder import decode_kernel_name
 from Tensile.SolutionStructs.Problem import ProblemType
 import Tensile.SolutionStructs.Naming as N
 
@@ -126,7 +127,30 @@ def test_solution_name_min(make_state, snapshot):
 def test_solution_name_full(make_state, snapshot):
     assert N.getSolutionNameFull(make_state(), splitGSU=False) == snapshot
 
+def test_solution_name_full_orders_colliding_afem_for_decoder(make_state):
+    state = make_state(
+        AssertFree0ElementMultiple=1,
+        AssertFree1ElementMultiple=4,
+    )
 
+    name = N.getSolutionNameFull(state, splitGSU=False)
+    components = name.split("_")
+    afem0_index = components.index("AFEM1")
+    afem1_index = components.index("AFEM4")
+
+    # Both parameter names abbreviate to AFEM. Their sorted, adjacent order is
+    # the contract that lets the decoder assign the first component to free
+    # index 0 and the second component to free index 1.
+    assert afem1_index == afem0_index + 1
+
+    decoded = decode_kernel_name(name)
+    parameters = {
+        parameter.name: parameter
+        for parameter in decoded.parameters
+        if parameter.name is not None
+    }
+    assert parameters["AssertFree0ElementMultiple"].value == 1
+    assert parameters["AssertFree1ElementMultiple"].value == 4
 def test_kernel_name_min(make_state, snapshot):
     assert N.getKernelNameMin(make_state(), splitGSU=False) == snapshot
 
