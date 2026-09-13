@@ -126,7 +126,10 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). At test time, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is skipped via `GTEST_SKIP()` and counted in the `[ SKIPPED ]` summary; the test still appears in the test list. Entries with no `known_bug_platforms` are treated as known-bug on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). Known-bug parameters are **excluded at test-registration time** in `INSTANTIATE_TEST_SUITE_P` (via `is_known_bug_for_platform()`), so on affected platforms they never register and do not appear in the test list, rather than registering and then being skipped at runtime. There are two flavors:
+  - **Build-time / all platforms:** an entry with no `known_bug_platforms` is tagged `category: known_bug` by `hipblaslt_gentest.py` and is excluded on every platform.
+  - **Per-GPU:** an entry with a `known_bug_platforms` list is excluded only when the current GPU `gcnArchName` matches one of the listed archs; on other platforms the case registers and runs normally.
+  This filtering applies to any `Arguments`-driven test (matmul, rocroller_predicate, aux). Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML. The regression case stays in the tree either way; it simply does not register on platforms where it is a known bug.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---
@@ -157,7 +160,7 @@ If your change makes a characterization test fail, do **not** run a blanket `pyt
 | TensileCreateLibrary fails with `ModuleNotFoundError` (e.g. `yaml`, `msgpack`) | Use a Python venv, `pip install -r tensilelite/requirements.txt`, and configure with `-DPython_EXECUTABLE=/path/to/venv/bin/python`. |
 | `hipblaslt_gtest.data` doesn't exist | Build `hipblaslt-test` or `hipblaslt-test-data`. If the generator failed (e.g. missing PyYAML), use the venv and `pip install -r tensilelite/requirements.txt`, then rebuild. |
 | Test can't find test data | Run from `build/clients/` (same directory as the executable and `hipblaslt_gtest.data`). |
-| Test skipped on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. |
+| Test missing / not registered on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`; known-bug cases are excluded from registration on matching platforms. |
 
 ---
 
