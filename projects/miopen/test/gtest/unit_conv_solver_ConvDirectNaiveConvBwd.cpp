@@ -137,6 +137,12 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 4, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}, 4}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {64, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
+
+    // Large spatial shapes to exercise BWD spatial tiling with large tensors
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 3, 600, 600}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {1, 3, 600, 600}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {8, 3, 200, 200}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
     // clang-format on
 
     return cases;
@@ -147,6 +153,12 @@ const auto& GetTestParams()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.UseCpuRef(); // CPU verification
+        // Float accumulators (solver mode) introduce slightly more rounding
+        // error than the previous double accumulators. Relax tolerance
+        // from 1x to 2x epsilon.
+        p.SetTolerance(Gpu::All, miopenFloat, 2.0f);
+        p.SetTolerance(Gpu::All, miopenHalf, 2.0f);
+        p.SetTolerance(Gpu::All, miopenBFloat16, 2.0f);
         return p;
     }();
     return params;

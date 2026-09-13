@@ -38,18 +38,25 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
 
 namespace miopen {
 
-namespace debug {
-// NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-MIOPEN_EXPORT bool AlwaysEnableConvDirectNaive = false;
-
-} // namespace debug
-
 namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-constexpr const char* NAIVE_CONV_KERNEL_FILE     = "naive_conv.cpp";
+// Block size for naive conv kernels. Passed to kernels via -DNAIVE_CONV_BLOCK_SIZE
+// so shared memory arrays match the launch configuration.
+constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
+
+// Minimum spatial work (n * ho * wo, or n * do * ho * wo for 3D) before WRW
+// enables cross-block tiling with atomicAdd. Below this threshold, a single
+// block per filter position is sufficient and avoids the cost of zeroing the
+// weight buffer and atomic contention. 262144 = 1024 * 256, roughly the point
+// where one block can no longer cover the spatial dimension in its thread-loop.
+constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
+
+// The fp8 naive conv path lives in a separate source file. The BWD-data block-size
+// heuristic special-cases it (see NaiveConv2DBWDBlockSize), and the invoker uses it
+// to select the fp8 kernel's distinct argument list.
 constexpr const char* FP8_NAIVE_CONV_KERNEL_FILE = "fp8_naive_conv.cpp";
 
 bool ConvDirectNaiveConvIsAssemblyKernel(const ExecutionContext& ctx,
@@ -92,11 +99,6 @@ bool IsInputInt8(const ProblemDescription& problem)
     return (problem.GetInDataType() == miopenInt8 && problem.GetWeightsDataType() == miopenInt8) ||
            (problem.GetOutDataType() == miopenInt8 && problem.GetWeightsDataType() == miopenInt8) ||
            (problem.GetInDataType() == miopenInt8 && problem.GetOutDataType() == miopenInt8);
-}
-
-bool IsAccFp64(const ProblemDescription& problem)
-{
-    return IsInputFp32(problem) || IsInputFp16(problem) || IsInputBfp16(problem);
 }
 
 bool IsAccInt32(const ProblemDescription& problem) { return IsInputInt8(problem); }
@@ -187,7 +189,7 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
     }
     else if(IsInputBfp16(problem))
     {
-        kernel_name << "ushort_";
+        kernel_name << "hip_bfloat16_";
     }
     else if(IsInputInt8(problem))
     {
@@ -200,8 +202,8 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
 
     if(IsAccInt32(problem))
         kernel_name << "int32_t_";
-    else if(IsAccFp64(problem))
-        kernel_name << "double_";
+    else if(IsInputFp32(problem) || IsInputFp16(problem) || IsInputBfp16(problem))
+        kernel_name << "float_";
     else
         MIOPEN_THROW("unsupported data type:");
 
@@ -211,7 +213,7 @@ std::string ConvDirectNaiveConvKernelName(const ProblemDescription& problem)
     else if(IsOutputFp16(problem))
         kernel_name << "half";
     else if(IsOutputBfp16(problem))
-        kernel_name << "ushort";
+        kernel_name << "hip_bfloat16";
     else if(IsOutputInt8(problem))
         kernel_name << "int8_t";
     else if(IsOutputInt32(problem))
@@ -241,7 +243,11 @@ std::string ConvDirectNaiveConvKernelFile(const ExecutionContext& ctx,
     // }
     if(problem.IsFp8() || problem.IsTensorsCasted() || problem.IsBfp8())
         return FP8_NAIVE_CONV_KERNEL_FILE;
-    return NAIVE_CONV_KERNEL_FILE;
+    if(problem.IsDirectionForward())
+        return "naive_conv_fwd.cpp";
+    if(problem.IsDirectionBackwardData())
+        return "naive_conv_bwd.cpp";
+    return "naive_conv_wrw.cpp";
 }
 
 std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
@@ -276,6 +282,9 @@ std::string ConvDirectNaiveConvCompileOption(const ExecutionContext& ctx,
         ss << " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" << MIOPEN_FP8_IEEE_EXPONENT_BIAS;
         //     Let the kernel choose its accumulator (double for naive kernels )
     }
+
+    ss << " -DNAIVE_CONV_BLOCK_SIZE=" << NAIVE_CONV_BLOCK_SIZE;
+
     return ss.str();
 }
 
@@ -351,16 +360,25 @@ NaiveConv2DBWDBlockSize(const Handle& handle, const std::string& kernel_file, si
 {
     constexpr size_t default_block = 256;
 
-    // The 1024 path below needs work loops that stride by blockDim.x; only naive_conv.cpp has
-    // them. fp8_naive_conv.cpp hardcodes `tid += 256`, so it stays at the default.
-    if(kernel_file != NAIVE_CONV_KERNEL_FILE)
+    // The 1024 path is only valid when the launch derives its spatial tiling from this block size.
+    // The per-direction naive_conv_bwd.cpp does: num_spatial_tiles = ceil(thread_length/block_size)
+    // and covers the domain with an `if(tid < thread_length)` guard, so any block size stays
+    // correct. fp8_naive_conv.cpp instead hardcodes `tid += 256` in its own loop, so it must stay
+    // at the default regardless of grid size.
+    if(kernel_file == FP8_NAIVE_CONV_KERNEL_FILE)
         return default_block;
 
-    // 1024-thread work groups while the grid is too small to fill the GPU. The kernel fixes the
-    // work group count at n*hi (NHWC) / n*c (NCHW) and splits the per-group items across its
-    // threads, so a wider group never reaches more CUs -- it only puts more resident waves on the
-    // ones it does reach, which is what hides this memory-bound kernel's latency. Worth 1.3x-2.1x
-    // geomean, measured on gfx90a, gfx942 and gfx950 only.
+    // 1024-thread work groups while the grid is too small to fill the GPU. The launch fixes the
+    // work-group count (in the grid.x dimension) at n*hi (NHWC) / n*c (NCHW); a wider group never
+    // reaches more CUs -- it only puts more resident waves on the ones it does reach, which is what
+    // hides this memory-bound kernel's latency. Worth 1.3x-2.1x geomean, measured on gfx90a, gfx942
+    // and gfx950 only.
+    //
+    // NOTE: the 5*CU crossover below was tuned upstream against a gridDim.y=1 grid-stride launch.
+    // This branch's BWD-d kernel instead spreads the spatial domain across gridDim.y tiles, so the
+    // effective occupancy is grid_size * num_spatial_tiles. The heuristic is preserved as-is as a
+    // known-good no-regression starting point, but the crossover should be re-validated on CDNA CI
+    // against this launch geometry before being treated as optimal.
     constexpr size_t large_block = 1024;
     const auto device_name       = handle.GetDeviceName();
     if(!(StartsWith(device_name, "gfx90a") || StartsWith(device_name, "gfx942") ||
@@ -451,26 +469,35 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size          = 256;
+    size_t block_size          = NAIVE_CONV_BLOCK_SIZE;
     int batch_chunk_size       = 1;
     size_t grid_size_per_batch = 1;
     size_t grid_size           = 1;
+    size_t thread_length       = 1;
     bool is_layout_default     = problem.IsLayoutDefault();
 
     if(is_layout_default)
     {
         grid_size_per_batch = static_cast<size_t>(k);
+        thread_length       = static_cast<size_t>(ho) * wo;
         CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
         grid_size_per_batch = static_cast<size_t>(ho);
+        thread_length       = static_cast<size_t>(wo) * k;
         CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
     {
         MIOPEN_THROW("Unsupported layout");
     }
+    // Spatial tiling: only tile when grid_size is too small to keep the GPU busy.
+    // When grid_size is already large enough (e.g., NHWC with ho blocks), tiling
+    // adds overhead without benefit.
+    size_t num_spatial_tiles = 1;
+    if(grid_size < 32)
+        num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -479,7 +506,7 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
@@ -674,26 +701,32 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size          = 256;
+    size_t block_size          = NAIVE_CONV_BLOCK_SIZE;
     int batch_chunk_size       = 1;
     size_t grid_size_per_batch = 1;
     size_t grid_size           = 1;
+    size_t thread_length       = 1;
     bool is_layout_default     = problem.IsLayoutDefault();
 
     if(is_layout_default)
     {
         grid_size_per_batch = static_cast<size_t>(k);
+        thread_length       = static_cast<size_t>(do_) * ho * wo;
         CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
         grid_size_per_batch = static_cast<size_t>(group) * do_;
+        thread_length       = static_cast<size_t>(ho) * wo * k_per_group;
         CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
     {
         MIOPEN_THROW("Unsupported layout");
     }
+    size_t num_spatial_tiles = 1;
+    if(grid_size < 32)
+        num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -702,7 +735,7 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
@@ -835,8 +868,16 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size = 256;
+    size_t block_size = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size  = static_cast<size_t>(k);
+
+    // Cross-block spatial tiling for WRW uses atomicAdd on the weight buffer.
+    // float/double have native hardware atomicAdd; half/hip_bfloat16 use
+    // CAS-based atomicAdd (portable across all GPUs and ROCm versions).
+    size_t spatial           = static_cast<size_t>(n) * ho * wo;
+    size_t num_spatial_tiles = 1;
+    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+        num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -845,7 +886,7 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
@@ -903,30 +944,47 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
             {
                 double alpha_val = data_ctx.alpha.GetAsDouble();
                 double beta_val  = data_ctx.beta.GetAsDouble();
-                handle.Run(kern)(tensors.x,
-                                 tensors.dw,
-                                 alpha_val,
-                                 beta_val,
-                                 tensors.dy,
-                                 in_strides,
-                                 wei_strides,
-                                 out_strides,
-                                 hi,
-                                 wi,
-                                 n,
-                                 k_per_group,
-                                 c_per_group,
-                                 ho,
-                                 wo,
-                                 sy,
-                                 sx,
-                                 dy,
-                                 dx,
-                                 py,
-                                 px,
-                                 fy,
-                                 fx,
-                                 group);
+
+                auto kern_copy = kern;
+                if(num_spatial_tiles > 1)
+                {
+                    if(alpha_val == 1.0 && beta_val == 0.0)
+                    {
+                        // Zero weight buffer before atomicAdd accumulation
+                        (void)hipMemsetAsync(
+                            tensors.dw, 0, tensors.dwDesc.GetNumBytes(), handle.GetStream());
+                    }
+                    else
+                    {
+                        // atomicAdd bypasses alpha/beta; fall back to serial
+                        kern_copy.gdims[1] = 1;
+                    }
+                }
+
+                handle.Run(kern_copy)(tensors.x,
+                                      tensors.dw,
+                                      alpha_val,
+                                      beta_val,
+                                      tensors.dy,
+                                      in_strides,
+                                      wei_strides,
+                                      out_strides,
+                                      hi,
+                                      wi,
+                                      n,
+                                      k_per_group,
+                                      c_per_group,
+                                      ho,
+                                      wo,
+                                      sy,
+                                      sx,
+                                      dy,
+                                      dx,
+                                      py,
+                                      px,
+                                      fy,
+                                      fx,
+                                      group);
             }
             if(handle.IsProfilingEnabled())
                 elapsed += handle.GetKernelTime();
@@ -972,8 +1030,14 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size = 256;
+    size_t block_size = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size  = static_cast<size_t>(k);
+
+    // Cross-block spatial tiling for WRW — see 2D WRW comment for details.
+    size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
+    size_t num_spatial_tiles = 1;
+    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+        num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -982,7 +1046,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
@@ -1009,36 +1073,52 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
             double alpha_val = data_ctx.alpha.GetAsDouble();
             double beta_val  = data_ctx.beta.GetAsDouble();
-            handle.Run(kern)(tensors.x,
-                             tensors.dw,
-                             alpha_val,
-                             beta_val,
-                             tensors.dy,
-                             in_strides,
-                             wei_strides,
-                             out_strides,
-                             di,
-                             hi,
-                             wi,
-                             n,
-                             k_per_group,
-                             c_per_group,
-                             do_,
-                             ho,
-                             wo,
-                             sz,
-                             sy,
-                             sx,
-                             dz,
-                             dy,
-                             dx,
-                             pz,
-                             py,
-                             px,
-                             fz,
-                             fy,
-                             fx,
-                             group);
+
+            auto kern_copy = kern;
+            if(num_spatial_tiles > 1)
+            {
+                if(alpha_val == 1.0 && beta_val == 0.0)
+                {
+                    (void)hipMemsetAsync(
+                        tensors.dw, 0, tensors.dwDesc.GetNumBytes(), handle.GetStream());
+                }
+                else
+                {
+                    // atomicAdd bypasses alpha/beta; fall back to serial
+                    kern_copy.gdims[1] = 1;
+                }
+            }
+
+            handle.Run(kern_copy)(tensors.x,
+                                  tensors.dw,
+                                  alpha_val,
+                                  beta_val,
+                                  tensors.dy,
+                                  in_strides,
+                                  wei_strides,
+                                  out_strides,
+                                  di,
+                                  hi,
+                                  wi,
+                                  n,
+                                  k_per_group,
+                                  c_per_group,
+                                  do_,
+                                  ho,
+                                  wo,
+                                  sz,
+                                  sy,
+                                  sx,
+                                  dz,
+                                  dy,
+                                  dx,
+                                  pz,
+                                  py,
+                                  px,
+                                  fz,
+                                  fy,
+                                  fx,
+                                  group);
 
             if(handle.IsProfilingEnabled())
                 elapsed += handle.GetKernelTime();
@@ -1077,14 +1157,17 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t grid_size = 1;
+    size_t grid_size     = 1;
+    size_t thread_length = 1;
     if(problem.IsLayoutDefault())
     {
-        grid_size = static_cast<size_t>(n) * c;
+        grid_size     = static_cast<size_t>(n) * c;
+        thread_length = static_cast<size_t>(hi) * wi;
     }
     else if(problem.IsLayoutNHWC())
     {
-        grid_size = static_cast<size_t>(n) * hi;
+        grid_size     = static_cast<size_t>(n) * hi;
+        thread_length = static_cast<size_t>(wi) * c;
     }
     else
     {
@@ -1092,7 +1175,14 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     }
 
     const auto kernel_file = ConvDirectNaiveConvKernelFile(ctx, problem);
-    size_t block_size      = NaiveConv2DBWDBlockSize(ctx.GetStream(), kernel_file, grid_size);
+    // On CDNA (gfx90a/gfx942/gfx950) a small grid uses 1024-thread groups; 256 otherwise. Must be
+    // computed before num_spatial_tiles below, which derives the tile count from block_size.
+    size_t block_size = NaiveConv2DBWDBlockSize(ctx.GetStream(), kernel_file, grid_size);
+
+    // BWD-d kernel uses a single if(tid < thread_length) guard with no loop,
+    // so tiling is required for correctness — unlike FWD which has a grid-stride
+    // loop and only tiles for occupancy.
+    size_t num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -1101,7 +1191,7 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
@@ -1229,20 +1319,27 @@ GetConv3DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size = 256;
-    size_t grid_size  = 1;
+    size_t block_size    = NAIVE_CONV_BLOCK_SIZE;
+    size_t grid_size     = 1;
+    size_t thread_length = 1;
     if(problem.IsLayoutDefault())
     {
-        grid_size = static_cast<size_t>(n) * c;
+        grid_size     = static_cast<size_t>(n) * c;
+        thread_length = static_cast<size_t>(di) * hi * wi;
     }
     else if(problem.IsLayoutNHWC())
     {
-        grid_size = static_cast<size_t>(group) * n * di;
+        grid_size     = static_cast<size_t>(group) * n * di;
+        thread_length = static_cast<size_t>(hi) * wi * c_per_group;
     }
     else
     {
         MIOPEN_THROW("Unsupported layout");
     }
+    // BWD-d kernel uses a single if(tid < thread_length) guard with no loop,
+    // so tiling is required for correctness — unlike FWD which has a grid-stride
+    // loop and only tiles for occupancy.
+    size_t num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -1251,7 +1348,7 @@ GetConv3DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
-    kernel.g_wk.push_back(1);
+    kernel.g_wk.push_back(num_spatial_tiles);
     kernel.g_wk.push_back(1);
     kernel.l_wk.clear();
     kernel.l_wk.push_back(block_size);
