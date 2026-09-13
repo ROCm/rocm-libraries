@@ -733,7 +733,9 @@ namespace TensileLite
         // dynamic-queue path but the hardware's NUM_XCD is not a power of two
         // (e.g. MI300A = 6), so the solution is EXCLUDED from selection rather
         // than silently degraded to tree reduction. All other solutions return
-        // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
+        // true. Wired into softwarePredicate() (SolutionLibrary.hpp) and the
+        // client's explicit all-solutions iterator, which otherwise bypasses
+        // library selection.
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
         // Selection-time filter for uniform summation order. Resolves StreamK /

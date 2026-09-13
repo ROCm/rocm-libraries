@@ -40,13 +40,12 @@ using namespace hip_kernel_provider::test_utilities;
  * @file IntegrationGpuKernelIngestorKpack.cpp
  * @brief A kernel that was compiled and packed at build time, executed end to end through
  *        the public frontend API. Nothing here names a loader type or a build path: the
- *        descriptor set reaches the runtime because the packaging rule staged it beside
- *        the plugin, and the kernel binary reaches the device because the KPACK kernel
- *        source resolved its archive relative to the descriptor that declared it.
+ *        descriptor set reaches the runtime through the integration root main() publishes,
+ *        and the kernel binary reaches the device because the KPACK kernel source resolved
+ *        its archive relative to the descriptor that declared it.
  *
- * The suite deliberately sets no HIPDNN_DESCRIPTOR_DIR and its CTest registration carries
- * no ENVIRONMENT entry -- the module-relative walk from the loaded plugin is the thing
- * under test, and overriding it would test the override instead.
+ * The archive this suite damages is found by the binary-relative offset the packaging rule
+ * staged it to, so no absolute build path is compiled in.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -59,16 +58,11 @@ namespace
 /// it, so this name appears nowhere in src/engines.
 constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 
-/// The engine that ships with the provider. Its kernels are `embedded_source`, so it is
-/// reachable whatever state the packaged archive is in, and it claims the same single-node
-/// FLOAT add. That makes it the fallback ...SurvivesABrokenArchive requires to still serve.
+/// The engine the integration descriptor root stages beside the fixture. Its kernels read
+/// a different archive, so it is reachable whatever state the packaged fixture's archive is
+/// in, and it claims the same single-node FLOAT add. That makes it the fallback
+/// ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
-
-/// Distinguishes the packaged FIXTURE's archive from every other root's in the shared
-/// descriptor tree. Each source root packs under its own archive group, so the group name
-/// is what names an archive to a particular root; this is the group the fixture root is
-/// wired with in HkpPackaging.cmake (HKP_GROUP_TESTFIXTURE).
-constexpr const char* PACKED_FIXTURE_ARCHIVE_STEM = "testfixture";
 
 /// Header-length garbage: long enough that the file exists and is readable, short enough
 /// that no table of contents can be parsed out of it.
@@ -113,7 +107,7 @@ std::shared_ptr<Graph> buildPointwiseAddGraph()
 }
 
 /// The directory the loader walks, derived the same way the loader derives it: from the
-/// plugin module, not from a path compiled in at configure time. HIPDNN_PACKAGED_FIXTURE_SUBDIR
+/// plugin module, not from a path compiled in at configure time. HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR
 /// is the single spelling of the arch_content layout, forwarded from the provider's
 /// CMakeLists so a rename cannot leave a stale copy here.
 std::filesystem::path packagedDescriptorRoot()
@@ -121,7 +115,7 @@ std::filesystem::path packagedDescriptorRoot()
     const std::filesystem::path pluginTarget(PLUGIN_PATH);
     return std::filesystem::weakly_canonical(getCurrentExecutableDirectory()
                                              / pluginTarget.parent_path()
-                                             / HIPDNN_PACKAGED_FIXTURE_SUBDIR);
+                                             / HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR);
 }
 
 /// Every .kpack under `root`, sorted so the choice of "first" is stable across runs.
@@ -250,10 +244,8 @@ std::string recoverAbandonedBackups(const std::vector<std::filesystem::path>& ar
 /// The module cache is process-lifetime by design -- one hipModule_t per
 /// (archive, toc_key, arch), deliberately outliving every Container. That is correct
 /// for the product and fatal for ...SurvivesABrokenArchive: if any earlier case has
-/// already executed the packaged kernel, a resident module serves the plan, the corrupt
-/// bytes are read by nothing, and the diagnostics this suite asserts on never fire.
-/// This suite used to depend on being FIRST in the file to avoid that, which
-/// --gtest_shuffle destroys.
+/// already executed the packaged kernel, a resident module serves the plan, nothing
+/// reads the corrupt bytes, and the diagnostics this suite asserts on never fire.
 ///
 /// Reached by dlsym rather than a direct call because this binary links only the SDKs;
 /// the provider arrives via dlopen. Same route as
@@ -394,18 +386,6 @@ protected:
 
 // ---------------------------------------------------------------------------
 // The artifact fails without taking the process with it
-//
-// Position-independent, deliberately. This suite used to rely on being FIRST in the
-// file -- gtest registers suites in definition order within a translation unit, so it
-// ran before IntegrationGpuKernelIngestorKpack below and therefore before any case had
-// executed the packaged kernel. That mattered because the module cache is
-// process-lifetime: once the kernel has run, a resident hipModule_t serves the plan and
-// the corrupt bytes on disk are read by nothing, so every diagnostic below silently
-// stops firing. --gtest_shuffle destroys that ordering, and the suite failed
-// deterministically whenever the shuffle put the executing case first.
-//
-// SetUp() now drops the resident modules explicitly, so the corrupt archive is re-read
-// whatever ran before. Nothing here depends on file position any more.
 // ---------------------------------------------------------------------------
 
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
@@ -434,21 +414,13 @@ protected:
             return;
         }
 
-        // The archive THIS fixture's engine reads, chosen by name rather than by taking
-        // the first of a sorted list. Every source root stages into one descriptor tree
-        // and is told apart by its archive group, so the tree holds one .kpack per root;
-        // `front()` picked whichever sorted first, which is the product archive, and
-        // corrupting that leaves the packaged fixture engine perfectly loadable while the
-        // assertions below wait for a failure that never comes.
-        const auto victim = std::find_if(
-            _archives.begin(), _archives.end(), [](const std::filesystem::path& archive) {
-                return archive.filename().string().find(PACKED_FIXTURE_ARCHIVE_STEM)
-                       != std::string::npos;
-            });
-        ASSERT_NE(victim, _archives.end())
-            << "no staged archive is named for the packaged fixture ('"
-            << PACKED_FIXTURE_ARCHIVE_STEM << "'), so there is nothing this suite can break "
-            << "that its own engine would read. Staged archives: " << [this] {
+        // The packed fixture root holds exactly one archive, and this suite breaks it. A
+        // second archive makes the choice ambiguous. Corrupting the wrong file leaves the
+        // fixture engine loadable, and the assertions below wait for a failure that never
+        // comes.
+        ASSERT_EQ(_archives.size(), 1U)
+            << "the packed fixture root must hold exactly one archive for this device. "
+            << "Staged archives: " << [this] {
                    std::string names;
                    for(const auto& archive : _archives)
                    {
@@ -456,7 +428,7 @@ protected:
                    }
                    return names;
                }();
-        _victim = *victim;
+        _victim = _archives.front();
 
         const auto backupRoot = backupRootPath();
         const auto backupName = _victim.filename().string() + PRISTINE_SUFFIX;
@@ -589,7 +561,7 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
 
     // An unreadable archive is reported at ERROR against the engine that owns it. If this
     // fails while the plan below still builds, the packaged engine was never asked -- a
-    // resident module served it, and the corrupt bytes were read by nothing. That is the
+    // resident module served it, and nothing read the corrupt bytes. That is the
     // failure mode the suite's position at the top of this file exists to prevent, so read
     // this assertion as the detector for a registration-order regression as well as for a
     // swallowed diagnostic.
