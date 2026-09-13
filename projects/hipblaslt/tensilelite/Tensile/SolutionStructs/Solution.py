@@ -49,6 +49,7 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        resolvePrefetchGlobalReadSpecialValues
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmFuseAMx, tdmFusePaired, \
                                        tdmGroupingAccepted, tdmGroupingName, \
+                                       tdmCrossRejectReason, tdmWaveLdsBytes, \
                                        tdmPapRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
@@ -3075,6 +3076,21 @@ class Solution(collections.abc.Mapping):
       if papGroupingReason:
         reject(state, printRejectionReason, papGroupingReason)
         return
+
+    # TDMCross rearranges which wave issues which member of a group that
+    # TDMFuse already chose. Every reject above therefore has precedence: an
+    # arrangement of a grouping that cannot be built is not a separate defect,
+    # and reporting "nothing to cross" for a solution whose real problem is a
+    # divergent pair under TDMFuse=2 would send the reader to the wrong knob.
+    #
+    # The reason itself is derived from the group structure rather than from a
+    # TDMFuse value, so it covers scale-less types (whose {MXSA,MXSB} group has
+    # no live member left, leaving one group and nothing to cross) and any
+    # grouping added to the table later, with no branch per value.
+    tdmCrossReason = tdmCrossRejectReason(state)
+    if tdmCrossReason:
+      reject(state, printRejectionReason, tdmCrossReason)
+      return
 
     # DepthU == -1?
     if state["DepthU"] == -1:
@@ -6270,6 +6286,24 @@ class Solution(collections.abc.Mapping):
     # from the tile shape: a block's size depends on MacroTile *and* element size
     # *and* MX scale block *and* pad *and* align.
     #
+    # Crossing is byte-preserving (every member lands on exactly one wave, and
+    # the sum over waves is the same total whatever the arrangement), so the
+    # whole-workgroup check above subsumes this one today; test_TDMCross.py
+    # pins that conservation directly. It is kept as the check that would bite
+    # first if a grouping row ever duplicated a member across groups, which is
+    # the one way an arrangement could inflate LDS.
+    if state.get("TDMCross", 0):
+      perWave = tdmWaveLdsBytes(state)
+      if perWave:
+        heaviest = max(perWave.values())
+        if heaviest > state["MaxLDS"]:
+          reject(state, printRejectionReason,
+                 "TDMCross=%d leaves wave %d filling %u > %u bytes of LDS"
+                 % (state["TDMCross"],
+                    max(perWave, key=perWave.get), heaviest, state["MaxLDS"]))
+          state["ValidDepthU"] = False
+          return
+
     # LoopUnroll  = DepthU / LocalSplitU
     if "LocalSplitU" in state:
       state["LoopUnroll"] = state["DepthU"] // state["LocalSplitU"]

@@ -118,6 +118,12 @@ def test_b_mx_separates_a_from_b_and_earns_the_token_gate():
     assert TF.tdmGroupingSeparatesAB(ks()) is True
 
 
+def test_b_mx_inherits_the_nothing_to_cross_rejection():
+    """One partitioned group, so crossing is refused with no new branch."""
+    assert TF.tdmCrossRejectReason(ks(TDMCross=1)) is not None
+    assert "nothing to cross" in TF.tdmCrossRejectReason(ks(TDMCross=1))
+
+
 def test_b_mx_inherits_the_pap_rejection():
     """A scale seated on a data tensor's set cannot take PAP's handoff."""
     reason = TF.tdmPapRejectReason(ks())

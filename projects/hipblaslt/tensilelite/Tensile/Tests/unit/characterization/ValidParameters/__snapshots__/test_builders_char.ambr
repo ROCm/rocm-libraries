@@ -1489,6 +1489,7 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMCross',
     'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
@@ -2655,6 +2656,14 @@
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMCross': dict({
       'head': list([
         0,
         1,
