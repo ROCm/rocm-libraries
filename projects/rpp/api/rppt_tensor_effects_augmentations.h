@@ -427,10 +427,17 @@ RppStatus rppt_gaussian_noise_voxel(RppPtr_t srcPtr, RpptGenericDescPtr srcGener
  * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4, offsetInBytes
  >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr)
  * \param [in] anchorBoxInfoTensor anchorBoxInfo values of type RpptRoiLtrb for each erase-region
- inside each image in the batch (tensor in HIP memory (for HIP backend) or HOST memory (for HOST
- backend)). Restrictions -
-            - 0 <= anchorBoxInfo[i] < respective image width/height
-            - Erase-region anchor boxes on each image given by the user must not overlap
+ * inside each image in the batch (tensor in HIP memory (for HIP backend) or HOST memory (for HOST
+ * backend)). Restrictions -
+ * - 0 <= anchorBoxInfo[i] < respective image width/height
+ * - Erase-region anchor boxes on each image given by the user must not overlap
+ * - anchorBoxInfo[i] coordinates are always in absolute source-image coordinates (i.e.
+ * relative to the full image, not to roiTensorPtrSrc). Under a partial ROI, the destination is
+ * written packed at the ROI's origin (row/column 0 of dstPtr is the ROI's top-left pixel);
+ * erase-region coordinates are reinterpreted relative to the ROI offset internally, so callers do
+ * not need to offset anchorBoxInfoTensor themselves
+ * - Erase-regions are clipped to the ROI: any part of a box that lies outside roiTensorPtrSrc
+ *   is ignored, and a box that lies entirely outside the ROI erases nothing
  * \param [in] colorsTensor RGB values to use for each erase-region inside each image in the batch
  (tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend)). (colors[i] will have
  range equivalent of srcPtr)
@@ -718,7 +725,14 @@ RppStatus rppt_channel_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
  * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr) \param [in]
  * anchorBoxInfoTensor precomputed cutout erase regions for the batch in pinned / HIP memory (for
  * HIP backend) or HOST memory (for HOST backend), stored as a flat array of RpptRoiLtrb of size
- * (batchSize * maxBoxesPerImage), where maxBoxesPerImage = max(numBoxesTensor[n]) \param [in]
+ * (batchSize * maxBoxesPerImage), where maxBoxesPerImage = max(numBoxesTensor[n]). Restrictions -
+ * coordinates are always in absolute source-image coordinates (i.e. relative to the full image,
+ * not to roiTensorPtrSrc). Under a partial ROI, the destination is written packed at the ROI's
+ * origin (row/column 0 of dstPtr is the ROI's top-left pixel); erase-region coordinates are
+ * reinterpreted relative to the ROI offset internally, so callers do not need to offset
+ * anchorBoxInfoTensor themselves. Erase-regions are clipped to the ROI: any part of a box that
+ * lies outside roiTensorPtrSrc is ignored, and a box that lies entirely outside the ROI erases
+ * nothing \param [in]
  * colorsTensor pointer to erase color values for each erase region in HIP memory (for HIP backend)
  * or HOST memory (for HOST backend), laid out identically to anchorBoxInfoTensor, i.e., of size
  * (batchSize * maxBoxesPerImage), with colorsTensor[(n * maxBoxesPerImage) + k] \param [in]
@@ -754,7 +768,14 @@ RppStatus rppt_cutout_dropout(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t 
  * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr) \param [in]
  * anchorBoxInfoTensor Precomputed grid erase regions for the batch in pinned / HIP memory (for HIP
  * backend) or HOST memory (for HOST backend), stored as an array of RpptRoiLtrb of size (batchSize
- * * boxesInEachImage) \param [in] boxesInEachImage Number of grid boxes per image (Data Type -
+ * * boxesInEachImage). Restrictions - coordinates are always in absolute source-image coordinates
+ * (i.e. relative to the full image, not to roiTensorPtrSrc). Under a partial ROI, the destination
+ * is written packed at the ROI's origin (row/column 0 of dstPtr is the ROI's top-left pixel);
+ * each hole's coordinates are reinterpreted relative to the ROI offset internally, so callers do
+ * not need to offset anchorBoxInfoTensor themselves. Grid holes are clipped to the ROI: any part
+ * of a hole that lies outside roiTensorPtrSrc is ignored, and a hole that lies entirely outside
+ * the ROI erases nothing \param [in] boxesInEachImage Number of grid
+ * boxes per image (Data Type -
  * Rpp32u) \param [in] maxHoleW Maximum hole width across all grid boxes (Data Type - Rpp32u) \param
  * [in] maxHoleH Maximum hole height across all grid boxes (Data Type - Rpp32u) \param [in]
  * roiTensorPtrSrc ROI data in HIP memory (for HIP backend) or HOST memory (for HOST backend), for

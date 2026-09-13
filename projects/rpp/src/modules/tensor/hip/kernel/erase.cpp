@@ -40,11 +40,16 @@ __global__ void erase_pkd_hip_tensor(T* dstPtr, uint2 dstStridesNH,
     Rpp32u numBoxes = numBoxesTensor[id_z];
     uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
 
+    // Anchor boxes are in image space; convert ROI-local thread coordinates to image space
+    // before comparing against them
+    int imgX = id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x;
+    int imgY = id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y;
+
     // check if the co-ordinates is within any user defined box
     for (int i = 0; i < numBoxes; i++) {
         int temp = (id_z * numBoxes) + i;
-        if (id_x >= anchorBoxInfoTensor[temp].lt.x && id_x <= anchorBoxInfoTensor[temp].rb.x &&
-            id_y >= anchorBoxInfoTensor[temp].lt.y && id_y <= anchorBoxInfoTensor[temp].rb.y) {
+        if (imgX >= anchorBoxInfoTensor[temp].lt.x && imgX <= anchorBoxInfoTensor[temp].rb.x &&
+            imgY >= anchorBoxInfoTensor[temp].lt.y && imgY <= anchorBoxInfoTensor[temp].rb.y) {
             *reinterpret_cast<U*>(dstPtr + dstIdx) = static_cast<U>(colorsTensor[temp]);
             break;
         }
@@ -66,11 +71,16 @@ __global__ void erase_pln_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
     Rpp32u numBoxes = numBoxesTensor[id_z];
     uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
 
+    // Anchor boxes are in image space; convert ROI-local thread coordinates to image space
+    // before comparing against them
+    int imgX = id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x;
+    int imgY = id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y;
+
     // check if the co-ordinates is within any user defined box
     for (int i = 0; i < numBoxes; i++) {
         int temp = (id_z * numBoxes) + i;
-        if (id_x >= anchorBoxInfoTensor[temp].lt.x && id_x <= anchorBoxInfoTensor[temp].rb.x &&
-            id_y >= anchorBoxInfoTensor[temp].lt.y && id_y <= anchorBoxInfoTensor[temp].rb.y) {
+        if (imgX >= anchorBoxInfoTensor[temp].lt.x && imgX <= anchorBoxInfoTensor[temp].rb.x &&
+            imgY >= anchorBoxInfoTensor[temp].lt.y && imgY <= anchorBoxInfoTensor[temp].rb.y) {
             *static_cast<T*>((dstPtr + dstIdx)) = colorsTensor[temp];
             break;
         }
@@ -92,11 +102,16 @@ __global__ void erase_pln3_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
     Rpp32u numBoxes = numBoxesTensor[id_z];
     uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
 
+    // Anchor boxes are in image space; convert ROI-local thread coordinates to image space
+    // before comparing against them
+    int imgX = id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x;
+    int imgY = id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y;
+
     // check if the co-ordinates is within any user defined box
     for (int i = 0; i < numBoxes; i++) {
         int temp = (id_z * numBoxes) + i;
-        if (id_x >= anchorBoxInfoTensor[temp].lt.x && id_x <= anchorBoxInfoTensor[temp].rb.x &&
-            id_y >= anchorBoxInfoTensor[temp].lt.y && id_y <= anchorBoxInfoTensor[temp].rb.y) {
+        if (imgX >= anchorBoxInfoTensor[temp].lt.x && imgX <= anchorBoxInfoTensor[temp].rb.x &&
+            imgY >= anchorBoxInfoTensor[temp].lt.y && imgY <= anchorBoxInfoTensor[temp].rb.y) {
             temp *= 3;
             *static_cast<T*>(dstPtr + dstIdx) = colorsTensor[temp];
             dstIdx += dstStridesNCH.y;
@@ -106,6 +121,74 @@ __global__ void erase_pln3_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
             break;
         }
     }
+}
+
+// ROI-aware shift-copy kernels: read source at the ROI offset but write destination packed at
+// the origin, so the box-application kernels above (which operate on the packed-origin frame)
+// see correctly copied background pixels under a partial ROI
+template <typename T>
+__global__ void erase_shift_copy_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                                uint2 dstStridesNH, RpptROIPtr roiTensorPtrSrc) {
+    int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
+
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
+        return;
+
+    uint srcIdx = (id_z * srcStridesNH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNH.y) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x) * 3;
+    uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
+
+    dstPtr[dstIdx] = srcPtr[srcIdx];
+    dstPtr[dstIdx + 1] = srcPtr[srcIdx + 1];
+    dstPtr[dstIdx + 2] = srcPtr[srcIdx + 2];
+}
+
+template <typename T>
+__global__ void erase_shift_copy_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                                uint3 dstStridesNCH, RpptROIPtr roiTensorPtrSrc) {
+    int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
+
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
+        return;
+
+    uint srcIdx = (id_z * srcStridesNCH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
+
+    dstPtr[dstIdx] = srcPtr[srcIdx];
+}
+
+template <typename T>
+__global__ void erase_shift_copy_pln3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                                 uint3 dstStridesNCH, RpptROIPtr roiTensorPtrSrc) {
+    int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
+
+    if ((id_y >= roiTensorPtrSrc[id_z].xywhROI.roiHeight) ||
+        (id_x >= roiTensorPtrSrc[id_z].xywhROI.roiWidth))
+        return;
+
+    uint srcIdx = (id_z * srcStridesNCH.x) +
+                  ((id_y + roiTensorPtrSrc[id_z].xywhROI.xy.y) * srcStridesNCH.z) +
+                  (id_x + roiTensorPtrSrc[id_z].xywhROI.xy.x);
+    uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
+
+    dstPtr[dstIdx] = srcPtr[srcIdx];
+    srcIdx += srcStridesNCH.y;
+    dstIdx += dstStridesNCH.y;
+    dstPtr[dstIdx] = srcPtr[srcIdx];
+    srcIdx += srcStridesNCH.y;
+    dstIdx += dstStridesNCH.y;
+    dstPtr[dstIdx] = srcPtr[srcIdx];
 }
 
 // -------------------- Set 1 - Kernel Executors --------------------
@@ -121,12 +204,19 @@ RppStatus hip_exec_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
     int globalThreads_z = handle.GetBatchSize();
 
     if (dstDescPtr->layout == RpptLayout::NHWC) {
-        // if src layout is NHWC, copy src to dst
+        // if src layout is NHWC, copy src to dst, shifted by the ROI offset so the packed-origin
+        // destination frame matches what the box-application kernel expects
         if (srcDescPtr->layout == RpptLayout::NHWC) {
-            RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-                dstPtr, srcPtr,
-                static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-                hipMemcpyDeviceToDevice, handle.GetStream()));
+            hipLaunchKernelGGL(
+                erase_shift_copy_pkd_hip_tensor,
+                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                srcPtr, make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride),
+                dstPtr, make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
+                roiTensorPtrSrc);
+            HIP_CHECK_LAUNCH_RETURN();
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         }
         // if src layout is NCHW, convert src from NCHW to NHWC
@@ -195,10 +285,19 @@ RppStatus hip_exec_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
         }
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 1) {
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-            dstPtr, srcPtr,
-            static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-            hipMemcpyDeviceToDevice, handle.GetStream()));
+        hipLaunchKernelGGL(erase_shift_copy_pln_hip_tensor,
+                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                           handle.GetStream(), srcPtr,
+                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                      srcDescPtr->strides.hStride),
+                           dstPtr,
+                           make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                      dstDescPtr->strides.hStride),
+                           roiTensorPtrSrc);
+        HIP_CHECK_LAUNCH_RETURN();
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(erase_pln_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
@@ -212,10 +311,19 @@ RppStatus hip_exec_erase_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
         HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 3) {
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-            dstPtr, srcPtr,
-            static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-            hipMemcpyDeviceToDevice, handle.GetStream()));
+        hipLaunchKernelGGL(erase_shift_copy_pln3_hip_tensor,
+                           dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                                ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                                ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                           dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                           handle.GetStream(), srcPtr,
+                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                      srcDescPtr->strides.hStride),
+                           dstPtr,
+                           make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                      dstDescPtr->strides.hStride),
+                           roiTensorPtrSrc);
+        HIP_CHECK_LAUNCH_RETURN();
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(erase_pln3_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
