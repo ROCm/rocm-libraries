@@ -2,6 +2,9 @@
   "version": "1.0",
   "id": "f1d5b1a7-0006-4a00-9000-000000000006",
   "name": "hipkernel:flydsl_attention (bf16 prefill family)",
+  "arch": [
+    "gfx950"
+  ],
   "matchers": [
     "f1d5b1a7-0005-4a00-9000-000000000005"
   ],
