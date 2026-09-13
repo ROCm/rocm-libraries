@@ -1,0 +1,26 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+if(NOT DEFINED HIPDNN_TEST_EXECUTABLE OR NOT EXISTS "${HIPDNN_TEST_EXECUTABLE}")
+    message(FATAL_ERROR "The runtime-load test executable is unavailable: ${HIPDNN_TEST_EXECUTABLE}")
+endif()
+
+set(_preload "$ENV{LD_PRELOAD}")
+if(_preload STREQUAL "")
+    set(_preload "@_asan_preload_runtime@")
+    if(_preload STREQUAL "" OR NOT EXISTS "${_preload}")
+        message(FATAL_ERROR "No runner LD_PRELOAD or configured ASan runtime is available")
+    endif()
+endif()
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "LD_PRELOAD=${_preload}"
+            "ASAN_OPTIONS=detect_leaks=0:verify_asan_link_order=0"
+            "HIPDNN_TEST_EXPECT_ASAN_PRELOAD=1"
+            "${HIPDNN_TEST_EXECUTABLE}" "--gtest_filter=TestRuntimeLoadBackendFactory.*"
+    RESULT_VARIABLE _result
+)
+if(NOT _result STREQUAL "0")
+    message(FATAL_ERROR "ASan-preloaded runtime-load tests failed: ${_result}")
+endif()

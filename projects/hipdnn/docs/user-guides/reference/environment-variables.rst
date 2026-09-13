@@ -100,3 +100,39 @@ For both relative paths and absolute paths:
 - If the path specifies a filename without an extension, hipDNN prefixes the filename with ``lib`` and adds the ``.so`` suffix (Linux), or adds the ``.DLL`` suffix (Windows) and only loads that file.
 
 See :ref:`plugin-loading` for API functions that provide additional control over which folders plugins are loaded from.
+
+.. _backend-library-variables:
+
+Backend library discovery
+=========================
+
+A consumer that links ``hipdnn_frontend_dynamic`` resolves the hipDNN backend shared library at first use rather than through a link-time dependency.
+hipDNN computes the path itself, in this order:
+
+#. ``HIPDNN_BACKEND_LIBRARY_PATH``, or ``hipdnn_frontend::setBackendLibraryPath()`` if the calling module has called it.
+#. The directory of the calling module (executable or shared library).
+#. That directory's sibling ``../lib`` and ``../lib64``.
+#. The directory the HIP runtime was loaded from.
+#. The bare library name, left to the system loader.
+
+``HIPDNN_BACKEND_LIBRARY_PATH``
+-------------------------------
+
+The directory holding the backend shared library. The filename is always hipDNN's own -- ``libhipdnn_backend.so`` on Linux, ``hipdnn_backend.dll`` on Windows -- so this variable selects a location, never a particular file.
+
+.. code:: bash
+
+  export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
+
+The value must be a non-empty absolute directory; any other value is reported on ``stderr`` and ignored.
+If the backend is absent or fails to load, resolution continues to the next location.
+
+``hipdnn_frontend::setBackendLibraryPath()`` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module.
+Both are read once, at the first backend call; later changes have no effect.
+
+Secure execution
+================
+
+In a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
+Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath()`` override before the system loader's hardened search.
+Variables that do not select code, such as the logging variables above, are unaffected.

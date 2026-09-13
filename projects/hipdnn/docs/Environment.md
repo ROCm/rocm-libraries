@@ -5,6 +5,7 @@ This document describes the environment variables and runtime configuration opti
 ## Table of Contents
 
 - [Environment Variables](#environment-variables)
+  - [Backend Library Discovery](#backend-library-discovery)
   - [Plugin Discovery](#plugin-discovery)
   - [Heuristic Policy Selection](#heuristic-policy-selection)
   - [Benchmarking](#benchmarking)
@@ -21,6 +22,30 @@ This document describes the environment variables and runtime configuration opti
 ---
 
 ## Environment Variables
+
+### Backend Library Discovery
+
+A consumer that links `hipdnn_frontend_dynamic` resolves the backend shared library at first use rather than through a link-time dependency. hipDNN computes the path itself, in this order: the programmatic override or this variable, then the directory of the calling module (executable or shared library), then that directory's sibling `../lib` and `../lib64`, then the directory the HIP runtime was loaded from, and finally the bare library name left to the system loader.
+
+#### HIPDNN_BACKEND_LIBRARY_PATH
+
+Specifies the directory holding the hipDNN backend shared library. The filename is always hipDNN's own (`libhipdnn_backend.so` on Linux, `hipdnn_backend.dll` on Windows), so this variable selects a location, never a particular file.
+
+| Value      | Description                                            |
+|------------|--------------------------------------------------------|
+| (unset)    | Resolve through the search order above                 |
+| `<path>`   | Look for the backend in this directory first           |
+
+The value must be a non-empty absolute directory; invalid values are reported on `stderr` and ignored. If the backend is absent or fails to load, resolution continues to the next location.
+
+**Example:**
+```bash
+export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
+```
+
+**Notes:**
+- `hipdnn_frontend::setBackendLibraryPath()` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module. Both are read once, at the first backend call; later changes have no effect.
+- On Linux, secure execution (for example, a set-user-ID process) ignores this variable and skips module-relative and HIP-runtime locations. An explicit `setBackendLibraryPath()` override is still honored before the system loader's hardened search.
 
 ### Plugin Discovery
 
@@ -47,6 +72,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
 - Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
+- Ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded
 
 #### HIPDNN_HEURISTIC_PLUGIN_DIR
 
@@ -70,6 +96,7 @@ export HIPDNN_HEURISTIC_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/heuristics
 - Only plugins with API version matching the Heuristic API major version will be loaded
 - Each heuristic plugin must provide a unique policy ID and policy name
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating heuristic plugins
+- Ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`
 
 ### Heuristic Policy Selection
 
