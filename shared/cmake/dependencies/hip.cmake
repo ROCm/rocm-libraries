@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,32 +20,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include(dependencies/rocm-cmake)
-include(dependencies/monorepo)
+include_guard(DIRECTORY)
 
-include(FetchContent)
-if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
-  fetch_monorepo_dep(
-    PACKAGE rocrand
+if(CMAKE_CXX_FLAGS MATCHES "(^| )--offload-compress( |$)")
+  message(WARNING
+    "'--offload-compress' is set before including HIP. This may"
+    "cause CMake errors when including CXX depedencies."
   )
-  get_target_property(
-    ROCRAND_LINK_LIBRARIES roc::rocrand INTERFACE_LINK_LIBRARIES
-  )
-  string(FIND "${ROCRAND_LINK_LIBRARIES}" "TBB::tbb" ROCRAND_REQUIRES_TBB)
-  if (ROCRAND_REQUIRES_TBB GREATER_EQUAL 0)
-    message(
-      STATUS
-      "The found version of rocRAND requires TBB (Thread Building Blocks)"
-    )
-    find_package(TBB REQUIRED)
-  endif()
 endif()
 
-if(BUILD_FORTRAN_WRAPPER)
-    enable_language(Fortran)
-endif()
-
-if(BUILD_TEST)
-  include(dependencies/googletest)
-endif()
-
+find_package(hip REQUIRED)

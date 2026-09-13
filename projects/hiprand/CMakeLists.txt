@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -108,29 +108,25 @@ endif()
 mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
 mark_as_advanced(HIPRAND_CONFIG_DIR)
 
-# CMake modules
+# Add project and ROCm-related CMake module paths.
 list(APPEND CMAKE_MODULE_PATH
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules
-    ${HIP_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip # FindHIP.cmake
-    ${ROCM_PATH}/llvm
+  # Shared within monorepo:
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/cmake
+  # ROCm related:
+  $ENV{ROCM_PATH}
+  $ENV{ROCM_PATH}/share
+  $ENV{ROCM_PATH}/lib/cmake
 )
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    message(STATUS "Setting build type to 'Release' as none was specified.")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+  message(STATUS "Setting build type to 'Release' as none was specified.")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-include(ROCmCMakeBuildToolsDependency)
-
-# Set version variables
-rocm_setup_version( VERSION ${VERSION_STRING} )
-set ( hiprand_VERSION ${VERSION_STRING} )
-# Old-style version number used within the library's API. rocrand_get_version should be modified.
-math(EXPR hiprand_VERSION_NUMBER "${hipRAND_VERSION_MAJOR} * 100000 + ${hipRAND_VERSION_MINOR} * 100 + ${hipRAND_VERSION_PATCH}")
-set(hiprand_SOVERSION 1.1)
+# rocm-cmake must be included before processing 'GPU_TARGETS'.
+include(dependencies/rocm-cmake)
 
 # Set target IDs for compilation
 if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
@@ -151,17 +147,22 @@ else()
   set(GPU_TARGETS "all" CACHE INTERNAL "")
 endif()
 
+include(dependencies/hip)
+
+include(cmake/Dependencies.cmake)
+
 # Verify that hipcc or HIP-aware clang is used on ROCM software
 # TODO: Fix VerifyCompiler for Windows
 if (NOT WIN32)
-  include(VerifyCompiler)
-else()
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm)
-  find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH})
+  include(cmake/VerifyCompiler.cmake)
 endif()
 
-# Include cmake scripts
-include(Dependencies)
+# Set version variables
+rocm_setup_version( VERSION ${VERSION_STRING} )
+set ( hiprand_VERSION ${VERSION_STRING} )
+# Old-style version number used within the library's API. rocrand_get_version should be modified.
+math(EXPR hiprand_VERSION_NUMBER "${hipRAND_VERSION_MAJOR} * 100000 + ${hipRAND_VERSION_MINOR} * 100 + ${hipRAND_VERSION_PATCH}")
+set(hiprand_SOVERSION 1.1)
 
 # Build CXX flags
 if (NOT DEFINED CMAKE_CXX_STANDARD)
@@ -170,9 +171,9 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(DISABLE_WERROR)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
@@ -195,7 +196,7 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
 endif()
 
 # Print configuration summary
-include(Summary)
+include(cmake/Summary.cmake)
 print_configuration_summary()
 
 # hipRAND library
@@ -205,45 +206,45 @@ add_subdirectory(library)
 
 # Tests
 if(BUILD_TEST)
-    enable_testing()
-    rocm_package_setup_component(clients)
-    rocm_package_setup_client_component(tests)
-    add_subdirectory(test)
+  enable_testing()
+  rocm_package_setup_component(clients)
+  rocm_package_setup_client_component(tests)
+  add_subdirectory(test)
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(WIN32)
-    set(CPACK_SOURCE_GENERATOR "ZIP")
-    set(CPACK_GENERATOR "ZIP")
-    set(CPACK_SET_DESTDIR OFF)
-    set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
-    set(CPACK_PACKAGING_INSTALL_PREFIX "")
-    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+  set(CPACK_SOURCE_GENERATOR "ZIP")
+  set(CPACK_GENERATOR "ZIP")
+  set(CPACK_SET_DESTDIR OFF)
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "")
+  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 else()
-    if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-        set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-    endif()
+  if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+  endif()
 endif()
 
 if( HIP_RUNTIME_LOWER STREQUAL "rocclr" )
-    if(BUILD_ADDRESS_SANITIZER)
-        set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
-    else()
-        set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
-    endif()
-    rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
+  if(BUILD_ADDRESS_SANITIZER)
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+  else()
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+  endif()
+  rocm_package_add_dependencies("${DEPENDS_HIP_RUNTIME} >= 4.5.0")
 elseif( HIP_RUNTIME STREQUAL "cuda" )
-    rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
+  rocm_package_add_dependencies("hip-nvcc >= 3.5.0")
 endif( )
 rocm_package_add_dependencies("rocrand >= ${VERSION_STRING}")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
 if (BUILD_WITH_LIB STREQUAL "CUDA")
-    set(package_name hiprand-alt)
+  set(package_name hiprand-alt)
 else()
-    set(package_name hiprand)
+  set(package_name hiprand)
 endif()
 
 if(BUILD_CODE_COVERAGE)
