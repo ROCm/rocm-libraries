@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
+#include <optional>
 #include <regex>
 #include <sstream>
 
@@ -18,8 +19,12 @@ using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 TEST(TestFormatComparisonHeader, ContainsAllFields)
 {
-    const ComparisonContext ctx{
-        "Bundle: /path/to/bundle", "output_tensor (UID 42, output)", "FLOAT", 1e-5f, 1e-4f};
+    const ComparisonContext ctx{"Bundle: /path/to/bundle",
+                                "output_tensor (UID 42, output)",
+                                "FLOAT",
+                                1e-5f,
+                                1e-4f,
+                                std::nullopt};
 
     const Tensor<float> tensor({2, 3, 4});
     const std::string header = formatComparisonHeader(ctx, tensor);
@@ -34,13 +39,45 @@ TEST(TestFormatComparisonHeader, ContainsAllFields)
 
 TEST(TestFormatComparisonHeader, IncludesShape)
 {
-    const ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f};
+    const ComparisonContext ctx{"Test: MyTest.Case", "x", "HALF", 0.0f, 0.0f, std::nullopt};
 
     const Tensor<float> tensor({8, 16});
     const std::string header = formatComparisonHeader(ctx, tensor);
 
     EXPECT_NE(header.find("Shape:"), std::string::npos);
     EXPECT_NE(header.find("8, 16"), std::string::npos);
+}
+
+// A check that atol/rtol do not describe says so, instead of printing two numbers that
+// had nothing to do with the verdict. The header owns the wording: callers hand over the
+// threshold, never a rendered sentence.
+TEST(TestFormatComparisonHeader, RmsThresholdReplacesAtolRtol)
+{
+    const ComparisonContext ctx{"Test: MyTest.Case", "dscale", "FLOAT", 1e-5f, 1e-4f, 1e-4f};
+
+    const Tensor<float> tensor({8, 16});
+    const std::string header = formatComparisonHeader(ctx, tensor);
+
+    EXPECT_NE(header.find("relative RMS <= 0.0001"), std::string::npos);
+    EXPECT_EQ(header.find("atol="), std::string::npos);
+    EXPECT_EQ(header.find("rtol="), std::string::npos);
+    // The element counts printed below an aggregate verdict are elements that differ at
+    // all, not elements that failed. Saying so is the header's job, not the caller's.
+    EXPECT_NE(header.find("aggregate check"), std::string::npos);
+    EXPECT_NE(header.find("not elements that failed"), std::string::npos);
+}
+
+// The threshold is optional, and absent means an ordinary per-element verdict.
+TEST(TestFormatComparisonHeader, NoRmsThresholdPrintsAtolRtol)
+{
+    const ComparisonContext ctx{"Test: MyTest.Case", "dx", "FLOAT", 1e-5f, 1e-4f, std::nullopt};
+
+    const Tensor<float> tensor({8, 16});
+    const std::string header = formatComparisonHeader(ctx, tensor);
+
+    EXPECT_NE(header.find("atol=1e-05"), std::string::npos);
+    EXPECT_NE(header.find("rtol=0.0001"), std::string::npos);
+    EXPECT_EQ(header.find("relative RMS"), std::string::npos);
 }
 
 // =================================================================================================

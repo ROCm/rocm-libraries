@@ -3,23 +3,119 @@
 
 #include "harness/bundle/OutputComparison.hpp"
 
+#include <exception>
 #include <sstream>
+#include <stdexcept>
 
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 
 namespace hipdnn_integration_tests::bundle
 {
 
+std::string tensorLabel(int64_t uid, const std::string& name)
+{
+    if(!name.empty())
+    {
+        return name;
+    }
+    return "uid=" + std::to_string(uid);
+}
+
 std::string tensorLabel(int64_t uid,
                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs)
 {
     const auto* name = attrs.name();
-    if(name != nullptr && !name->empty())
+    return tensorLabel(uid, name != nullptr ? name->str() : std::string{});
+}
+
+ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                 const std::string& label,
+                                 const ComparisonTolerance& tolerance)
+{
+    switch(tolerance.kind)
     {
-        return name->str();
+    case ValidatorKind::ALLCLOSE:
+        return {hipdnn_test_sdk::utilities::createAllCloseValidator(
+                    dataType, tolerance.atol, tolerance.rtol),
+                {}};
+
+    case ValidatorKind::RMS:
+        // Only RMS is caught. It is the one kind a [[validator_overrides]] glob can
+        // select, so an unsupported data type here is an operator's config mistake and
+        // deserves a legible answer. allclose is the default that nothing selects, so
+        // there is no glob to blame and its own throw stays a throw.
+        try
+        {
+            return {
+                hipdnn_test_sdk::utilities::createRmsValidator(dataType, tolerance.rmsThreshold),
+                {}};
+        }
+        catch(const std::exception& e)
+        {
+            std::ostringstream error;
+            error << "\nValidator override NOT APPLICABLE\n"
+                  << "  Tensor: " << label << "\n"
+                  << "  Data type: "
+                  << hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType) << "\n"
+                  << "  A [[validator_overrides]] entry in this engine's TOML config selected the\n"
+                     "  rms validator for this tensor, but it does not support this data type ("
+                  << e.what()
+                  << ").\n"
+                     "  Narrow that entry's 'tensors' glob so it no longer matches this tensor.\n";
+            return {nullptr, error.str()};
+        }
+
+    default:
+        // A kind that is neither, i.e. a new ValidatorKind whose case was never written.
+        // Grading it as allclose by omission is exactly the silent miscompare this whole
+        // mechanism exists to prevent, so refuse instead.
+        throw std::invalid_argument("makeValidator: unhandled ValidatorKind");
     }
-    return "uid=" + std::to_string(uid);
+}
+
+std::string formatMismatchReport(int64_t uid,
+                                 const std::string& label,
+                                 hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                 hipdnn_data_sdk::utilities::ITensor& expected,
+                                 hipdnn_data_sdk::utilities::ITensor& actual,
+                                 const ComparisonTolerance& tolerance,
+                                 const std::string& contextLine)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const bool useRms = tolerance.kind == ValidatorKind::RMS;
+
+    hipdnn_test_sdk::utilities::ComparisonContext ctx;
+    ctx.contextLine = contextLine;
+    ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
+    ctx.dtypeName = dataType != DataType::UNSET
+                        ? hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType)
+                        : "unknown";
+    ctx.atol = tolerance.atol;
+    ctx.rtol = tolerance.rtol;
+    if(useRms)
+    {
+        // Carry the threshold, not a rendered sentence: the report module owns how a
+        // tolerance is worded, and atol/rtol did not decide this failure.
+        ctx.rmsThreshold = tolerance.rmsThreshold;
+    }
+
+    std::ostringstream report;
+    report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
+    if(dataType != DataType::UNSET)
+    {
+        // Zero tolerances under RMS: the per-element budget is not what was checked, and a
+        // full drift profile (max/mean abs diff, worst elements) is the useful diagnostic.
+        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(report,
+                                                                   dataType,
+                                                                   label,
+                                                                   expected,
+                                                                   actual,
+                                                                   useRms ? 0.0f : tolerance.atol,
+                                                                   useRms ? 0.0f : tolerance.rtol);
+    }
+    return report.str();
 }
 
 std::optional<TensorMismatch>
@@ -31,39 +127,31 @@ std::optional<TensorMismatch>
                   const std::string& contextLine)
 {
     const auto dataType = attrs.data_type();
+    const auto label = tensorLabel(uid, attrs);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        dataType, tolerance.atol, tolerance.rtol);
-    if(validator->allClose(expected, actual))
+    auto selection = makeValidator(dataType, label, tolerance);
+    if(selection.validator == nullptr)
+    {
+        return TensorMismatch{uid, label, std::move(selection.error)};
+    }
+    if(selection.validator->allClose(expected, actual))
     {
         return std::nullopt;
     }
 
-    const auto label = tensorLabel(uid, attrs);
-
-    hipdnn_test_sdk::utilities::ComparisonContext ctx;
-    ctx.contextLine = contextLine;
-    ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
-    ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-    ctx.atol = tolerance.atol;
-    ctx.rtol = tolerance.rtol;
-
-    std::ostringstream report;
-    report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
-    hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
-        report, dataType, label, expected, actual, tolerance.atol, tolerance.rtol);
-
-    return TensorMismatch{uid, label, report.str()};
+    return TensorMismatch{
+        uid,
+        label,
+        formatMismatchReport(uid, label, dataType, expected, actual, tolerance, contextLine)};
 }
 
-std::vector<TensorMismatch> compareOutputs(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    const std::vector<int64_t>& outputUids,
-    OutputTensors& actual,
-    const ExpectedTensorLookup& expectedFor,
-    const std::function<ComparisonTolerance(hipdnn_flatbuffers_sdk::data_objects::DataType)>&
-        toleranceFor,
-    const std::string& contextLine)
+std::vector<TensorMismatch>
+    compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
+                   const std::vector<int64_t>& outputUids,
+                   OutputTensors& actual,
+                   const ExpectedTensorLookup& expectedFor,
+                   const ToleranceLookup& toleranceFor,
+                   const std::string& contextLine)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
@@ -71,12 +159,13 @@ std::vector<TensorMismatch> compareOutputs(
     for(const int64_t uid : outputUids)
     {
         const auto* attrs = tensorAttrMap.at(uid);
-        auto mismatch = compareTensor(uid,
-                                      *attrs,
-                                      expectedFor(uid),
-                                      *actual.at(uid),
-                                      toleranceFor(attrs->data_type()),
-                                      contextLine);
+        auto mismatch
+            = compareTensor(uid,
+                            *attrs,
+                            expectedFor(uid),
+                            *actual.at(uid),
+                            toleranceFor(uid, tensorLabel(uid, *attrs), attrs->data_type()),
+                            contextLine);
         if(mismatch.has_value())
         {
             mismatches.push_back(*std::move(mismatch));

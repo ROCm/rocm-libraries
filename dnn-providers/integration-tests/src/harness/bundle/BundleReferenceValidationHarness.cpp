@@ -127,10 +127,13 @@ void BundleReferenceValidationHarness::TestBody()
     };
 
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
-    // engine and must not loosen the gate on our own data.
-    const auto toleranceFor = [&wrapper](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+    // engine and must not loosen the gate on our own data. For the same reason this
+    // path never selects a non-default validator — allclose always (ALMIOPEN-2561).
+    const auto toleranceFor = [&wrapper](int64_t /*uid*/,
+                                         const std::string& /*label*/,
+                                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
         const float value = tolerance::defaultTolerance(wrapper, dataType);
-        return ComparisonTolerance{value, value};
+        return ComparisonTolerance::allClose(value, value);
     };
 
     const std::string contextLine = "Golden data validation ("
