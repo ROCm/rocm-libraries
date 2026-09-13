@@ -120,7 +120,8 @@ __global__ void emboss_3x3_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
                                   &sum_f24.f8[1], filter_row3);
         emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row3);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -224,7 +225,8 @@ __global__ void emboss_5x5_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
                                   &sum_f24.f8[1], filter_row5);
         emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row5);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -342,7 +344,8 @@ __global__ void emboss_7x7_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
                                   &sum_f24.f8[1], filter_row7);
         emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row7);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -474,7 +477,8 @@ __global__ void emboss_9x9_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, 
                                   &sum_f24.f8[1], filter_row9);
         emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row9);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -538,7 +542,8 @@ __global__ void emboss_3x3_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                   filter_row2);
         emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8,
                                   filter_row3);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f8);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
         else
@@ -575,7 +580,8 @@ __global__ void emboss_3x3_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row2);
             emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8,
                                       filter_row3);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -612,7 +618,8 @@ __global__ void emboss_3x3_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row2);
             emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y + 2][hipThreadIdx_x8], &sum_f8,
                                       filter_row3);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -681,7 +688,8 @@ __global__ void emboss_5x5_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                   filter_row4);
         emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8,
                                   filter_row5);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f8);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
         else
@@ -722,7 +730,8 @@ __global__ void emboss_5x5_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row4);
             emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8,
                                       filter_row5);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -762,7 +771,8 @@ __global__ void emboss_5x5_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row4);
             emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y + 4][hipThreadIdx_x8], &sum_f8,
                                       filter_row5);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -837,7 +847,8 @@ __global__ void emboss_7x7_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                   filter_row6);
         emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8,
                                   filter_row7);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f8);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
         else
@@ -882,7 +893,8 @@ __global__ void emboss_7x7_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row6);
             emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8,
                                       filter_row7);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -927,7 +939,8 @@ __global__ void emboss_7x7_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row6);
             emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y + 6][hipThreadIdx_x8], &sum_f8,
                                       filter_row7);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -1008,7 +1021,8 @@ __global__ void emboss_9x9_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                   filter_row8);
         emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 8][hipThreadIdx_x8], &sum_f8,
                                   filter_row9);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f8);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
         else
@@ -1057,7 +1071,8 @@ __global__ void emboss_9x9_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row8);
             emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 8][hipThreadIdx_x8], &sum_f8,
                                       filter_row9);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -1106,7 +1121,8 @@ __global__ void emboss_9x9_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
                                       filter_row8);
             emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y + 8][hipThreadIdx_x8], &sum_f8,
                                       filter_row9);
-            if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f8);
+            if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+                rpp_hip_pixel_check_0to1(&sum_f8);
             if constexpr (std::is_same<T, Rpp8s>::value)
                 rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &sum_f8);
             else
@@ -1199,7 +1215,8 @@ __global__ void emboss_3x3_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* ds
                                   &sum_f24.f8[1], filter_row3);
         emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row3);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
                                                                        dstStridesNCH.y, &sum_f24);
@@ -1304,7 +1321,8 @@ __global__ void emboss_5x5_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* ds
                                   &sum_f24.f8[1], filter_row5);
         emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row5);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
                                                                        dstStridesNCH.y, &sum_f24);
@@ -1423,7 +1441,8 @@ __global__ void emboss_7x7_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* ds
                                   &sum_f24.f8[1], filter_row7);
         emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row7);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
                                                                        dstStridesNCH.y, &sum_f24);
@@ -1556,7 +1575,8 @@ __global__ void emboss_9x9_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* ds
                                   &sum_f24.f8[1], filter_row9);
         emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row9);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx,
                                                                        dstStridesNCH.y, &sum_f24);
@@ -1654,7 +1674,8 @@ __global__ void emboss_3x3_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* d
                                   &sum_f24.f8[1], filter_row3);
         emboss_row_hip_compute<3>(&src_smem[hipThreadIdx_y_channel.z + 2][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row3);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -1763,7 +1784,8 @@ __global__ void emboss_5x5_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* d
                                   &sum_f24.f8[1], filter_row5);
         emboss_row_hip_compute<5>(&src_smem[hipThreadIdx_y_channel.z + 4][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row5);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -1886,7 +1908,8 @@ __global__ void emboss_7x7_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* d
                                   &sum_f24.f8[1], filter_row7);
         emboss_row_hip_compute<7>(&src_smem[hipThreadIdx_y_channel.z + 6][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row7);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
@@ -2023,7 +2046,8 @@ __global__ void emboss_9x9_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* d
                                   &sum_f24.f8[1], filter_row9);
         emboss_row_hip_compute<9>(&src_smem[hipThreadIdx_y_channel.z + 8][hipThreadIdx_x8],
                                   &sum_f24.f8[2], filter_row9);
-        if constexpr (std::is_same<T, float>::value) rpp_hip_pixel_check_0to1(&sum_f24);
+        if constexpr (std::is_same<T, float>::value || std::is_same<T, half>::value)
+            rpp_hip_pixel_check_0to1(&sum_f24);
         if constexpr (std::is_same<T, Rpp8s>::value)
             rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &sum_f24);
         else
