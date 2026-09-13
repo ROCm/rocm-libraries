@@ -60,100 +60,112 @@ namespace rocsparse
         const int32_t tidx = hipThreadIdx_x;
         const int32_t tidy = hipThreadIdx_y;
 
-        const int32_t block_row = hipBlockIdx_x;
-
-        const I block_row_start = (block_row < Mb) ? (bsr_row_ptr[block_row] - idx_base) : 0;
-        const I block_row_end   = (block_row < Mb) ? (bsr_row_ptr[block_row + 1] - idx_base) : 0;
-
         __shared__ B shared_B[BSR_BLOCK_DIM * BLK_SIZE_Y];
         __shared__ A shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
 
-        const J global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y;
-
-        for(J x = 0; x < block_dim; x += BSR_BLOCK_DIM)
+        // grid.y is capped at 65,535, so grid-stride over the dense column panels
+        // (each panel is BLK_SIZE_Y columns wide) to cover all of N. The loop bound is
+        // uniform across the block so every thread reaches the __syncthreads below.
+        for(J col_panel = hipBlockIdx_y * BLK_SIZE_Y; col_panel < N;
+            col_panel += hipGridDim_y * BLK_SIZE_Y)
         {
-            const J global_row = tidx + x + hipBlockIdx_x * block_dim;
+        const J global_col = tidy + col_panel;
 
-            T sum = static_cast<T>(0);
+        // Grid-stride loop over the block-row dimension (grid x) so a clamped
+        // grid still covers all Mb block rows.
+        for(J block_row = hipBlockIdx_x; block_row < Mb; block_row += hipGridDim_x)
+        {
+            const I block_row_start = bsr_row_ptr[block_row] - idx_base;
+            const I block_row_end   = bsr_row_ptr[block_row + 1] - idx_base;
 
-            for(I k = block_row_start; k < block_row_end; k++)
+            for(J x = 0; x < block_dim; x += BSR_BLOCK_DIM)
             {
-                const J block_col = (bsr_col_ind[k] - idx_base);
+                const J global_row = tidx + x + block_row * block_dim;
 
-                for(J y = 0; y < block_dim; y += BLK_SIZE_Y)
+                T sum = static_cast<T>(0);
+
+                for(I k = block_row_start; k < block_row_end; k++)
                 {
-                    if(nn)
+                    const J block_col = (bsr_col_ind[k] - idx_base);
+
+                    for(J y = 0; y < block_dim; y += BLK_SIZE_Y)
                     {
-                        shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < block_dim)
-                                  ? dense_B[block_dim * block_col + (tidx + y) + global_col * ldb]
-                                  : static_cast<B>(0);
+                        if(nn)
+                        {
+                            shared_B[BSR_BLOCK_DIM * tidy + tidx]
+                                = (global_col < N && (tidx + y) < block_dim)
+                                      ? dense_B[block_dim * block_col + (tidx + y)
+                                                + global_col * ldb]
+                                      : static_cast<B>(0);
+                        }
+                        else
+                        {
+                            shared_B[BSR_BLOCK_DIM * tidy + tidx]
+                                = (global_col < N && (tidx + y) < block_dim)
+                                      ? dense_B[global_col
+                                                + ldb * (block_dim * block_col + (tidx + y))]
+                                      : static_cast<B>(0);
+                        }
+
+                        if(direction == rocsparse_direction_row)
+                        {
+                            shared_A[BSR_BLOCK_DIM * tidy + tidx]
+                                = ((tidx + x) < block_dim && (tidy + y) < block_dim)
+                                      ? bsr_val[block_dim * block_dim * k + block_dim * (tidx + x)
+                                                + (tidy + y)]
+                                      : static_cast<A>(0);
+                        }
+                        else
+                        {
+                            shared_A[BSR_BLOCK_DIM * tidy + tidx]
+                                = ((tidx + x) < block_dim && (tidy + y) < block_dim)
+                                      ? bsr_val[block_dim * block_dim * k + block_dim * (tidy + y)
+                                                + (tidx + x)]
+                                      : static_cast<A>(0);
+                        }
+
+                        __syncthreads();
+
+                        for(uint32_t j = 0; j < BSR_BLOCK_DIM; j++)
+                        {
+                            sum = rocsparse::fma<T>(shared_A[BSR_BLOCK_DIM * j + tidx],
+                                                    shared_B[BSR_BLOCK_DIM * tidy + j],
+                                                    sum);
+                        }
+
+                        __syncthreads();
+                    }
+                }
+
+                if(global_col < N && (tidx + x) < block_dim)
+                {
+                    if(beta == static_cast<T>(0))
+                    {
+                        if(order_C == rocsparse_order_column)
+                        {
+                            dense_C[global_row + ldc * global_col] = alpha * sum;
+                        }
+                        else
+                        {
+                            dense_C[global_row * ldc + global_col] = alpha * sum;
+                        }
                     }
                     else
                     {
-                        shared_B[BSR_BLOCK_DIM * tidy + tidx]
-                            = (global_col < N && (tidx + y) < block_dim)
-                                  ? dense_B[global_col + ldb * (block_dim * block_col + (tidx + y))]
-                                  : static_cast<B>(0);
+                        if(order_C == rocsparse_order_column)
+                        {
+                            dense_C[global_row + ldc * global_col] = rocsparse::fma<T>(
+                                beta, dense_C[global_row + ldc * global_col], alpha * sum);
+                        }
+                        else
+                        {
+                            dense_C[global_row * ldc + global_col] = rocsparse::fma<T>(
+                                beta, dense_C[global_row * ldc + global_col], alpha * sum);
+                        }
                     }
-
-                    if(direction == rocsparse_direction_row)
-                    {
-                        shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < block_dim && (tidy + y) < block_dim)
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * (tidx + x)
-                                            + (tidy + y)]
-                                  : static_cast<A>(0);
-                    }
-                    else
-                    {
-                        shared_A[BSR_BLOCK_DIM * tidy + tidx]
-                            = ((tidx + x) < block_dim && (tidy + y) < block_dim)
-                                  ? bsr_val[block_dim * block_dim * k + block_dim * (tidy + y)
-                                            + (tidx + x)]
-                                  : static_cast<A>(0);
-                    }
-
-                    __syncthreads();
-
-                    for(uint32_t j = 0; j < BSR_BLOCK_DIM; j++)
-                    {
-                        sum = rocsparse::fma<T>(shared_A[BSR_BLOCK_DIM * j + tidx],
-                                                shared_B[BSR_BLOCK_DIM * tidy + j],
-                                                sum);
-                    }
-
-                    __syncthreads();
                 }
             }
-
-            if(block_row < Mb && global_col < N && (tidx + x) < block_dim)
-            {
-                if(beta == static_cast<T>(0))
-                {
-                    if(order_C == rocsparse_order_column)
-                    {
-                        dense_C[global_row + ldc * global_col] = alpha * sum;
-                    }
-                    else
-                    {
-                        dense_C[global_row * ldc + global_col] = alpha * sum;
-                    }
-                }
-                else
-                {
-                    if(order_C == rocsparse_order_column)
-                    {
-                        dense_C[global_row + ldc * global_col] = rocsparse::fma<T>(
-                            beta, dense_C[global_row + ldc * global_col], alpha * sum);
-                    }
-                    else
-                    {
-                        dense_C[global_row * ldc + global_col] = rocsparse::fma<T>(
-                            beta, dense_C[global_row * ldc + global_col], alpha * sum);
-                    }
-                }
-            }
+        }
         }
     }
 }
