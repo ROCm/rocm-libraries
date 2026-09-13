@@ -52,16 +52,40 @@ _SCRIPT_DIR = Path(__file__).parent
 _BEST_RE = re.compile(r"Best:\s*([\d.]+)\s*TFLOPS\s*[—\-]\s*(.+)")
 
 
-def _run_script(script: Path, extra_args: list[str]) -> tuple[float | None, str, str]:
+def _run_script(
+    script: Path, extra_args: list[str], timeout: "float | None" = None
+) -> tuple[float | None, str, str]:
     """Run *script* with *extra_args*; return (best_tflops, kernel_name, stdout)."""
     cmd = [sys.executable, str(script)] + extra_args
     print(f"\n{'='*72}", flush=True)
     print(f"Running: {script.name} {' '.join(extra_args)}", flush=True)
     print(f"{'='*72}", flush=True)
 
-    proc = subprocess.run(
-        cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
+    try:
+        proc = subprocess.run(
+            cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = timeout
+        print(
+            f"\n[timeout] {script.name} exceeded {elapsed:.0f}s limit — killed.",
+            file=sys.stderr,
+            flush=True,
+        )
+        stdout = (exc.stdout or b"")
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode(errors="replace")
+        stderr = exc.stderr or b""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        if stderr:
+            print(stderr, end="", file=sys.stderr, flush=True)
+        print(stdout, end="", flush=True)
+        m = _BEST_RE.search(stdout)
+        if m:
+            return float(m.group(1)), m.group(2).strip(), stdout
+        return None, "", stdout
 
     # Echo output to the terminal so the user can see the sweep progress.
     print(proc.stdout, end="", flush=True)
@@ -299,6 +323,7 @@ def main() -> int:
         tflops, name, _ = _run_script(
             _SCRIPT_DIR / "benchmark_direct_conv.py",
             direct_args,
+            timeout=240,
         )
         direct_result = (tflops, name)
 
