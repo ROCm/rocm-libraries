@@ -513,7 +513,7 @@ Testing is crucial for ensuring plugin reliability and correctness. Plugins shou
 Test structure
 --------------
 
-Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md>`_, plugins should organize tests as follows:
+Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md>`_, plugins should organize tests as follows:
 
 .. code::
 
@@ -567,7 +567,7 @@ External integrations tests use an external integration test executable written 
 
 .. note::
 
-  See `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md#testing-requirements>`_.
+  See `general testing principles <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TESTING_STRATEGY.md#principles>`_.
 
 Example: MIOpen provider plugin
 ================================
