@@ -32,6 +32,11 @@ include(shared_third_party)
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
 
+option(ROCM_LIBS_ENABLE_INTERFACES
+    "Build the experimental noncanonical ROCm math-library interfaces layer"
+    OFF
+)
+
 set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
 )
@@ -198,6 +203,18 @@ if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT rocrand
         PREFIX_PATH projects
         EXPECT_TARGET rocrand
+    )
+endif()
+
+# The interfaces layer is deliberately independent of the component list while
+# it remains an opt-in migration facility. It consumes public headers from the
+# source tree and canonical implementation DSOs from the configured ROCm prefix;
+# it does not replace any canonical math-library target or SONAME.
+if(ROCM_LIBS_ENABLE_INTERFACES)
+    add_subdirectory_with_message(
+        COMPONENT interfaces
+        PREFIX_PATH .
+        EXPECT_TARGET rocblas_loader_shadow
     )
 endif()
 
