@@ -117,7 +117,11 @@ constexpr const int MAX_PAYLOAD_SIZE = ROCPRIM_MAX_ATOMIC_SIZE - 1;
 /// \tparam T The accumulator type of the scan operation.
 /// \tparam UseSleep [optional] If true, the execution of a wavefront is paused for a short duration, allowing other threads or processes to execute during idle periods.
 /// \tparam IsSmall [optional] Dependent on the size of `T`. If it's smaller than 16 bytes (8 bytes if 16 byte atomics are possibly not supported), it's by default set to true.
-template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
+/// \tparam PreferredAlignment [optional] Align the state flags to this number of bytes
+template<class T,
+         bool   UseSleep           = false,
+         size_t PreferredAlignment = 0,
+         bool   IsSmall            = (sizeof(T) <= MAX_PAYLOAD_SIZE)>
 struct lookback_scan_state;
 
 /// Reduce lanes `0-valid_items` and return the result in lane 0.
@@ -214,28 +218,38 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 }
 
 // Packed flag and prefix value are loaded/stored in one atomic operation.
-template<class T, bool UseSleep>
-struct lookback_scan_state<T, UseSleep, true>
+template<class T, bool UseSleep, size_t PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ true>
 {
+public:
+    // Type used for flag/flag of block prefix
+    using value_type = T;
+
+    static constexpr bool use_sleep = UseSleep;
+
 private:
     // Type which is used in store/load operations of block prefix (flag and value).
     // It is 16-, 32- or 64-bit int and can be loaded/stored using single atomic instruction.
     using prefix_underlying_type = typename match_prefix_underlying_type<T>::type;
 
-    // Helper struct
     struct prefix_type
     {
         T                         value;
         lookback_scan_prefix_flag flag;
     };
 
+    static constexpr size_t alignment = max(sizeof(prefix_underlying_type), PreferredAlignment);
+    /// This type aligns the raw prefix data. This can be used to align
+    /// a single atomic per cache line to reduce false sharing.
+    struct alignas(alignment) aligned_prefix_type
+    {
+        prefix_underlying_type raw;
+    };
+
     static_assert(sizeof(prefix_underlying_type) >= sizeof(prefix_type), "");
 
+    aligned_prefix_type* prefixes;
 public:
-    // Type used for flag/flag of block prefix
-    using value_type = T;
-
-    static constexpr bool use_sleep = UseSleep;
 
     /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
     ///
@@ -253,7 +267,7 @@ public:
                                     const hipStream_t /*stream*/)
     {
         (void)number_of_blocks;
-        state.prefixes = reinterpret_cast<prefix_underlying_type*>(temp_storage);
+        state.prefixes = reinterpret_cast<aligned_prefix_type*>(temp_storage);
         return hipSuccess;
     }
 
@@ -276,7 +290,7 @@ public:
         unsigned int warp_size;
         hipError_t   error = ::rocprim::host_warp_size(stream, warp_size);
 
-        storage_size = sizeof(prefix_underlying_type) * (warp_size + number_of_blocks);
+        storage_size = sizeof(aligned_prefix_type) * (warp_size + number_of_blocks);
 
         return error;
     }
@@ -299,7 +313,7 @@ public:
     {
         size_t     storage_size = 0;
         hipError_t error        = get_storage_size(number_of_blocks, stream, storage_size);
-        layout = detail::temp_storage::layout{storage_size, alignof(prefix_underlying_type)};
+        layout = detail::temp_storage::layout{storage_size, alignof(aligned_prefix_type)};
         return error;
     }
 
@@ -318,7 +332,7 @@ public:
             prefix.flag = lookback_scan_prefix_flag::empty;
             prefix_underlying_type p;
             memcpy(&p, &prefix, sizeof(prefix_type));
-            prefixes[padding + block_id] = p;
+            prefixes[padding + block_id].raw = p;
         }
         if(block_id < padding)
         {
@@ -326,7 +340,7 @@ public:
             prefix.flag = lookback_scan_prefix_flag::invalid;
             prefix_underlying_type p;
             memcpy(&p, &prefix, sizeof(prefix_type));
-            prefixes[block_id] = p;
+            prefixes[block_id].raw = p;
         }
     }
 
@@ -365,7 +379,7 @@ public:
         const unsigned int SLEEP_MAX     = 32;
         unsigned int       times_through = 1;
 
-        prefix_underlying_type p = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
+        prefix_underlying_type p = ::rocprim::detail::atomic_load(&prefixes[padding + block_id].raw);
         memcpy(&prefix, &p, sizeof(prefix_type));
         while(prefix.flag == lookback_scan_prefix_flag::empty)
         {
@@ -377,7 +391,7 @@ public:
                     times_through++;
             }
             prefix_underlying_type p
-                = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
+                = ::rocprim::detail::atomic_load(&prefixes[padding + block_id].raw);
             memcpy(&prefix, &p, sizeof(prefix_type));
         }
 
@@ -495,16 +509,14 @@ private:
         prefix_type            prefix = {value, flag};
         prefix_underlying_type p;
         memcpy(&p, &prefix, sizeof(prefix_type));
-        ::rocprim::detail::atomic_store(&prefixes[padding + block_id], p);
+        ::rocprim::detail::atomic_store(&prefixes[padding + block_id].raw, p);
     }
-
-    prefix_underlying_type* prefixes;
 };
 
 // Flag, partial and final prefixes are stored in separate arrays.
 // Consistency ensured by memory fences between flag and prefixes load/store operations.
-template<class T, bool UseSleep>
-struct lookback_scan_state<T, UseSleep, false>
+template<class T, bool UseSleep, size_t PreferredAlignment>
+struct lookback_scan_state<T, UseSleep, PreferredAlignment, /* IsSmall = */ false>
 {
 
 public:
@@ -513,6 +525,30 @@ public:
 
     static constexpr bool use_sleep = UseSleep;
 
+private:
+    struct value_underlying_type
+    {
+        static constexpr int words_no = ceiling_div(sizeof(T), sizeof(unsigned int));
+
+        unsigned int words[words_no];
+    };
+
+    static constexpr size_t alignment = max(sizeof(flag_cast_type), PreferredAlignment);
+    /// This type aligns the raw flag data. This can be used to align
+    /// a single atomic per cache line to reduce false sharing.
+    struct alignas(alignment) aligned_flag_type
+    {
+        flag_cast_type flag;
+    };
+
+    // We need to separate arrays for partial and final prefixes, because
+    // value can be overwritten before flag is changed (flag and value are
+    // not stored in single instruction).
+    void*              prefixes_partial_values;
+    void*              prefixes_complete_values;
+    aligned_flag_type* prefixes_flags;
+
+public:
     /// \brief Initializes the lookback_scan_state with the given temporary storage and the given grid size.
     ///
     /// \param [in,out] state the lookback_scan_state object to be initialized.
@@ -541,7 +577,7 @@ public:
         state.prefixes_complete_values = ptr;
         ptr += ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
 
-        state.prefixes_flags = reinterpret_cast<flag_cast_type*>(ptr);
+        state.prefixes_flags = reinterpret_cast<aligned_flag_type*>(ptr);
 
         return error;
     }
@@ -568,7 +604,7 @@ public:
         // Always use sizeof(value_underlying_type) instead of sizeof(T) because storage is
         // allocated by host so it can hold both types no matter what device is used.
         storage_size = 2 * ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
-        storage_size += n * sizeof(flag_cast_type);
+        storage_size += ::rocprim::detail::align_size(n * sizeof(aligned_flag_type));
         return error;
     }
 
@@ -606,12 +642,12 @@ public:
         const unsigned int padding = ::rocprim::arch::wavefront::size();
         if(block_id < number_of_blocks)
         {
-            prefixes_flags[padding + block_id]
+            prefixes_flags[padding + block_id].flag
                 = static_cast<flag_cast_type>(lookback_scan_prefix_flag::empty);
         }
         if(block_id < padding)
         {
-            prefixes_flags[block_id]
+            prefixes_flags[block_id].flag
                 = static_cast<flag_cast_type>(lookback_scan_prefix_flag::invalid);
         }
     }
@@ -816,7 +852,7 @@ private:
         unsigned int       times_through = 1;
 
         lookback_scan_prefix_flag flag = static_cast<lookback_scan_prefix_flag>(
-            ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
+            ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id].flag));
 
         while(::rocprim::detail::warp_any(flag == lookback_scan_prefix_flag::empty))
         {
@@ -829,7 +865,7 @@ private:
             }
 
             flag = static_cast<lookback_scan_prefix_flag>(
-                ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]));
+                ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id].flag));
         }
         return flag;
     }
@@ -859,23 +895,9 @@ private:
         ::rocprim::detail::memory_fence_device();
 #endif
 
-        ::rocprim::detail::atomic_store(&prefixes_flags[padding + block_id],
+        ::rocprim::detail::atomic_store(&prefixes_flags[padding + block_id].flag,
                                         static_cast<flag_cast_type>(flag));
     }
-
-    struct value_underlying_type
-    {
-        static constexpr int words_no = ceiling_div(sizeof(T), sizeof(unsigned int));
-
-        unsigned int words[words_no];
-    };
-
-    // We need to separate arrays for partial and final prefixes, because
-    // value can be overwritten before flag is changed (flag and value are
-    // not stored in single instruction).
-    void*                 prefixes_partial_values;
-    void*                 prefixes_complete_values;
-    flag_cast_type*       prefixes_flags;
 };
 
 template<class T,
