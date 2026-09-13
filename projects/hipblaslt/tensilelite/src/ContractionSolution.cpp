@@ -230,8 +230,15 @@ namespace TensileLite
                                       size_t                    tiles,
                                       size_t                    itersPerTile,
                                       size_t                    skGrid,
-                                      bool                      perTileExtraIters)
+                                      bool                      perTileCapable,
+                                      bool                      uniformSummationOrder)
     {
+        // The kernel branches at runtime on the uniform-summation-order bit the
+        // host packs into MagicShiftItersPerTile: with the bit clear it runs the
+        // historical global first-E mapping even when it supports per-tile
+        // extras. Model both terms, or host and device disagree about which tile
+        // a workgroup owns.
+        const bool perTileActive = perTileCapable && uniformSummationOrder;
         // A tile's fold signature is the ordered list of chunk lengths whose
         // partials are summed to produce it, and two tiles are bitwise equal
         // for identical inputs exactly when their signatures match. Every tile
@@ -255,10 +262,10 @@ namespace TensileLite
         //                      match because each tile gets the same intra-tile
         //                      remainder pattern.
         //
-        // Without the capability bit, extraIters != 0 means chunks come in two
+        // Without perTileActive, extraIters != 0 means chunks come in two
         // lengths under the global first-E mapping, so the chunk lattice has no
-        // single period. skItersPerWG != 0 is not implied by the rest: tiles ==
-        // 0 is reachable from the grouped-GEMM callers and would otherwise leave
+        // single period. skItersPerWG != 0 is not implied by the rest: tiles == 0
+        // is reachable from the grouped-GEMM callers and would otherwise leave
         // I % skItersPerWG undefined.
         if(split.skTiles == 0)
             return true;
@@ -267,7 +274,7 @@ namespace TensileLite
            && itersPerTile % split.skItersPerWG == 0)
             return true;
 
-        if(perTileExtraIters && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
+        if(perTileActive && split.skTiles == tiles && tiles != 0 && skGrid % tiles == 0
            && split.skItersPerWG != 0)
             return true;
 
@@ -300,8 +307,12 @@ namespace TensileLite
         return true;
     }
 
-    StreamKWorkgroupIterRange streamKWorkgroupIterRange(
-        size_t w, size_t tiles, size_t itersPerTile, size_t skGrid, bool perTileExtraIters)
+    StreamKWorkgroupIterRange streamKWorkgroupIterRange(size_t w,
+                                                        size_t tiles,
+                                                        size_t itersPerTile,
+                                                        size_t skGrid,
+                                                        bool   perTileCapable,
+                                                        bool   uniformSummationOrder)
     {
         StreamKWorkgroupIterRange range;
         if(skGrid == 0 || tiles == 0)
@@ -311,7 +322,13 @@ namespace TensileLite
         const size_t W          = totalIters / skGrid;
         const size_t E          = totalIters - W * skGrid;
 
-        if(perTileExtraIters && skGrid % tiles == 0)
+        // The device takes the per-tile branch only when the kernel supports it
+        // AND the packed uniform-summation-order bit is set. Mirror both terms,
+        // or the host attributes iterations to the wrong workgroup and the fixup
+        // reads the wrong partials.
+        const bool perTileActive = perTileCapable && uniformSummationOrder;
+
+        if(perTileActive && skGrid % tiles == 0)
         {
             const size_t F    = skGrid / tiles;
             const size_t q    = w / F;
@@ -1160,6 +1177,8 @@ namespace TensileLite
                 // SK5 hybrid: pack 6 args for the active sub-mode (SK3/SK4 RegSet-alias
                 // the same SGPR slots). Mode bit is bit 30 of slot 2 — not bit 31,
                 // which magicNumberAlg2 uses as the magic-division "add" indicator.
+                // Bit 29 of the same slot carries uniform summation order on the
+                // static sub-path; see the wire-format note in the SK3 packer.
 
                 AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                 assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
@@ -1190,7 +1209,14 @@ namespace TensileLite
                     uint32_t sk4_totalItems
                         = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
 
-                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xC0000000u) == 0u
+                    // Slot 2 aliases MagicShiftItersPerTile on the static
+                    // sub-path, whose top three bits are abit(31), the SK5 mode
+                    // bit(30) and the uniform-summation-order bit(29). The
+                    // dynamic sub-path never sets bit 29 -- the device reads 0
+                    // and takes the global mapping, which is all it has -- but
+                    // skTiles must still not collide with it. Free in practice:
+                    // sk4_skTiles <= tiles and a 2^29 tile count is unreachable.
+                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xE0000000u) == 0u
                                        && "SK5 SK4 skTiles collides with mode/magic bits");
                     uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
 
@@ -1212,7 +1238,17 @@ namespace TensileLite
                     uint32_t magicShiftItersPerTile;
                     magicNumberItersPerTile = magicNumber(
                         2, sk3_itersPerTile, &magicShiftItersPerTile);
-                    assert((magicShiftItersPerTile & 0x40000000u) == 0u);
+                    // Bit 30 = SK5 mode bit, bit 29 = uniform summation order.
+                    // Both are stolen from the always-zero 5..30 window of
+                    // magicNumberAlg2's shift field; bit 31 stays the "add"
+                    // indicator.
+                    assert((magicShiftItersPerTile & 0x60000000u) == 0u);
+                    // Same host rule as the standalone SK3 packer: capability
+                    // AND mode, so a kernel without the runtime gate never sees
+                    // the bit.
+                    if(internalArgsSupport.perTileExtraIters
+                       && problem.getParams().uniformSummationOrder())
+                        magicShiftItersPerTile |= 0x20000000u;
 
                     uint32_t sk3_skItersPerWG;
                     uint32_t sk3_skTiles;
@@ -1261,6 +1297,25 @@ namespace TensileLite
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
                 magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+
+                // MagicShiftItersPerTile wire format:
+                //   31    = magicNumberAlg2's "add" indicator (abit)
+                //   30    = SK5 hybrid mode bit (SK5 path only)
+                //   29    = uniform summation order (this bit)
+                //   28..6 = zero
+                //   5..0  = shift amount
+                // magicNumberAlg2 returns p - 32 with p <= 64 (the loop's post
+                // test permits exit at p == 64), so the shift never exceeds 32
+                // and bits 6..30 are always clear here.
+                //
+                // Set iff the kernel has the runtime gate AND the mode is on:
+                // without the capability term, a solution whose assembly
+                // predates the gate (custom kernels, older logic) would receive
+                // a bit it misreads.
+                assert((magicShiftItersPerTile & 0x60000000u) == 0u);
+                if(internalArgsSupport.perTileExtraIters
+                   && problem.getParams().uniformSummationOrder())
+                    magicShiftItersPerTile |= 0x20000000u;
 
                 args.template append<uint32_t>("itersPerTile", itersPerTile);
                 args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
@@ -3785,9 +3840,15 @@ namespace TensileLite
         // Both requiredWorkspaceSize() -- the workspace query the caller sizes
         // its allocation from -- and resolveStreamKSettings() -- what solve()
         // launches -- call this on the same (reduction, grid, tiles) triple
-        // immediately after getSKGridImpl(), so query and launch cannot
-        // disagree about which reduction is in play, and therefore cannot
-        // disagree about the workspace it needs.
+        // immediately after getSKGridImpl(). For SK3 and SK5-static, where the
+        // two start from the same getSKReduction() answer, that keeps query and
+        // launch agreed on the reduction and so on the workspace. SK4 and
+        // SK5-dynamic are pinned to tree at the launch sites only; see
+        // requiredWorkspaceSize() for why the resulting divergence is bounded.
+        //
+        // Unconditional, not uniform-summation-order enforcement: F < 2 is
+        // unlaunchable for parallel whatever the mode, and solve() still throws
+        // on the triple. Demoting here keeps that throw unreachable.
         inline origami::reduction_t streamKReconcileReduction(
             origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
         {
@@ -3884,31 +3945,26 @@ namespace TensileLite
                 rv.push_back(generateBetaOnlyCall<false>(problem, inputs));
         }
 
-        StreamKSettings  sk;
-        StreamKDecisions skDecisions;
+        StreamKSettings sk;
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            // Single source of truth: compute the StreamK launch decisions once
-            // (also consumed by the diagnostic launch summary and unit tests) and
-            // consume them here. computeStreamKDecisions() owns the reduction /
-            // grid / workspace-DP-fallback logic and reuses the same helpers, so
-            // the decisions ARE what is launched.
-            //
-            // The dynamic-queue guard below consumes skDecisions.isDynamic, so
-            // this call has to precede it -- which moves getSKReduction(),
-            // getSKGridImpl() and the workspace sizing ahead of that rejection.
-            // That is safe rather than free: the call mutates no solution or
-            // problem state and launches nothing, so the guard still throws before
-            // any kernel-arg packing or kernel launch. It is not, however,
-            // output-free -- the helpers it calls can write TENSILE_DB diagnostics
-            // to stderr (streamK5EffectiveDynamic's SK5 mode-selection note under
-            // 0x100000, getSKGridImpl's CU-occupancy and flag-region-clamp notes
-            // under printPropertyEvaluation). The clamp note is reachable on a
-            // guard-rejected launch: it fires on the same dynamic-queue path the
-            // guard rejects. So a solution rejected below may already have
-            // printed one line under printPropertyEvaluation.
-            skDecisions = computeStreamKDecisions(problem, hardware);
+            // Deliberate deviation from the previous ordering, which called
+            // computeStreamKDecisions() ahead of the guard and used
+            // skDecisions.isDynamic as the predicate. Here the predicate is
+            // derived inline from the cheap SK5 sub-mode query, so the XCD
+            // support guard runs BEFORE any grid / reduction / workspace work:
+            // the decisions call would redo getSKReduction() and getSKGridImpl()
+            // on the hot dispatch path, and its helpers can write TENSILE_DB
+            // diagnostics to stderr, so a solution the guard is about to reject
+            // would already have printed. The predicate value is unchanged --
+            // computeStreamKDecisions() feeds the same effectiveDynamic to the
+            // same streamKUsesDynamicQueue(). It is still called below, but only
+            // when the diagnostic launch summary is enabled.
+            const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                              ? streamK5EffectiveDynamic(problem, hardware)
+                                              : false;
+            const bool dynamicQueuePath = streamKUsesDynamicQueue(sizeMapping, effectiveDynamic);
             // Defensive: dynamic-queue / work-stealing StreamK solutions are
             // excluded from selection on devices whose runtime XCD count is not
             // a power of two or does not equal the baked per-XCD queue count
@@ -3920,7 +3976,6 @@ namespace TensileLite
             // reject EXPLICITLY rather than silently running the fixed-mask
             // kernel with a mismatched queue count (which would corrupt
             // results).
-            const bool dynamicQueuePath = skDecisions.isDynamic;
             if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
             {
                 warnStreamKDynamicQueueUnsupportedOnce(hardware);
@@ -3944,37 +3999,42 @@ namespace TensileLite
                     "Select a non-work-stealing solution instead.");
             }
 
-            // Consume the reduction / grid decided above. resolveStreamKSettings()
-            // is the single source of truth for what is launched: it runs the same
-            // reduction selection, the same getSKGridImpl() call and the same
-            // workspace-insufficient DP fallback that computeStreamKDecisions()
-            // reports on, and additionally applies streamKReconcileReduction() so
-            // requiredWorkspaceSize() and the launch cannot disagree.
-            // computeStreamKDecisions() mirrors that reconciliation at the same
-            // point, so the snapshot above and the settings below carry the same
-            // (reduction, grid) pair; the re-wire after the guard re-asserts it.
-            sk = resolveStreamKSettings(problem, hardware);
+            // resolveStreamKSettings() produces what solve() launches: it runs
+            // the same reduction selection, the same getSKGridImpl() call and
+            // the same workspace-insufficient DP fallback requiredWorkspaceSize()
+            // reports on, and additionally applies streamKReconcileReduction()
+            // (see the note there for the SK4 / SK5-dynamic caveat, where query
+            // and launch can still differ).
+            sk = resolveStreamKSettings(
+                problem, hardware, sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
 
-            // Defensive only: resolveStreamKSettings() runs
-            // streamKReconcileReduction() on the final grid, which demotes
-            // parallel to tree exactly when this condition would hold, so this
-            // is unreachable. Kept so a future path that builds a
-            // StreamKSettings without that reconciliation still fails loudly
-            // rather than launching a fixup kernel with nothing to reduce.
-            if(tiles != 0 && sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
+            // Defense in depth: resolveStreamKSettings() demotes every
+            // (parallel, F < 2) triple to tree, so this cannot fire today. Keep
+            // it so a future path that bypasses that demotion fails loudly
+            // rather than launching an inexpressible reduction.
+            //
+            // Deliberate behavior change: tiles == 0 throws here instead of
+            // dividing by zero (grouped-GEMM callers report 0 tiles).
+            if(sk.reduction == origami::reduction_t::parallel && (tiles == 0 || sk.grid / tiles < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
             }
 
-            // Wire the FINAL launch grid and reduction from the values solve()
-            // actually launches with (post all fallbacks, post reconciliation), so
-            // the diagnostic summary can never drift from the real launch.
-            skDecisions.finalGrid = sk.grid;
-            skDecisions.skGrid    = sk.grid;
-            skDecisions.reduction = sk.reduction;
+            // Diagnostics only, and built lazily for the two reasons given above
+            // the guard: computeStreamKDecisions() repeats getSKReduction() /
+            // getSKGridImpl(), and its stderr notes must not print for a launch
+            // the guard already rejected. Grid and reduction are overwritten from
+            // the values solve() launches with (post all fallbacks, post
+            // reconciliation), so the summary cannot drift from the real launch.
             if(Debug::Instance().printStreamKLaunchSummary())
+            {
+                StreamKDecisions skDecisions = computeStreamKDecisions(problem, hardware);
+                skDecisions.finalGrid = sk.grid;
+                skDecisions.skGrid    = sk.grid;
+                skDecisions.reduction = sk.reduction;
                 printStreamKLaunchSummary(std::cerr, problem, skDecisions);
+            }
         }
 
         GSUSettings gsuSettings;
@@ -4400,16 +4460,20 @@ namespace TensileLite
                 const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
-                // Mirror solve()'s SK4 / SK5-dynamic tree forcing so the grid
-                // and workspace reported here match the launch reduction.
-                origami::reduction_t reductionStrat;
-                if(sizeMapping.streamK == 4)
-                    reductionStrat = origami::reduction_t::tree;
-                else if(sizeMapping.streamK == 5)
-                    reductionStrat = effectiveDynamic ? origami::reduction_t::tree
-                                                      : getSKReduction(problem, hardware);
-                else
-                    reductionStrat = getSKReduction(problem, hardware);
+                // getSKReduction() decides here for every StreamK mode, unlike
+                // resolveStreamKSettings() / computeStreamKDecisions(), which pin
+                // SK4 and SK5-dynamic to tree, so this query can report the
+                // parallel size while the launch runs tree. That cannot overrun
+                // the caller's buffer: the launch reserves partial tiles only
+                // when they fit the workspace it is given and otherwise falls
+                // back to DP, so an under-report costs the partial-tile path,
+                // not memory safety. Absent a fixed grid (skFixedGrid == 0) the
+                // reconcile below erases the divergence for these modes anyway --
+                // they take the work-item branch of getSKGridImpl(), which
+                // ignores the strategy and yields skGrid <= tiles, so splitk < 2
+                // demotes the query to tree too. Under skFixedGrid the grid is
+                // the user's and the divergence can persist.
+                auto   reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGridImpl(*this,
                                               problem,
                                               hardware,
@@ -4575,9 +4639,13 @@ namespace TensileLite
 
         if(!sizeMapping.customKernelName.empty() || handwrittenCustomKernel())
         {
-            // Custom kernels currently only support single-kernel (tree) reduction.
-            // YAML records set sizeMapping.customKernelName; handwritten kernels
-            // are identified by customKernel.name && !generated.
+            // Custom kernels currently only support single-kernel (tree)
+            // reduction. Both spellings are checked, though today the second is
+            // implied by the first: customKernel.name is only ever the copy of
+            // sizeMapping.customKernelName made by the ContractionSolution
+            // MappingTraits in Serialization/ContractionSolution.hpp, and
+            // nothing sets customKernel.generated. Kept for a future path that
+            // populates customKernel directly.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
@@ -4814,20 +4882,26 @@ namespace TensileLite
     }
 
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,
-                                                                Hardware const& hardware) const
+                                                                Hardware const& hardware,
+                                                                bool const* effectiveDynamicHint) const
     {
         StreamKSettings sk;
         if(sizeMapping.streamK == 0)
             return sk;
 
         auto tiles = problem.getNumTiles(sizeMapping, 1);
-        const bool effectiveDynamic = (sizeMapping.streamK == 5)
-                                          ? streamK5EffectiveDynamic(problem, hardware)
-                                          : false;
-        const bool dynamicQueuePath
-            = (sizeMapping.streamK == 4)
-              || (sizeMapping.streamK == 5 && effectiveDynamic);
-
+        // Take the caller's already-resolved sub-mode when offered: resolving it
+        // is not free (see the note in getSKGridImpl), and solve() has it.
+        const bool effectiveDynamic
+            = (sizeMapping.streamK == 5)
+                  ? (effectiveDynamicHint != nullptr ? *effectiveDynamicHint
+                                                     : streamK5EffectiveDynamic(problem, hardware))
+                  : false;
+        // Pinning SK4 and SK5-resolved-dynamic to tree is a launch-site rule:
+        // requiredWorkspaceSize() always asks getSKReduction() and has no such
+        // special case, so a dynamic-queue launch can be sized for parallel and
+        // then run tree -- see the note there on why that is not a memory-safety
+        // problem.
         if(sizeMapping.streamK == 4)
             sk.reduction = origami::reduction_t::tree;
         else if(sizeMapping.streamK == 5)
@@ -4854,18 +4928,17 @@ namespace TensileLite
            && (sk.reduction == origami::reduction_t::parallel
                || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
         {
+            // The workspace holds the partial tiles only. The per-XCD work-queue
+            // counters live at the base of the flag buffer (AddressFlags), not
+            // here, so they need no room in it: the kernel builds SrdWS solely
+            // from AddressWS (computeWorkspaceSrd() in StreamK.py) while the
+            // queue counters are addressed off AddressFlags (layout documented
+            // above _wsQueueConstants() in StreamK.py). A per-queue-stride
+            // reservation here would therefore have reserved bytes nothing ever
+            // addresses, and would have made this launch-path threshold disagree
+            // with the two workspace-size queries (requiredWorkspaceSize() and
+            // computeStreamKDecisions()), which carry no such term.
             size_t idealWorkspace = partialTileSize(sk.grid);
-            // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-            // sizes like standalone SK3. The region is sized as (per-queue
-            // stride) * (baked per-XCD queue count), both sourced from origami:
-            // the stride is the L2 cache-line size (get_default_cache_line_bytes,
-            // 128 B for gfx942/gfx950) so each counter owns its line (no false
-            // sharing), and the queue count is the per-arch XCD count. The
-            // acceptance guard requires runtime NUM_XCD == baked, so this equals
-            // cacheLineBytes * NUM_XCD for every device that reaches here.
-            if(dynamicQueuePath)
-                idealWorkspace
-                    += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
             // If given workspace is less than ideal, we can fall back to DP mode
             // Performance will likely be lower, but the kernel can run if workspace is unavailable.
             // (The non-power-of-two XCD case is handled earlier by explicit
@@ -5105,7 +5178,7 @@ namespace TensileLite
         // admissible solution reports which clauses emptied it, which is the
         // only way to tell "uniform summation order refused everything" from
         // "nothing matched this problem in the first place". Tallying is off
-        // unless TENSILE_DB bit 0x200000 is set and never changes the verdict.
+        // unless TENSILE_DB bit 0x400000 is set and never changes the verdict.
         char const*       obstacleToken = nullptr;
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, sk, resolvedGA, gsu, nullptr, false, &obstacleToken);
@@ -5244,11 +5317,22 @@ namespace TensileLite
                                              pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
                                              sizeMapping.streamKForceDPOnly != 0);
 
+                    // Capability AND the mode bit: the packer only sets
+                    // MagicShiftItersPerTile bit 29 -- the bit the kernel
+                    // branches on -- when both hold, so both have to be modelled
+                    // here. The mode term is currently always true here (both
+                    // callers of uniformSummationOrderLaunchObstacle() return
+                    // early when the mode is off); it is passed explicitly so the
+                    // helper keeps meaning "the mapping the device will perform"
+                    // if this region is ever refactored.
+                    const bool perTileActive = internalArgsSupport.perTileExtraIters
+                                               && problem.getParams().uniformSummationOrder();
                     if(!streamKStaticSplitRowUniform(split,
                                                      tiles,
                                                      itersPerTile,
                                                      sk.grid,
-                                                     internalArgsSupport.perTileExtraIters))
+                                                     internalArgsSupport.perTileExtraIters,
+                                                     problem.getParams().uniformSummationOrder()))
                         return refuse(
                             "StaticSplitNotRowUniform",
                             "the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
@@ -5257,8 +5341,7 @@ namespace TensileLite
                                 + " skTiles=" + std::to_string(split.skTiles)
                                 + " skItersPerWG=" + std::to_string(split.skItersPerWG)
                                 + " extraIters=" + std::to_string(split.extraIters)
-                                + " perTileExtraIters="
-                                + (internalArgsSupport.perTileExtraIters ? "1" : "0"));
+                                + " perTileExtraIters=" + (perTileActive ? "1" : "0"));
                 }
                 else if(tiles % sk.grid != 0)
                 {
@@ -5590,7 +5673,13 @@ namespace TensileLite
                         = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
                     // Matches origami::streamk MinItersPerCU (streamk.cpp).
                     constexpr size_t MinItersPerCU = 8;
-                    const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters;
+                    // "will RUN", not "is supported": the device branches on the
+                    // packed uniform-summation-order bit, which the packer sets
+                    // only when both terms hold. The mode term is redundant under
+                    // the enclosing uniformSummationOrder() test but keeps the
+                    // local meaning what the search below assumes.
+                    const bool perTileExtraIters = self.internalArgsSupport.perTileExtraIters
+                                                   && problem.getParams().uniformSummationOrder();
 
                     // The flag-region bound is a constraint ON this selection, not
                     // a correction applied after it. Every grid this snap can emit
@@ -5825,8 +5914,8 @@ namespace TensileLite
     //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
     //
     // The partials-workspace guard reserves iff (reduction==parallel || tiles%grid!=0),
-    // sized as partialTileSize(grid) (+ the per-XCD work-queue region on the dynamic
-    // path); the reservation does not depend on dynamicPartialsSlots. The
+    // sized as partialTileSize(grid); the reservation does not depend on
+    // dynamicPartialsSlots. The
     // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
     // locally) purely for reporting.
     StreamKDecisions

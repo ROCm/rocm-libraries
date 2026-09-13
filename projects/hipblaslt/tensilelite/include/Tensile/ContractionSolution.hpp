@@ -149,7 +149,11 @@ namespace TensileLite
 
         dim3 clusterDim{1, 1, 1};
 
-        dim3 workGroupSize;
+        // getSKGridImpl divides by workGroupSize to derive its tile cap, so an
+        // unset value is read before any solution is deserialized (dim3 has no
+        // member initializers of its own). Zero keeps that cap at its maximum,
+        // which is the behaviour from before the cap existed.
+        dim3 workGroupSize{0, 0, 0};
         dim3 threadTile;
         dim3 macroTile;
 
@@ -305,15 +309,24 @@ namespace TensileLite
      * @param tiles             The same batch-inclusive tile count fed to it.
      * @param itersPerTile      The same clamped iterations per tile fed to it.
      * @param skGrid            The resolved StreamK grid packed into the split.
-     * @param perTileExtraIters True when the selected kernel redistributes
+     * @param perTileCapable    True when the selected kernel CAN redistribute
      *                          Stream-K extras within each tile
-     *                          (InternalArgsSupport::perTileExtraIters).
+     *                          (InternalArgsSupport::perTileExtraIters). Capability
+     *                          only; the kernel branches on it at runtime.
+     * @param uniformSummationOrder
+     *                          ContractionProblemParameters::uniformSummationOrder(),
+     *                          the host-side bit the packer forwards to the device in
+     *                          MagicShiftItersPerTile bit 29. The per-tile mapping runs
+     *                          only when this AND perTileCapable hold; otherwise the
+     *                          kernel runs the historical global first-E mapping.
      */
-    TENSILELITEHOST_EXPORT bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
-                                                            size_t                    tiles,
-                                                            size_t                    itersPerTile,
-                                                            size_t                    skGrid            = 0,
-                                                            bool                      perTileExtraIters = false);
+    TENSILELITEHOST_EXPORT bool
+        streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
+                                     size_t                    tiles,
+                                     size_t                    itersPerTile,
+                                     size_t                    skGrid                = 0,
+                                     bool                      perTileCapable        = false,
+                                     bool                      uniformSummationOrder = false);
 
     /**
      * Whether a resolved Stream-K launch may use parallel reduction under
@@ -336,8 +349,9 @@ namespace TensileLite
 
     /**
      * Iteration range [start, end) assigned to workgroup w under the static
-     * two-tile StreamK mapping. When perTileExtraIters is true and
-     * skGrid % tiles == 0, extras are distributed within each tile;
+     * two-tile StreamK mapping. Extras are distributed within each tile when
+     * skGrid % tiles == 0 and both perTileCapable (InternalArgsSupport::perTileExtraIters)
+     * and uniformSummationOrder hold -- the pair the kernel branches on at runtime;
      * otherwise the historical global first-E mapping is used.
      */
     struct StreamKWorkgroupIterRange
@@ -351,7 +365,8 @@ namespace TensileLite
         size_t tiles,
         size_t itersPerTile,
         size_t skGrid,
-        bool   perTileExtraIters);
+        bool   perTileCapable,
+        bool   uniformSummationOrder);
 
     /**
      * Thrown when a launch requests uniform summation order but the resolved
@@ -477,15 +492,15 @@ namespace TensileLite
         // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
         // grid / tiles) instead of partialTileSize(grid).
         //
-        // The two could in principle disagree about WHETHER a workspace is needed,
-        // not just about how many bytes: at a k-split factor grid / tiles of 1,
+        // The two can disagree about WHETHER a workspace is needed, not just how
+        // many bytes: at a k-split factor grid / tiles of 1,
         // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
-        // does not, so a parallel reduction whose grid came back equal to tiles
-        // would reserve here and not there. That case is unreachable -- both call
-        // sites run streamKReconcileReduction() on the same (reduction, grid, tiles)
-        // triple immediately after getSKGridImpl(), and it demotes parallel to tree
-        // whenever the split factor is below 2, so neither sizing ever sees parallel
-        // at a split of 1. The formulas differ; the reserve-or-not answer does not.
+        // does not, so a parallel reduction whose grid came back equal to tiles would
+        // reserve here and not there. Both call sites run streamKReconcileReduction()
+        // on the same (reduction, grid, tiles) triple immediately after
+        // getSKGridImpl(), and it demotes parallel to tree below a split factor of 2
+        // unconditionally -- uniform summation order does not gate it -- so the gap
+        // closes in both modes. The formulas differ; the reserve-or-not answer does not.
         //
         // That agreement is load-bearing rather than incidental: it is what lets the
         // allocate-then-launch flow close. The allocator sizes from
@@ -539,7 +554,7 @@ namespace TensileLite
      * The tally is thread-local and covers the candidates examined since the
      * last reset, which a caller performs immediately before a lookup.
      *
-     * Everything here is inert unless TENSILE_DB bit 0x200000 is set: recording
+     * Everything here is inert unless TENSILE_DB bit 0x400000 is set: recording
      * is a branch on a cached flag, so no counting, formatting or allocation
      * happens on a normal run. It is a dedicated bit rather than a log level so
      * that enabling it does not also switch on per-call tracing.
@@ -746,10 +761,14 @@ namespace TensileLite
         size_t               partialTileSize(size_t skGrid) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
-        // given problem/hardware. solve() consumes the reduction strategy, grid,
-        // isDynamic predicate, and workspace/DP fallback from here to populate
-        // StreamKSettings -- this is the only place that logic lives -- and it is
-        // also directly callable from unit tests. Existing helpers are reused where
+        // given problem/hardware. solve() does NOT consume this on the hot path:
+        // it builds StreamKSettings from resolveStreamKSettings() and derives the
+        // dynamic-queue predicate inline, and calls this only under
+        // Debug::printStreamKLaunchSummary(). Both paths run the same reduction /
+        // grid / workspace-DP-fallback helpers, so the decisions reported here
+        // are the launch values; keeping them in step is a maintenance
+        // obligation, not a structural guarantee. Also directly callable from
+        // unit tests. Existing helpers are reused where
         // possible (streamK5EffectiveDynamic, getSKReduction, getSKGridImpl,
         // partialTileSize); the makeArgs packing quantities are re-derived. Each
         // StreamKDecisions field documents its own provenance (available vs
@@ -1111,8 +1130,14 @@ namespace TensileLite
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.
+        //
+        // effectiveDynamicHint, when non-null, is the SK5 sub-mode the caller
+        // already resolved for this (problem, hardware); it avoids a second
+        // streamK5EffectiveDynamic() call, which can run the origami hybrid-mode
+        // heuristic. Null recomputes.
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
-                                               Hardware const& hardware) const;
+                                               Hardware const& hardware,
+                                               bool const* effectiveDynamicHint = nullptr) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
