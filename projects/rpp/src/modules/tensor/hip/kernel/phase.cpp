@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <type_traits>
+
 #include "hip_tensor_executors.hpp"
 
 __device__ void phase_hip_compute(uchar* srcPtr, d_float8* src1_f8, d_float8* src2_f8,
@@ -128,7 +130,10 @@ __global__ void phase_pkd_hip_tensor(T* srcPtr1, T* srcPtr2, uint2 srcStridesNH,
     phase_hip_compute(srcPtr1, &src1_f24.f8[0], &src2_f24.f8[0], &dst_f24.f8[0]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[1], &src2_f24.f8[1], &dst_f24.f8[1]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[2], &src2_f24.f8[2], &dst_f24.f8[2]);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
@@ -154,7 +159,10 @@ __global__ void phase_pln_hip_tensor(T* srcPtr1, T* srcPtr2, uint3 srcStridesNCH
     rpp_hip_load8_and_unpack_to_float8(srcPtr1 + srcIdx, &src1_f8);
     rpp_hip_load8_and_unpack_to_float8(srcPtr2 + srcIdx, &src2_f8);
     phase_hip_compute(srcPtr1, &src1_f8, &src2_f8, &dst_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
     if (channelsDst == 3) {
         srcIdx += srcStridesNCH.y;
@@ -163,7 +171,10 @@ __global__ void phase_pln_hip_tensor(T* srcPtr1, T* srcPtr2, uint3 srcStridesNCH
         rpp_hip_load8_and_unpack_to_float8(srcPtr1 + srcIdx, &src1_f8);
         rpp_hip_load8_and_unpack_to_float8(srcPtr2 + srcIdx, &src2_f8);
         phase_hip_compute(srcPtr1, &src1_f8, &src2_f8, &dst_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
@@ -171,7 +182,10 @@ __global__ void phase_pln_hip_tensor(T* srcPtr1, T* srcPtr2, uint3 srcStridesNCH
         rpp_hip_load8_and_unpack_to_float8(srcPtr1 + srcIdx, &src1_f8);
         rpp_hip_load8_and_unpack_to_float8(srcPtr2 + srcIdx, &src2_f8);
         phase_hip_compute(srcPtr1, &src1_f8, &src2_f8, &dst_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
     }
 }
 
@@ -199,7 +213,11 @@ __global__ void phase_pkd3_pln3_hip_tensor(T* srcPtr1, T* srcPtr2, uint2 srcStri
     phase_hip_compute(srcPtr1, &src1_f24.f8[0], &src2_f24.f8[0], &dst_f24.f8[0]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[1], &src2_f24.f8[1], &dst_f24.f8[1]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[2], &src2_f24.f8[2], &dst_f24.f8[2]);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
 
 template <typename T>
@@ -226,7 +244,10 @@ __global__ void phase_pln3_pkd3_hip_tensor(T* srcPtr1, T* srcPtr2, uint3 srcStri
     phase_hip_compute(srcPtr1, &src1_f24.f8[0], &src2_f24.f8[0], &dst_f24.f8[0]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[1], &src2_f24.f8[1], &dst_f24.f8[1]);
     phase_hip_compute(srcPtr1, &src1_f24.f8[2], &src2_f24.f8[2], &dst_f24.f8[2]);
-    rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pkd3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &dst_f24);
+    else
+        rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
