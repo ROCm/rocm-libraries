@@ -14,6 +14,17 @@ add_library(
 
 add_subdirectory(engines)
 
+# --- kpack C runtime library (needed by ASM SDPA and/or kernel ingestor) ---
+# find_package lives here (not in asm_sdpa_engine/) so the imported target is
+# visible to _impl, _private, and the shared hip_kernel_provider.
+set(KPACK_NEEDED FALSE)
+if(ENABLE_ASM_SDPA_ENGINE OR HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(KPACK_NEEDED TRUE)
+    if(NOT TARGET rocm::rocm_kpack)
+        find_package(rocm-kpack CONFIG REQUIRED)
+    endif()
+endif()
+
 target_include_directories(hip_kernel_provider_impl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../include
@@ -22,6 +33,12 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 )
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_impl PRIVATE dl)
+    endif()
+endif()
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(hip_kernel_provider_impl PROPERTIES
@@ -40,6 +57,12 @@ target_include_directories(hip_kernel_provider_private PUBLIC
 target_link_libraries(hip_kernel_provider_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip_kernel_provider_impl)
 if(ENABLE_ASM_SDPA_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
+endif()
+if(KPACK_NEEDED)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider_private PUBLIC dl)
+    endif()
 endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
@@ -94,22 +117,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         compilation/KpackKernelLoader.cpp
         compilation/KpackProgram.cpp
     )
-
-    # The object library gets rocm::rocm_kpack for its include directories; the two
-    # targets that actually link have to name it themselves, because they consume the
-    # objects via $<TARGET_OBJECTS:...>, which carries no link interface.
-    target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
-    target_link_libraries(hip_kernel_provider_private PUBLIC rocm::rocm_kpack)
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
-
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # See the note above hip_kernel_provider_impl: $<TARGET_OBJECTS:...> carries no link
-    # interface, so the plugin has to name the kpack reader itself.
+if(KPACK_NEEDED)
+    # $<TARGET_OBJECTS:...> carries no link interface, so the plugin has to name
+    # the kpack reader itself (same for _private above).
     target_link_libraries(hip_kernel_provider PRIVATE rocm::rocm_kpack)
+    if(NOT WIN32)
+        target_link_libraries(hip_kernel_provider PRIVATE dl)
+    endif()
 endif()
 
 if(NOT WIN32)
@@ -186,10 +205,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
-        # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
-        # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by
-        # dnn-providers/cmake/Tests.cmake since the raw test name below is never
-        # itself registered as a CTest test in this YAML-categorized mode.
+        # merged with any per-target ENVIRONMENT passed to add_integration_test_target(),
+        # published by dnn-providers/cmake/Tests.cmake since the raw test name below is
+        # never itself registered as a CTest test in this YAML-categorized mode.
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
