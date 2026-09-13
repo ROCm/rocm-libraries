@@ -82,6 +82,25 @@ std::unordered_map<int64_t, void*>
 
 void BundleReferenceValidationHarness::TestBody()
 {
+    // Checked before any allocation: a known-gap bundle never reaches execution, and
+    // building a variant pack for a graph the reference will decline is wasted work.
+    if(const auto* gap = findKnownReferenceGap(_referenceType, _bundleId); gap != nullptr)
+    {
+        IReferenceGraphExecutor& gapExecutor = referenceExecutor();
+        const bool applicable
+            = gapExecutor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+
+        // Inverted on purpose. The entry says this reference cannot run this graph;
+        // if it can now, the entry is stale and the bundle should be validated for
+        // real. Failing here is how the list gets deleted.
+        ASSERT_FALSE(applicable)
+            << referenceLabel(_referenceType) << " now reports this graph applicable, but "
+            << _bundleId << " is still listed in knownReferenceGaps() as: " << gap->reason
+            << "\n  Remove that entry so the bundle is validated against its golden data."
+            << "\n  bundle: " << _bundlePath;
+        return;
+    }
+
     auto referenceOutputs = allocateOutputs();
     auto variantPack = buildVariantPack(referenceOutputs);
 
@@ -96,7 +115,8 @@ void BundleReferenceValidationHarness::TestBody()
             << referenceLabel(_referenceType)
             << " is required to support this graph (its node types are in the reference's "
                "supported-op set) but reports it is not applicable: "
-            << _bundlePath;
+            << _bundlePath
+            << "\n  If this gap is known and tracked, add an entry to knownReferenceGaps().";
 
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
