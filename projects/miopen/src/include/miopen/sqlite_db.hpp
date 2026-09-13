@@ -265,7 +265,7 @@ public:
         }
     }
 
-    static Derived& GetCached(const fs::path& path, bool is_system);
+    static Derived& GetCached(DbKinds db_kind, const fs::path& path, bool is_system);
     // TODO: Fix this for the overhead of having fields per record
 
     inline auto CheckTableColumns(const std::string& tableName,
@@ -296,6 +296,7 @@ public:
         using Ret = decltype(reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...));
         if(disable_file_io)
             return Ret{};
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...);
     }
 
@@ -304,6 +305,7 @@ public:
     {
         if(disable_file_io)
             return true;
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->RemoveRecordUnsafe(args...);
     }
 
@@ -312,6 +314,7 @@ public:
     {
         if(disable_file_io)
             return true;
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->StoreRecordUnsafe(args...);
     }
 
@@ -320,6 +323,7 @@ public:
     {
         if(disable_file_io)
             return true;
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->RemoveUnsafe(args...);
     }
 
@@ -329,6 +333,7 @@ public:
         using Ret = decltype(reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...));
         if(disable_file_io)
             return Ret{};
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...);
     }
 
@@ -337,6 +342,7 @@ public:
     {
         if(disable_file_io)
             return false;
+        const std::lock_guard<std::mutex> lock{instance_mutex};
         return reinterpret_cast<Derived*>(this)->LoadUnsafe(args...);
     }
 
@@ -350,24 +356,33 @@ public:
     /// behind IsUserDbDisabled() is flipped between constructions. Always false for the system
     /// databases, which the user-db switch does not govern.
     const bool disable_file_io;
+
+    /// Per-instance mutex that guards SQLite operations when the instance is shared via GetCached.
+    mutable std::mutex instance_mutex;
 };
 
+/// Cached instances are stored for process lifetime (static storage).
+/// Thread-safe: a static mutex guards the map, and a per-instance mutex (see instance_mutex)
+/// guards individual operations once instances are shared across threads.
+/// Keyed by path only — different DbKinds use different file extensions, so path is sufficient.
 template <typename Derived>
-Derived& SQLiteBase<Derived>::GetCached(const fs::path& path, bool is_system)
+Derived& SQLiteBase<Derived>::GetCached(DbKinds db_kind, const fs::path& path, bool is_system)
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex mutex;
     const std::lock_guard<std::mutex> lock{mutex};
 
+    // unique_ptr avoids requiring Derived to be movable (important with the per-instance mutex).
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static auto instances = std::map<fs::path, Derived>{};
+    static auto instances = std::map<fs::path, std::unique_ptr<Derived>>{};
     const auto it         = instances.find(path);
 
     if(it != instances.end())
-        return it->second;
+        return *it->second;
 
-    instances.emplace(path, Derived{path, is_system});
-    return instances.at(path);
+    auto& instance =
+        *instances.emplace(path, std::make_unique<Derived>(db_kind, path, is_system)).first->second;
+    return instance;
 }
 
 class SQLitePerfDb : public SQLiteBase<SQLitePerfDb>
