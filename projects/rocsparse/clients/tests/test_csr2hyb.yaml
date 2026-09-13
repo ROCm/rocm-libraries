@@ -31,6 +31,16 @@ Tests:
   function: csr2hyb_bad_arg
   precision: *single_double_precisions_complex_real
 
+# half-dense conversion whose padded ELL size ell_width * m overflows
+# a 32-bit product (40000 * 53688 > 2^31) while csr_nnz stays under 2^31. Reproduces
+# the pre-fix silent ELL under-allocation / out-of-bounds write. Needs ~26 GB device
+# (CSR input + padded ELL output), so the memory guard filters it out on smaller cards.
+- name: csr2hyb_extra
+  category: nightly
+  function: csr2hyb_extra
+  host_memory_gb: 12
+  device_memory_gb: 30
+
 - name: csr2hyb
   category: quick
   function: csr2hyb

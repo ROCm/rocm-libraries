@@ -444,14 +444,16 @@ struct test_hyb
     rocsparse_int           m;
     rocsparse_int           n;
     rocsparse_hyb_partition partition;
-    rocsparse_int           ell_nnz;
-    rocsparse_int           ell_width;
-    rocsparse_int*          ell_col_ind;
-    void*                   ell_val;
-    rocsparse_int           coo_nnz;
-    rocsparse_int*          coo_row_ind;
-    rocsparse_int*          coo_col_ind;
-    void*                   coo_val;
+    // Must mirror the layout of _rocsparse_hyb_mat: ell_nnz is 64-bit there so
+    // that ell_width * m cannot overflow when sizing the ELL allocations.
+    int64_t        ell_nnz;
+    rocsparse_int  ell_width;
+    rocsparse_int* ell_col_ind;
+    void*          ell_val;
+    rocsparse_int  coo_nnz;
+    rocsparse_int* coo_row_ind;
+    rocsparse_int* coo_col_ind;
+    void*          coo_val;
 };
 
 /*! \brief  local hyb matrix structure which is automatically created and destroyed  */
