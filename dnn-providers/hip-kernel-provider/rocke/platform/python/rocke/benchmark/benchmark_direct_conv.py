@@ -198,7 +198,7 @@ def parse_miopen_cmd_direct(cmd: str):
         PAD=miopen_args.pH,
         stride=sH,
     )
-    return problem, dtype
+    return problem, dtype, miopen_args.forw
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -933,8 +933,15 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt = parse_miopen_cmd_direct(line)
-                cases.append((prob, dt))
+                prob, dt, forw = parse_miopen_cmd_direct(line)
+                if forw & 1:
+                    cases.append((prob, dt))
+                else:
+                    print(
+                        f"[skip] {path}:{lineno}: -F={forw} is not forward (fwd); "
+                        f"wgrad/dgrad are not supported — skipping",
+                        file=sys.stderr,
+                    )
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
         if not cases:
@@ -942,9 +949,16 @@ def main() -> int:
             return 2
     elif args.miopen_cmd is not None:
         try:
-            prob, dt = parse_miopen_cmd_direct(args.miopen_cmd)
+            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd)
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
+            return 2
+        if not (forw & 1):
+            print(
+                f"error: --miopen-cmd: -F={forw} is not forward (fwd); "
+                f"wgrad/dgrad are not supported",
+                file=sys.stderr,
+            )
             return 2
         cases = [(prob, dt)]
     else:
