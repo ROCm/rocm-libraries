@@ -767,8 +767,13 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             J last_row         = info->adaptive.last_row;
             J required_threads = (first_row - 0) + (m - last_row);
 
-            dim3 scale_blocks((required_threads - 1) / gen_wg + 1);
-            dim3 scale_threads(gen_wg);
+            // Size the grid for the scale operation itself (previously this reused the adaptive
+            // kernel's grid). Clamp to the device maximum grid size; the kernel grid-strides over
+            // all required threads.
+            int64_t scale_wgs = rocsparse::min(int64_t((required_threads - 1) / gen_wg + 1),
+                                               int64_t(handle->properties.maxGridSize[0]));
+            dim3    scale_blocks(static_cast<uint32_t>(scale_wgs));
+            dim3    scale_threads(gen_wg);
 #define ROCSPARSE_LAUNCH_PARTIAL_SCALE_Y(GEN_WG)                     \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                              \
         (rocsparse::partial_scale_y_kernel<GEN_WG>),                 \
