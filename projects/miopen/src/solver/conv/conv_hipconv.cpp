@@ -255,6 +255,8 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
     if(!problem.Is2d() && !problem.Is3d())
         return false;
+    if(problem.HasNonPackedTensors())
+        return false;
     // fp16, bf16, and tf32 (fp32 data with tf32 compute enabled).
     if(!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.UseTF32()))
         return false;
