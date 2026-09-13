@@ -1,0 +1,29 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block target_tparams %}
+    template<class Target, class key_type, class value_type>
+{% endblock %}
+
+{% block config_guard scoped %}
+    {{ mk_kv_type_check(type) }}
+{% endblock %}
+
+{% block config_constructor -%}
+    segmented_radix_sort_config_params{
+        {{ config.radix_bits }},
+        kernel_config_params{ {{ config.block_size_x }}, {{  config.ipt }} },
+        warp_sort_config_params{{{ config.warp_partitioning_allowed }}, 
+                                {{ config.warp_small_lws }},
+                                {{ config.warp_small_ipt }},
+                                {{ config.warp_small_bs }},
+                                {{ config.warp_partition }},
+                                {{ config.warp_medium_lws }},
+                                {{ config.warp_medium_ipt }},
+                                {{ config.warp_medium_bs }}},
+        1
+    }
+{%- endblock %}
+
+{% block config_base_type -%}
+    segmented_radix_sort_config_params_base<key_type, value_type>
+{%- endblock %}

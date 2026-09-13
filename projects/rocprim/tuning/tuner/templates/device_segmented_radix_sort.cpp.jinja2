@@ -1,0 +1,51 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+    {% if value_type %}
+        #include "benchmark_device_segmented_radix_sort_pairs.hpp"
+    {% else %}
+        #include "benchmark_device_segmented_radix_sort_keys.hpp"
+    {% endif %}
+{% endblock %}
+
+{% block config_constructor -%}
+    rocprim::segmented_radix_sort_config<
+        {{ config.radix_bits }},
+        rocprim::kernel_config<{{ config.block_size_x }}, {{ config.ipt }}>,
+        rocprim::WarpSortConfig<{{ config.warp_small_lws }},
+                                {{ config.warp_small_ipt }},
+                                {{ config.warp_small_bs }},
+                                {{ config.warp_partition }},
+                                {{ config.warp_medium_lws }},
+                                {{ config.warp_medium_ipt }},
+                                {{ config.warp_medium_bs }}>,
+        true
+    >
+{%- endblock %}
+{% block benchmark_type %}
+    {% if value_type %}
+        using benchmark_type = device_segmented_radix_sort_pairs_benchmark<key_type, value_type, config>;
+    {% else %}
+        using benchmark_type = device_segmented_radix_sort_keys_benchmark<key_type, config>;
+    {% endif %}
+{% endblock %}
+
+{% block type_definitions %}
+    using key_type = {{ key_type }};
+    {% if value_type %}
+        using value_type = {{ value_type }};
+    {% else %}
+        using value_type = rocprim::empty_type;
+    {% endif %}
+{% endblock %}
+
+{% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+{% endblock %}
+
+{% block benchmark_queue %}
+    const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
+    const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
+    executor.queue<benchmark_type>(segment_counts, segment_lengths);
+{% endblock %}
+

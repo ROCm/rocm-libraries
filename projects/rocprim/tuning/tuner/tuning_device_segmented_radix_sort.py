@@ -26,70 +26,76 @@ import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
-from utils import TYPE_CONFIGS
-from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_VALUE_TYPES, COMMON_KEY_TYPES
+from utils import TYPE_CONFIGS, BASE_DIR
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
 
+"""
+Inclusive range for params tuning, edit these to adjust tuning grid range.
+"""
+RADIX_BITS = [8]
+BLOCK_SIZES = [256]
+IPT = [4, 8, 16]
+WARP_SMALL_LWS = [8]
+WARP_SMALL_IPT = [4]
+WARP_SMALL_BS = [256]
+WARP_PARTITION = [64]
+WARP_MEDIUM_LWS = [16]
+WARP_MEDIUM_IPT = [8]
+WARP_MEDIUM_BS = [256]
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name="device_merge")
+        return TunerArgs(algo_full_name='device_segmented_radix_sort')
 
-    def __init__(self, args: TunerArgs):
+    def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
-        """Returns tuning parameters and their possible values as an OrderedDict.
-        Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        params["block_size_x"] = list(range(64, 1025, 64))
-        params["ipt"] = [1, 2] + list(range(4, 33, 4))
+        params['radix_bits'] = RADIX_BITS
+        params['block_size_x'] = BLOCK_SIZES
+        params['ipt'] = IPT
+        params['warp_small_lws'] = WARP_SMALL_LWS
+        params['warp_small_ipt'] = WARP_SMALL_IPT
+        params['warp_small_bs'] = WARP_SMALL_BS
+        params['warp_partition'] = WARP_PARTITION
+        params['warp_medium_lws'] = WARP_MEDIUM_LWS
+        params['warp_medium_ipt'] = WARP_MEDIUM_IPT
+        params['warp_medium_bs'] = WARP_MEDIUM_BS
+        params['warp_partitioning_allowed'] = [1]
+
         return params
 
     def _get_restrictions(
-        self, key_type: str, value_type: Optional[str] = None
+        self, key_type: str, val_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
-        """Constraints for what parameter combinations are valid during tuning"""
-        size = self.bytes_size // TYPE_CONFIGS[key_type].size
-        element_size = TYPE_CONFIGS[key_type].size
-        if value_type:
-            element_size += TYPE_CONFIGS[value_type].size
+
+        key_size = TYPE_CONFIGS[key_type].size
+        TUNING_SHARED_MAX = 65536
 
         def validate(params):
-            block_size = params["block_size_x"]
-            ipt = params["ipt"]
+            bs = params['block_size_x']
+            ipt = params['ipt']
 
-            # Total size constraint
-            if block_size * ipt > size:
-                return False
-
-            # Memory size constraint
-            if block_size * ipt * element_size > 65536:
-                return False
-
-            # Block size constraint
-            if block_size > 1024:
-                return False
-
-            # Items per thread constraint - high ipts don't perform well
-            if ipt >= block_size:
-                return False
-
-            # High ipts on gfx1030 cause HSA_STATUS_ERROR_INVALID_ISA
-            if params.get("arch_name") == "gfx1030" and ipt > 28:
-                return False
-
-            return True
+            if not val_type:
+                return key_size * bs * ipt < TUNING_SHARED_MAX 
+            else:
+                val_size = TYPE_CONFIGS[val_type].size
+                return (key_size + val_size) * bs * ipt <= TUNING_SHARED_MAX
 
         return validate
 
     def tune_all(self) -> None:
-        """Tune for all key type and value type combinations"""
+        """Tune for all value type combinations"""
+
+        VALUE_TYPES = COMMON_VALUE_TYPES + [None]
+
         for key_type in COMMON_KEY_TYPES:
-            self.tune_type(key_type)
-            for value_type in COMMON_VALUE_TYPES:
+            for value_type in VALUE_TYPES:
                 self.tune_type(key_type, value_type)
 
 
 if __name__ == "__main__":
     Tuner.cli()
+    
