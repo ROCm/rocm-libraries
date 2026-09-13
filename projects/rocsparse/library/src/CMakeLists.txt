@@ -26,6 +26,9 @@ set(rocsparse_source
 
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/dnmat_transpose/rocsparse_dnmat_transpose.cpp
+  src/auxiliary/dnmat_copy_data/rocsparse_dnmat_copy_data.cpp
+  src/auxiliary/dnvec_copy_data/rocsparse_dnvec_copy_data.cpp
   src/auxiliary/rocsparse_error.cpp
 # Common
   src/common/rocsparse_singularity.cpp
