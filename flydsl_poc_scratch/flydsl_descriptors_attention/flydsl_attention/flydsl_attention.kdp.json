@@ -29,7 +29,8 @@
         "hsaco": "flash_attn_real_h32kv8_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -51,7 +52,8 @@
         "hsaco": "flash_attn_real_h8_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -73,7 +75,8 @@
         "hsaco": "flash_attn_real_h16_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -95,7 +98,8 @@
         "hsaco": "flash_attn_real_h8_d128_noncausal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -117,7 +121,8 @@
         "hsaco": "flash_attn_real_h16_d128_noncausal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -139,7 +144,8 @@
         "hsaco": "flash_attn_real_h32kv8_d128_causal_bf16_w4_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 4
       },
       "priority": 0
     },
@@ -161,7 +167,8 @@
         "hsaco": "flash_attn_real_h32kv8_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -183,7 +190,8 @@
         "hsaco": "flash_attn_real_h28kv4_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -205,7 +213,8 @@
         "hsaco": "flash_attn_real_h28kv4_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -227,7 +236,8 @@
         "hsaco": "flash_attn_real_h32kv32_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -249,7 +259,8 @@
         "hsaco": "flash_attn_real_h32kv32_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -271,7 +282,8 @@
         "hsaco": "flash_attn_real_h40kv8_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -293,7 +305,8 @@
         "hsaco": "flash_attn_real_h40kv8_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -315,7 +328,8 @@
         "hsaco": "flash_attn_real_h40kv40_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -337,7 +351,8 @@
         "hsaco": "flash_attn_real_h40kv40_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -359,7 +374,8 @@
         "hsaco": "flash_attn_real_h64kv4_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -381,7 +397,8 @@
         "hsaco": "flash_attn_real_h64kv4_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -403,7 +420,8 @@
         "hsaco": "flash_attn_real_h64kv8_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -425,7 +443,8 @@
         "hsaco": "flash_attn_real_h64kv8_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -447,7 +466,8 @@
         "hsaco": "flash_attn_real_h128kv8_d128_causal_bf16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     },
@@ -469,7 +489,8 @@
         "hsaco": "flash_attn_real_h128kv8_d128_causal_f16_gfx950.hsaco",
         "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0",
         "block_threads": 512,
-        "block_m": 256
+        "block_m": 256,
+        "waves_per_eu": 2
       },
       "priority": 0
     }

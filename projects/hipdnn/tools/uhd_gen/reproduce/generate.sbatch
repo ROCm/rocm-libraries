@@ -129,6 +129,10 @@ if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
     cp -r "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention/." "$COMPOSED"/
     HSACO_DIR="$SRC/flydsl_poc_scratch"
     if [ -n "${UHD_HSACO_DIR:-}" ] && [ -d "${UHD_HSACO_DIR}" ]; then
+        # Point the engine at the staged directory rather than copying into the source tree:
+        # dispatch raw-loads `metadata.hsaco` from exactly this path, and a copy that silently
+        # did not land reads as "cannot open HSACO" 185 graphs later (run 67932029).
+        HSACO_DIR="$UHD_HSACO_DIR"
         # Reuse the enablement job's binaries: the flyDSL compiler is a pip wheel whose
         # output must match the kernarg ABI the pack decodes, so the artifacts that were
         # already proven to launch are preferred over a fresh rebuild of the same source.
