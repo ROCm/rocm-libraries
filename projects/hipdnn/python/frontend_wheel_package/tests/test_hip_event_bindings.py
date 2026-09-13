@@ -4,6 +4,10 @@
 
 """Smoke tests for direct HIP runtime bindings."""
 
+import subprocess
+import sys
+import textwrap
+
 import pytest
 
 import hipdnn_frontend as fe
@@ -76,3 +80,49 @@ def test_stall_gate_raises_after_destroy() -> None:
         gate.arm(0)
     with pytest.raises(RuntimeError, match="destroyed"):
         gate.release()
+
+
+# Runs in a child process: the watchdog latch that this test trips is process-wide and
+# has no Python reset, so tripping it in-process would silently unstall every later test.
+_TIMEOUT_SCRIPT = textwrap.dedent(
+    """
+    import hipdnn_frontend as fe
+
+    gate = fe.HipStallGate()
+    gate.arm(0)
+    # Blocks until the watchdog writes the signal: only the host can release, and the
+    # host is right here, waiting on the stream it stalled.
+    fe.hip_stream_synchronize(0)
+    assert gate.timed_out(), "watchdog released the stall but did not report it"
+
+    # Reuse after a timeout must raise: stalling is off from here on, so a caller that
+    # got no exception would keep reading host-inflated times as device time.
+    try:
+        gate.arm(0)
+    except RuntimeError as err:
+        assert "watchdog" in str(err), err
+    else:
+        raise AssertionError("arm() silently declined after the watchdog timeout")
+
+    assert not gate.timed_out(), "a declined arm still reports the earlier timeout"
+    print("OK")
+    """
+)
+
+
+@pytest.mark.gpu
+def test_stall_gate_reports_timeout_and_refuses_reuse() -> None:
+    if fe.hip_get_device_count() <= 0:
+        pytest.skip("No HIP GPU available")
+    if not fe.hip_can_use_stream_wait_value():
+        pytest.skip("Device does not support hipStreamWaitValue32")
+
+    # Generous relative to the gate's 2 s budget, so a slow runner cannot fail this.
+    completed = subprocess.run(
+        [sys.executable, "-c", _TIMEOUT_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "OK" in completed.stdout

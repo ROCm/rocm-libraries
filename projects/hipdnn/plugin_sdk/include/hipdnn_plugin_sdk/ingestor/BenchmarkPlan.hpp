@@ -21,6 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -173,11 +174,17 @@ private:
     static Timer makeHipEventTimer()
     {
         auto events = std::make_shared<std::optional<detail::HipEventPair>>();
-        return [events](const IPlan<THandle>& plan,
-                        const THandle& handle,
-                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                        uint32_t numDeviceBuffers,
-                        void* workspace) -> std::optional<double> {
+        // Created on first use, like the event pair above: the timer is built in the
+        // BenchmarkPlan constructor, which can run before any device context exists, and
+        // a gate created then would be permanently unusable. Created once and then
+        // reused, since acquiring signal memory and a control stream on every sample
+        // would cost more than the submission gap the gate removes.
+        auto gate = std::make_shared<std::optional<hipdnn_data_sdk::utilities::StallGate>>();
+        return [events, gate](const IPlan<THandle>& plan,
+                              const THandle& handle,
+                              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                              uint32_t numDeviceBuffers,
+                              void* workspace) -> std::optional<double> {
             if(!events->has_value())
             {
                 events->emplace();
@@ -197,6 +204,27 @@ private:
             const auto stop = (*events)->stop.get();
             const auto stream = handle.getStream();
 
+            if(!gate->has_value())
+            {
+                gate->emplace();
+            }
+
+            // Stall the stream so the measured span excludes host submission. A false
+            // return means no stall is available and the timer keeps its prior behavior.
+            static_cast<void>((*gate)->arm(stream));
+
+            // Mandatory here, unlike the autotune path: plan.execute() below can throw,
+            // and an escaping exception with the gate armed would stall the stream
+            // permanently. release() is idempotent, so the explicit release below wins.
+            struct Release
+            {
+                hipdnn_data_sdk::utilities::StallGate* target;
+                ~Release()
+                {
+                    target->release();
+                }
+            } const releaseGuard{&gate->value()};
+
             if(hipEventRecord(start, stream) != hipSuccess)
             {
                 return std::nullopt;
@@ -204,8 +232,24 @@ private:
 
             plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
 
-            if(hipEventRecord(stop, stream) != hipSuccess
-               || hipEventSynchronize(stop) != hipSuccess)
+            if(hipEventRecord(stop, stream) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+
+            // Must precede the synchronize: a still-stalled stream never signals stop.
+            (*gate)->release();
+
+            if(hipEventSynchronize(stop) != hipSuccess)
+            {
+                return std::nullopt;
+            }
+
+            // A watchdog release means this plan blocked the host on its own stream, so
+            // the span contains the timeout rather than a measurement. Drop the sample:
+            // averaging it would swamp every good one. The first timeout also disables
+            // stalling process-wide, so later samples measure unstalled and succeed.
+            if((*gate)->timedOut())
             {
                 return std::nullopt;
             }
@@ -239,17 +283,40 @@ private:
         std::vector<std::pair<double, size_t>> ranked;
         ranked.reserve(_candidates.size());
 
-        for(size_t index = 0; index < _candidates.size(); ++index)
+        // A stall watchdog timeout is a change of measurement method, not a verdict on the
+        // candidate: the plan executed correctly, it just synchronizes inside the timed
+        // region and so cannot be measured with the stream stalled. Dropping it would cache
+        // a slower kernel, and keeping the earlier device-only scores would rank two
+        // incomparable populations, so the whole sweep is discarded and re-measured
+        // unstalled. The timeout disables stalling process-wide, so the second pass cannot
+        // arm, cannot time out, and this runs at most twice.
+        bool stalledPass = !hipdnn_data_sdk::utilities::StallGate::isStallingDisabled();
+        for(;;)
         {
-            const auto timeMs
-                = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
-            if(!timeMs.has_value())
+            ranked.clear();
+            for(size_t index = 0; index < _candidates.size(); ++index)
             {
-                // Omitted, never appended with a sentinel time: a candidate that failed to
-                // time must never be served ahead of the normal ranked path.
-                continue;
+                const auto timeMs
+                    = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
+                if(!timeMs.has_value())
+                {
+                    // Omitted, never appended with a sentinel time: a candidate that failed
+                    // to time must never be served ahead of the normal ranked path.
+                    continue;
+                }
+                ranked.emplace_back(*timeMs, index);
             }
-            ranked.emplace_back(*timeMs, index);
+
+            if(!stalledPass || !hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
+            {
+                break;
+            }
+
+            HIPDNN_PLUGIN_LOG_WARN(
+                "ingestor: a stall watchdog timeout ended device-only timing partway through "
+                "benchmarking, so this pass mixed device-only and host-included measurements. "
+                "Discarding it and re-measuring every candidate unstalled.");
+            stalledPass = false;
         }
 
         // stable_sort, not sort: ties must resolve to the lowest candidate index. A plain
@@ -315,6 +382,11 @@ protected:
             {
                 candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
             }
+
+            // Start the first armed iteration from a drained stream, so leftover warmup
+            // work is not measured. A failure only means that sample carries the prior
+            // behavior; throwing would score an otherwise-good candidate unusable.
+            static_cast<void>(hipStreamSynchronize(handle.getStream()));
 
             std::vector<double> samples;
             samples.reserve(BENCHMARK_ITERATIONS);

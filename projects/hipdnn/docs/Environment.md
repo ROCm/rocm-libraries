@@ -580,6 +580,188 @@ Error setGlobalLogLevel(hipdnnSeverity_t level)
 ```
 Sets hipDNN to the specified log level. Use `HIPDNN_SEV_OFF` to disable logging.
 
+## Measuring device kernel time
+
+### The problem
+
+A single HIP-event bracket around `hipdnnBackendExecute` does not measure kernel time:
+
+```c
+hipEventRecord(start, stream);
+hipdnnBackendExecute(handle, plan, variantPack);
+hipEventRecord(stop, stream);
+```
+
+The stream is idle when `start` is recorded, so `start` completes immediately. The device then
+stays idle while the host validates descriptors, dispatches the plan, and formats log records. All
+of that host time falls inside the `start`-to-`stop` span, so `hipEventElapsedTime` reports host
+submission cost added to kernel time. For a kernel below about 15 microseconds the host cost is
+most of the number, and a comparison between two engines can rank the slower kernel first.
+
+### The fix
+
+Use `HIPDNN_BACKEND_PROFILING_CONTROL_EXT` and stall the stream before recording `start`. The
+stall holds every later item on the stream -- the start event, the kernels, the stop event --
+until you release it. The host finishes all submission work while the stream is stalled, so the
+measured span begins when the device starts the work.
+
+```c
+hipdnnBackendDescriptor_t profiling;
+hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_PROFILING_CONTROL_EXT, &profiling);
+
+bool trigger = true;
+
+// 1. Bind the handle. This also creates the HIP events on the handle's stream.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_HANDLE_EXT,
+                          HIPDNN_TYPE_HANDLE, 1, &handle);
+
+// 2. Stall the stream. Everything queued after this point waits for the release.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_ARM_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 3. Queue the start event, the work, and the stop event. None of them run yet.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_START_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+hipdnnBackendExecute(handle, plan, variantPack);
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STOP_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 4. Release. The queued work now runs back to back with no host gap inside it.
+hipdnnBackendSetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, &trigger);
+
+// 5. Finalize synchronizes the stop event and computes the elapsed time.
+hipdnnBackendFinalize(profiling);
+
+float elapsedMs = 0.0f;
+hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
+                          HIPDNN_TYPE_FLOAT, 1, NULL, &elapsedMs);
+
+hipdnnBackendDestroyDescriptor(profiling);
+```
+
+Both attributes are write-only triggers. The boolean value is unused; the `setAttribute` call
+itself performs the action, as it does for `START`, `STOP`, and `DEVICE_SYNC`.
+
+`Graph::autotune()` and kernel-ingestor benchmark mode (`HIPDNN_FORCE_BENCHMARKING`) already use
+this sequence internally, so their reported times exclude host submission.
+
+**Notes:**
+- Set `HIPDNN_ATTR_PROFILING_HANDLE_EXT` before arming. Arming without a handle fails with
+  `HIPDNN_STATUS_BAD_PARAM`.
+- The stall needs `hipStreamWaitValue32` support. On a device without it, arming is silently
+  skipped and logs one informational message; the measurement still succeeds, but it includes host
+  submission overhead as it did before.
+- `hipdnnBackendFinalize` releases the stall before it synchronizes, and destroying the descriptor
+  releases and drains as well. An error path that skips `STALL_RELEASE` therefore cannot leave the
+  stream stalled.
+- Releasing without a preceding arm is a no-op success, so a caller need not track whether arming
+  worked.
+- Run one or more untimed warmup executions and one `HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT` before
+  the first timed iteration. The stall removes the submission gap inside a measurement; it does not
+  drain work that was queued before it.
+
+### Do not synchronize inside the measured region
+
+While the stall is armed, the stream is frozen and only the host can release it. Code between
+`STALL_ARM` and `STALL_RELEASE` must therefore not block the host on that stream. These calls
+deadlock if the executed plan makes them on the stalled stream:
+
+- `hipStreamSynchronize` on the stalled stream, or `hipDeviceSynchronize`
+- `hipEventSynchronize` on an event recorded on the stalled stream
+- a blocking `hipMemcpy` on the stalled stream
+- `hipMalloc` or `hipFree`, which synchronize the device implicitly
+
+Synchronizing a different stream that has no dependency on the stalled one is safe. Allocate
+workspace before arming, not inside the timed region.
+
+A watchdog bounds this rather than letting it hang. If the host has not released within the
+timeout, the watchdog writes the release itself, the stream drains, the blocked call returns, and
+execution continues. The measurement from that region is invalid, because it contains the timeout:
+
+```c
+bool stallTimedOut = false;
+hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, NULL, &stallTimedOut);
+/* Discard the sample when this is true; do not average it. */
+```
+
+A timeout also logs a warning and disables stalling for the rest of the run, because the cause
+is a property of the code being measured and re-arming would only produce another timeout. Later
+measurements then run unstalled and include host submission overhead. The disable is scoped to
+the hipDNN component that armed the gate, not to the whole process: hipDNN builds with hidden
+visibility, so the backend and a provider plugin each keep their own flag and neither can see
+the other's.
+
+Both benchmarking paths keep a comparison self-consistent rather than dropping the engine.
+`Graph::autotune()` and the kernel ingestor's benchmark mode discard the whole sweep that mixed
+the two measurement methods and re-measure every candidate unstalled, so no engine is rejected
+because the timer could not measure it, and no ranking compares a device-only time against a
+host-included one. The cost is one extra sweep, once.
+
+### Frontend convenience: `Graph.execute_timed_ext()`
+
+`Graph::execute_timed_ext()` (C++) and `Graph.execute_timed_ext()` (Python) measure the graph's
+active plan without exposing profiling descriptors. They share the one-shot timing implementation
+with `Graph::autotune()`, but do not use its warmup or retry policy. Normal `execute()` is unchanged.
+
+```c++
+#include <hipdnn_frontend.hpp>
+#include <iostream>
+
+hipdnn_frontend::ExecutionTiming timing;
+hipdnn_frontend::Error err = graph.execute_timed_ext(handle, variantPack, workspace, timing);
+if(err.is_bad())
+{
+    // Execution or profiling failed. Do not assume the plan has not executed.
+    std::cerr << err.get_message() << '\n';
+}
+else if(timing.quality == hipdnn_frontend::TimingQuality::INVALID)
+{
+    std::cerr << "Execution completed; watchdog invalidated the timing.\n";
+}
+else
+{
+    // timing.quality is DEVICE_ONLY (stall armed) or HOST_INCLUDED (arming was declined).
+    std::cout << *timing.elapsedMs << " ms, "
+              << (timing.quality == hipdnn_frontend::TimingQuality::DEVICE_ONLY
+                      ? "device-only" : "host-included") << '\n';
+}
+```
+
+```python
+import hipdnn_frontend as hipdnn
+
+err, timing = graph.execute_timed_ext(handle, variant_pack, workspace)
+if err.is_bad():
+    print(err.get_message())  # execution or profiling failed; elapsed_ms is None
+elif timing.quality == hipdnn.TimingQuality.INVALID:
+    print("Execution completed; watchdog invalidated the timing.")
+else:
+    print(timing.elapsed_ms, timing.quality)  # DEVICE_ONLY or HOST_INCLUDED
+```
+
+**Semantics:**
+- **Exactly once, blocking.** One `backendExecute` of the active plan, no warmup iteration and
+  no retry on a bad or invalid sample -- a caller that wants averaging (as `autotune()` does)
+  loops and calls this once per iteration itself. The call blocks until the timing is complete
+  (the stop event is synchronized before it returns).
+- **Allocate workspace first.** `workspace` must already be sized and allocated exactly as for
+  `execute()`; nothing here defers or resizes it, and allocating inside the timed region would
+  itself synchronize the device and corrupt the measurement (see above).
+- **Three-way `TimingQuality`:**
+  - `DEVICE_ONLY` -- the stall gate armed for this call; `elapsed_ms`/`elapsedMs` is device time
+    with the host submission gap removed.
+  - `HOST_INCLUDED` -- arming was declined (an unsupported device, or stalling already disabled
+    after an earlier watchdog timeout); execution still ran and still timed, but
+    the reported span includes host submission overhead exactly like a plain HIP-event bracket.
+  - `INVALID` -- either the watchdog released this call's stall (execution completed, but the
+    span includes the timeout and must be discarded), or the value is a default/never-measured
+    `ExecutionTiming`. `elapsed_ms`/`elapsedMs` is empty in both cases.
+- **A bad `Error` never carries a valid timing.** Execution failures and profiling failures
+  leave `elapsed_ms`/`elapsedMs` empty and `quality` at `INVALID`. A profiling failure can occur
+  after the plan executes; do not replay state-changing work merely because an error was returned.
+
 ## Error Handling
 
 hipDNN provides functions for retrieving error information:

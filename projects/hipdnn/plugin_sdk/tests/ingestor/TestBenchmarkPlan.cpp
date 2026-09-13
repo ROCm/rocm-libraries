@@ -15,6 +15,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -162,16 +163,19 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 // ---------------------------------------------------------------------------
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
-/// StubHandle (used by the oracle above) has no getStream(). The injected timer never
-/// records an event, so the null stream's behaviour never matters.
+/// StubHandle (used by the oracle above) has no getStream(). Defaults to the null stream,
+/// which never matters for the injected timers; the watchdog case below passes a real one,
+/// because the default timer arms the stall gate on whatever stream it is given.
 struct BenchmarkTestHandle
 {
+    hipStream_t stream = nullptr;
+
     // Non-static: models a real handle's instance accessor, which is what HasGetStream
     // detects.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
-        return nullptr;
+        return stream;
     }
 };
 
@@ -236,6 +240,27 @@ private:
     mutable const hipdnnPluginDeviceBuffer_t* _lastDeviceBuffers = nullptr;
     mutable uint32_t _lastNumDeviceBuffers = 0;
     mutable void* _lastWorkspace = nullptr;
+};
+
+/// Blocks the host on the handle's own stream from inside execute(). With the stall gate
+/// armed the stream cannot drain until the host releases, and the host is stuck here, so
+/// only the watchdog ends it. This is the exact shape of caller code the watchdog exists
+/// for: a plugin free to synchronize inside the region hipDNN is timing.
+class StreamSyncingPlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
+{
+public:
+    size_t getWorkspaceSize(const BenchmarkTestHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    void execute(const BenchmarkTestHandle& handle,
+                 const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                 uint32_t /*numDeviceBuffers*/,
+                 void* /*workspace*/ = nullptr) const override
+    {
+        static_cast<void>(hipStreamSynchronize(handle.getStream()));
+    }
 };
 
 using TestBenchmarkPlan = BenchmarkPlan<BenchmarkTestHandle>;
@@ -484,6 +509,60 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
     // still delegates exactly once.
     plan.execute(handle, nullptr, 0, nullptr);
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 2);
+}
+
+/// A watchdog timeout says the candidate cannot be measured with the stream stalled; it
+/// says nothing about how fast the candidate is. Before the fix the timed-out sample was
+/// scored unusable, so the candidate was dropped from the ranking entirely and a slower
+/// kernel was cached. The sweep now discards the mixed pass and re-measures every
+/// candidate unstalled, so both appear.
+///
+/// This is the real default timer against real HIP: the plan below synchronizes the very
+/// stream the gate stalls, which is the self-inflicted deadlock the watchdog exists for.
+TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutRemeasuresEveryCandidateInsteadOfDroppingOne)
+{
+    SKIP_IF_NO_DEVICES();
+
+    int canWaitValue = 0;
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWaitValue, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWaitValue == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    // The latch is process-wide and sticky, so clear it first: an earlier case that timed
+    // out would otherwise leave this sweep unstalled and nothing would be proven.
+    hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
+
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    const BenchmarkTestHandle handle{stream};
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+
+    std::vector<RankedEntry> recorded;
+    const TestBenchmarkPlan plan(
+        std::move(candidates),
+        handle,
+        TestBenchmarkPlan::Timer{},
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
+        << "the watchdog never fired, so this case proved nothing";
+    EXPECT_EQ(recorded.size(), 2U)
+        << "the timed-out candidate was dropped instead of re-measured unstalled";
+
+    hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
+    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
 }
 
 /// A one-candidate composite still samples before delegating to the only candidate.

@@ -5,8 +5,10 @@
 
 #include "BackendDescriptor.hpp"
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 struct hipdnnHandle;
@@ -35,13 +37,15 @@ using HipEventGuard = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEven
  *
  * Provides event-based GPU profiling for autotuning workloads.
  * The lifecycle is:
- *   1. setAttribute(PROFILING_HANDLE_EXT) -- store handle, extract stream, create events
- *   2. setAttribute(PROFILING_DEVICE_SYNC_EXT) -- optional: sync device before benchmark
- *   3. setAttribute(PROFILING_START_EXT)  -- record start event
- *   4. (run kernel on the same stream)
- *   5. setAttribute(PROFILING_STOP_EXT)   -- record stop event
- *   6. finalize()                         -- synchronize stop event, compute elapsed time
- *   7. getAttribute(PROFILING_ELAPSED_MS_EXT) -- read elapsed milliseconds
+ *   1. setAttribute(PROFILING_HANDLE_EXT)        -- store handle, extract stream, create events
+ *   2. setAttribute(PROFILING_DEVICE_SYNC_EXT)   -- optional: sync device before benchmark
+ *   3. setAttribute(PROFILING_STALL_ARM_EXT)     -- optional: stall the stream
+ *   4. setAttribute(PROFILING_START_EXT)         -- record start event
+ *   5. (run kernel on the same stream)
+ *   6. setAttribute(PROFILING_STOP_EXT)          -- record stop event
+ *   7. setAttribute(PROFILING_STALL_RELEASE_EXT) -- release the stall
+ *   8. finalize()                                -- synchronize stop event, compute elapsed time
+ *   9. getAttribute(PROFILING_ELAPSED_MS_EXT)    -- read elapsed milliseconds
  */
 class ProfilingControlDescriptor : public HipdnnBackendDescriptorImpl<ProfilingControlDescriptor>
 {
@@ -79,6 +83,13 @@ private:
     float _elapsedMs = 0.0F;
     bool _startRecorded = false;
     bool _stopRecorded = false;
+    // True when the most recent STALL_ARM_EXT actually stalled the stream (arm()
+    // succeeded), not the current armed state -- exposed via STALL_USED_EXT.
+    bool _stallUsed = false;
+    // Created on the first STALL_ARM_EXT, so a descriptor that only times or only syncs
+    // never acquires signal memory, a control stream, or a watchdog thread. Destroyed
+    // with the descriptor, which releases the stall if the caller never did.
+    std::optional<hipdnn_data_sdk::utilities::StallGate> _stallGate;
 
     void createEvents();
 };

@@ -8349,6 +8349,246 @@ TEST_F(TestGraph, BuildPlanAtIndexOutOfBounds)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
+// ---------------------------------------------------------------------------
+// execute_timed_ext tests
+// ---------------------------------------------------------------------------
+//
+// executeWithPlanTimed() (detail/GraphExecution.hpp) is exercised here through
+// Graph::execute_timed_ext(); autotune's benchmarkOnce() shares the same helper and
+// its own retry policy is covered separately (autotune tests / integration tests).
+// injectValidCompiledPlan() installs a fake-but-"valid" active plan so these tests
+// exercise execute_timed_ext()'s own validation and profiling sequence without the
+// full engine-descriptor mock chain that a real build() would need.
+
+namespace
+{
+// Mocks the three getAttribute reads executeWithPlanTimed() performs after finalize:
+// ELAPSED_MS_EXT, STALL_USED_EXT, STALL_TIMED_OUT_EXT.
+void mockProfilingGetAttributes(
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>>& mockBackend,
+    float elapsedMs,
+    bool stallUsed,
+    bool timedOut)
+{
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .WillOnce([elapsedMs](hipdnnBackendDescriptor_t,
+                              hipdnnBackendAttributeName_t,
+                              hipdnnBackendAttributeType_t,
+                              int64_t,
+                              int64_t*,
+                              void* out) {
+            *static_cast<float*>(out) = elapsedMs;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, nullptr, _))
+        .WillOnce([stallUsed](hipdnnBackendDescriptor_t,
+                              hipdnnBackendAttributeName_t,
+                              hipdnnBackendAttributeType_t,
+                              int64_t,
+                              int64_t*,
+                              void* out) {
+            *static_cast<bool*>(out) = stallUsed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *mockBackend,
+        backendGetAttribute(
+            _, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT, HIPDNN_TYPE_BOOLEAN, 1, nullptr, _))
+        .WillOnce([timedOut](hipdnnBackendDescriptor_t,
+                             hipdnnBackendAttributeName_t,
+                             hipdnnBackendAttributeType_t,
+                             int64_t,
+                             int64_t*,
+                             void* out) {
+            *static_cast<bool*>(out) = timedOut;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+} // namespace
+
+TEST_F(TestGraph, TimedExecuteReportsDeviceOnlyWhenStallUsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/1, /*workspaceSize=*/0, /*barred=*/false);
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(::testing::AnyNumber());
+    {
+        // Both edges keep host submission outside the measured event span.
+        const ::testing::InSequence sequence;
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_START_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(
+            *_mockBackend,
+            backendSetAttribute(_, HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend,
+                    backendSetAttribute(
+                        _, HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    }
+    mockProfilingGetAttributes(
+        _mockBackend, /*elapsedMs=*/2.5f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 2.5f);
+}
+
+TEST_F(TestGraph, TimedExecuteReportsHostIncludedWhenStallDeclined)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 3.0f, /*stallUsed=*/false, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::HOST_INCLUDED);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 3.0f);
+}
+
+TEST_F(TestGraph, TimedExecuteReportsInvalidOnWatchdogTimeoutWithExactlyOneExecution)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    // Exactly one backendExecute: execute_timed_ext() discards a timed-out measurement
+    // rather than retrying or replaying it (unlike autotune's benchmarkOnce()).
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 999.0f, /*stallUsed=*/true, /*timedOut=*/true);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    // Execution completed; only the measurement is invalid.
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteLeavesTimingInvalidOnBackendExecuteFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_EXECUTION_FAILED));
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsNoActivePlanAndResetsTiming)
+{
+    const GraphTestUtils graph; // no active plan installed
+    const std::unordered_map<int64_t, void*> variantPack;
+    // Pre-seed timing with a stale value to confirm it is reset before validation runs.
+    ExecutionTiming timing;
+    timing.elapsedMs = 99.0f;
+    timing.quality = TimingQuality::DEVICE_ONLY;
+
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsBarredActivePlanWithoutExecuting)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, /*barred=*/true);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteTensorMapRejectsNullTensor)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
+        = {{nullptr, reinterpret_cast<void*>(0x1)}};
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("uid"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteTensorMapPacksVariantPackAndReportsTiming)
+{
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_uid(7);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 1.5f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<std::shared_ptr<TensorAttributes>, void*> tensorLookup
+        = {{tensor, reinterpret_cast<void*>(0x1234)}};
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, tensorLookup, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 1.5f);
+}
+
 // --------------------------------------------------------------------------
 // deselect_workspace_greater_than tests
 // --------------------------------------------------------------------------

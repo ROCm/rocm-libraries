@@ -3,7 +3,15 @@
 
 """API tests for Graph configuration (mostly no GPU required)."""
 
+import math
+
+import numpy as np
+import pytest
+
 import hipdnn_frontend as hipdnn
+
+from .graph_builders import build_pointwise_add_graph
+from .helpers import build_all_plans
 
 
 class TestGraphConfiguration:
@@ -122,3 +130,102 @@ class TestGraphValidation:
 
         result = graph.validate()
         assert not result.is_good()
+
+
+def _device_buffer(data):
+    buf = hipdnn.DeviceBuffer(data.nbytes)
+    buf.copy_from_host(data.tobytes())
+    return buf
+
+
+def _workspace_ptr(graph):
+    size = graph.get_workspace_size()
+    if size <= 0:
+        return None, 0
+    buf = hipdnn.DeviceBuffer(size)
+    return buf, buf.ptr()
+
+
+class _NullHandle:
+    """Stand-in for a Handle whose get() yields a null pointer.
+
+    execute_timed_ext() must reject a graph with no compiled plan before it ever
+    dereferences the handle, so this path needs no real device or backend.
+    """
+
+    def get(self):
+        return 0
+
+
+def test_execute_timed_ext_without_compiled_plan_is_a_bad_error():
+    """No compiled plan -> the same failure execute() would report; timing stays empty."""
+    graph = hipdnn.Graph()
+
+    err, timing = graph.execute_timed_ext(_NullHandle(), {}, 0)
+    assert err.is_bad()
+    assert "compiled execution plan" in err.get_message()
+    assert timing.elapsed_ms is None
+    assert timing.quality == hipdnn.TimingQuality.INVALID
+
+
+@pytest.mark.gpu
+class TestGraphExecuteTimedExt:
+    """Tests for Graph.execute_timed_ext(): exactly-once, device-only-timed execution."""
+
+    def test_uid_keyed_preserves_stub_output_and_reports_timing(self):
+        """execute_timed_ext() runs the same variant-pack/backendExecute plumbing as
+        execute(): a known sentinel written to the output buffer survives untouched
+        under the pinned no-op test stub, and the call reports a finite timing.
+
+        The ABSOLUTE-mode test stub (GoodPlugin) never touches device memory --
+        conftest.py's _load_test_good_plugin and helpers.execute_zeros both note its
+        execute() is a no-op. This proves the timed-execute plumbing runs end to end
+        against a real device; it says nothing about the arithmetic of the operation,
+        which is the C++/real-provider tests' job.
+        """
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = build_all_plans(graph)
+
+        a_data = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32).reshape(a.get_dim())
+        b_data = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32).reshape(
+            b.get_dim()
+        )
+        sentinel = np.full(out.get_dim(), -1.0, dtype=np.float32)
+
+        a_buf, b_buf = _device_buffer(a_data), _device_buffer(b_data)
+        out_buf = _device_buffer(sentinel)
+        ws_buf, ws_ptr = _workspace_ptr(graph)
+        variant_pack = {
+            a.get_uid(): a_buf.ptr(),
+            b.get_uid(): b_buf.ptr(),
+            out.get_uid(): out_buf.ptr(),
+        }
+
+        err, timing = graph.execute_timed_ext(handle, variant_pack, ws_ptr)
+        assert err.is_good(), err.get_message()
+        assert timing.elapsed_ms is not None
+        assert math.isfinite(timing.elapsed_ms)
+        assert timing.elapsed_ms >= 0.0
+        assert timing.quality in (
+            hipdnn.TimingQuality.DEVICE_ONLY,
+            hipdnn.TimingQuality.HOST_INCLUDED,
+        )
+
+        actual = np.frombuffer(out_buf.copy_to_host(), dtype=np.float32)
+        np.testing.assert_array_equal(actual, sentinel.reshape(-1))
+
+
+def test_execution_timing_types_are_bound():
+    """TimingQuality/ExecutionTiming expose the documented enum and read-only fields."""
+    assert hipdnn.TimingQuality.DEVICE_ONLY.name == "DEVICE_ONLY"
+    assert hipdnn.TimingQuality.HOST_INCLUDED.name == "HOST_INCLUDED"
+    assert hipdnn.TimingQuality.INVALID.name == "INVALID"
+
+    timing = hipdnn.ExecutionTiming()
+    assert timing.elapsed_ms is None
+    assert timing.quality == hipdnn.TimingQuality.INVALID
+
+    with pytest.raises(AttributeError):
+        timing.elapsed_ms = 1.0
+    with pytest.raises(AttributeError):
+        timing.quality = hipdnn.TimingQuality.DEVICE_ONLY

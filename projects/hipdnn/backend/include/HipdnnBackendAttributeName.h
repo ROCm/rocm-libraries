@@ -1464,6 +1464,21 @@ typedef enum
     /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
     HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
 
+    /** @brief Trigger: stall the stream so the measured span excludes host submission (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_ARM_EXT = 60405,
+
+    /** @brief Trigger: release the stall so the queued work runs (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
+
+    /** @brief True when a stall watchdog timeout, not the caller, released the stall; the elapsed time is then invalid (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT = 60407,
+
+    /** @brief True when arm() actually stalled the stream for this measurement, not the
+     *  current armed state (always false after release). False when STALL_ARM_EXT was never
+     *  set or arming declined (unsupported device, process-wide disabled, or a HIP failure).
+     *  Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
+    HIPDNN_ATTR_PROFILING_STALL_USED_EXT = 60408,
+
     /** @} */
 
 } hipdnnBackendAttributeName_t;
