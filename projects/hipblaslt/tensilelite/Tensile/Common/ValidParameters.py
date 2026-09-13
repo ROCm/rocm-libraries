@@ -336,6 +336,9 @@ validParameters = { # we need to make sure this matches develop
     # normal/DTL/DTV should be same for A and B to swap GR order
     # (normalA + normalB) or (DTLA + DTLB) or (DTVA + DTVB)
     "SwapGlobalReadOrder": [0, 1],
+    # PrefetchGlobalRead = -1, or PrefetchGlobalReadA/B = -1: auto max-LDS pair.
+    # Components/DecouplePGR.py holds the full table of accepted combinations;
+    # A and B must both be set or both omitted.
     # PrefetchGlobalRead = 1:
     # Requires 2X LDS space, and VGPRs for buffering data on way into LDS
     #   prefetch / double-buffer reads from global memory -> vgprs -> lds.
@@ -348,7 +351,9 @@ validParameters = { # we need to make sure this matches develop
     # DirectToLds only. Do PGR times prefetch global read before main loop.
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
-    "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    "PrefetchGlobalRead": [-1] + list(range(16 + 1)),
+    "PrefetchGlobalReadA": [-1] + list(range(16 + 1)),
+    "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).

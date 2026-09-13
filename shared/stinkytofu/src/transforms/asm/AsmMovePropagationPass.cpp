@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 
+#include <array>
 #include <unordered_map>
 #include <vector>
 
@@ -168,6 +169,53 @@ bool overlapsWithKey(const MoveMapKey& key, const StinkyRegister& reg) {
     const uint32_t regBegin = reg.reg.idx;
     const uint32_t regEnd = reg.reg.idx + reg.reg.num;
     return !(keyEnd <= regBegin || regEnd <= keyBegin);
+}
+
+// The registers named by read-write destination fields.
+//
+// Hardware reads such a destination on the path where it does not write it:
+// s_cmov_b32 d, s is "if (SCC) d = s; else d = d". The IR models that read as an
+// extra source naming the same register, which AsmVerifierPass requires to be
+// present on both sides and collectReadWriteTies keeps the allocator from
+// splitting. Substituting a different register for it is therefore invalid: the
+// operand field is the destination field, so the emitter prints d regardless and
+// the untaken path silently becomes "d = whatever d held".
+//
+// The tie is found by register name rather than operand position, as in
+// collectReadWriteTies -- rocisa appends the destination to the end of
+// getSrcParams, so the position varies by opcode while the name does not.
+struct ReadWriteDestKeys {
+    // v_swap_b32 and v_permlane16_swap_b32 mark both of their fields read-write;
+    // nothing on the supported architectures marks more than two.
+    static constexpr size_t kCapacity = 4;
+
+    std::array<MoveMapKey, kCapacity> keys{};
+    size_t count = 0;
+
+    bool covers(const StinkyRegister& reg) const {
+        for (size_t i = 0; i < count; ++i) {
+            if (overlapsWithKey(keys[i], reg)) return true;
+        }
+        return false;
+    }
+};
+
+ReadWriteDestKeys collectReadWriteDestKeys(const StinkyInstruction& inst) {
+    ReadWriteDestKeys result;
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc == nullptr || desc->operandFields.empty()) return result;
+
+    const std::vector<StinkyRegister>& destRegs = inst.getDestRegs();
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (!field.isReadWrite) continue;
+        if (destSlot >= destRegs.size() || !destRegs[destSlot].isRegister()) continue;
+        if (result.count == ReadWriteDestKeys::kCapacity) continue;
+        result.keys[result.count++] = toMoveMapKey(destRegs[destSlot]);
+    }
+    return result;
 }
 
 struct RegLaneKey {
@@ -350,6 +398,8 @@ class AsmMovePropagationPassImpl : public Pass {
                 continue;
             }
 
+            const ReadWriteDestKeys rwDests = collectReadWriteDestKeys(*inst);
+
             for (size_t i = 0; i < inst->getNumSrcRegs(); ++i) {
                 const StinkyRegister& oldSrc = inst->getSrcReg(i);
                 if (!oldSrc.isRegister()) continue;
@@ -357,6 +407,9 @@ class AsmMovePropagationPassImpl : public Pass {
                 // (inline reg modifiers or VOP3 source modifiers).
                 if (hasRegisterSourceModifier(oldSrc) || hasInstructionSourceModifier(*inst, i))
                     continue;
+                // Skip a source tied to a read-write destination. It shares the
+                // destination's operand field, so it cannot name another register.
+                if (rwDests.covers(oldSrc)) continue;
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
                 if (hasRegisterSourceModifier(newSrc)) continue;

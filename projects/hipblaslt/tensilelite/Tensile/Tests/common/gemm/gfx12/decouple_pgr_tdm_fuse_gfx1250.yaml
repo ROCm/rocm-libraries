@@ -26,7 +26,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # TN - MXF8F4SS Block32, E8, TDMFuse sweep
+  # TN - MXF8F4SS Block32, E8, decoupled PGR and TDMFuse sweep
   #######################################
   -
     - # ProblemType, TN
@@ -49,7 +49,7 @@ BenchmarkProblems:
       DataTypeMXSA: E8
       DataTypeMXSB: E8
 
-    - # BenchmarkProblemSizeGroup - TDMFuse, NumWaves=4
+    - # BenchmarkProblemSizeGroup - decoupled PGR, TDMFuse, NumWaves=4
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -63,7 +63,9 @@ BenchmarkProblems:
         - TDMSplit: [False]
         - TDMFuse: [0, 1, 2, 3]
         - InitCIterWmma: [0, 1]
-        - PrefetchGlobalRead: [1, 2]
+        - PrefetchGlobalRead: [-1, 0, 1, 2]
+        - PrefetchGlobalReadA: [-1, 0, 1, 2]
+        - PrefetchGlobalReadB: [-1, 0, 1, 2]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
