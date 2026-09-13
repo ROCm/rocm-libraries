@@ -8,9 +8,12 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/utility/json_dump.hpp"
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
 
 #include <string>
 #include <variant>
+
+using ck_tile_example::GemmConfigVectorSizeFallback;
 
 struct GemmConfigBase
 {
@@ -41,6 +44,14 @@ struct GemmConfigBase
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
         ck_tile::DataCachePrefetchKind::None;
     static constexpr bool Async = false;
+
+    static constexpr bool FixedVectorSize = false;
+    // If FixedVectorSize==true: use these vector sizes for A/B loads and C store
+    static constexpr ck_tile::index_t VectorSizeA = 1;
+    static constexpr ck_tile::index_t VectorSizeB = 1;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+
+    static constexpr bool EnableSmallerVectorLoadFallback = false;
 };
 
 template <typename PrecType>
@@ -176,6 +187,7 @@ struct GemmConfigComputeV3_3 : public GemmConfigBase
 template <typename PrecType>
 struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 {
+
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 64 / sizeof(PrecType);
@@ -193,6 +205,8 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 
     static constexpr int kBlockPerCu = 2;
+
+    static constexpr bool EnableSmallerVectorLoadFallback = true;
 };
 
 template <typename PrecType>
