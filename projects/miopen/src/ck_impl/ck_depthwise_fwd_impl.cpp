@@ -381,6 +381,67 @@ using DeviceConvFwdFactoryT64 = std::tuple<
                                                        16,
                                                        8,
                                                        8,
+                                                       RequirePadding>
+
+    // Non-square 3x3 stride-1 tiles (wide-and-short shapes, e.g. text-recognition backbones).
+    // InScalarPerVector=2 is forced: GetAlignedPackW() must be a power of two, and 80/2 = 40 is
+    // the only divisor giving that on 64 lanes. SubTileH then puts
+    // HSubtileRepeat * WSubtileRepeat in (WaveSize/2, WaveSize], so SubtilesPerWave == 1, which
+    // NBatch == 1 requires.
+    ,
+    ck::tensor_operation::device::DeviceGroupedConvFwd<NDimSpatial,
+                                                       BlockSize,
+                                                       DType,
+                                                       DType,
+                                                       AccType,
+                                                       DType,
+                                                       S<3, 80>, // BlockTileSize
+                                                       3,        // FilterSize
+                                                       ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>,
+                                                       InElementOp,
+                                                       WeiElementOp,
+                                                       OutElementOp,
+                                                       1, // NBatch
+                                                       1, // SubTileH
+                                                       4, // SubTileW
+                                                       2, // InScalarPerVector
+                                                       4, // OutScalarPerVector
+                                                       RequirePadding>,
+    ck::tensor_operation::device::DeviceGroupedConvFwd<NDimSpatial,
+                                                       BlockSize,
+                                                       DType,
+                                                       DType,
+                                                       AccType,
+                                                       DType,
+                                                       S<6, 80>, // BlockTileSize
+                                                       3,        // FilterSize
+                                                       ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>,
+                                                       InElementOp,
+                                                       WeiElementOp,
+                                                       OutElementOp,
+                                                       1, // NBatch
+                                                       1, // SubTileH
+                                                       8, // SubTileW
+                                                       2, // InScalarPerVector
+                                                       8, // OutScalarPerVector
+                                                       RequirePadding>,
+    ck::tensor_operation::device::DeviceGroupedConvFwd<NDimSpatial,
+                                                       BlockSize,
+                                                       DType,
+                                                       DType,
+                                                       AccType,
+                                                       DType,
+                                                       S<12, 80>, // BlockTileSize
+                                                       3,         // FilterSize
+                                                       ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>,
+                                                       InElementOp,
+                                                       WeiElementOp,
+                                                       OutElementOp,
+                                                       1, // NBatch
+                                                       2, // SubTileH
+                                                       8, // SubTileW
+                                                       2, // InScalarPerVector
+                                                       8, // OutScalarPerVector
                                                        RequirePadding>>;
 
 // Wave32 (RDNA gfx10/gfx11/gfx12) counterparts of the instances above: same shapes with
@@ -710,6 +771,68 @@ using DeviceConvFwdFactoryT32 =
                    56, // SubTileW
                    8,  // InScalarPerVector
                    8,  // OutScalarPerVector
+                   RequirePadding>,
+
+               // Non-square 3x3 stride-1 tiles, wave32 counterparts. On 32 lanes 80/4 = 20 is the
+               // divisor giving a power-of-two GetAlignedPackW(), hence InScalarPerVector=4.
+               // SubTileW=8 gives WSubtileRepeat=10, and SubTileH makes HSubtileRepeat * 10 == 30:
+               // 30 of 32 lanes carry a subtile and SubtilesPerWave == 1.
+               ck::tensor_operation::device::DeviceGroupedConvFwd<
+                   NDimSpatial,
+                   32, // BlockSize (wave32)
+                   DType,
+                   DType,
+                   AccType,
+                   DType,
+                   S<3, 80>,                             // BlockTileSize
+                   3,                                    // FilterSize
+                   ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+                   InElementOp,
+                   WeiElementOp,
+                   OutElementOp,
+                   1, // NBatch
+                   1, // SubTileH
+                   8, // SubTileW
+                   4, // InScalarPerVector
+                   8, // OutScalarPerVector
+                   RequirePadding>,
+               ck::tensor_operation::device::DeviceGroupedConvFwd<
+                   NDimSpatial,
+                   32, // BlockSize (wave32)
+                   DType,
+                   DType,
+                   AccType,
+                   DType,
+                   S<6, 80>,                             // BlockTileSize
+                   3,                                    // FilterSize
+                   ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+                   InElementOp,
+                   WeiElementOp,
+                   OutElementOp,
+                   1, // NBatch
+                   2, // SubTileH
+                   8, // SubTileW
+                   4, // InScalarPerVector
+                   8, // OutScalarPerVector
+                   RequirePadding>,
+               ck::tensor_operation::device::DeviceGroupedConvFwd<
+                   NDimSpatial,
+                   32, // BlockSize (wave32)
+                   DType,
+                   DType,
+                   AccType,
+                   DType,
+                   S<12, 80>,                            // BlockTileSize
+                   3,                                    // FilterSize
+                   ck::Tuple<S<1, 1>, S<1, 1>, S<1, 1>>, // FilterParam(dilation, stride, padding)
+                   InElementOp,
+                   WeiElementOp,
+                   OutElementOp,
+                   1, // NBatch
+                   4, // SubTileH
+                   8, // SubTileW
+                   4, // InScalarPerVector
+                   8, // OutScalarPerVector
                    RequirePadding>>;
 
 #ifndef MIOPEN_CK_DEPTHWISE_WAVE_SIZE
