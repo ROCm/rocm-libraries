@@ -80,7 +80,30 @@
 
 "project: miopen":
 - changed-files:
-  - any-glob-to-any-file: 'projects/miopen/**/*'
+  - any-glob-to-any-file:
+    - 'projects/miopen/**/*'
+    # MIOpen compiles against old CK (include/ck) and links its convolution instance
+    # library (composable_kernel::device_conv_operations), so a CK-only PR touching the
+    # paths below can regress MIOpen. Label them so that impact is visible on the PR and
+    # a gardener override is not granted without an MIOpen-aware review.
+    # Core old-CK infrastructure that every conv kernel is built on. #10547 regressed
+    # MIOpen from a change confined to include/ck/tensor_description alone.
+    - 'projects/composablekernel/include/ck/*.{hpp,in}'
+    - 'projects/composablekernel/include/ck/{utility,tensor,tensor_description,host_utility}/**'
+    - 'projects/composablekernel/include/ck/tensor_operation/operator_transform/**'
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/element/**'
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/thread/**'
+    # Shared kernel engine. Old-CK convolution is implemented on top of the blockwise
+    # and gridwise GEMM stack, so a "GEMM-only" change here can still reach MIOpen.
+    # The conv and GEMM users of these two directories are not separable by filename,
+    # so they are matched wholesale and trade some precision for full recall.
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/block/**'
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/grid/**'
+    # Old-CK convolution device ops, plus the conv instance headers and sources that
+    # are compiled into the device_conv_operations archive MIOpen links against.
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/**/*conv*'
+    - 'projects/composablekernel/library/**/tensor_operation_instance/**/*conv*'
+    - 'projects/composablekernel/library/**/tensor_operation_instance/**/*conv*/**'
 
 "project: miopen-provider":
 - changed-files:
