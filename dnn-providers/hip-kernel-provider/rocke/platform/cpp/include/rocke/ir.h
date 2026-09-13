@@ -1036,6 +1036,18 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
+rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                        rocke_value_t* a,
+                                                        rocke_value_t* bb,
+                                                        rocke_value_t* c,
+                                                        rocke_value_t* a_scale,
+                                                        rocke_value_t* b_scale);
+rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                          rocke_value_t* a,
+                                                          rocke_value_t* bb,
+                                                          rocke_value_t* c,
+                                                          rocke_value_t* a_scale,
+                                                          rocke_value_t* b_scale);
 rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,
