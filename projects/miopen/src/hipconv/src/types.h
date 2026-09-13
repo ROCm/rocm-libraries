@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include "unreachable.h"
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>

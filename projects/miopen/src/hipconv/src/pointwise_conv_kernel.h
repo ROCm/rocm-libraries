@@ -1,7 +1,7 @@
 #pragma once
 
 #include "conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv
 {
@@ -15,7 +15,7 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Pointwise; }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
@@ -43,7 +43,7 @@ public:
     }
 
     // The hipBLASLt-backed pointwise path is the tuned choice for 1x1.
-    float get_weighted_throughput_index(const hipconv::Conv2dParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
     {
         return 1.0f;
     }

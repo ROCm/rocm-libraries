@@ -93,7 +93,7 @@ std::optional<ArchHandle> resolve_arch(std::string_view name)
 }
 
 std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const Conv2dParams& par, Algorithm algo, std::size_t max_ranked)
+get_valid_configs(ArchHandle arch, const ConvParams& par, Algorithm algo, std::size_t max_ranked)
 {
     if(!arch)
         throw std::invalid_argument("null arch handle");
@@ -106,7 +106,7 @@ get_valid_configs(ArchHandle arch, const Conv2dParams& par, Algorithm algo, std:
 }
 
 std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const Conv2dParams& par, std::size_t max_ranked)
+get_valid_configs(ArchHandle arch, const ConvParams& par, std::size_t max_ranked)
 {
     if(!arch)
         throw std::invalid_argument("null arch handle");
@@ -120,7 +120,7 @@ get_valid_configs(ArchHandle arch, const Conv2dParams& par, std::size_t max_rank
     return handles(scored);
 }
 
-std::optional<ConvKernelHandle> find_config(ArchHandle arch, const Conv2dParams& par)
+std::optional<ConvKernelHandle> find_config(ArchHandle arch, const ConvParams& par)
 {
     auto cfgs = get_valid_configs(arch, par);
     if(cfgs.empty())
@@ -128,11 +128,22 @@ std::optional<ConvKernelHandle> find_config(ArchHandle arch, const Conv2dParams&
     return cfgs.front();
 }
 
-bool is_applicable(ConvKernelHandle kernel, const Conv2dParams& par)
+namespace
+{
+// The full per-kernel predicate, for the entry points that ask a kernel directly
+// instead of going through ConvAlgorithm::get_valid_configs.
+bool kernel_supports(const ConvKernel* kernel, const ConvParams& par)
+{
+    return kernel->supports_dims(par.dims) && kernel->is_applicable(par) &&
+           kernel->is_valid_config(par);
+}
+} // namespace
+
+bool is_applicable(ConvKernelHandle kernel, const ConvParams& par)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
-    return kernel->is_applicable(par) && kernel->is_valid_config(par);
+    return kernel_supports(kernel, par);
 }
 
 std::string_view name(ConvKernelHandle kernel)
@@ -163,14 +174,14 @@ bool matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::str
     return kernel->matches_descriptor(spec, error);
 }
 
-size_t get_workspace_size(ConvKernelHandle kernel, const Conv2dParams& par)
+size_t get_workspace_size(ConvKernelHandle kernel, const ConvParams& par)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
     return kernel->get_workspace_size(par);
 }
 
-float get_weighted_throughput_index(ConvKernelHandle kernel, const Conv2dParams& par)
+float get_weighted_throughput_index(ConvKernelHandle kernel, const ConvParams& par)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
@@ -178,7 +189,7 @@ float get_weighted_throughput_index(ConvKernelHandle kernel, const Conv2dParams&
 }
 
 hipconvError_t launch(ConvKernelHandle kernel,
-                      const Conv2dParams& par,
+                      const ConvParams& par,
                       const void* in,
                       const void* wei,
                       void* out,
@@ -202,14 +213,14 @@ hipconvError_t launch(ConvKernelHandle kernel,
     return hipSuccess;
 }
 
-void get_tolerance(ConvKernelHandle kernel, const Conv2dParams& par, float& atol, float& rtol)
+void get_tolerance(ConvKernelHandle kernel, const ConvParams& par, float& atol, float& rtol)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
     kernel->get_tolerance(par, atol, rtol);
 }
 
-void get_recursive_summation_tolerance(const Conv2dParams& par, float& atol, float& rtol)
+void get_recursive_summation_tolerance(const ConvParams& par, float& atol, float& rtol)
 {
     get_mixed_precision_tolerance(par, atol, rtol);
 }
@@ -217,16 +228,16 @@ void get_recursive_summation_tolerance(const Conv2dParams& par, float& atol, flo
 struct ConvLaunch::State
 {
     ConvKernel* kernel;
-    Conv2dParams par;
+    ConvParams par;
     LaunchParams lp;
     size_t workspace_size;
 };
 
-std::optional<ConvLaunch> ConvLaunch::make(ConvKernelHandle kernel, Conv2dParams par)
+std::optional<ConvLaunch> ConvLaunch::make(ConvKernelHandle kernel, ConvParams par)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
-    if(!kernel->is_applicable(par) || !kernel->is_valid_config(par))
+    if(!kernel_supports(kernel, par))
         return std::nullopt;
 
     auto lp = kernel->get_launch_params(par);
@@ -251,7 +262,7 @@ void ConvLaunch::get_tolerance(float& atol, float& rtol) const
     state_->kernel->get_tolerance(state_->par, atol, rtol);
 }
 
-const Conv2dParams& ConvLaunch::params() const noexcept
+const ConvParams& ConvLaunch::params() const noexcept
 {
     return state_->par;
 }

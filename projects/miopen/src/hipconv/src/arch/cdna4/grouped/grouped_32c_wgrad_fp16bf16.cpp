@@ -510,7 +510,7 @@ __global__ void conv2d_grouped_32c_wgrad_fp16_nhwc_cdna4(const ToType<DT>* __res
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -561,14 +561,14 @@ public:
     // is_applicable now also accepts tf32, so reject non-fp16/bf16 here to avoid
     // mis-collecting this kernel for a tf32 request (which would reinterpret the
     // fp32 buffers as fp16/bf16).
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
         return GroupedWgradConvKernel::is_applicable(par);
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != DIRECTION)
             return false;
@@ -582,7 +582,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         auto blocks_q = divup(par.q, cfg_.block_q());
         auto blocks_c = divup(par.groups, cfg_.groups_per_wg);

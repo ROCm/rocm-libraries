@@ -4,7 +4,7 @@
 // Unit tests for the ConvHipConv solver (hipconv-backed grouped 3x3 conv).
 //
 // Restrictions enforced by ConvHipConv::IsApplicable:
-//   - 2D convolution only
+//   - 2D convolution, or a 3D convolution that reduces to one
 //   - fp16 or bf16
 //   - architectures recognised by hipconv (gfx950)
 //   - the hipconv library must have a valid kernel for the (params, direction) tuple
@@ -27,6 +27,20 @@ auto GetConvSmokeTestCases(miopenDataType_t datatype)
         TestCase{{datatype, layout, {4, 16, 8, 1}}, {datatype, layout, {16,  8, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1},  2}}, // 8c
         TestCase{{datatype, layout, {4, 32, 8, 1}}, {datatype, layout, {32, 16, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1},  2}}, // 16c
         TestCase{{datatype, layout, {4, 64, 8, 1}}, {datatype, layout, {64, 32, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1},  2}}, // 32c
+        // clang-format on
+    };
+}
+
+// The same cases at depth 2, with depth left unconvolved so each folds into the batch.
+auto GetConv3dSmokeTestCases(miopenDataType_t datatype)
+{
+    constexpr auto layout = miopenTensorNDHWC;
+    return std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {4, 64, 2, 8, 1}}, {datatype, layout, {64,  4, 1, 3, 3}}, datatype, {{0, 1, 1}, {1, 1, 1}, {1, 1, 1}, 16}}, // 4c
+        TestCase{{datatype, layout, {4, 16, 2, 8, 1}}, {datatype, layout, {16,  8, 1, 3, 3}}, datatype, {{0, 1, 1}, {1, 1, 1}, {1, 1, 1},  2}}, // 8c
+        TestCase{{datatype, layout, {4, 32, 2, 8, 1}}, {datatype, layout, {32, 16, 1, 3, 3}}, datatype, {{0, 1, 1}, {1, 1, 1}, {1, 1, 1},  2}}, // 16c
+        TestCase{{datatype, layout, {4, 64, 2, 8, 1}}, {datatype, layout, {64, 32, 1, 3, 3}}, datatype, {{0, 1, 1}, {1, 1, 1}, {1, 1, 1},  2}}, // 32c
         // clang-format on
     };
 }
@@ -119,5 +133,44 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3d,
+                         GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3d,
+                         GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeConv3d,
+                         GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConv3dSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3d,
+    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3d,
+    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3d,
+    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dSmokeTestCases(miopenBFloat16))));
 
 #endif // MIOPEN_USE_HIPCONV

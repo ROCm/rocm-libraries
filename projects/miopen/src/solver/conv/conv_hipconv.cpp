@@ -35,9 +35,9 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
 
 // Translate a MIOpen problem into hipconv's parameter struct.
-static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
+static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
 {
-    hipconv::Conv2dParams par{};
+    hipconv::ConvParams par{};
 
     if(problem.IsDirectionForward())
         par.direction = hipconv::Direction::Fprop;
@@ -64,6 +64,20 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 
     par.p = ProblemInterpreter::GetOutputHeightHo(problem);
     par.q = ProblemInterpreter::GetOutputWidthWo(problem);
+    // Every output extent must be set: ConvParams leaves them at -1 for
+    // "unspecified", and ConvSize multiplies them into a size_t.
+    par.e = 1;
+
+    if(problem.Is3d())
+    {
+        par.dims       = 3;
+        par.d          = ProblemInterpreter::GetInputDepthDi(problem);
+        par.kd         = ProblemInterpreter::GetFilterDepthZ(problem);
+        par.pad_d      = ProblemInterpreter::GetInputLeftPadD(problem);
+        par.stride_d   = ProblemInterpreter::GetAdjustedConvolutionStrideD(problem);
+        par.dilation_d = ProblemInterpreter::GetAdjustedConvolutionDilationD(problem);
+        par.e          = ProblemInterpreter::GetOutputDepthDo(problem);
+    }
 
     if(problem.IsFp16())
     {
@@ -91,12 +105,16 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 
     par.order = problem.IsLayoutNHWC() ? hipconv::TensorOrder::NHWC : hipconv::TensorOrder::NCHW;
 
-    return par;
+    // Fold to 2D once here, so every call site sees the same params.
+    //
+    // unfolded() does not read par.order, and folding depth into the batch is a
+    // reshape only when channels are last.
+    return par.order == hipconv::TensorOrder::NHWC ? par.unfolded() : par;
 }
 
 // Resolve the kernel handle a perf-config selected.
 static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
-                                               const hipconv::Conv2dParams& par,
+                                               const hipconv::ConvParams& par,
                                                const PerformanceConfigConvHipConv& config)
 {
     if(config.index < 0)
@@ -235,7 +253,7 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         return false;
     if(!ctx.use_hip_kernels)
         return false;
-    if(!problem.Is2d())
+    if(!problem.Is2d() && !problem.Is3d())
         return false;
     // fp16, bf16, and tf32 (fp32 data with tf32 compute enabled).
     if(!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.UseTF32()))
@@ -252,28 +270,48 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     return hipconv::find_config(*arch, par).has_value();
 }
 
+// Bytes of fp32 scratch the wgrad path stages dw through, 0 when it does not stage.
+//
+// A wgrad kernel returns the gradient as fp32 but MIOpen wants dw in the weight
+// type, so fp16/bf16 stages the fp32 output and casts it down. fp32 dw takes the
+// kernel's output directly.
+static size_t WrwStagingBytes(const ProblemDescription& problem)
+{
+    if(!problem.IsDirectionBackwardWrW() || problem.IsFp32())
+        return 0;
+    const auto k           = ProblemInterpreter::GetOutputChannelK(problem);
+    const auto c           = ProblemInterpreter::GetInputChannelC(problem);
+    const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
+    const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
+    const auto group       = ProblemInterpreter::GetGroupCountG(problem);
+    const auto c_per_group = c / group;
+    return static_cast<size_t>(k) * y * x * c_per_group * sizeof(float);
+}
+
+// Offset of the kernel's own scratch within the single workspace MIOpen allocates.
+//
+// The staging buffer and the scratch are separate regions of it, so a wgrad kernel
+// that splits its reduction needs both. 256 matches hipMalloc's alignment, so the
+// kernel sees what it would get from its own allocation.
+static size_t WrwScratchOffset(const ProblemDescription& problem)
+{
+    constexpr size_t align = 256;
+    return (WrwStagingBytes(problem) + align - 1) / align * align;
+}
+
+// The kernel's scratch region within the wgrad workspace, or nullptr if it needs none.
+static void* WrwScratch(Data_t workspace, size_t workspace_size, size_t offset, size_t bytes)
+{
+    if(bytes == 0)
+        return nullptr;
+    if(workspace == nullptr || workspace_size < offset + bytes)
+        MIOPEN_THROW("ConvHipConv: not enough workspace for wgrad.");
+    return static_cast<char*>(workspace) + offset;
+}
+
 size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
                                      const ProblemDescription& problem) const
 {
-    if(problem.IsDirectionBackwardWrW())
-    {
-        // fp32 wgrad kernels do not use a workspace.
-        if(problem.IsFp32())
-            return 0;
-
-        // fp16/bf16 wgrad needs an fp32 scratch.
-        //
-        // The kernel returns the gradient as fp32 but MIOpen wants dw in the
-        // weight type, so stage the fp32 output in a workspace before converting.
-        const auto k           = ProblemInterpreter::GetOutputChannelK(problem);
-        const auto c           = ProblemInterpreter::GetInputChannelC(problem);
-        const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
-        const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
-        const auto group       = ProblemInterpreter::GetGroupCountG(problem);
-        const auto c_per_group = c / group;
-        return static_cast<size_t>(k) * y * x * c_per_group * sizeof(float);
-    }
-
     // Max over configs: Find sizes one buffer here before picking a config, and
     // the direct_l1 formatted-weights size varies by config (block_k padding).
     const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
@@ -284,7 +322,8 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
     size_t max_ws   = 0;
     for(auto* kernel : cfgs)
         max_ws = std::max(max_ws, hipconv::get_workspace_size(kernel, par));
-    return max_ws;
+
+    return WrwScratchOffset(problem) + max_ws;
 }
 
 // Estimated quality, consulted only on the immediate-mode fallback (no Find).
@@ -355,10 +394,13 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
         const auto workspace_size = GetWorkspaceSize(ctx, problem);
         result.workspace_sz       = workspace_size;
 
-        // fp32 dw takes the kernel's fp32 output directly; no workspace.
+        const auto scratch_offset = WrwScratchOffset(problem);
+        const auto scratch_bytes  = hipconv::get_workspace_size(kernel, par);
+
+        // fp32 dw takes the kernel's fp32 output directly, with no staging.
         //
         // fp16/bf16 dw is narrower, so that path stages the fp32 output through
-        // a workspace and casts it down. Today fp32 reaches here only via tf32.
+        // the workspace and casts it down. Today fp32 reaches here only via tf32.
         if(problem.IsFp32())
         {
             result.invoker_factory = [=](const std::vector<Kernel>&) {
@@ -366,6 +408,8 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                     decltype(auto) wrw_ctx =
                         primitive_parameters.CastTo<miopen::conv::WrWInvokeParams>();
                     const auto& tensors = wrw_ctx.tensors;
+                    void* const scratch = WrwScratch(
+                        wrw_ctx.workSpace, wrw_ctx.workSpaceSize, scratch_offset, scratch_bytes);
 
                     const HipEventProfiler profiler(handle);
                     const ScopedHipConvKernelLog kernel_log(handle, kernel_label);
@@ -374,7 +418,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                                                            tensors.x,
                                                            tensors.dy,
                                                            tensors.dw,
-                                                           nullptr,
+                                                           scratch,
                                                            handle.GetStream());
                        status != hipSuccess)
                         MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
@@ -399,6 +443,9 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                 if(workSpace == nullptr || workSpaceSize < workspace_size)
                     MIOPEN_THROW("ConvHipConv: not enough workspace for wgrad.");
 
+                void* const scratch =
+                    WrwScratch(workSpace, workSpaceSize, scratch_offset, scratch_bytes);
+
                 const HipEventProfiler profiler(handle);
 
                 // wgrad kernel writes fp32 into the workspace...
@@ -412,7 +459,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                                                            tensors.x,
                                                            tensors.dy,
                                                            workSpace,
-                                                           nullptr,
+                                                           scratch,
                                                            handle.GetStream());
                        status != hipSuccess)
                         MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");

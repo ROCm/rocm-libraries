@@ -427,6 +427,17 @@ constexpr Config configs[] = {
         .kw          = 5,
         .k_divisible = false,
     },
+    // 3x1
+    //
+    // The 3x1 K256 arbitrary-K sibling covers only the counts the K256 selection
+    // claims, which at a wide output map it never does, so K=32 had no tile.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
+        .k_divisible = false,
+    },
     // Small-C fallback (K64, single_c): serves C in [2, 64].
     //
     // The single lone C(64) peel iteration over-computes to C_padded=64 against zero
@@ -461,6 +472,14 @@ constexpr Config configs[] = {
         .wave_p   = 6,
         .kh       = 5,
         .kw       = 5,
+        .single_c = true,
+    },
+    // 3x1
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 1,
         .single_c = true,
     },
     // Small-C arbitrary-output fallback (K64, single_c, k_divisible=false).
@@ -501,6 +520,18 @@ constexpr Config configs[] = {
         .wave_p      = 6,
         .kh          = 5,
         .kw          = 5,
+        .k_divisible = false,
+        .single_c    = true,
+    },
+    // 3x1
+    //
+    // The pointwise fold of a (3,1,1) conv3d lands here whenever C and K are both
+    // small: C=32, K=32 fails the divisible tiles on both counts at once.
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
         .k_divisible = false,
         .single_c    = true,
     },
@@ -819,6 +850,35 @@ constexpr Config configs[] = {
         .direction = hipconv::Direction::Dgrad,
     },
 
+    // Dgrad 3x1 large-tensor tiles: mirror the fprop 3x1 large_tensor trio.
+    // K128
+    {
+        .wave_k16     = 4,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+    // K96
+    {
+        .wave_k16     = 3,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+    // K64
+    {
+        .wave_k16     = 2,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+
     // 3x1 dgrad K256 tile (waves_k=4): mirrors the fprop 3x1 K256 for dgrad.
     {
         .waves_k   = 4,
@@ -885,6 +945,15 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
     },
+    // 3x1: mirrors the fprop 3x1 arbitrary-K fallback.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+    },
     // Dgrad small-dout fallback (single_c): serves dout in [2, 64].
     //
     // The dgrad analog of the fprop small-C config (dout is the reduction). dout
@@ -922,6 +991,15 @@ constexpr Config configs[] = {
         .wave_p    = 6,
         .kh        = 5,
         .kw        = 5,
+        .direction = hipconv::Direction::Dgrad,
+        .single_c  = true,
+    },
+    // 3x1
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 1,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
     },
@@ -965,6 +1043,16 @@ constexpr Config configs[] = {
         .wave_p      = 6,
         .kh          = 5,
         .kw          = 5,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+    },
+    // 3x1
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
         .single_c    = true,

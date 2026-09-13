@@ -1,5 +1,7 @@
 #pragma once
 
+#include "packed_ops.h"
+
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -82,15 +84,17 @@ constexpr auto test(uint32_t flags, wmma_flag flag) -> bool
 
 enum class fpfmt : int
 {
-    e11m52 = 0x400, // fp64
-    e8m23  = 0x200, // fp32
-    e5m10  = 0x100, // fp16
-    e8m7   = 0x101, // bf16
-    e4m3   = 0x80,  // fp8
-    e5m2   = 0x81,  // bf8
-    e2m3   = 0x60,  // fp6
-    e3m2   = 0x61,  // bf6
-    e2m1   = 0x40,  // fp4
+    e11m52            = 0x400, // fp64
+    e8m23             = 0x200, // fp32
+    e8m10             = 0x201, // tf32
+    e8m10_e8m7x2split = 0x202, // bf16x2
+    e5m10             = 0x100, // fp16
+    e8m7              = 0x101, // bf16
+    e4m3              = 0x80,  // fp8
+    e5m2              = 0x81,  // bf8
+    e2m3              = 0x60,  // fp6
+    e3m2              = 0x61,  // bf6
+    e2m1              = 0x40,  // fp4
     // scale layouts (unsigned)
     ue8m0 = 0x1080,
 };
@@ -120,6 +124,7 @@ template <fpfmt Fmt> constexpr bool is_8bit_scale = is_wide_scale<Fmt, 8>;
 template <fpfmt Fmt> struct base_storage_type { using type = uint32_t; };
 template <> struct base_storage_type<fpfmt::e11m52> { using type = double; };
 template <> struct base_storage_type<fpfmt::e8m23> { using type = float; };
+template <> struct base_storage_type<fpfmt::e8m10> { using type = float; };
 template <> struct base_storage_type<fpfmt::e5m10> { using type = _Float16; };
 template <> struct base_storage_type<fpfmt::e8m7> { using type = __bf16; };
 template <> struct base_storage_type<fpfmt::ue8m0> { using type = int; };
