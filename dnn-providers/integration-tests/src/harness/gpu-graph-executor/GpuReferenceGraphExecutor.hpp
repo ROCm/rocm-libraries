@@ -142,13 +142,14 @@ private:
             return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::LayernormBackwardAttributes:
             return detail::GpuLayernormBwdSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::MatmulAttributes:
+            return detail::GpuMatmulSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::PointwiseAttributes:
             return detail::GpuPointwiseSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormAttributes:
             return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormBackwardAttributes:
             return detail::GpuRMSNormBwdSignatureKey(node, tensorMap, node.compute_data_type());
-
         case NodeAttrs::SdpaAttributes:
             return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
 
@@ -159,7 +160,6 @@ private:
         case NodeAttrs::BatchnormAttributes:
         case NodeAttrs::ConvolutionBwdAttributes:
         case NodeAttrs::ConvolutionWrwAttributes:
-        case NodeAttrs::MatmulAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:

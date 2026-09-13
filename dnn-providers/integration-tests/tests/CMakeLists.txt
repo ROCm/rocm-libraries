@@ -36,6 +36,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuLayernormBwdPlan.cpp
     TestGpuLayernormFwdSignatureKey.cpp
     TestGpuLayernormFwdPlan.cpp
+    TestGpuMatmulSignatureKey.cpp
+    TestGpuMatmulPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
