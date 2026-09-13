@@ -609,6 +609,14 @@ inline bool isSplitBarrierAllWave(const StinkyInstruction& inst) {
     return src.dataType == StinkyRegister::Type::LiteralInt && src.getLiteralInt() == -1;
 }
 
+/// Cluster-scope split barrier (`s_barrier_signal/wait -3`): handshake, not LDS/tensor fence.
+inline bool isClusterSplitBarrier(const StinkyInstruction& inst) {
+    if (!(isBarrierSignal(inst) || isBarrierWait(inst))) return false;
+    if (inst.getSrcRegs().empty()) return false;
+    const StinkyRegister& src = inst.getSrcRegs()[0];
+    return src.dataType == StinkyRegister::Type::LiteralInt && src.getLiteralInt() == -3;
+}
+
 inline bool isBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Branch);
 }
