@@ -114,6 +114,85 @@ set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# codegen_common shared-infrastructure regression test. Covers normalize_gfx_arch()
+# and the EXACT-gfx1250 RowColQuant/TensorQuant tile selector: a family-wide match
+# there would hand gfx1200/gfx1201 a tile that compiles cleanly and returns garbage,
+# which no downstream check catches.
+add_test(
+    NAME dispatcher_test_codegen_common
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_codegen_common.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_codegen_common PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# .so cache key vs the ctypes export set. The failure this guards is a stale cached
+# artifact being reused after an export is added -- an "undefined symbol" that surfaces
+# on a different machine long after the change. CPU-only, no compilation.
+add_test(
+    NAME dispatcher_test_so_abi_token
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_so_abi_token.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_so_abi_token PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# gfx1250 compile-time tile guard in the RowColQuant/TensorQuant ctypes libs. It is
+# the only one of the three gfx1250 guards that outlives Tile-Engine deprecation, so
+# it needs coverage of its own. Needs no GPU and no ROCm: the test extracts the guard
+# block from the shipped .cpp and compiles it against a mock kernel struct with the
+# host C++ compiler. Skips itself if no compiler is on PATH.
+add_test(
+    NAME dispatcher_test_gfx1250_compile_guard
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gfx1250_compile_guard.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gfx1250_compile_guard PROPERTIES
+    LABELS "dispatcher;python;validation;gfx1250"
+    TIMEOUT 300
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
+# instance builders and the dispatcher's own warp gate all share. Registered on the
+# dispatcher side because the bridge/Old-TE instance-set parity that depends on it
+# is a dispatcher property; tile_engine has no CTest registration of its own.
+add_test(
+    NAME dispatcher_test_gemm_validation_arch_normalization
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_validation_arch_normalization.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_validation_arch_normalization PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Arch-gate predicate used by the RowColQuant/TensorQuant GPU tests. CPU-only: it
+# exercises the string predicate, not a device. Worth its own registration because
+# the failure mode it guards is a SKIP -- CI stays green while covering nothing.
+add_test(
+    NAME dispatcher_test_gpu_test_arch_gate
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gpu_test_arch_gate.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gpu_test_arch_gate PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # gemm_utils host-helper + runner-shape regression test. Also acts as an import
 # canary: a merge that truncates python/gemm_utils.py (see #9308) makes this fail.
 add_test(
