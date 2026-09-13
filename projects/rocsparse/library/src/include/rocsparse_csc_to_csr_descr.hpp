@@ -93,12 +93,5 @@ namespace rocsparse
         csr.col_type       = csc.row_type;
         csr.format         = rocsparse_format_csr;
         csr.descr          = &csr_descr;
-
-        // rocsparse_csc_set_strided_batch stores the value batch stride in
-        // columns_values_batch_stride and leaves batch_stride unset (unlike the CSR
-        // setter, which also fills batch_stride). The triangular solve reads the
-        // value stride from batch_stride, so map it explicitly here to keep batched
-        // CSC solves correct.
-        csr.batch_stride = csc.columns_values_batch_stride;
     }
 }

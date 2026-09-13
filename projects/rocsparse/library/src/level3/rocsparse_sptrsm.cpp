@@ -152,8 +152,7 @@ try
                            data_size_in_bytes,
                            data_size_in_bytes != sizeof(rocsparse_solve_mode),
                            rocsparse_status_invalid_size);
-        const rocsparse_solve_mode solve_mode
-            = *reinterpret_cast<const rocsparse_solve_mode*>(data);
+        const auto solve_mode = *reinterpret_cast<const rocsparse_solve_mode*>(data);
         ROCSPARSE_CHECKARG(3,
                            data,
                            (solve_mode != rocsparse_solve_mode_triangular
@@ -169,8 +168,7 @@ try
                            data_size_in_bytes,
                            data_size_in_bytes != sizeof(rocsparse_diagonal_modifier),
                            rocsparse_status_invalid_size);
-        const rocsparse_diagonal_modifier diagonal_modifier
-            = *reinterpret_cast<const rocsparse_diagonal_modifier*>(data);
+        const auto diagonal_modifier = *reinterpret_cast<const rocsparse_diagonal_modifier*>(data);
         ROCSPARSE_CHECKARG(3,
                            data,
                            (diagonal_modifier != rocsparse_diagonal_modifier_none
@@ -1581,20 +1579,6 @@ namespace rocsparse
             {
                 const rocsparse_diagonal_modifier modifier = sptrsm_descr->get_diagonal_modifier();
 
-                const int64_t nrhs = Y->cols;
-
-                const bool x_transposed = (X_operation != rocsparse_operation_none);
-                const bool conj_x       = (X_operation == rocsparse_operation_conjugate_transpose);
-                const bool x_col_major  = (X->order == rocsparse_order_column);
-                const bool y_col_major  = (Y->order == rocsparse_order_column);
-
-                const int64_t x_row_stride
-                    = x_transposed ? (x_col_major ? X->ld : 1) : (x_col_major ? 1 : X->ld);
-                const int64_t x_col_stride
-                    = x_transposed ? (x_col_major ? 1 : X->ld) : (x_col_major ? X->ld : 1);
-                const int64_t y_row_stride = y_col_major ? 1 : Y->ld;
-                const int64_t y_col_stride = y_col_major ? Y->ld : 1;
-
                 switch(A->format)
                 {
                 case rocsparse_format_csr:
@@ -1606,17 +1590,9 @@ namespace rocsparse
                                                       alpha,
                                                       A,
                                                       sptrsm_descr->get_csrsm_info(),
-                                                      nrhs,
-                                                      X->const_values,
-                                                      x_row_stride,
-                                                      x_col_stride,
-                                                      static_cast<int64_t>(0),
-                                                      Y->values,
-                                                      y_row_stride,
-                                                      y_col_stride,
-                                                      static_cast<int64_t>(0),
-                                                      static_cast<int64_t>(1),
-                                                      conj_x));
+                                                      X_operation,
+                                                      X,
+                                                      Y));
                     sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                     return rocsparse_status_success;
                 }
@@ -1629,17 +1605,9 @@ namespace rocsparse
                                                       alpha,
                                                       A,
                                                       sptrsm_descr->get_csrsm_info(),
-                                                      nrhs,
-                                                      X->const_values,
-                                                      x_row_stride,
-                                                      x_col_stride,
-                                                      static_cast<int64_t>(0),
-                                                      Y->values,
-                                                      y_row_stride,
-                                                      y_col_stride,
-                                                      static_cast<int64_t>(0),
-                                                      static_cast<int64_t>(1),
-                                                      conj_x));
+                                                      X_operation,
+                                                      X,
+                                                      Y));
                     sptrsm_descr->set_stage(rocsparse_sptrsm_stage_compute);
                     return rocsparse_status_success;
                 }
@@ -1651,7 +1619,10 @@ namespace rocsparse
                 case rocsparse_format_sell:
                 {
                     // LCOV_EXCL_START
-                    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                    RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                        rocsparse_status_not_implemented,
+                        "rocsparse_solve_mode_diagonal is only implemented for the formats "
+                        "rocsparse_format_csr and rocsparse_format_csc");
                     // LCOV_EXCL_STOP
                 }
                 }

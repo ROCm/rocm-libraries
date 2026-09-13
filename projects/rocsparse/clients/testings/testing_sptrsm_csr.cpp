@@ -450,7 +450,7 @@ void testing_sptrsm_csr(const Arguments& arg)
     }
 
 #ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
-    if(arg.solve_mode != 0)
+    if(arg.solve_mode != rocsparse_solve_mode_triangular)
     {
         return;
     }
@@ -785,15 +785,14 @@ void testing_sptrsm_csr(const Arguments& arg)
 
 #if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     {
-        const rocsparse_solve_mode solve_mode = static_cast<rocsparse_solve_mode>(arg.solve_mode);
+        const rocsparse_solve_mode solve_mode = arg.solve_mode;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
                                                          sptrsm_descr,
                                                          rocsparse_sptrsm_input_solve_mode,
                                                          &solve_mode,
                                                          sizeof(solve_mode),
                                                          p_error));
-        const rocsparse_diagonal_modifier diagonal_modifier
-            = static_cast<rocsparse_diagonal_modifier>(arg.diagonal_modifier);
+        const rocsparse_diagonal_modifier diagonal_modifier = arg.diagonal_modifier;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
                                                          sptrsm_descr,
                                                          rocsparse_sptrsm_input_diagonal_modifier,
@@ -834,7 +833,9 @@ void testing_sptrsm_csr(const Arguments& arg)
         // CPU csrsm
         J analysis_pivot = -1;
         J solve_pivot    = -1;
-        if(arg.solve_mode != 0)
+        switch(arg.solve_mode)
+        {
+        case rocsparse_solve_mode_diagonal:
         {
             host_diagonal_solve_csr<I, J, T>(trans_A,
                                              M,
@@ -851,8 +852,9 @@ void testing_sptrsm_csr(const Arguments& arg)
                                              arg.diagonal_modifier,
                                              &analysis_pivot,
                                              &solve_pivot);
+            break;
         }
-        else
+        case rocsparse_solve_mode_triangular:
         {
             host_csrsm<I, J, T>(M,
                                 K,
@@ -871,6 +873,8 @@ void testing_sptrsm_csr(const Arguments& arg)
                                 base,
                                 &analysis_pivot,
                                 &solve_pivot);
+            break;
+        }
         }
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
