@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --ReplayLegacyColoringPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --RegisterAllocationPass=allocator=legacy,apply --print-output
 #
 # Legacy replay: lifting followed by SSA destruction is an identity transform.
 #

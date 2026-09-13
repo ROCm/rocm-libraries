@@ -3,4 +3,3 @@
 
 add_subdirectory(logical)
 add_subdirectory(asm)
-add_subdirectory(ssa)

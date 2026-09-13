@@ -119,8 +119,8 @@ StinkySSAValue* SSAArena::createBlockArgument(RegType type, uint16_t dwordWidth)
     return create(StinkySSAValue::Kind::BlockArgument, type, dwordWidth);
 }
 
-StinkySSAValue* SSAArena::get(uint32_t valueId) const {
-    if (valueId == 0 || valueId >= byId_.size()) return nullptr;
+StinkySSAValue* SSAArena::get(SSAValueID valueId) const {
+    if (valueId == kInvalidSSAValueID || valueId >= byId_.size()) return nullptr;
     return byId_[valueId];
 }
 
@@ -133,7 +133,8 @@ void SSAArena::clear() {
     storage_.clear();
     byId_.clear();
     byId_.push_back(nullptr);
-    shape_ = 0;
+    shape_ = kUnstampedShape;
+    liftedClasses_ = RegClassSet::all();
 }
 
 StinkyOpOperand::~StinkyOpOperand() {
