@@ -30,9 +30,9 @@ include( ExternalProject )
 # subdirectory where we need gtest.
 set( _gtest_prefix ${PROJECT_BINARY_DIR}/googletest )
 set( _gtest_lib
-  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
+  ${_gtest_prefix}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
 set( _gtest_main_lib
-  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
+  ${_gtest_prefix}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
 
 if( NOT TARGET googletest )
   ExternalProject_Add( googletest
