@@ -138,6 +138,23 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+    # These test kernels carry StreamK keys only; an absent TDM key means off.
+    def isTdmWaveSeparated(self, kernel):
+        return bool(
+            kernel.get("enableTDMA")
+            and kernel.get("enableTDMB")
+            and kernel.get("NumWaves", 1) > 1
+        )
+
+    def tdmFuseAMx(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
 
 def _sk_common_kernel(dp_only):
     return {
@@ -345,6 +362,76 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
 
     assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
+
+
+class _FuseAMxWriter(_SKWriter):
+    """_SKWriter that reports the TDMFuse=2 shared descriptor set."""
+
+    def tdmFuseAMx(self, kernel):
+        return True
+
+    def tdmFusePaired(self, kernel):
+        return False
+
+
+def _tdm_setup_increment_items(dp_only):
+    writer = _FuseAMxWriter()
+    tpa, tpb = _tensor_parameters(with_mx=True)
+    # The shared-set increment reads its fallthrough tensor and its compared
+    # wave indices from the grouping table, so the solution has to resolve to
+    # TDMFuse=2 rather than merely have the predicate overridden above. These
+    # four keys are what the resolver needs; before it was routed, the override
+    # alone was enough and the dict could stay this short.
+    kernel = {
+        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TDMFuse": 2,
+        "TDMInst": 3,
+        "NumWaves": 4,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+    }
+    return _module_items(
+        kwa_module.KernelWriterAssembly.tdmSetupIncrementWaveSeparated(writer, kernel, tpa, tpb)
+    )
+
+
+@pytest.mark.parametrize("dp_only", [True, False])
+def test_tdm_shared_set_increment_is_seeded_regardless_of_dp_only(dp_only):
+    """TDMFuse=2 shares one descriptor set across A, MXSA and MXSB, so a wave
+    that matches none of the conditional arms still has to find A's increment in
+    tdmABIncs. That dispatch is emitted by tdmSetupIncrementWaveSeparated, which
+    StreamKForceDPOnly does not gate; the only helper it early-returns from is
+    the K-offset applier, which never writes tdmABIncs (asserted separately).
+
+    Asserted on the dataflow rather than the instruction shape, so this holds
+    for a seeding s_mov plus s_cmov arms and for chained s_cselect_b32 alike:
+    the first write to tdmABIncs must not read tdmABIncs, and must carry A's
+    increment.
+    """
+    items = _tdm_setup_increment_items(dp_only)
+    writes = [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
+    assert writes, "tdmABIncs is never written"
+    first = writes[0]
+    srcs = [str(src) for src in getattr(first, "srcs", [])]
+    assert any("GlobalReadIncsA" in src for src in srcs), srcs
+    assert not any("tdmABIncs" in src for src in srcs), (
+        "the first write to tdmABIncs reads it back, so a wave taking no arm "
+        "advances the shared descriptor by whatever the register held: %s" % srcs)
+
+
+def test_tdm_streamk_offset_applier_never_writes_the_shared_set_increment():
+    writer = _SKWriter()
+    tpa, tpb = _tensor_parameters()
+    for dp_only in (0, 1):
+        items = _module_items(
+            kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
+                writer, {"StreamKForceDPOnly": dp_only}, tpa, tpb
+            )
+        )
+        assert not [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
 
 
 def test_tdm_apply_streamk_offset_subtile_noop_under_dp_only():
