@@ -42,6 +42,18 @@
     {
       "name": "waves_per_eu",
       "type": "int"
+    },
+    {
+      "name": "stagger",
+      "type": "int"
+    },
+    {
+      "name": "lazy_rescale",
+      "type": "int"
+    },
+    {
+      "name": "setprio",
+      "type": "int"
     }
   ]
 }

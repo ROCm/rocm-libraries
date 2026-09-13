@@ -144,6 +144,15 @@ if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
             > "$OUT/flydsl-build.log" 2>&1
         echo "flydsl build rc=$? hsacos=$(ls "$HSACO_DIR"/*.hsaco 2>/dev/null | wc -l)"
     fi
+    if [ -n "${UHD_FLYDSL_CATALOG:-}" ] && [ -d "${UHD_FLYDSL_CATALOG}" ]; then
+        # The variant catalog replaces the shipped one-kernel-per-tuple pack: same engine,
+        # same functional tuples, but every scheduling knob crossed, which is what gives L2
+        # more than one candidate per graph to rank.
+        for document in flydsl_attention.kdp.json flydsl_attention.kmd.json; do
+            cp "$UHD_FLYDSL_CATALOG/$document" "$COMPOSED/flydsl_attention/$document"
+        done
+        echo "catalog: $(python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))['kernelDescriptors']))" "$COMPOSED/flydsl_attention/flydsl_attention.kdp.json") kernels"
+    fi
     export FLYDSL_ATTENTION_HSACO_DIR="$HSACO_DIR"
     export HIPDNN_DESCRIPTOR_DIR="$COMPOSED"
     TREE_ROOT="$COMPOSED"

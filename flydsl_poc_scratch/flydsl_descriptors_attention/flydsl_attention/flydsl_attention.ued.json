@@ -9,5 +9,11 @@
   "knobs": [],
   "behavior_notes": [
     "runtime_compilation"
-  ]
+  ],
+  "sort_kernel_catalog": {
+    "gfx950": "aa97d962-bcbe-49cb-9349-670b0c620064"
+  },
+  "predict_engine_tflops": {
+    "gfx950": "8315bdf4-2833-46e1-88bb-2c84c12a75ae"
+  }
 }

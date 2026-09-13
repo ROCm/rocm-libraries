@@ -98,6 +98,26 @@ done < <(find "$BUILD" -type d -name asm_kernels 2>/dev/null)
 [ -n "$AITER_ASM" ] && export HIPDNN_AITER_ASM_DIR="$AITER_ASM"
 echo "tree root: $TREE_ROOT"; echo "aiter asm: ${AITER_ASM:-NONE}"
 
+if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
+    step "compose the flyDSL pack into the descriptor tree"
+    # Same reason as the collection job: HIPDNN_DESCRIPTOR_DIR replaces the search roots, so
+    # rocKE and flyDSL are only both loaded from one composed tree -- and a bake-off that
+    # cannot load an engine cannot ask it anything.
+    COMPOSED=/tmp/uhd/descriptors
+    mkdir -p "$COMPOSED"
+    cp -r "$TREE_ROOT"/. "$COMPOSED"/
+    cp -r "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention/." "$COMPOSED"/
+    if [ -n "${UHD_FLYDSL_CATALOG:-}" ] && [ -d "${UHD_FLYDSL_CATALOG}" ]; then
+        for document in flydsl_attention.kdp.json flydsl_attention.kmd.json; do
+            cp "$UHD_FLYDSL_CATALOG/$document" "$COMPOSED/flydsl_attention/$document"
+        done
+    fi
+    export FLYDSL_ATTENTION_HSACO_DIR="${UHD_HSACO_DIR:-$UHD_FLYDSL_CATALOG}"
+    export HIPDNN_DESCRIPTOR_DIR="$COMPOSED"
+    TREE_ROOT="$COMPOSED"
+    echo "composed tree: $(find "$COMPOSED" -name '*.json' | wc -l) descriptors, $(ls "$FLYDSL_ATTENTION_HSACO_DIR"/*.hsaco 2>/dev/null | wc -l) hsacos"
+fi
+
 step "install every trained model into the one tree"
 cd "$SRC/projects/hipdnn/tools" || exit 1
 IFS=';' read -ra ENTRIES <<< "$MODELS"
