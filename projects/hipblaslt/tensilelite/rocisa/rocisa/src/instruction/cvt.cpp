@@ -39,26 +39,22 @@ void cvt_inst(nb::module_ m_inst)
                       const std::vector<InstructionInput>&,
                       const std::optional<rocisa::SDWAModifiers>,
                       const std::optional<rocisa::VOP3PModifiers>,
-                      const std::vector<rocisa::True16Modifiers>&,
                       const std::string&>(),
              nb::arg("cvtType"),
              nb::arg("dst"),
              nb::arg("srcs"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
-             nb::arg("true16")  = std::vector<rocisa::True16Modifiers>({}),
              nb::arg("comment") = "");
 
     nb::class_<rocisa::VCvtF16toF32, rocisa::VCvtInstruction>(m_inst, "VCvtF16toF32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
-                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
-             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtF16toF32& self, const nb::dict&) {
             return new rocisa::VCvtF16toF32(self);
@@ -68,12 +64,10 @@ void cvt_inst(nb::module_ m_inst)
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
-                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
-             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtF32toF16& self, const nb::dict&) {
             return new rocisa::VCvtF32toF16(self);
@@ -205,13 +199,11 @@ void cvt_inst(nb::module_ m_inst)
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
                       const std::optional<rocisa::VOP3PModifiers>&,
-                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
-             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtPkFP8toF32& self, const nb::dict&) {
             return new rocisa::VCvtPkFP8toF32(self);
@@ -222,13 +214,11 @@ void cvt_inst(nb::module_ m_inst)
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
                       const std::optional<rocisa::VOP3PModifiers>&,
-                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
-             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtPkBF8toF32& self, const nb::dict&) {
             return new rocisa::VCvtPkBF8toF32(self);
@@ -448,13 +438,11 @@ void cvt_inst(nb::module_ m_inst)
                       const std::shared_ptr<rocisa::Container>&,
                       std::optional<rocisa::SDWAModifiers>,
                       std::optional<rocisa::VOP3PModifiers>,
-                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
              nb::arg("vop3")    = std::nullopt,
-             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::PVCvtBF16toFP32& self, nb::dict&) {
             return new rocisa::PVCvtBF16toFP32(self);

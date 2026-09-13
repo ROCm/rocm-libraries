@@ -762,6 +762,15 @@ DEF_T(VCndmaskB32Inst, "v_cndmask_b32", .format = VOP2, .logical = "VCndMaskB32"
         {S2, src2, sreg, M64},
     },
 )
+// true16 16-bit select (VOP3-only); half-word (.l/.h) rides on the operands.
+DEF_T(VCndmaskB16Inst, "v_cndmask_b16", .format = VOP3, .logical = "VCndMaskB16",
+    .operand_fields = {
+        {D0, vdst, vgpr, 16},
+        {S0, src0, src, 16},
+        {S1, src1, src, 16},
+        {S2, src2, sreg, M64},
+    },
+)
 DEF_T(VFmacF32Inst, "v_fmac_f32", .format = VOP2, .logical = "VMacF32",
     .operand_fields = {
         {D0, vdst, vgpr, 32, RW},

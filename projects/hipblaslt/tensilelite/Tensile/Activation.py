@@ -30,14 +30,15 @@ from typing import List, Union
 
 from rocisa import rocIsa
 from rocisa.code import Module, TextBlock
-from rocisa.container import VCC, EXEC, vgpr, sgpr, HolderContainer, RegisterContainer, Holder
-from rocisa.enum import InstType
+from rocisa.container import VCC, EXEC, vgpr, sgpr, HolderContainer, RegisterContainer, Holder, \
+    SDWAModifiers, VOP3PModifiers
+from rocisa.enum import InstType, HighBitSel, SelectBit, UnusedBit
 from rocisa.instruction import Instruction, SMovB32, SNop, SSetMask, VAddF16, VAddF32, \
     VAddPKF16, VAndB32, VCmpGEF16, VCmpGEF32, VCmpGEF64, VCmpGEI32, VCmpGTF16, VCmpGTF32, \
-    VCmpGTF64, VCmpGTI32, VCmpXClassF32, VCmpXLtF32, VCndMaskB32, VExpF16, VExpF32, VFmaF16, \
-    VFmaF32, VFmaPKF16, VMaxF32, VMaxF64, VMaxI32, VMaxPKF16, VMed3I32, VMinF16, VMinF32, \
+    VCmpGTF64, VCmpGTI32, VCmpXClassF32, VCmpXLtF32, VCndMaskB16, VCndMaskB32, VExpF16, VExpF32, VFmaF16, \
+    VFmaF32, VFmaPKF16, VMaxF16, VMaxF32, VMaxF64, VMaxI32, VMaxPKF16, VMed3I32, VMinF16, VMinF32, \
     VMinF64, VMinI32, VMovB32, VMulF16, VMulF32, VMulF64, VMulLOU32, VMulPKF16, VRcpF16, \
-    VRcpF32, VSubF32, VSubI32
+    VRcpF32, VSubF32, VSubI32, t16
 
 from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import printExit, printWarning
@@ -471,6 +472,71 @@ class ActivationModule:
             args = args[1]
             return vgpr(vgprStr, args)
 
+    # ---- f16 half-wise emit helpers -------------------------------------------
+    # Each emits one f16 op for half `i`, hiding the true16-vs-SDWA arch branch:
+    #   true16 (NoSDWA): tag each VGPR operand with .l/.h (scalars pass through),
+    #                    v_cndmask_b16 replaces v_cndmask_b32.
+    #   legacy  (SDWA):  select the half via WORD_0/WORD_1 on the operands.
+    # Callers keep their own `for i in range(0, 2)` loop, so a compare and the
+    # cndmask that consumes its VCC stay in the same iteration.
+    @staticmethod
+    def _t16v(op, half):
+        # Tag .l/.h on a VGPR operand only; sgpr/immediate operands pass through.
+        return t16(op, half) if getattr(op, "regType", None) == "v" else op
+
+    def addTransF16Half(self, module, InstCls, vgprIdx, i, comment):
+        # One half of a unary f16 transcendental (dst == src); caller owns the SNop.
+        if rocIsa.getInstance().getArchCaps()["NoSDWA"]:
+            half = HighBitSel.LOW if i == 0 else HighBitSel.HIGH
+            module.add(InstCls(dst=t16(self.vgprPrefix(vgprIdx), half), \
+                               src=t16(self.vgprPrefix(vgprIdx), half), comment=comment))
+        else:
+            sb = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+            module.add(InstCls(dst=self.vgprPrefix(vgprIdx), src=self.vgprPrefix(vgprIdx), \
+                               sdwa=SDWAModifiers(dst_sel=sb, dst_unused=UnusedBit.UNUSED_PRESERVE, \
+                                                  src0_sel=sb), comment=comment))
+
+    def addTransF16Halfwise(self, module, InstCls, vgprIdx, comment):
+        ti = rocIsa.getInstance()
+        for i in range(0, 2):
+            self.addTransF16Half(module, InstCls, vgprIdx, i, comment)
+            if ti.getArchCaps()["TransOpWait"]:
+                module.add(SNop(waitState=0, comment="1 wait states"))
+
+    def addCmpF16Half(self, module, CmpCls, src0, src1, i, comment):
+        # f16 compare into VCC over half `i`; src0 is the VGPR, src1 a scalar/immediate.
+        if rocIsa.getInstance().getArchCaps()["NoSDWA"]:
+            half = HighBitSel.LOW if i == 0 else HighBitSel.HIGH
+            module.add(CmpCls(dst=VCC(), src0=t16(src0, half), src1=src1, comment=comment))
+        else:
+            sb = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+            module.add(CmpCls(dst=VCC(), src0=src0, src1=src1, \
+                              sdwa=SDWAModifiers(src0_sel=sb, src1_sel=SelectBit.WORD_0), comment=comment))
+
+    def addValuF16Half(self, module, InstCls, dst, src0, src1, i, comment):
+        # f16 min/max-style op over half `i` (all operands share the WORD_i select on legacy).
+        if rocIsa.getInstance().getArchCaps()["NoSDWA"]:
+            half = HighBitSel.LOW if i == 0 else HighBitSel.HIGH
+            module.add(InstCls(dst=self._t16v(dst, half), src0=self._t16v(src0, half), \
+                               src1=self._t16v(src1, half), comment=comment))
+        else:
+            sb = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+            module.add(InstCls(dst=dst, src0=src0, src1=src1, \
+                               sdwa=SDWAModifiers(dst_sel=sb, dst_unused=UnusedBit.UNUSED_PRESERVE, \
+                                                  src0_sel=sb, src1_sel=sb), comment=comment))
+
+    def addCndMaskF16Half(self, module, dst, src0, src1, i, comment):
+        # Half-`i` conditional select from VCC: v_cndmask_b16 (true16) / v_cndmask_b32 + SDWA (legacy).
+        if rocIsa.getInstance().getArchCaps()["NoSDWA"]:
+            half = HighBitSel.LOW if i == 0 else HighBitSel.HIGH
+            module.add(VCndMaskB16(dst=self._t16v(dst, half), src0=self._t16v(src0, half), \
+                                   src1=self._t16v(src1, half), src2=VCC(), comment=comment))
+        else:
+            sb = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+            module.add(VCndMaskB32(dst=dst, src0=src0, src1=src1, \
+                                   sdwa=SDWAModifiers(dst_sel=sb, dst_unused=UnusedBit.UNUSED_PRESERVE, \
+                                                      src0_sel=sb, src1_sel=sb), comment=comment))
+
     ################################################################################
     ################################################################################
     ###
@@ -506,21 +572,10 @@ class ActivationModule:
         if cDataType.isHalf():
             vgprTemp = self.getVgpr(1)
             for i in range(0, 2):
-                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                module.add(VCmpGTF16(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), \
-                           sdwa=SDWAModifiers(src0_sel=select_bit, src1_sel=SelectBit.WORD_0), comment="x > alpha?"))
-                module.add(VMinF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprIn), \
-                           sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                              src0_sel=select_bit, src1_sel=select_bit), \
-                           comment="min(x, beta)"))
-                module.add(VMinF16(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationBeta), src1=0.0, \
-                           sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                              src0_sel=select_bit, src1_sel=select_bit), \
-                           comment="min(0, beta)"))
-                module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprOut), \
-                           sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                              src0_sel=select_bit, src1_sel=select_bit), \
-                           comment="set x to min(0, beta) if <= alpha"))
+                self.addCmpF16Half(module, VCmpGTF16, self.vgprPrefix(vgprIn), sgpr(activationAlpha), i, "x > alpha?")
+                self.addValuF16Half(module, VMinF16, self.vgprPrefix(vgprOut), sgpr(activationBeta), self.vgprPrefix(vgprIn), i, "min(x, beta)")
+                self.addValuF16Half(module, VMinF16, vgpr(Holder(idx=vgprTemp)), sgpr(activationBeta), 0.0, i, "min(0, beta)")
+                self.addCndMaskF16Half(module, self.vgprPrefix(vgprOut), vgpr(Holder(idx=vgprTemp)), self.vgprPrefix(vgprOut), i, "set x to min(0, beta) if <= alpha")
             module.add(SNop(waitState=0, comment="1 wait states")) # workaround for emulator
         elif cDataType.isSingle():
             module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x > alpha ?"))
@@ -551,17 +606,11 @@ class ActivationModule:
             module.add(SMovB32(dst=sgpr(Holder(idx=sgprMagic)), src=math.log(math.e,2), comment="exp magic"))
             if self.usePK:
                 module.add(VMulPKF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(Holder(idx=sgprMagic)), src1=self.vgprPrefix(vgprIn), comment="exp step 1"))
-                for i in range(0, 2):
-                    select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                    module.add(VExpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), \
-                                       sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                                          src0_sel=select_bit), \
-                                       comment="exp step 2"))
-                    if ti.getArchCaps()["TransOpWait"]:
-                        module.add(SNop(waitState=0, comment="1 wait states"))
+                self.addTransF16Halfwise(module, VExpF16, vgprOut, "exp step 2")
             else:
-                module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(Holder(idx=sgprMagic)), src1=self.vgprPrefix(vgprIn), comment="exp step 1"))
-                module.add(VExpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), comment="exp step 2"))
+                # Scalar path: f16 in the low half, tag .l on true16 (no-op on legacy).
+                module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), HighBitSel.LOW), src0=sgpr(Holder(idx=sgprMagic)), src1=t16(self.vgprPrefix(vgprIn), HighBitSel.LOW), comment="exp step 1"))
+                module.add(VExpF16(dst=t16(self.vgprPrefix(vgprOut), HighBitSel.LOW), src=t16(self.vgprPrefix(vgprOut), HighBitSel.LOW), comment="exp step 2"))
                 if ti.getArchCaps()["TransOpWait"]:
                     module.add(SNop(waitState=0, comment="1 wait states"))
         elif cDataType.isSingle():
@@ -581,6 +630,7 @@ class ActivationModule:
             flt16GeluK1Str = HexToStr(cDataType, self.usePK, ActivationMagicNumbers["Float16GeluK1"])
             sgprMagicK1 = self.getSgpr(1)
             sgprPKLiteral = self.getSgpr(1)
+            coef = floatUnion(u=ActivationMagicNumbers["FloatGeluK0"])
             module.add(SMovB32(dst=sgpr(Holder(idx=sgprMagicK1)), src=flt16GeluK1Str, comment="Float16GeluK1" ))
             module.add(SMovB32(dst=sgpr(Holder(idx=sgprPKLiteral)), src=coef.f))
             vgprTemp = self.getVgpr(1)
@@ -606,19 +656,22 @@ class ActivationModule:
                                         vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="0.5 * x * (1 + tanh(...)) * scale"))
 
             else:
-                module.add(VMulF16(dst=vgpr(Holder(idx=vgprTemp)), src0=self.vgprPrefix(vgprIn), src1=self.vgprPrefix(vgprIn), comment="x * x" ))
-                module.add(VFmaF16(dst=vgpr(Holder(idx=vgprTemp)), src0=vgpr(Holder(idx=vgprTemp)), src1=sgpr(Holder(idx=sgprMagicK1)), src2=1.0, comment="x^2 * k1 + 1"))
-                module.add(VMulF16(dst=vgpr(Holder(idx=vgprTemp)), src0=self.vgprPrefix(vgprIn), src1=vgpr(Holder(idx=vgprTemp)), comment="x * (x^2 * k1 + 1)"))
+                # Scalar path: f16 values in the low half. t16(LOW) tags .l on true16,
+                # no-op on non-true16 (legacy output unchanged).
+                low = HighBitSel.LOW
+                module.add(VMulF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=t16(self.vgprPrefix(vgprIn), low), src1=t16(self.vgprPrefix(vgprIn), low), comment="x * x" ))
+                module.add(VFmaF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=t16(vgpr(Holder(idx=vgprTemp)), low), src1=sgpr(Holder(idx=sgprMagicK1)), src2=1.0, comment="x^2 * k1 + 1"))
+                module.add(VMulF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=t16(self.vgprPrefix(vgprIn), low), src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="x * (x^2 * k1 + 1)"))
                 coef = floatUnion(u=ActivationMagicNumbers["FloatGeluK0"])
-                module.add(VMulF16(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(Holder(idx=sgprPKLiteral)), src1=vgpr(Holder(idx=vgprTemp)), comment="k0 * x * (x^2 * k1 + 1)"))
+                module.add(VMulF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=sgpr(Holder(idx=sgprPKLiteral)), src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="k0 * x * (x^2 * k1 + 1)"))
                 module.add(self.getTanhModule(cDataType, Holder(idx=vgprTemp), Holder(idx=vgprTemp), "", ""))
-                module.add(VAddF16(dst=vgpr(Holder(idx=vgprTemp)), src0=1.0, src1=vgpr(Holder(idx=vgprTemp)), comment="1 + tanh(...)" ))
-                module.add(VMulF16(dst=vgpr(Holder(idx=vgprTemp)), src0=self.vgprPrefix(vgprIn), src1=vgpr(Holder(idx=vgprTemp)), comment="x * (1 + tanh(...))"))
+                module.add(VAddF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=1.0, src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="1 + tanh(...)" ))
+                module.add(VMulF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=t16(self.vgprPrefix(vgprIn), low), src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="x * (1 + tanh(...))"))
                 if activationAlpha == None:
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=0.5, src1=vgpr(Holder(idx=vgprTemp)), comment="0.5 * x * (1 + tanh(...))"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=0.5, src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="0.5 * x * (1 + tanh(...))"))
                 else:
-                    module.add(VMulF16(dst=vgpr(Holder(idx=vgprTemp)), src0=0.5, src1=vgpr(Holder(idx=vgprTemp)), comment="0.5 * x * (1 + tanh(...))"))
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationAlpha), src1=vgpr(Holder(idx=vgprTemp)), comment="0.5 * x * (1 + tanh(...)) * scale"))
+                    module.add(VMulF16(dst=t16(vgpr(Holder(idx=vgprTemp)), low), src0=0.5, src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="0.5 * x * (1 + tanh(...))"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=sgpr(activationAlpha), src1=t16(vgpr(Holder(idx=vgprTemp)), low), comment="0.5 * x * (1 + tanh(...)) * scale"))
         elif cDataType.isSingle():
             vgprTemp = self.getVgpr(1)
             flt16GeluK1Str = HexToStr(cDataType, self.usePK, ActivationMagicNumbers["FloatGeluK1"])
@@ -645,14 +698,8 @@ class ActivationModule:
             vgprTemp = self.getVgpr(1)
             module.add(VMulPKF16(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationAlpha), src1=self.vgprPrefix(vgprIn), comment="tmp = x * alpha"))
             for i in range(0, 2):
-                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                module.add(VCmpGEF16(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0.0, \
-                                     sdwa=SDWAModifiers(src0_sel=select_bit, src1_sel=SelectBit.WORD_0), \
-                                     comment="x > 0 ?"))
-                module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=vgpr(Holder(idx=vgprTemp)), src1=self.vgprPrefix(vgprIn), \
-                                       sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                                          src0_sel=select_bit, src1_sel=select_bit), \
-                                       comment="set x to tmp if < 0"))
+                self.addCmpF16Half(module, VCmpGEF16, self.vgprPrefix(vgprIn), 0.0, i, "x > 0 ?")
+                self.addCndMaskF16Half(module, self.vgprPrefix(vgprOut), vgpr(Holder(idx=vgprTemp)), self.vgprPrefix(vgprIn), i, "set x to tmp if < 0")
         elif cDataType.isSingle():
             vgprTemp = self.getVgpr(1)
             module.add(VMulF32(dst=vgpr(Holder(idx=vgprTemp)), src0=sgpr(activationAlpha), src1=self.vgprPrefix(vgprIn), comment="tmp = x * alpha"))
@@ -703,17 +750,18 @@ class ActivationModule:
                 module.add(VAddPKF16(dst=self.vgprPrefix(vgprOut), src0=1.0, src1=self.vgprPrefix(vgprOut), \
                                      vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="1 + exp(-x)"))
                 for i in range(0, 2):
-                    select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                    module.add(VRcpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), \
-                                       sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, src0_sel=select_bit), \
-                                       comment="1 / (1 + exp(-x))"))
+                    self.addTransF16Half(module, VRcpF16, vgprOut, i, "1 / (1 + exp(-x))")
                 if ti.getArchCaps()["TransOpWait"]:
                     module.add(SNop(waitState=0, comment="1 wait states"))
             else:
-                module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=-1.0, src1=self.vgprPrefix(vgprIn), comment=" x = -x"))
+                # Scalar path: f16 value lives in the low half. t16(LOW) tags .l on
+                # true16 targets and is a no-op on non-true16 targets (legacy output
+                # is byte-for-byte unchanged).
+                low = HighBitSel.LOW
+                module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=-1.0, src1=t16(self.vgprPrefix(vgprIn), low), comment=" x = -x"))
                 module.add(self.getExpModule(cDataType, vgprOut, vgprOut))
-                module.add(VAddF16(dst=self.vgprPrefix(vgprOut), src0=1.0, src1=self.vgprPrefix(vgprOut), comment="1 + exp(-x)"))
-                module.add(VRcpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), comment="1 / (1 + exp(-x))"))
+                module.add(VAddF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=1.0, src1=t16(self.vgprPrefix(vgprOut), low), comment="1 + exp(-x)"))
+                module.add(VRcpF16(dst=t16(self.vgprPrefix(vgprOut), low), src=t16(self.vgprPrefix(vgprOut), low), comment="1 / (1 + exp(-x))"))
                 if ti.getArchCaps()["TransOpWait"]:
                     module.add(SNop(waitState=0, comment="1 wait states"))
         elif cDataType.isSingle():
@@ -742,33 +790,27 @@ class ActivationModule:
                 module.add(self.getExpModule(cDataType, vgprOut, vgprOut))
                 module.add(VAddPKF16(dst=self.vgprPrefix(vgprOut), src0=1.0, src1=self.vgprPrefix(vgprOut), \
                                      vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="e^2x + 1"))
-                for i in range(0, 2):
-                    select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                    vgprCtrl = "dst_sel:WORD_%d dst_unused:UNUSED_PRESERVE src0_sel:WORD_%d"%(i, i)
-                    module.add(VRcpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), \
-                                       sdwa=SDWAModifiers(dst_sel=select_bit, dst_unused=UnusedBit.UNUSED_PRESERVE, \
-                                                          src0_sel=select_bit), \
-                                       comment="1 / (1 + exp(-x))"))
-                    if ti.getArchCaps()["TransOpWait"]:
-                        module.add(SNop(waitState=0, comment="1 wait states")) #workaround for emulator
+                self.addTransF16Halfwise(module, VRcpF16, vgprOut, "1 / (1 + exp(-x))")
                 module.add(VFmaPKF16(dst=self.vgprPrefix(vgprOut), src0=-2.0, src1=self.vgprPrefix(vgprOut), src2=1.0, \
                                      vop3=VOP3PModifiers(op_sel_hi=[0,1,0,1]), comment="tanh(x) = (1 / (e^2x + 1)) * (-2) + 1"))
                 if activationBeta:
                     module.add(VMulPKF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprOut), comment="beta * tanh(x)"))
             else:
+                # Scalar path: f16 in the low half, tag .l on true16 (no-op on legacy).
+                low = HighBitSel.LOW
                 if activationAlpha:
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationAlpha), src1=self.vgprPrefix(vgprIn), comment="x * alpha"))
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=2, src1=self.vgprPrefix(vgprOut), comment=" x = 2 * x"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=sgpr(activationAlpha), src1=t16(self.vgprPrefix(vgprIn), low), comment="x * alpha"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=2, src1=t16(self.vgprPrefix(vgprOut), low), comment=" x = 2 * x"))
                 else:
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=2, src1=self.vgprPrefix(vgprIn), comment=" x = 2 * x"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=2, src1=t16(self.vgprPrefix(vgprIn), low), comment=" x = 2 * x"))
                 module.add(self.getExpModule(cDataType, vgprOut, vgprOut))
-                module.add(VAddF16(dst=self.vgprPrefix(vgprOut), src0=1.0, src1=self.vgprPrefix(vgprOut), comment="e^2x + 1"))
-                module.add(VRcpF16(dst=self.vgprPrefix(vgprOut), src=self.vgprPrefix(vgprOut), comment="1 / (1 + exp(-x))"))
+                module.add(VAddF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=1.0, src1=t16(self.vgprPrefix(vgprOut), low), comment="e^2x + 1"))
+                module.add(VRcpF16(dst=t16(self.vgprPrefix(vgprOut), low), src=t16(self.vgprPrefix(vgprOut), low), comment="1 / (1 + exp(-x))"))
                 if ti.getArchCaps()["TransOpWait"]:
                     module.add(SNop(waitState=0, comment="1 wait states")) #workaround for emulator
-                module.add(VFmaF16(dst=self.vgprPrefix(vgprOut), src0=-2.0, src1=self.vgprPrefix(vgprOut), src2=1.0, comment="tanh(x) = (1 / (e^2x + 1)) * (-2) + 1"))
+                module.add(VFmaF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=-2.0, src1=t16(self.vgprPrefix(vgprOut), low), src2=1.0, comment="tanh(x) = (1 / (e^2x + 1)) * (-2) + 1"))
                 if activationBeta:
-                    module.add(VMulF16(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprOut), comment="beta * tanh(x)"))
+                    module.add(VMulF16(dst=t16(self.vgprPrefix(vgprOut), low), src0=sgpr(activationBeta), src1=t16(self.vgprPrefix(vgprOut), low), comment="beta * tanh(x)"))
         elif cDataType.isSingle():
             if activationAlpha:
                 module.add(VMulF32(dst=self.vgprPrefix(vgprOut), src0=sgpr(activationAlpha), src1=self.vgprPrefix(vgprIn), comment="x * alpha"))
@@ -877,7 +919,9 @@ class ActivationModule:
             mulFunction = VMulF32
         else:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
-        module.add(mulFunction(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprIn), src1=self.vgprPrefix(Holder(idx=vgprTemp)), comment="x / (1 + exp(-x))"))
+        # Scalar VMulF16 gets .l on true16; packed VMulPKF16 must NOT be tagged.
+        w = (lambda r: t16(r, HighBitSel.LOW)) if (cDataType.isHalf() and not self.usePK) else (lambda r: r)
+        module.add(mulFunction(dst=w(self.vgprPrefix(vgprOut)), src0=w(self.vgprPrefix(vgprIn)), src1=w(self.vgprPrefix(Holder(idx=vgprTemp))), comment="x / (1 + exp(-x))"))
         return module
 
     def getSwishModule(self, cDataType, vgprIn, vgprOut, activationAlpha):
@@ -894,9 +938,11 @@ class ActivationModule:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
         vgprTempIn = self.getVgpr(1)
         vgprTempOut = self.getVgpr(1)
-        module.add(mulFunction(dst=self.vgprPrefix(Holder(idx=vgprTempIn)), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x * beta"))
+        # Scalar VMulF16 gets .l on true16; packed VMulPKF16 must NOT be tagged.
+        w = (lambda r: t16(r, HighBitSel.LOW)) if (cDataType.isHalf() and not self.usePK) else (lambda r: r)
+        module.add(mulFunction(dst=w(self.vgprPrefix(Holder(idx=vgprTempIn))), src0=w(self.vgprPrefix(vgprIn)), src1=sgpr(activationAlpha), comment="x * beta"))
         module.addModuleAsFlatItems(self.getSigmoidModule(cDataType, Holder(idx=vgprTempIn), Holder(idx=vgprTempOut)))
-        module.add(mulFunction(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprIn), src1=self.vgprPrefix(Holder(idx=vgprTempOut)), comment="x / (1 + exp(-x * beta))"))
+        module.add(mulFunction(dst=w(self.vgprPrefix(vgprOut)), src0=w(self.vgprPrefix(vgprIn)), src1=w(self.vgprPrefix(Holder(idx=vgprTempOut))), comment="x / (1 + exp(-x * beta))"))
         return module
 
     def getClampModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
@@ -918,11 +964,8 @@ class ActivationModule:
 
         if cDataType.isHalf():
             for i in range(0, 2):
-                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                sdwa = SDWAModifiers(dst_sel = select_bit, dst_unused = UnusedBit.UNUSED_PRESERVE,
-                                     src0_sel = select_bit, src1_sel = select_bit)
-                module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, sdwa = sdwa, comment = "min(x, beta)"))
-                module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, sdwa = sdwa, comment = "max(alpha, min(x, beta))"))
+                self.addValuF16Half(module, MIN, Vout, beta, Vin, i, "min(x, beta)")
+                self.addValuF16Half(module, MAX, Vout, alpha, Vout, i, "max(alpha, min(x, beta))")
         else:
             module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, comment = "min(x, beta)"))
             module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, comment = "max(alpha, min(x, beta))"))
@@ -1338,6 +1381,10 @@ class ActivationInline:
     kStr = ""
     padSpacesStr = ' ' * spaces
     asm = padSpacesStr + self.asmStr
+    # true16: bind f16 alpha/beta as "v" (not "s") so they stay in a VGPR and get
+    # a ".l" select; an f16 sgpr forced into a VGPR has no half-word and is rejected.
+    isTrue16 = bool(rocIsa.getInstance().getArchCaps()["NoSDWA"]) and self.dataType.isHalf()
+    scalarCons = "v" if isTrue16 else "s"
     if (activationType == 'abs'):
       if self.dataType.isHalf() or self.dataType.isBFloat16():
         unionDataTypeStr = "_Float16" if self.dataType.isHalf() else "BFloat16"
@@ -1374,7 +1421,7 @@ class ActivationInline:
       kStr += (asm + " // geluscaling\n")
       module = activation.getGeluModule(self.dataType, 0, 0, 1)
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
-      kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
+      kStr += addSpace(asm, ": \"+v\"(value) : \"%s\"(alpha)\n" % scalarCons)
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'leakyrelu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
@@ -1400,7 +1447,7 @@ class ActivationInline:
       kStr += (asm + " // tanh\n")
       module = activation.getTanhModule(self.dataType, 0, 0, 1, 2)
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
-      kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha), \"s\"(beta)\n")
+      kStr += addSpace(asm, ": \"+v\"(value) : \"%s\"(alpha), \"%s\"(beta)\n" % (scalarCons, scalarCons))
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'dgelu'):
       kStr += (asm + " // dgelu\n")
@@ -1424,7 +1471,7 @@ class ActivationInline:
       kStr += (asm + " // Swish\n")
       module = activation.getSwishModule(self.dataType, 0, 0, 1)
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
-      kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
+      kStr += addSpace(asm, ": \"+v\"(value) : \"%s\"(alpha)\n" % scalarCons)
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'clamp'):
       kStr += (padSpacesStr + "value = std::max(alpha, std::min(value, beta));\n")  # clamp

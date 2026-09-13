@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet, SrdUpperValue
 from rocisa.container import EXEC, VCC, DSModifiers, MUBUFModifiers, vgpr, sgpr
-from rocisa.enum import RegisterType
+from rocisa.enum import RegisterType, HighBitSel
 from rocisa.register import RegisterPool
 import rocisa.instruction as ri
 
@@ -450,12 +450,16 @@ class AMaxKernelGenerator:
 
     def max_per_data(self, i, onlyOneElement = False) -> Module:
         mod = Module("max_per_data")
+        low = HighBitSel.LOW
         if (self.i_type.isHalf()):
-            mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
+            # f16 in the low half; t16(LOW) tags .l on true16 (no-op on legacy).
+            mod.add(ri.VMaxF16(ri.t16(vgpr("Output"), low), ri.t16(vgpr("Output"), low),
+                               ri.t16(vgpr(f"Value+{i}", isAbs=True), low)))
             # On non-Ecc hardware, the top 16 bits are dirty
             if not onlyOneElement:
                 mod.add(ri.VLShiftRightB32(vgpr(f"Value+{i}"), 16, vgpr(f"Value+{i}")))
-                mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
+                mod.add(ri.VMaxF16(ri.t16(vgpr("Output"), low), ri.t16(vgpr("Output"), low),
+                                   ri.t16(vgpr(f"Value+{i}", isAbs=True), low)))
         elif (self.i_type.isSingle()):
             mod.add(ri.VMaxF32(vgpr("Output"), vgpr("Output"), vgpr(f"Value+{i}", isAbs=True)))
         return mod
@@ -652,7 +656,9 @@ class AMaxKernelGenerator:
     def merge_sum(self) -> Module:
         mod = Module("merge_sum")
         if (self.i_type.isHalf()):
-            mod.add(ri.VMaxF16(vgpr("Output"), vgpr("Output"), vgpr("OutputB")))
+            low = HighBitSel.LOW
+            mod.add(ri.VMaxF16(ri.t16(vgpr("Output"), low), ri.t16(vgpr("Output"), low),
+                               ri.t16(vgpr("OutputB"), low)))
         elif (self.i_type.isSingle()):
             mod.add(ri.VMaxF32(vgpr("Output"), vgpr("Output"), vgpr("OutputB")))
 
@@ -762,10 +768,11 @@ class AMaxKernelGenerator:
         BufferStorex1 = self.global_write_inst_type(1)
 
         mod.add(ri.VMovB32(vgpr("Offset"), 0))
+        # f16 in the low half; ECvt* selects .l on true16, SDWA WORD_0 on legacy.
         if self.i_type.toChar() == 'H' and self.o_type.toChar() == "S":
-            mod.add(ri.VCvtF16toF32(vgpr("Output"), vgpr("Output")))
+            mod.add(ri.ECvtF16toF32(vgpr("Output"), vgpr("Output"), HighBitSel.LOW))
         elif self.i_type.toChar() == 'S' and self.o_type.toChar() == "H":
-            mod.add(ri.VCvtF32toF16(vgpr("Output"), vgpr("Output")))
+            mod.add(ri.ECvtF32toF16(vgpr("Output"), vgpr("Output"), HighBitSel.LOW))
         mod.add(BufferStorex1(vgpr("Output"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 

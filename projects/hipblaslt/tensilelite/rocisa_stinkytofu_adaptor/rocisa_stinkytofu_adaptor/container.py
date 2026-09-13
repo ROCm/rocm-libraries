@@ -15,7 +15,7 @@ from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
 from .caps import glc_bit_name_from_caps, slc_bit_name_from_caps
-from .enum import CacheScope, HighBitSel, NonVolatile, SelectBit, TemporalHint, UnusedBit
+from .enum import CacheScope, NonVolatile, SelectBit, TemporalHint, UnusedBit
 
 _P = "rocisa.container"
 
@@ -1952,35 +1952,3 @@ class VOP3PModifiers(Container):
         self.op_sel = list(self.op_sel)
         self.op_sel_hi = list(self.op_sel_hi)
         self.byte_sel = list(self.byte_sel)
-
-
-class True16Modifiers(Container):
-    """True16 high/low selector (``rocisa::True16Modifiers``)."""
-
-    __slots__ = ("high_bit",)
-
-    def __init__(self, high_bit: Union[HighBitSel, int] = HighBitSel.NONE) -> None:
-        if isinstance(high_bit, int):
-            self.high_bit = HighBitSel(high_bit)
-        else:
-            self.high_bit = high_bit
-
-    def toString(self) -> str:
-        if self.high_bit == HighBitSel.NONE:
-            return ""
-        return ".h" if self.high_bit == HighBitSel.HIGH else ".l"
-
-    def __repr__(self) -> str:
-        return f"True16Modifiers(high_bit={self.high_bit!r})"
-
-    def __copy__(self) -> "True16Modifiers":
-        return True16Modifiers(self.high_bit)
-
-    def __deepcopy__(self, memo: dict) -> "True16Modifiers":
-        return True16Modifiers(self.high_bit)
-
-    def __getstate__(self) -> Tuple[int]:
-        return (int(self.high_bit),)
-
-    def __setstate__(self, state: Tuple[int]) -> None:
-        self.high_bit = HighBitSel(state[0])
