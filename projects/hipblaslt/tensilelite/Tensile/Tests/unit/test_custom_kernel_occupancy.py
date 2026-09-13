@@ -492,8 +492,6 @@ class TestGetSourceFileStringCustomKernelPath:
             "KernelLanguage": "Assembly",
             "CUOccupancy": -1,
         })
-        # duplicate is set as an attribute by TensileCreateLibrary before dispatch
-        k.duplicate = False
         return k
 
     def _make_kwa_setrocisa_path(self, asm_source):
@@ -617,7 +615,6 @@ class TestGetSourceFileStringIncompleteSingletonCaps:
             "KernelLanguage": "Assembly",
             "CUOccupancy": -1,
         })
-        k.duplicate = False
         return k
 
     def _good_asm(self):

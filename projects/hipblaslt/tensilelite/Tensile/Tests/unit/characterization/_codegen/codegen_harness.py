@@ -177,7 +177,6 @@ def _prepare_kernel(kernel, splitGSU=False):
     from Tensile.SolutionStructs.Naming import getKernelFileBase
 
     base = getKernelFileBase(splitGSU, kernel)
-    kernel.duplicate = False
     kernel["BaseName"] = base
     return base
 

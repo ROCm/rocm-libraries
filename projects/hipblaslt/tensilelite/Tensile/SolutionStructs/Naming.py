@@ -44,20 +44,26 @@ _INTERNAL_ARGS = (
     "SFCWGM",
 )
 
-def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
-  """Return a string key that identifies a kernel ignoring internal args.
+# Construction and selection controls that do not affect emitted assembly.
+_NON_CODEGEN_PARAMETERS = (
+    "AssertAIGreaterThanEqual",
+    "AssertAILessThanEqual",
+    "NoReject",
+    "NonTemporalGate",
+    "Sparse",
+)
+
+def getKernelCompileKey(state, splitGSU: bool) -> str:
+  """Return generated-assembly identity without code-object placement.
 
   Internal args (WorkGroupMapping, StaggerU, etc.) are runtime dispatch
-  parameters — they don't change the generated assembly. This function
-  produces a canonical key where those parameters are masked to "M" and
-  GroupedGemm is forced to False, so that kernels differing only in
-  internal args map to the same key. GroupedGemm masking is skipped when
-  SupportUserArgs is set, because the batch-offset codegen is gated on
-  GroupedGemm there and the assembly genuinely differs.
+  parameters and map to the same compile key. GroupedGemm shares a key for
+  the standard argument path and remains distinct when SupportUserArgs makes
+  grouped batch-offset handling part of generated assembly.
 
   Used to:
     - Deduplicate kernels before code generation (BenchmarkProblems.py,
-      Run.py:getUniqueKernels) — avoids compiling the same assembly twice.
+      Run.py:groupKernelRecords) — avoids compiling the same assembly twice.
     - Identify invalid kernels after compilation and propagate failures
       to all solutions sharing that kernel (Run.py:removeInvalidSolutionsAndKernels).
     - Build kernel-to-solution mappings for post-processing
@@ -69,6 +75,9 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
 
   # Save originals
   backups = {k: s[k] for k in _INTERNAL_ARGS}
+  nonCodegenBackups = {
+      key: s[key] for key in _NON_CODEGEN_PARAMETERS if key in s
+  }
   gsu_backup = s["GlobalSplitU"]
   gg_backup = pt["GroupedGemm"]
 
@@ -85,15 +94,26 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
     s["GlobalSplitU"] = "M"
   for k in _INTERNAL_ARGS:
     s[k] = "M"
+  for key in nonCodegenBackups:
+    s[key] = "M"
 
-  # Compute string key (same as what str(deep_copied_solution) would produce)
-  key = _getName(s, getRequiredParametersFull(), splitGSU, False)
+  try:
+    compileKey = _getName(s, getRequiredParametersFull(), splitGSU, False)
+  finally:
+    pt["GroupedGemm"] = gg_backup
+    s["GlobalSplitU"] = gsu_backup
+    for k in _INTERNAL_ARGS:
+      s[k] = backups[k]
+    for parameter, value in nonCodegenBackups.items():
+      s[parameter] = value
 
-  # Restore
-  pt["GroupedGemm"] = gg_backup
-  s["GlobalSplitU"] = gsu_backup
-  for k in _INTERNAL_ARGS:
-    s[k] = backups[k]
+  return compileKey
+
+
+def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
+  """Return the compile key plus code-object placement metadata."""
+  s = state._state if hasattr(state, '_state') else state
+  key = getKernelCompileKey(s, splitGSU)
 
   # Include codeObjectFile and DeviceNames in the key to prevent
   # over-deduplication across different code object files / devices.
@@ -155,75 +175,90 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   ggBackup = state["ProblemType"]["GroupedGemm"]
   wgmxccBackup = state["WorkGroupMappingXCC"]
 
-  # Include WGMXCC in kernel name as either n1 for auto or 1 for set value
-  # Fixed values produce different assembly code
-  # If the key is missing from name, kernels are dropped as duplicates when they should be kept
-  if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
-    state["WorkGroupMappingXCC"] = 1
+  try:
+    # Encode only the fixed WGMXCC categories that change generated assembly.
+    if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
+      state["WorkGroupMappingXCC"] = (
+          2
+          if state.get("StreamK") in (4, 5)
+          and state.get("StreamKXCCMapping", 0) != 0
+          and state["WorkGroupMappingXCC"] > 1
+          else 1
+      )
 
-  if ignoreInternalArgs:
-    # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
-    # one key. When SupportUserArgs is set the batch-offset codegen depends on
-    # GroupedGemm, so grouped and non-grouped kernels are not identical and must
-    # keep distinct keys -- preserve the real value in that case.
-    if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
-      state["ProblemType"]["GroupedGemm"] = False
-    if splitGSU:
-      state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
+    if ignoreInternalArgs:
+      # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
+      # one key. When SupportUserArgs is set the batch-offset codegen depends on
+      # GroupedGemm, so grouped and non-grouped kernels are not identical and must
+      # keep distinct keys -- preserve the real value in that case.
+      if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
+        state["ProblemType"]["GroupedGemm"] = False
+      if splitGSU:
+        state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
-  requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+    requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
-  if ignoreInternalArgs:
-    if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
-      requiredParametersTemp.discard("GlobalSplitU")
-  else:
-    requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
-                                                          #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
-                                                           "WorkGroupMappingXCCGroup",
-                                                           "StaggerU",
-                                                           "StaggerUStride",
-                                                           "StaggerUMapping",
-                                                           "GlobalSplitUCoalesced",
-                                                           "GlobalSplitUWorkGroupMappingRoundRobin"])
-  pt = state["ProblemType"]
-  if isinstance(pt, ProblemType):
-    components = [str(pt)]
-  else:
-    components = [str(ProblemType(pt, printIndexAssignmentInfo=False))]
+    if ignoreInternalArgs:
+      if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:
+        requiredParametersTemp.discard("GlobalSplitU")
+    else:
+      requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
+                                                            #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
+                                                             "WorkGroupMappingXCCGroup",
+                                                             "StaggerU",
+                                                             "StaggerUStride",
+                                                             "StaggerUMapping",
+                                                             "GlobalSplitUCoalesced",
+                                                             "GlobalSplitUWorkGroupMappingRoundRobin"])
+    pt = state["ProblemType"]
+    if isinstance(pt, ProblemType):
+      components = [str(pt)]
+    else:
+      components = [str(ProblemType(pt, printIndexAssignmentInfo=False))]
 
-  if "MacroTile0" in state \
-      and "MacroTile1" in state \
-      and "DepthU" in state:
-    components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
+    if "MacroTile0" in state \
+        and "MacroTile1" in state \
+        and "DepthU" in state:
+      components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
-  if "MatrixInstM" in state:
-    # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
-    # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
-    _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
-    requiredParametersTemp.add("MIWaveTile")
-  else:
-    requiredParametersTemp.add("ThreadTile")
+    if "MatrixInstM" in state:
+      # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
+      # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
+      _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
+      components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
+      requiredParametersTemp.add("MIWaveTile")
+    else:
+      requiredParametersTemp.add("ThreadTile")
 
-  if state["UseCustomMainLoopSchedule"]:
-    components.append('CMS')
+    if state["UseCustomMainLoopSchedule"]:
+      components.append('CMS')
 
-  components.append('SN')
+    components.append('SN')
 
-  # Skip SFA tag if using default wgm algo
-  if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
-    requiredParametersTemp.discard("SpaceFillingAlgo")
+    # Skip SFA tag if using default wgm algo
+    if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
+      requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
-      continue
-    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    # These values remove or replace generated control-flow paths.
+    if state.get("DebugStreamK", 0) != 0:
+      requiredParametersTemp.add("DebugStreamK")
+    if state.get("StreamKAtomic", 0) != 0:
+      requiredParametersTemp.add("StreamKAtomic")
+    if state.get("MbskPrefetchMethod", 0) != 0:
+      requiredParametersTemp.add("MbskPrefetchMethod")
+    if state.get("DebugPersistentKernelLoopForever", False):
+      requiredParametersTemp.add("DebugPersistentKernelLoopForever")
 
-  state["GlobalSplitU"] = gsuBackup
-  state["ProblemType"]["GroupedGemm"] = ggBackup
-  state["WorkGroupMappingXCC"] = wgmxccBackup
+    for key in sorted(requiredParametersTemp):
+      if key not in state or key == "CustomKernelName":
+        continue
+      components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
-  return '_'.join(components)
+    return '_'.join(components)
+  finally:
+    state["GlobalSplitU"] = gsuBackup
+    state["ProblemType"]["GroupedGemm"] = ggBackup
+    state["WorkGroupMappingXCC"] = wgmxccBackup
 
 
 def shortenFileBase(splitGSU, kernel):
