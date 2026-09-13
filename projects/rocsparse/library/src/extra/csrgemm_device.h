@@ -89,7 +89,7 @@ namespace rocsparse
         int lid = hipThreadIdx_x & (WFSIZE - 1);
 
         // Each (sub)wavefront processes a row
-        J row = (hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x) / WFSIZE;
+        J row = (static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x) / WFSIZE;
 
         // Bounds check
         if(row >= m)
@@ -177,7 +177,7 @@ namespace rocsparse
                                     J* __restrict__ group_size,
                                     uint32_t shared_mem_optin)
     {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -191,7 +191,7 @@ namespace rocsparse
         __threadfence_block();
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             I nprod = int_prod[row];
 
@@ -231,7 +231,7 @@ namespace rocsparse
                                     int* __restrict__ workspace,
                                     uint32_t shared_mem_optin)
     {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -245,7 +245,7 @@ namespace rocsparse
         __threadfence_block();
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             I nnz = csr_row_ptr[row + 1] - csr_row_ptr[row];
 
@@ -311,13 +311,13 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Initialize local maximum
         J local_max = 0;
 
         // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
+        for(; row < m; row += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             // Determine local maximum
             local_max = rocsparse::max(local_max, J(csr_row_ptr[row + 1] - csr_row_ptr[row]));
@@ -486,7 +486,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE / WFSIZE + wid;
 
         // Hash table in shared memory
         __shared__ J stable[BLOCKSIZE / WFSIZE * HASHSIZE];
@@ -941,7 +941,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
+        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE / WFSIZE + wid;
 
         // Hash table in shared memory
         __shared__ J stable[BLOCKSIZE / WFSIZE * HASHSIZE];
