@@ -1,0 +1,111 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_16_112_112_bfp16_nchw_norlo_rhi0p5",
+          "1_16_112_112_bfp16_nchw_rlo0_norhi",
+          "1_16_112_112_bfp16_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_bfp16_nhwc_norlo_rhi0p5",
+          "1_16_112_112_bfp16_nhwc_rlo0_norhi",
+          "1_16_112_112_bfp16_nhwc_rlo0p1_rhi0p5",
+          "1_16_112_112_fp16_nchw_norlo_rhi0p5",
+          "1_16_112_112_fp16_nchw_rlo0_norhi",
+          "1_16_112_112_fp16_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_fp16_nhwc_norlo_rhi0p5",
+          "1_16_112_112_fp16_nhwc_rlo0_norhi",
+          "1_16_112_112_fp16_nhwc_rlo0p1_rhi0p5",
+          "1_16_112_112_fp32_nchw_norlo_rhi0p5",
+          "1_16_112_112_fp32_nchw_rlo0_norhi",
+          "1_16_112_112_fp32_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_fp32_nhwc_norlo_rhi0p5",
+          "1_16_112_112_fp32_nhwc_rlo0_norhi",
+          "1_16_112_112_fp32_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_bfp16_nchw_norlo_rhi0p5",
+          "5_256_14_14_bfp16_nchw_rlo0_norhi",
+          "5_256_14_14_bfp16_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_bfp16_nhwc_norlo_rhi0p5",
+          "5_256_14_14_bfp16_nhwc_rlo0_norhi",
+          "5_256_14_14_bfp16_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_fp16_nchw_norlo_rhi0p5",
+          "5_256_14_14_fp16_nchw_rlo0_norhi",
+          "5_256_14_14_fp16_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_fp16_nhwc_norlo_rhi0p5",
+          "5_256_14_14_fp16_nhwc_rlo0_norhi",
+          "5_256_14_14_fp16_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_fp32_nchw_norlo_rhi0p5",
+          "5_256_14_14_fp32_nchw_rlo0_norhi",
+          "5_256_14_14_fp32_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_fp32_nhwc_norlo_rhi0p5",
+          "5_256_14_14_fp32_nhwc_rlo0_norhi",
+          "5_256_14_14_fp32_nhwc_rlo0p1_rhi0p5"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_112_112_bfp16_nchw_norlo_rhi0p5",
+          "1_16_112_112_bfp16_nchw_rlo0_norhi",
+          "1_16_112_112_bfp16_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_bfp16_nhwc_norlo_rhi0p5",
+          "1_16_112_112_bfp16_nhwc_rlo0_norhi",
+          "1_16_112_112_bfp16_nhwc_rlo0p1_rhi0p5",
+          "1_16_112_112_fp16_nchw_norlo_rhi0p5",
+          "1_16_112_112_fp16_nchw_rlo0_norhi",
+          "1_16_112_112_fp16_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_fp16_nhwc_norlo_rhi0p5",
+          "1_16_112_112_fp16_nhwc_rlo0_norhi",
+          "1_16_112_112_fp16_nhwc_rlo0p1_rhi0p5",
+          "1_16_112_112_fp32_nchw_norlo_rhi0p5",
+          "1_16_112_112_fp32_nchw_rlo0_norhi",
+          "1_16_112_112_fp32_nchw_rlo0p1_rhi0p5",
+          "1_16_112_112_fp32_nhwc_norlo_rhi0p5",
+          "1_16_112_112_fp32_nhwc_rlo0_norhi",
+          "1_16_112_112_fp32_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_bfp16_nchw_norlo_rhi0p5",
+          "5_256_14_14_bfp16_nchw_rlo0_norhi",
+          "5_256_14_14_bfp16_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_bfp16_nhwc_norlo_rhi0p5",
+          "5_256_14_14_bfp16_nhwc_rlo0_norhi",
+          "5_256_14_14_bfp16_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_fp16_nchw_norlo_rhi0p5",
+          "5_256_14_14_fp16_nchw_rlo0_norhi",
+          "5_256_14_14_fp16_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_fp16_nhwc_norlo_rhi0p5",
+          "5_256_14_14_fp16_nhwc_rlo0_norhi",
+          "5_256_14_14_fp16_nhwc_rlo0p1_rhi0p5",
+          "5_256_14_14_fp32_nchw_norlo_rhi0p5",
+          "5_256_14_14_fp32_nchw_rlo0_norhi",
+          "5_256_14_14_fp32_nchw_rlo0p1_rhi0p5",
+          "5_256_14_14_fp32_nhwc_norlo_rhi0p5",
+          "5_256_14_14_fp32_nhwc_rlo0_norhi",
+          "5_256_14_14_fp32_nhwc_rlo0p1_rhi0p5"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}
