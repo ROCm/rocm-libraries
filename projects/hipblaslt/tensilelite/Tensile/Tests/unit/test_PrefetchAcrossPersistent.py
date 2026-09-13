@@ -264,6 +264,9 @@ class _SetupNewTilePapTdmWriter:
     def papTdmRestoreLdsBank(self, kernel, tpa, tpb):
         return self._module("papTdmRestoreLdsBank")
 
+    def papTdmRebalanceSkippedSplitIncrement(self, kernel, tpa, tpb):
+        return self._module("papTdmRebalanceSkippedSplitIncrement")
+
     def isSwapGlobalReadOrderForDtvOrDtl(self, kernel, prefetch1=False):
         return False
 
@@ -863,6 +866,11 @@ def test_setup_new_tile_releases_waveidx_for_pap_wave_separated_tdm(monkeypatch)
     non_pap_module_names = _setup_new_tile_module_names(prefetch_across_persistent=0)
 
     assert "papTdmRestoreLdsBank" in pap_module_names
+    assert "papTdmRebalanceSkippedSplitIncrement" in pap_module_names
+    assert "papTdmRebalanceSkippedSplitIncrement" not in non_pap_module_names
+    assert pap_module_names.index("papTdmRebalanceSkippedSplitIncrement") < pap_module_names.index(
+        "globalReadIncrementAB"
+    )
     assert "undefineSgpr_WaveIdx" in pap_module_names
     assert "undefineSgpr_WaveIdx" in non_pap_module_names
     assert pap_module_names.index("undefineSgpr_WaveIdx") < pap_module_names.index("papTdmRestoreLdsBank")

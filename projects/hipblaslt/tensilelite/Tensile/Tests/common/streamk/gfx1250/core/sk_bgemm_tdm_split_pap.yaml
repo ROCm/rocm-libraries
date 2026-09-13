@@ -88,9 +88,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 128]
-          - Exact: [128, 128, 1, 192]  #tail
-          - Exact: [129, 128, 1, 128]  #edge-m
-          - Exact: [128, 129, 1, 128]  #edge-n
+          - Exact: [2048, 2048, 1, 128]
+          - Exact: [2048, 2048, 1, 192]  #tail
+          - Exact: [2049, 2048, 1, 128]  #edge-m
+          - Exact: [2048, 2049, 1, 128]  #edge-n
         - ActivationArgs:
           - [Enum: none]
