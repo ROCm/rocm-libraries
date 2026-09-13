@@ -152,6 +152,16 @@ class LocalReadVALU(LocalRead):
 class LocalReadMFMA(LocalRead):
     kernel = {"EnableMatrixInstruction": True}
 
+    @staticmethod
+    def numElementsPerRead(kernel, tP, instruction, bpr, lrvwTile):
+        needsConvertAfterDS = kernel["ConvertAfterDS"] and tP["bpe"] != tP["bpeDS"]
+        if needsConvertAfterDS and not kernel["UseF32XEmulation"]:
+            return 1
+        numElements = instruction.numElementsPerBlock(bpr, tP["bpe"])
+        if numElements == 0:
+            return 0
+        return max(1, numElements // lrvwTile)
+
     # LDS size is increased on gfx950. const offset is still 16-bit.
     # this function handles both LDS size < 64K and LDS size >= 64K
     def cal_offset_srcAddr(self, maxLDSConstOffset, tc, offset):
@@ -801,7 +811,7 @@ class LocalReadMFMA(LocalRead):
         else:
             raise Exception(f"unsupport tc %s{tc}")
 
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        numElementPerRead = self.numElementsPerRead(kernel, tP, instruction, bpr, lrvwTile)
         perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
