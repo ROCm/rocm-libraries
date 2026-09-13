@@ -90,7 +90,7 @@ def passing_validators(monkeypatch):
     """Install validators that all accept; individual tests override as needed."""
     monkeypatch.setattr(Run, "_validateChipId",
                         lambda f, logic_relative_path=None, report_path=None: True)
-    monkeypatch.setattr(Run, "handleCustomKernel", lambda s, iim: (s, False))
+    monkeypatch.setattr(Run, "handleCustomKernel", lambda s, iim: (s, False, None))
     monkeypatch.setattr(Run, "_validateMatrixInstruction", lambda s, iim, rel: True)
     monkeypatch.setattr(Run, "_validateWorkGroup", lambda s, rel: True)
     monkeypatch.setattr(Run, "_validateWorkGroupMappingXCC",
@@ -152,7 +152,7 @@ def test_runchecks_only_custom_kernels_filters(tmp_path, passing_validators, mon
     monkeypatch.setattr(Run, "hasCustomKernel", lambda f: True)
     monkeypatch.setattr(
         Run, "handleCustomKernel",
-        lambda s, iim: (s, s.get("SolutionIndex") == 0),
+        lambda s, iim: (s, s.get("SolutionIndex") == 0, None),
     )
     f = _write_logic(tmp_path / "lib" / "a.yaml",
                      [{"SolutionIndex": 0}, {"SolutionIndex": 1}])

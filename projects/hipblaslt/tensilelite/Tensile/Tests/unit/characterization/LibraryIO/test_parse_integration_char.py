@@ -136,6 +136,7 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, snaps
 def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeypatch, snapshot):
     # CustomKernelName set + an (empty) config -> the custom-kernel merge branch
     # runs; getCustomKernelConfig is monkeypatched so no real kernel is needed.
+    # An empty config declares no ProblemType, so there is nothing to check.
     monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp: {})
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
