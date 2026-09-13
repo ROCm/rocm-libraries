@@ -94,6 +94,16 @@ Tests:
   percentage: [100.0, 88.0]
   baseA: [rocsparse_index_base_one]
 
+- name: prune_dense2csr_by_percentage_extra_682
+  category: nightly
+  function: prune_dense2csr_by_percentage_extra
+  precision: *single_only_precisions
+  M: [46341]
+  N: [46341]
+  percentage: [50.0]
+  baseA: [rocsparse_index_base_zero]
+  device_memory_gb: 25
+
 # Stress
 - name: prune_dense2csr_by_percentage
   category: stress

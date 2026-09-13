@@ -32,22 +32,18 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void abs_kernel(int64_t m, int64_t n, const T* A, int64_t lda, T* output)
     {
-        const int64_t gid_x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-        const int64_t gid_y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+        const int64_t nnz = m * n;
 
-        const int64_t grid_dim_x = hipGridDim_x * hipBlockDim_x;
+        const int64_t NUM_THREADS = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        // Map a 2D HIP grid to a 1D index
-        const int64_t gid = grid_dim_x * gid_y + gid_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
-        if(gid >= m * n)
+        for(int64_t idx = gid; idx < nnz; idx += NUM_THREADS)
         {
-            return;
+            const int64_t row = idx % m;
+            const int64_t col = idx / m;
+
+            output[m * col + row] = rocsparse::abs(A[lda * col + row]);
         }
-
-        int64_t row = gid % m;
-        int64_t col = gid / m;
-
-        output[m * col + row] = rocsparse::abs(A[lda * col + row]);
     }
 }
