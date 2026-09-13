@@ -228,6 +228,7 @@ NB_MODULE(origami, m) {
       .def_rw("batch", &origami::problem_t::batch)
       .def_rw("num_cus", &origami::problem_t::num_cus)
       .def_rw("q_heads", &origami::problem_t::q_heads)
+      .def_rw("causal", &origami::problem_t::causal)
       .def_rw("a_transpose", &origami::problem_t::a_transpose)
       .def_rw("b_transpose", &origami::problem_t::b_transpose)
       .def_rw("a_dtype", &origami::problem_t::a_dtype)
@@ -467,6 +468,9 @@ NB_MODULE(origami, m) {
   m.def("att_compute_l2_hit_rate_global",
         &origami::attention::compute_l2_hit_rate_global,
         "Compute global L2 hit rate for attention");
+  m.def("att_causal_active_tile_pairs",
+        &origami::attention::causal_active_tile_pairs,
+        "Total active (Q-tile, KV-tile) pairs under causal masking (triangular)");
 
   // Lambda wrappers (auto-create context_t from problem/hardware/config)
   m.def(
