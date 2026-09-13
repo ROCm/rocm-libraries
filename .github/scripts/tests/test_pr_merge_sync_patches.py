@@ -437,11 +437,7 @@ class StageChangesTest(unittest.TestCase):
         sut._stage_changes(self.repo)
         self.assertIn("README.md", self._staged_files())
 
-    @pytest.mark.xfail(
-        reason="BUG: 'git add .' respects .gitignore and silently drops new untracked files that match ignore patterns",
-        strict=True,
-    )
-    def test_gitignored_file_is_NOT_staged(self):
+    def test_gitignored_file_is_staged(self):
         (self.repo / ".gitignore").write_text("*.log\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -452,10 +448,9 @@ class StageChangesTest(unittest.TestCase):
         self.assertIn("output.log", self._staged_files())
 
     def test_previously_force_tracked_file_modifications_are_staged(self):
-        # `git add .` DOES stage modifications to already-tracked files even when
-        # they match .gitignore -- git only skips *new untracked* files that match.
-        # This documents that boundary: modifications to force-tracked files are
-        # NOT lost by the current implementation.
+        # Modifications to already-tracked files were staged even before `-f`,
+        # because git only skips *new untracked* files that match an ignore rule.
+        # Kept as a boundary marker: this case was never the broken one.
         (self.repo / ".gitignore").write_text("generated/\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -472,11 +467,7 @@ class StageChangesTest(unittest.TestCase):
         # Modifications to already-tracked files ARE staged even under .gitignore.
         self.assertIn("generated/output.h", self._staged_files())
 
-    @pytest.mark.xfail(
-        reason="BUG: if a patch introduces a brand-new file whose path matches .gitignore, 'git add .' silently skips it; the sync appears to succeed but the file is never committed to the sub-repo",
-        strict=True,
-    )
-    def test_new_gitignored_file_added_by_patch_is_NOT_staged(self):
+    def test_new_gitignored_file_added_by_patch_is_staged(self):
         (self.repo / ".gitignore").write_text("generated/\n")
         _git(["add", ".gitignore"], cwd=self.repo)
         _git(["commit", "-m", "add gitignore"], cwd=self.repo)
@@ -489,6 +480,25 @@ class StageChangesTest(unittest.TestCase):
         sut._stage_changes(self.repo)
 
         self.assertIn("generated/new_output.h", self._staged_files())
+
+    def test_new_file_outside_nested_ignore_allowlist_is_staged(self):
+        # The shape that actually dropped a file: a nested .gitignore excluding a
+        # glob and allowlisting specific names. Siblings on the allowlist synced
+        # normally, which is why the missing one went unnoticed.
+        heuristics = self.repo / "heuristics"
+        heuristics.mkdir()
+        (heuristics / ".gitignore").write_text("*.md\n!README.md\n")
+        _git(["add", "heuristics/.gitignore"], cwd=self.repo)
+        _git(["commit", "-m", "add nested gitignore"], cwd=self.repo)
+
+        (heuristics / "README.md").write_text("# allowlisted")
+        (heuristics / "HEURISTIC_REPORT.md").write_text("# not allowlisted")
+
+        sut._stage_changes(self.repo)
+
+        staged = self._staged_files()
+        self.assertIn("heuristics/README.md", staged)
+        self.assertIn("heuristics/HEURISTIC_REPORT.md", staged)
 
 
 # ---------------------------------------------------------------------------
