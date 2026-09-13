@@ -5,6 +5,8 @@
 
 #include <cstdint>
 #include <flatbuffers/base.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include "core/Utils.hpp"
@@ -218,6 +220,46 @@ size_t guessNormalizedDim(
     const size_t normalizedDimMax = std::min(affineNormalizedDimMax, statNormalizedDimMax);
 
     return normalizedDimMin > 0 ? normalizedDimMin : normalizedDimMax;
+}
+
+ProblemDescription::ProblemDescription(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ioAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* affineAttr,
+    std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr,
+    Direction direction)
+    : _direction(direction)
+    , _normalizedDim(guessNormalizedDim(ioAttr, affineAttr, statAttr))
+    , _outerSize(1)
+    , _innerSize(1)
+    , _stride(1)
+{
+    const auto* dims = ioAttr->dims();
+    const auto* strides = ioAttr->strides();
+    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
+        std::vector<int64_t>(strides->begin(), strides->end()));
+    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
+    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
+
+    if(_normalizedDim > 1
+       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
+    {
+        _stride = dims->Get(1);
+    }
+
+    for(unsigned int i = 0; i < dims->size(); ++i)
+    {
+        if(i < _normalizedDim)
+        {
+            if(_stride == 1 || i != 1)
+            {
+                _outerSize *= dims->Get(i);
+            }
+        }
+        else
+        {
+            _innerSize *= dims->Get(i);
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::layernorm
