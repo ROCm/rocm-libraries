@@ -1054,6 +1054,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only temporal-hint modifier.
     "TemporalHint": list(range(-1, 8)),
     "TemporalHintE": list(range(0, 8)),
+    "TemporalHintGate": list(range(0, 8)),
     "TemporalHintD": list(range(0, 8)),
     "TemporalHintC": list(range(0, 8)),
     "TemporalHintA": list(range(0, 8)),
@@ -1065,6 +1066,7 @@ validParameters = { # we need to make sure this matches develop
     # gfx1250-only non-volatile memory modifier.
     "NonVolatile": [-1, 0, 1],
     "NonVolatileE": [0, 1],
+    "NonVolatileGate": [0, 1],
     "NonVolatileD": [0, 1],
     "NonVolatileC": [0, 1],
     "NonVolatileA": [0, 1],
