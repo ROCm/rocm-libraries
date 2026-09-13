@@ -5,7 +5,8 @@
 #
 # Phased presubmit and on-demand ASAN builds. TheRock's
 # configure_multi_arch_ci.py automatically selects host-asan for pull_request
-# events and full asan for workflow_dispatch. Presubmit is intentionally
+# events. workflow_dispatch defaults to full ASAN but can explicitly select
+# host-asan for draft-PR validation. Presubmit is intentionally
 # label-gated by the existing ci:host-asan/ci:asan opt-in while the CPU-only
 # component scope is proven in CI.
 #
@@ -31,6 +32,13 @@ on:
         type: string
         description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
         default: ""
+      sanitizer_mode:
+        type: choice
+        description: "Select full device ASAN or the CPU-only host-ASAN component matrix"
+        options:
+          - asan
+          - host-asan
+        default: asan
       prebuilt_stages:
         type: string
         default: ""
@@ -78,7 +86,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
+          ref: 08d0b77d121cf4f95227e90f473455da07ce13e2
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -97,9 +105,9 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@a85f17faf1cffc5827fa4a353ad788339152bbfa
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@08d0b77d121cf4f95227e90f473455da07ce13e2
     with:
-      build_variant: "asan"
+      build_variant: ${{ inputs.sanitizer_mode || 'asan' }}
       # Host instrumentation is architecture-independent, so presubmit builds
       # one canonical family. Manual full-ASAN keeps the broader matrix.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || (github.event_name == 'pull_request' && 'gfx94X') || 'gfx94X,gfx950,gfx125X' }}
@@ -111,13 +119,14 @@ jobs:
       build_python_packages: false
       build_pytorch: false
       build_jax: false
-      # Admitted Phase-1/Phase-2 components are produced by compiler-runtime and
-      # math-libs. Avoid unrelated WSL, system, and packaging work on PRs;
-      # workflow_dispatch retains the complete full-ASAN graph.
-      build_stages: ${{ github.event_name == 'pull_request' && 'compiler-runtime,math-libs' || '' }}
-      build_native_linux: ${{ github.event_name != 'pull_request' }}
+      # Admitted Phase-1 through Phase-5 components are produced by these four
+      # stages. compiler-runtime includes both profiler artifacts; runtime-tests
+      # adds rocrtst and storage-libs adds hipfile. Avoid unrelated WSL, system,
+      # and packaging work for CPU host-ASAN; manual full-ASAN retains the full graph.
+      build_stages: ${{ (github.event_name == 'pull_request' || inputs.sanitizer_mode == 'host-asan') && 'compiler-runtime,runtime-tests,math-libs,storage-libs' || '' }}
+      build_native_linux: ${{ github.event_name != 'pull_request' && inputs.sanitizer_mode != 'host-asan' }}
       repository: ROCm/TheRock
-      ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
+      ref: 08d0b77d121cf4f95227e90f473455da07ce13e2
       changed_projects: ${{ needs.configure.outputs.changed_projects }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -130,7 +139,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@a85f17faf1cffc5827fa4a353ad788339152bbfa
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@08d0b77d121cf4f95227e90f473455da07ce13e2
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -144,7 +153,7 @@ jobs:
       # the explicit phased host-ASAN admission list in TheRock.
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
-      ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
+      ref: 08d0b77d121cf4f95227e90f473455da07ce13e2
     permissions:
       contents: read
       id-token: write
@@ -162,7 +171,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: a85f17faf1cffc5827fa4a353ad788339152bbfa
+          ref: 08d0b77d121cf4f95227e90f473455da07ce13e2
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

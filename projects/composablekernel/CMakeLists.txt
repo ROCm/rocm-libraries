@@ -866,7 +866,9 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERS
     add_compile_options(-fdiagnostics-color=always)
 endif()
 
-if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
+option(CK_BUILD_HOST_TESTS_ONLY "Build only tests which do not require a GPU" OFF)
+
+if((NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY) OR CK_BUILD_HOST_TESTS_ONLY)
     # make check runs the entire set of examples and tests
     add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} USES_TERMINAL)
     # make smoke runs the tests and examples that runs within 30 seconds on gfx90a
@@ -962,13 +964,21 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
            add_dependencies(check build-smoke-rocm-ck)
        endif()
    endif()
-   if(BUILD_TESTING)
+   if(BUILD_TESTING AND NOT CK_BUILD_HOST_TESTS_ONLY)
        rocm_package_setup_component(tests
             LIBRARY_NAME composablekernel
             PACKAGE_NAME tests # Prevent -static suffix on package name
        )
        add_subdirectory(test)
    endif()
+endif()
+
+if(BUILD_TESTING AND CK_BUILD_HOST_TESTS_ONLY)
+    rocm_package_setup_component(tests
+         LIBRARY_NAME composablekernel
+         PACKAGE_NAME tests # Prevent -static suffix on package name
+    )
+    add_subdirectory(test)
 endif()
 
 if(BUILD_CK_PROFILER)

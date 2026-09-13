@@ -9,6 +9,25 @@ import therock_configure_ci
 
 
 class ConfigureCITest(unittest.TestCase):
+    def test_host_asan_presubmit_builds_phase5_artifact_stages(self):
+        repo_root = Path(__file__).parents[3]
+        workflow = (
+            repo_root / ".github/workflows/therock-multi-arch-ci-asan.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "'compiler-runtime,runtime-tests,math-libs,storage-libs'", workflow
+        )
+
+    def test_workflow_dispatch_can_select_host_asan_without_gpu_builds(self):
+        repo_root = Path(__file__).parents[3]
+        workflow = (
+            repo_root / ".github/workflows/therock-multi-arch-ci-asan.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sanitizer_mode:", workflow)
+        self.assertIn("build_variant: ${{ inputs.sanitizer_mode || 'asan' }}", workflow)
+        self.assertIn("inputs.sanitizer_mode == 'host-asan'", workflow)
+        self.assertIn("inputs.sanitizer_mode != 'host-asan'", workflow)
+
     @patch("subprocess.run")
     def test_pull_request(self, mock_run):
         args = {
