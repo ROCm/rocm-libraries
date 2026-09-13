@@ -63,6 +63,9 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle,
+                                             ROCBLAS_API_STR(rocblas_gemm_strided_batched_ex));
+
         const bool HPA = compute_type == rocblas_datatype_f32_r
                          && (a_type == rocblas_datatype_f16_r || a_type == rocblas_datatype_bf16_r);
 
