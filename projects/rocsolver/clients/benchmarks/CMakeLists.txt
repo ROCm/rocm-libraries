@@ -72,5 +72,8 @@ endif()
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
+endif()
 
 rocm_install(TARGETS rocsolver-bench COMPONENT benchmarks)
