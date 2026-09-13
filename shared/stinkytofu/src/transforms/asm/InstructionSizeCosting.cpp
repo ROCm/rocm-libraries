@@ -190,6 +190,10 @@ inline bool parseLiteralStringToInt(const std::string& s, int32_t& out) {
 ///   1) VOP3P modifiers: non-empty **`op_sel`**, **`op_sel_hi`**, or
 ///   **`byte_sel`** forces VOP3 (8 B)
 ///      (all compact VALU, including the narrow converts below).
+///   1b) abs/neg/clamp/omod modifiers force VOP3 (8 B). These arrive either as an
+///      instruction-level **`VOP3Modifiers`** or as per-operand register modifiers
+///      (**`StinkyRegister::reg.isAbs`** / **`isMinus`**, e.g. `v_max_f32 vD, vD,
+///      abs(vSrc)`).
 ///   2) `v_cvt_f32_bf16` / `v_cvt_f32_f16` / `v_cvt_pk_*`, **when (1) did not
 ///   apply**: any **source** VGPR whose **logical** index (`phys % 256`, plus
 ///   `num`) spans above **127** requires `_e64` (8 B). **`v_cvt_f16_f32` uses the
@@ -215,6 +219,23 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
                 return 8;  // e.g. v_cvt_f32_bf16 op_sel, v_cvt_pk_f32_fp8 op_sel,
                            // v_cvt_f32_fp8 byte_sel
         }
+        // abs/neg operand modifiers (and clamp / omod) live only in the VOP3 (_e64)
+        // encoding: any active one forces a compact VOP1/VOP2/VOPC to 8 bytes. e.g.
+        // `v_max_num_f32 vD, vD, |vSrc|` (VMaxF32(..., isAbs=True)) in the gfx1250
+        // amax epilogue assembles as _e64 (8 B), not the compact 4 B form.
+        //
+        // Two encodings of the same modifier reach the size model:
+        //   (a) instruction-level VOP3Modifiers (neg_src*/abs_src*/clamp/omod), and
+        //   (b) per-operand register modifiers set by the rocisa->stinky conversion
+        //       (StinkyRegister::reg.isAbs / isMinus), which is what
+        //       `vgpr(..., isAbs=True)` produces. Both must promote to _e64.
+        if (const VOP3Modifiers* vop3 = inst.getModifier<VOP3Modifiers>()) {
+            if (vop3->neg_src0 || vop3->neg_src1 || vop3->neg_src2 || vop3->abs_src0 ||
+                vop3->abs_src1 || vop3->abs_src2 || vop3->clamp || vop3->omod != 0)
+                return 8;
+        }
+        for (const StinkyRegister& s : srcs)
+            if (s.isRegister() && (s.reg.isAbs || s.reg.isMinus)) return 8;
         if (isVcvtNarrowSrcBankFamily(mnemonic)) {
             if (isVcvtF16F32DestBankPromotion(mnemonic)) {
                 const auto& destRegs = inst.getDestRegs();
