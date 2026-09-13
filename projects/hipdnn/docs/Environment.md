@@ -25,7 +25,7 @@ This document describes the environment variables and runtime configuration opti
 
 ### Backend Library Discovery
 
-A consumer that links `hipdnn_frontend_dynamic` resolves the backend shared library at first use rather than through a link-time dependency. hipDNN computes the path itself, in this order: this variable, then the directory of the shared object making the call, then that directory's sibling `../lib` and `../lib64`, then the directory the HIP runtime was loaded from, and finally the bare library name left to the system loader.
+A consumer that links `hipdnn_frontend_dynamic` resolves the backend shared library at first use rather than through a link-time dependency. hipDNN computes the path itself, in this order: the programmatic override or this variable, then the directory of the calling module (executable or shared library), then that directory's sibling `../lib` and `../lib64`, then the directory the HIP runtime was loaded from, and finally the bare library name left to the system loader.
 
 #### HIPDNN_BACKEND_LIBRARY_PATH
 
@@ -36,7 +36,7 @@ Specifies the directory holding the hipDNN backend shared library. The filename 
 | (unset)    | Resolve through the search order above                 |
 | `<path>`   | Look for the backend in this directory first           |
 
-The value must be a non-empty absolute directory; any other value is reported on `stderr` and ignored. A directory that does not contain the backend, or contains one that fails to load, is skipped and the search continues -- setting this variable cannot make the backend unloadable.
+The value must be a non-empty absolute directory; invalid values are reported on `stderr` and ignored. If the backend is absent or fails to load, resolution continues to the next location.
 
 **Example:**
 ```bash
@@ -44,8 +44,8 @@ export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
 ```
 
 **Notes:**
-- `hipdnn_frontend::setBackendLibraryPath()` does the same thing for one shared object rather than the whole process, and takes precedence over this variable for that shared object. Both are read once, at the first backend call; later changes have no effect.
-- Ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), along with every other computed location: such a process uses only the system loader's own hardened search.
+- `hipdnn_frontend::setBackendLibraryPath()` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module. Both are read once, at the first backend call; later changes have no effect.
+- On Linux, secure execution (for example, a set-user-ID process) ignores this variable and skips module-relative and HIP-runtime locations. An explicit `setBackendLibraryPath()` override is still honored before the system loader's hardened search.
 
 ### Plugin Discovery
 

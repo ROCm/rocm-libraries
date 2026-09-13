@@ -6,6 +6,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <iostream>
+#include <memory>
 
 #if defined(__linux__)
 #include <array>
@@ -37,6 +38,18 @@ TEST(TestPlatformUtils, PathCompEqEmptyPaths)
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path1, path2));
 }
+
+#ifdef _WIN32
+TEST(TestPlatformUtils, PathCompEqNativeUnicodePaths)
+{
+    const std::filesystem::path path = L"C:\\\u6D4B\u8BD5_\U0001F9EA\\\u03A9\u0416.dll";
+    const std::filesystem::path same = L"c:\\\u6D4B\u8BD5_\U0001F9EA\\\u03C9\u0436.DLL";
+    const std::filesystem::path different = L"c:\\\u6D4B\u8BD5_\U0001F9EA\\\u03C9\u0437.DLL";
+
+    EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(path, same));
+    EXPECT_FALSE(hipdnn_data_sdk::utilities::pathCompEq(path, different));
+}
+#endif
 
 TEST(TestPlatformUtils, GetCurrentExecutableDirectoryReturnsValidPath)
 {
@@ -409,18 +422,13 @@ TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
 
 #endif // defined(__linux__) / defined(_WIN32)
 
-// isSecureExecution / getSecureEnv tests
-
 TEST(TestPlatformUtils, IsSecureExecutionFalseForAnOrdinaryProcess)
 {
-    // A test binary is launched by the same user that owns it, with no set-uid/set-gid
-    // bit and no inherited capabilities, which is the whole of what AT_SECURE reports.
+    // Assumes a test process launched without set-ID or capability elevation.
     EXPECT_FALSE(hipdnn_data_sdk::utilities::isSecureExecution());
 }
 
-// Regression guard for ordinary processes only: it shows that routing a variable through
-// getSecureEnv() does not change what an unprivileged caller sees. It says nothing about
-// the hardening itself, which only takes effect when isSecureExecution() is true.
+// Checks ordinary-process compatibility, not secure-execution hardening.
 TEST(TestPlatformUtils, GetSecureEnvMatchesGetEnvOutsideSecureExecution)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter(
@@ -439,8 +447,6 @@ TEST(TestPlatformUtils, GetSecureEnvReturnsDefaultWhenUnset)
               "default_value");
 }
 
-// getLoadedLibraryOrigin tests
-
 TEST(TestPlatformUtils, GetLoadedLibraryOriginRejectsNullHandle)
 {
     EXPECT_THROW(hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(nullptr), std::runtime_error);
@@ -457,7 +463,7 @@ std::filesystem::path anyLoadedLibraryPath()
     std::filesystem::path found;
     dl_iterate_phdr(
         [](struct dl_phdr_info* info, [[maybe_unused]] size_t size, void* data) -> int {
-            if(info->dlpi_name == nullptr || info->dlpi_name[0] == '\0')
+            if(info->dlpi_name == nullptr || info->dlpi_name[0] != '/')
             {
                 return 0;
             }
@@ -473,6 +479,25 @@ std::filesystem::path anyLoadedLibraryPath()
     return found;
 }
 
+class TestPlatformUtilsLibraryOrigin : public testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        _root = std::filesystem::temp_directory_path()
+                / ("hipdnn_library_origin_" + std::to_string(getpid()));
+        ASSERT_TRUE(std::filesystem::create_directory(_root));
+    }
+
+    void TearDown() override
+    {
+        std::error_code failed;
+        std::filesystem::remove_all(_root, failed);
+    }
+
+    std::filesystem::path _root;
+};
+
 } // namespace
 
 TEST(TestPlatformUtils, GetLoadedLibraryOriginReportsTheDirectoryTheLibraryCameFrom)
@@ -480,14 +505,44 @@ TEST(TestPlatformUtils, GetLoadedLibraryOriginReportsTheDirectoryTheLibraryCameF
     const std::filesystem::path library = anyLoadedLibraryPath();
     ASSERT_FALSE(library.empty()) << "no loaded shared object to interrogate";
 
-    const auto handle = hipdnn_data_sdk::utilities::openLibrary(library);
-    ASSERT_NE(handle, nullptr);
+    const std::unique_ptr<void, decltype(&hipdnn_data_sdk::utilities::closeLibrary)> handle(
+        hipdnn_data_sdk::utilities::openLibrary(library),
+        &hipdnn_data_sdk::utilities::closeLibrary);
 
-    const auto origin = hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(handle);
-    hipdnn_data_sdk::utilities::closeLibrary(handle);
+    const auto origin = hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(handle.get());
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::pathCompEq(
         origin, std::filesystem::weakly_canonical(library).parent_path()));
+}
+
+TEST_F(TestPlatformUtilsLibraryOrigin, RejectsRelativeLoaderName)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> sourceHandle(
+        utilities::openLibrary("libm.so.6"), &utilities::closeLibrary);
+    link_map* sourceMap = nullptr;
+    ASSERT_EQ(dlinfo(sourceHandle.get(), RTLD_DI_LINKMAP, static_cast<void*>(&sourceMap)), 0);
+    ASSERT_NE(sourceMap, nullptr);
+    ASSERT_NE(sourceMap->l_name, nullptr);
+    const std::filesystem::path source(sourceMap->l_name);
+    ASSERT_TRUE(source.is_absolute());
+    const auto library = _root / "relative-origin.so";
+    ASSERT_TRUE(std::filesystem::copy_file(source, library));
+    const auto relative = std::filesystem::relative(library);
+    ASSERT_TRUE(relative.is_relative());
+
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> handle(
+        utilities::openLibrary(relative), &utilities::closeLibrary);
+    EXPECT_THROW(utilities::getLoadedLibraryOrigin(handle.get()), std::runtime_error);
+}
+
+TEST(TestPlatformUtils, GetLoadedLibraryOriginRejectsMainExecutable)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> handle(
+        dlopen(nullptr, RTLD_NOW | RTLD_LOCAL), &utilities::closeLibrary);
+    ASSERT_NE(handle, nullptr);
+    EXPECT_THROW(utilities::getLoadedLibraryOrigin(handle.get()), std::runtime_error);
 }
 
 #endif // defined(__linux__)

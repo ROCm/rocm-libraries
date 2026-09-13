@@ -160,11 +160,7 @@ protected:
     // (e.g. derived-class indexes populated from actionAfterAdding).
     virtual void actionAfterClearing() {}
 
-    // For cases where tests need to override the default plugin search paths.
-    //
-    // Read through getSecureEnv(): the value replaces the default search set entirely and
-    // every shared object in the named directory is then loaded, under filenames this
-    // process does not control, so a set-uid caller must not be able to redirect it.
+    // Allow test overrides, but never let secure execution redirect loading via the environment.
     static std::set<std::filesystem::path>
         getPluginSearchPaths(const char* envVarName,
                              const std::set<std::filesystem::path>& defaultPaths)
@@ -172,7 +168,6 @@ protected:
         const auto envPath = hipdnn_data_sdk::utilities::getSecureEnv(envVarName);
         if(!envPath.empty())
         {
-            // Could make this take multiple dirs
             return {std::filesystem::path(envPath)};
         }
         return defaultPaths;

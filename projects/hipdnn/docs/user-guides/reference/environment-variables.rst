@@ -109,8 +109,8 @@ Backend library discovery
 A consumer that links ``hipdnn_frontend_dynamic`` resolves the hipDNN backend shared library at first use rather than through a link-time dependency.
 hipDNN computes the path itself, in this order:
 
-#. ``HIPDNN_BACKEND_LIBRARY_PATH``, or ``hipdnn_frontend::setBackendLibraryPath()`` if the calling shared object has called it.
-#. The directory of the shared object making the call.
+#. ``HIPDNN_BACKEND_LIBRARY_PATH``, or ``hipdnn_frontend::setBackendLibraryPath()`` if the calling module has called it.
+#. The directory of the calling module (executable or shared library).
 #. That directory's sibling ``../lib`` and ``../lib64``.
 #. The directory the HIP runtime was loaded from.
 #. The bare library name, left to the system loader.
@@ -125,14 +125,14 @@ The directory holding the backend shared library. The filename is always hipDNN'
   export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
 
 The value must be a non-empty absolute directory; any other value is reported on ``stderr`` and ignored.
-A directory that does not contain the backend, or contains one that fails to load, is skipped and the search continues, so setting this variable cannot make the backend unloadable.
+If the backend is absent or fails to load, resolution continues to the next location.
 
-``hipdnn_frontend::setBackendLibraryPath()`` does the same thing for one shared object rather than for the whole process, and takes precedence over this variable for that shared object.
+``hipdnn_frontend::setBackendLibraryPath()`` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module.
 Both are read once, at the first backend call; later changes have no effect.
 
 Secure execution
 ================
 
 In a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
-Backend resolution additionally skips all of its computed locations and uses only the system loader's own hardened search.
+Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath()`` override before the system loader's hardened search.
 Variables that do not select code, such as the logging variables above, are unaffected.

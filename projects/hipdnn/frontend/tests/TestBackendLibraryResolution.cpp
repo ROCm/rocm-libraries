@@ -72,9 +72,7 @@ int recordSmallestLoadedLibrary(struct dl_phdr_info* info,
     return 0;
 }
 
-/// The smallest shared object already mapped into this process, as a file the loader is
-/// known to accept. Copies of it stand in for the backend: what the tiering tests need is
-/// a candidate that loads, not one that exports anything.
+/// Copy the smallest loaded library as a stand-in; resolution needs no backend symbols.
 const std::filesystem::path& loadableLibrarySource()
 {
     static const std::filesystem::path s_source = [] {
@@ -87,8 +85,7 @@ const std::filesystem::path& loadableLibrarySource()
 
 #endif // defined(__linux__)
 
-/// A directory tree of its own, removed with the fixture, so the tiers built here are the
-/// only thing the resolver can see below the loader's own search.
+/// Isolate filesystem candidates in a temporary tree; the loader's search remains external.
 class TestBackendLibraryResolution : public ::testing::Test
 {
 protected:
@@ -110,7 +107,6 @@ protected:
         std::filesystem::remove_all(_root, failed);
     }
 
-    /// An empty directory under the fixture root.
     std::filesystem::path directory(const std::string& name)
     {
         const std::filesystem::path created = _root / name;
@@ -120,7 +116,6 @@ protected:
         return created;
     }
 
-    /// A directory holding a file named like the backend that no loader will accept.
     std::filesystem::path directoryWithUnloadableBackend(const std::string& name)
     {
         const std::filesystem::path created = directory(name);
@@ -131,7 +126,6 @@ protected:
     }
 
 #if defined(__linux__)
-    /// A directory holding a loadable stand-in named like the backend.
     std::filesystem::path directoryWithLoadableBackend(const std::string& name)
     {
         const std::filesystem::path created = directory(name);
@@ -158,9 +152,7 @@ private:
 
 } // namespace
 
-// Tier-0 validation. A rejected override leaves no candidate behind -- `path("") / name`
-// is just the bare name, and a relative directory is indistinguishable from an absent one
-// once resolution reaches the loader -- so the observable is the operator-facing warning.
+// A rejected override may still resolve through the loader, so check the rejection warning.
 
 TEST_F(TestBackendLibraryResolution, EmptyOverrideIsRejectedWithAWarning)
 {
@@ -196,9 +188,7 @@ TEST_F(TestBackendLibraryResolution, RelativeOverrideIsRejectedWithAWarning)
     closeResolved(resolution);
 }
 
-// Secure execution: the derived tiers are not consulted at all, so nothing the fixture
-// created can be reached. Whether the bare-name tier then succeeds is the machine's
-// business; either outcome is directory-free.
+// Secure execution must not visit computed directories, even if the loader later succeeds.
 TEST_F(TestBackendLibraryResolution, SecureExecutionSkipsTheDerivedTiers)
 {
     BackendResolutionInputs inputs;
@@ -217,11 +207,7 @@ TEST_F(TestBackendLibraryResolution, SecureExecutionSkipsTheDerivedTiers)
 
 #if defined(__linux__)
 
-// The one tier a secure-execution process keeps besides the loader's own search. Only
-// setBackendLibraryPath() can populate it there -- backendResolutionInputs() never reads
-// the environment for such a process -- and a call inside the process is the program
-// speaking for itself, not an environment its invoker pre-set. Ignoring it would make an
-// explicit API call silently do nothing.
+// Secure execution trusts the programmatic override, not the invoker's environment.
 TEST_F(TestBackendLibraryResolution, SecureExecutionStillHonoursTheProgrammaticOverride)
 {
     BackendResolutionInputs inputs;
@@ -241,9 +227,7 @@ TEST_F(TestBackendLibraryResolution, SecureExecutionStillHonoursTheProgrammaticO
 
 #endif // defined(__linux__)
 
-// The programmatic override is one-shot per shared object. This is the only test that
-// drives the process-wide resolution, and it points at an empty directory on purpose so
-// the resolver falls through rather than adopting a stand-in as this process's backend.
+// Use an empty override so this one-shot resolution cannot cache a stand-in backend.
 TEST_F(TestBackendLibraryResolution, SetterIsRefusedOnceResolutionHasRun)
 {
     EXPECT_TRUE(hipdnn_frontend::setBackendLibraryPath(directory("early")));
@@ -254,6 +238,14 @@ TEST_F(TestBackendLibraryResolution, SetterIsRefusedOnceResolutionHasRun)
 }
 
 #if defined(__linux__)
+
+TEST_F(TestBackendLibraryResolution, ExecutableAddressUsesTheExecutableDirectory)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    EXPECT_EQ(utilities::getLoadedLibraryDirectoryForAddress(
+                  reinterpret_cast<const void*>(&closeResolved)),
+              utilities::getCurrentExecutableDirectory());
+}
 
 TEST_F(TestBackendLibraryResolution, OverrideOutranksEveryOtherTier)
 {
@@ -323,8 +315,7 @@ TEST_F(TestBackendLibraryResolution, AbsentCandidateIsSkippedAndReported)
     closeResolved(resolution);
 }
 
-// A stale or corrupt library in an early tier must not deny the backend altogether: the
-// failure is recorded and the search continues into the next tier.
+// A corrupt override must not prevent fallback to a usable backend.
 TEST_F(TestBackendLibraryResolution, UnloadableCandidateFallsThroughToTheNextTier)
 {
     BackendResolutionInputs inputs;
@@ -353,8 +344,7 @@ TEST_F(TestBackendLibraryResolution, UnloadableCandidatesEverywhereNeverBecomeTh
 
     const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
 
-    // The bare-name tier is still attempted and is the machine's business; what must hold
-    // is that no unloadable candidate was adopted.
+    // The loader may still succeed, but no unloadable candidate may be adopted.
     EXPECT_FALSE(resolution.path.has_parent_path()) << resolution.path;
     closeResolved(resolution);
 }

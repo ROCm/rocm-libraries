@@ -193,10 +193,7 @@ target_link_libraries(
 )
 
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_dynamic_load_tests)
-# Same gate the private runtime-load suite uses: when this build produces a backend
-# library, the suite must fail rather than skip if it cannot be loaded. No if(TARGET ...)
-# guard, because the dependency below is itself unconditional here -- this directory does
-# not configure at all without hipdnn_backend.
+# A built backend must load successfully; do not skip runtime-resolution failures.
 add_dependencies(hipdnn_public_frontend_dynamic_load_tests hipdnn_backend)
 target_compile_definitions(
     hipdnn_public_frontend_dynamic_load_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY

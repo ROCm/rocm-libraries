@@ -5,25 +5,15 @@
  * @file DynamicBackendLibrary.hpp
  * @brief Runtime resolution of the hipDNN backend shared library.
  *
- * When the frontend is built in runtime-load mode
- * (@ref HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND), backend entry points are resolved
- * at first use via the cross-platform loader in @c hipdnn_data_sdk::utilities
- * (`dlopen`/`dlsym` on Linux, `LoadLibrary`/`GetProcAddress` on Windows) instead
- * of being linked directly. This keeps a header-only consumer from inheriting a
- * hard dependency on `libhipdnn_backend.so`.
+ * With @ref HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND, entry points are resolved at
+ * first use without a direct backend link dependency. Resolvers share one handle
+ * per module (executable or shared library), caching load failures too.
  *
- * The library is located by a path this code computes, not by a search the loader
- * may or may not perform on its behalf: a sanitizer runtime that intercepts
- * `dlopen` resolves a bare soname against *its own* RUNPATH rather than the
- * caller's, so a bare-name load fails even when the backend sits exactly where the
- * consumer's RUNPATH points. @ref hipdnn_frontend::detail::resolveBackendLibrary
- * documents the search order.
+ * Explicit paths avoid ASan resolving bare sonames against its own RUNPATH.
+ * See @ref hipdnn_frontend::detail::resolveBackendLibrary for the search order.
  *
- * The library handle is opened exactly once and shared by every entry-point
- * resolver. These helpers deliberately never emit log messages: the logging
- * callback itself is resolved through here during frontend logging
- * initialization, so logging from this layer would re-enter the loader. The
- * failure and warning paths below therefore write to stderr directly.
+ * Diagnostics go directly to stderr: logging would re-enter this loader while
+ * resolving the logging callback.
  */
 
 #pragma once
@@ -48,36 +38,28 @@ namespace hipdnn_frontend::detail
 
 HIPDNN_HIDDEN inline hipdnn_data_sdk::utilities::SharedLibraryHandle backendLibraryHandle();
 
-/// Directory holding the backend shared library, as a process-wide override. Joined with
-/// the platform's own backend filename, so it selects a location and never an arbitrary
-/// object. Must be non-empty and absolute; any other value is reported on stderr and
-/// ignored.
+/// Process-wide directory override, joined with the platform's backend filename.
+/// Empty or relative values are reported on stderr and ignored.
 constexpr const char* BACKEND_LIBRARY_PATH_ENV = "HIPDNN_BACKEND_LIBRARY_PATH";
 
-/// The inputs backend resolution consults, gathered up front so the search order itself
-/// is a pure function of them. Production values come from
-/// @ref backendResolutionInputs(); tests substitute a synthetic layout.
+/// Production inputs come from @ref backendResolutionInputs(); tests use synthetic layouts.
 struct BackendResolutionInputs
 {
-    /// Whether the process runs with privileges its invoker does not have. True disables
-    /// every caller-influenced tier -- see @ref resolveBackendLibrary().
+    /// See @ref resolveBackendLibrary() for secure-execution exclusions.
     bool secureExecution = false;
 
-    /// Tier 0. Engaged means an override was *requested*, including a request whose value
-    /// is invalid; disengaged means none was.
+    /// Engaged even for an invalid request; disengaged when no override was requested.
     std::optional<std::filesystem::path> overrideDirectory;
 
-    /// What asked for @ref overrideDirectory, for the rejection message.
     std::string overrideSource;
 
-    /// Directory this shared object is loaded from; tiers 1 and 2. Empty when unknown.
+    /// Calling module's directory (executable or shared library); empty when unknown.
     std::filesystem::path selfDirectory;
 
-    /// Directory the HIP runtime is loaded from; tier 3. Empty when unknown.
+    /// Directory the HIP runtime is loaded from; empty when unknown.
     std::filesystem::path hipAnchorDirectory;
 };
 
-/// Outcome of one resolution attempt over a candidate list.
 struct BackendLibraryResolution
 {
     /// Open handle to the backend, or `nullptr` if no candidate could be loaded.
@@ -90,7 +72,6 @@ struct BackendLibraryResolution
     std::string diagnostics;
 };
 
-/// Mutable tier-0 state, per shared object.
 struct BackendLibraryOverrideState
 {
     std::mutex mutex;
@@ -98,16 +79,14 @@ struct BackendLibraryOverrideState
     bool resolutionStarted = false;
 };
 
-/// @ref HIPDNN_HIDDEN so each shared object gets its own copy -- see
-/// @ref hipdnn_frontend::setBackendLibraryPath() for why that is the intended scope.
+/// @ref HIPDNN_HIDDEN keeps state local to each executable or shared library.
 HIPDNN_HIDDEN inline BackendLibraryOverrideState& backendLibraryOverrideState()
 {
     static BackendLibraryOverrideState s_state;
     return s_state;
 }
 
-/// Reads the programmatic override and latches resolution as started, so any later
-/// @ref hipdnn_frontend::setBackendLibraryPath() call reports that it changed nothing.
+/// Prevents further setter calls before returning the override.
 HIPDNN_HIDDEN inline std::optional<std::filesystem::path> takeBackendLibraryOverride()
 {
     auto& state = backendLibraryOverrideState();
@@ -116,13 +95,9 @@ HIPDNN_HIDDEN inline std::optional<std::filesystem::path> takeBackendLibraryOver
     return state.directory;
 }
 
-/// The directory the HIP runtime is loaded from, or empty if it is not loaded.
-///
-/// Asked of the runtime's own module handle rather than of a HIP symbol's address: a
-/// non-PIE consumer resolves `&hipSymbol` to a canonical PLT entry inside itself, which
-/// would answer with the executable's directory instead. `RTLD_NOLOAD` never loads the
-/// runtime -- if HIP is absent, tier 3 is simply skipped -- but it does take a reference,
-/// so the handle is released again here.
+/// Loaded HIP runtime's directory, or empty if unavailable.
+/// Query the module: a symbol address may name a non-PIE executable's PLT entry.
+/// RTLD_NOLOAD acquires a reference without loading; the reference must be released.
 HIPDNN_HIDDEN inline std::filesystem::path hipRuntimeDirectory()
 {
     namespace utilities = hipdnn_data_sdk::utilities;
@@ -164,23 +139,12 @@ HIPDNN_HIDDEN inline std::filesystem::path hipRuntimeDirectory()
     return {};
 }
 
-/// Locate and open the backend, most specific location first.
-///
-/// Ordinary process: tier 0 the explicit override, tier 1 `<this module's dir>`, tier 2
-/// `<this module's dir>/../lib`, tier 3 the HIP runtime's directory, tier 4 the bare
-/// library name left to the loader. Self-relative outranks the HIP anchor so a
-/// development build cannot silently pick up a stale backend from an installed ROCm.
-///
-/// Secure execution (@ref BackendResolutionInputs::secureExecution) uses tier 0 and tier 4
-/// only, and tier 0 there can only have come from @ref hipdnn_frontend::setBackendLibraryPath():
-/// a call inside the process is the program speaking for itself, whereas the loader
-/// restricts its own search for such a process -- `$ORIGIN` expansion, `LD_*` -- and a
-/// directory this code computed is subject to no such restriction. Offering tiers 1-3 there
-/// would open a filesystem door beside the closed environment one.
-///
-/// No candidate failure is terminal: a candidate that is absent, and equally one that
-/// exists but will not load, is recorded and the search continues. A stale or corrupt
-/// backend in an early tier must not deny the backend altogether.
+/// Search the override, this module's directory, sibling lib/lib64 directories,
+/// the HIP runtime's directory, then the bare library name. Self-relative paths
+/// precede installed backends to avoid stale development-build dependencies.
+/// Secure execution allows only the programmatic override and loader search:
+/// computed paths bypass the loader's secure-execution restrictions.
+/// Missing or unloadable candidates are recorded and skipped.
 HIPDNN_HIDDEN inline BackendLibraryResolution
     resolveBackendLibrary(const BackendResolutionInputs& inputs)
 {
@@ -191,7 +155,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
     struct Candidate
     {
         std::filesystem::path path;
-        /// False for the bare name, which has no path to test and is the loader's job.
+        /// Bare names bypass the filesystem check and use the loader's search.
         bool mustExist = true;
     };
 
@@ -220,7 +184,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
                          "hipDNN: ignoring %s: expected a non-empty absolute directory, got "
                          "\"%s\"\n",
                          inputs.overrideSource.c_str(),
-                         inputs.overrideDirectory->string().c_str());
+                         inputs.overrideDirectory->u8string().c_str());
         }
         else
         {
@@ -233,9 +197,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
         addDirectory(inputs.selfDirectory);
         if(!inputs.selfDirectory.empty())
         {
-            // Both GNUInstallDirs layouts: an executable in bin/ has its libraries in the
-            // sibling lib/ or lib64/, and this header cannot know which one the hipDNN it
-            // talks to was installed with.
+            // Support both GNUInstallDirs library layouts.
             const std::filesystem::path parent = inputs.selfDirectory.parent_path();
             addDirectory(parent / "lib");
             addDirectory(parent / "lib64");
@@ -253,7 +215,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
             std::error_code failed;
             if(!std::filesystem::exists(candidate.path, failed) || failed)
             {
-                resolution.diagnostics += "\n  " + candidate.path.string() + ": not present";
+                resolution.diagnostics += "\n  " + candidate.path.u8string() + ": not present";
                 continue;
             }
         }
@@ -270,7 +232,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
         }
         catch(...)
         {
-            resolution.diagnostics += "\n  " + candidate.path.string() + ": unknown error";
+            resolution.diagnostics += "\n  " + candidate.path.u8string() + ": unknown error";
         }
     }
 
@@ -291,24 +253,25 @@ HIPDNN_HIDDEN inline BackendResolutionInputs backendResolutionInputs()
     BackendResolutionInputs inputs;
     inputs.secureExecution = utilities::isSecureExecution();
 
-    // Latched even when the value goes unused, so the setter's "resolution has already
-    // run" answer does not depend on which tier won.
+    // Close the setter before searching, regardless of which candidate succeeds.
     inputs.overrideDirectory = takeBackendLibraryOverride();
     inputs.overrideSource = "setBackendLibraryPath()";
 
     if(inputs.secureExecution)
     {
-        // Tiers 0-3 are not consulted, so nothing below is even asked.
         return inputs;
     }
 
     if(!inputs.overrideDirectory.has_value())
     {
-        // A sentinel default separates "set to something unusable" -- which is worth
-        // reporting -- from "not set", which the environment cannot otherwise express:
-        // both arrive as an empty string.
+        // Distinguish an unset variable from an explicitly empty, invalid override.
+#ifdef _WIN32
+        constexpr const wchar_t* UNSET = L"\x01unset";
+        const std::wstring value = utilities::getEnvW(L"HIPDNN_BACKEND_LIBRARY_PATH", UNSET);
+#else
         constexpr const char* UNSET = "\x01unset";
         const std::string value = utilities::getSecureEnv(BACKEND_LIBRARY_PATH_ENV, UNSET);
+#endif
         if(value != UNSET)
         {
             inputs.overrideDirectory = std::filesystem::path(value);
@@ -331,10 +294,8 @@ HIPDNN_HIDDEN inline BackendResolutionInputs backendResolutionInputs()
     return inputs;
 }
 
-/// The resolution performed on first call and reused thereafter, failure included.
-///
-/// `HIPDNN_HIDDEN` gives each shared object its own resolution, matching the per-SO
-/// isolation of the backend instance accessor.
+/// Resolves on first call and caches success or failure.
+/// HIPDNN_HIDDEN isolates each executable or shared library's resolution.
 HIPDNN_HIDDEN inline const BackendLibraryResolution& backendLibraryResolution()
 {
     static BackendLibraryResolution s_resolution;
@@ -360,9 +321,6 @@ HIPDNN_HIDDEN inline const BackendLibraryResolution& backendLibraryResolution()
 
         if(s_resolution.handle == nullptr)
         {
-            // Report via stderr directly rather than the frontend logging facility: that
-            // callback is itself resolved through this loader, so logging here would
-            // re-enter it.
             std::fprintf(stderr,
                          "hipDNN: failed to load backend library; tried:%s\n",
                          s_resolution.diagnostics.c_str());
@@ -372,36 +330,20 @@ HIPDNN_HIDDEN inline const BackendLibraryResolution& backendLibraryResolution()
     return s_resolution;
 }
 
-/**
- * @brief Return the lazily-opened handle to the hipDNN backend shared library.
- *
- * @return The library handle, or `nullptr` if the backend could not be loaded.
- */
+/// Returns the lazily resolved backend handle, or nullptr if loading failed.
 HIPDNN_HIDDEN inline hipdnn_data_sdk::utilities::SharedLibraryHandle backendLibraryHandle()
 {
     return backendLibraryResolution().handle;
 }
 
-/**
- * @brief The path the backend shared library was loaded from.
- *
- * Triggers resolution on first call, exactly as @ref backendLibraryHandle() does.
- *
- * @return The resolved path, or an empty path if the backend could not be loaded. A
- *     resolution that fell through to the loader's own search reports the bare library
- *     name, which is distinguishable from any directory-qualified tier.
- */
+/// Triggers resolution on first call and returns the selected path.
+/// Empty on failure; a bare library name identifies loader-search fallback.
 HIPDNN_HIDDEN inline std::filesystem::path resolveBackendLibraryPath()
 {
     return backendLibraryResolution().path;
 }
 
-/**
- * @brief Resolve a symbol from the already-opened backend library.
- *
- * Returns `nullptr` if the library could not be loaded or the symbol is not
- * found. Never logs.
- */
+/// Resolves a backend symbol; returns nullptr if loading or lookup fails. Never logs.
 HIPDNN_HIDDEN inline void* resolveSymbol(const char* symbolName)
 {
     const auto handle = backendLibraryHandle();
@@ -443,18 +385,15 @@ namespace hipdnn_frontend
 /**
  * @brief Point backend resolution at @p directory, ahead of every other location.
  *
- * **Scope is the calling shared object, not the process.** The state lives beside the
- * `HIPDNN_HIDDEN` backend handle, which exists precisely so that each shared object
- * loading the frontend gets its own; a call from an executable therefore cannot pin the
- * backend for, say, `libMIOpen.so`'s copy. For process-wide injection set
- * @ref hipdnn_frontend::detail::BACKEND_LIBRARY_PATH_ENV instead -- this setter is the
- * calling module's own escape hatch, and it outranks that variable for that module.
+ * Applies only to the calling module (executable or shared library), not other
+ * modules' frontend instances. For process-wide injection, use
+ * @ref hipdnn_frontend::detail::BACKEND_LIBRARY_PATH_ENV; this setter takes
+ * precedence within its module.
  *
- * @param directory Directory holding the backend library; it is joined with the
- *     platform's backend filename. Must be non-empty and absolute -- any other value is
- *     reported on stderr and ignored when resolution runs.
- * @return `true` if the directory was stored, `false` if resolution has already run --
- *     including a run that failed and cached the failure -- in which case nothing changed.
+ * @param directory Directory joined with the platform's backend filename.
+ *     Empty or relative values are reported on stderr and ignored at resolution.
+ * @return `true` if stored; `false` without changes once resolution has started,
+ *     including after a cached failure.
  */
 HIPDNN_HIDDEN inline bool setBackendLibraryPath(const std::filesystem::path& directory)
 {
