@@ -40,8 +40,8 @@ namespace rocsparse
                                        J* __restrict__ count,
                                        J* __restrict__ position)
     {
-        const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             const J c = (((ind_[ptr_diag_[tid] - base_ + ptr_shift_] - base_) != tid) ? 1 : 0);
             if(c > 0)
@@ -62,8 +62,8 @@ namespace rocsparse
                                         J* __restrict__ count,
                                         J* __restrict__ position)
     {
-        const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             static constexpr int shift = (FILL_MODE == rocsparse_fill_mode_lower) ? 1 : 0;
             const J c = (((ind_[ptr_[tid + shift] - shift - base_] - base_) != tid) ? 1 : 0);
@@ -84,8 +84,8 @@ namespace rocsparse
                                           rocsparse_index_base base_,
                                           J* __restrict__ count)
     {
-        const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             static constexpr int shift = (FILL_MODE == rocsparse_fill_mode_lower) ? 1 : 0;
             const J c = (((ind_[ptr_[tid + shift] - shift - base_] - base_) == tid) ? 1 : 0);
@@ -104,8 +104,8 @@ namespace rocsparse
                              I* __restrict__ ptr_end,
                              rocsparse_index_base base)
     {
-        const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             ptr_end[tid] = ptr_[tid + 1];
             for(I k = ptr_[tid] - base; k < ptr_[tid + 1] - base; ++k)
@@ -127,8 +127,8 @@ namespace rocsparse
                                  I* __restrict__ ptr_end,
                                  rocsparse_index_base base)
     {
-        uint32_t tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
-        if(tid < m)
+        for(J tid = rocsparse::csritsv_grid_index<BLOCKSIZE>(); tid < m;
+            tid += rocsparse::csritsv_grid_stride<BLOCKSIZE>())
         {
             ptr_end[tid] = ptr_[tid + 1];
             for(I k = ptr_[tid] - base; k < ptr_[tid + 1] - base; ++k)
@@ -211,7 +211,7 @@ namespace rocsparse
                 break;
             }
 
-            dim3 blocks((m - 1) / BLOCKSIZE + 1);
+            dim3 blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
             dim3 threads(BLOCKSIZE);
             if(use_unit_kernel)
             {
@@ -276,7 +276,7 @@ namespace rocsparse
             if(info->is_submatrix)
             {
                 const J ptr_shift = (fill_mode == rocsparse_fill_mode_upper) ? 0 : -1;
-                dim3    blocks((m - 1) / BLOCKSIZE + 1);
+                dim3    blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
                 dim3    threads(BLOCKSIZE);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::kernel_count_missing_diagonal<1024, I, J>),
@@ -294,7 +294,7 @@ namespace rocsparse
             }
             else
             {
-                dim3 blocks((m - 1) / BLOCKSIZE + 1);
+                dim3 blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
                 dim3 threads(BLOCKSIZE);
                 switch(fill_mode)
                 {
@@ -361,7 +361,7 @@ namespace rocsparse
                         RETURN_IF_HIP_ERROR(
                             rocsparse_hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
 
-                        dim3 blocks((m - 1) / BLOCKSIZE + 1);
+                        dim3 blocks(rocsparse::csritsv_grid_stride_blocks<BLOCKSIZE>(handle, m));
                         dim3 threads(BLOCKSIZE);
                         switch(fill_mode)
                         {
