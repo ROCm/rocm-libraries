@@ -1798,6 +1798,12 @@ class Solution(collections.abc.Mapping):
       # dot2 kernel does not support MBSK
       state["GlobalSplitUAlgorithm"] = 'MultipleBuffer'
       state["MbskPrefetchMethod"] = 0
+    # [ToDO] MBSK on gfx1250 with MIWaveTile[0] > 1 produces wrong results.
+    if (state["ISA"] == (12, 5, 0) and state.get("EnableMatrixInstruction", False)
+        and "MIWaveTile" in state and state["MIWaveTile"][0] > 1
+        and state["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
+      reject(state, printRejectionReason,
+             "MultipleBufferSingleKernel produces wrong results on gfx1250 with MT>1")
     if state["StreamK"] > 0 and state["StreamKAtomic"] == 0:
       # StreamK Workspace size
       state["_GlobalAccumulation"] = 'PartialsBuffer'
