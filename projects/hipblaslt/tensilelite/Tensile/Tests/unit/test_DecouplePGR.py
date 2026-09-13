@@ -882,6 +882,159 @@ def _asm(*blocks, **kwargs):
     return "".join(line + "\n" for line in lines)
 
 
+def test_thick_wait_retags_the_body_and_the_iter0_clone():
+    asm = _asm(_fillBlock("B", clone=True), _fillBlock("B"))
+    out = _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    assert out.count("s_wait_tensorcnt 2") == 2
+    assert "s_wait_tensorcnt 0" not in out
+
+
+def test_thick_wait_accepts_one_retag_when_iter0_is_not_cloned():
+    """InitCIterWmma=0 emits no iter0 clone, so there is one wait to retag."""
+    asm = _asm(_fillBlock("B"))
+    out = _applyThickWait(_thickWaitKernel(), asm)
+    assert out.count("s_wait_tensorcnt 2") == 1
+
+
+def test_thick_wait_ignores_header_copies_that_carry_no_tensorcnt_wait():
+    """A loop copy can emit a thick header with no wait in its block, so the
+    header labels are not a count of the waits to retag."""
+    asm = _asm(_fillBlock("B", clone=True), _fillBlock("B"),
+               _fillBlock("B", wait=None))
+    out = _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    assert out.count("s_wait_tensorcnt 2") == 2
+
+
+def test_thick_wait_finds_the_wait_in_a_long_fill_block():
+    asm = _asm(_fillBlock("B", body=400, clone=True), _fillBlock("B", body=400))
+    out = _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    assert out.count("s_wait_tensorcnt 2") == 2
+
+
+@pytest.mark.parametrize("pgrA, pgrB, thick, thin", [(1, 2, "B", "A"), (2, 1, "A", "B")])
+def test_thick_wait_only_retags_the_double_buffered_tensor(pgrA, pgrB, thick, thin):
+    asm = _asm(_fillBlock(thick), _fillBlock(thin))
+    out = _applyThickWait(_thickWaitKernel(pgrA, pgrB), asm)
+    assert out.count("s_wait_tensorcnt 2") == 1
+    assert out.count("s_wait_tensorcnt 0") == 1
+
+
+def test_thick_wait_leaves_equal_pairs_untouched():
+    asm = _asm(_fillBlock("B"))
+    assert _applyThickWait(_thickWaitKernel(2, 2), asm) == asm
+
+
+def test_thick_wait_does_not_claim_a_wait_past_the_next_fill_label():
+    """The retag loop stops at the next fill label, so the drain past it is
+    never rewritten -- and the coverage check will not accept a gate the pass
+    did not write, so the kernel is still refused rather than credited with a
+    wait belonging to another group."""
+    asm = _asm(_fillBlock("B", wait=None), tail=["label_DcpLateFillAEnd:",
+                                                 "s_wait_tensorcnt 0", "s_endpgm"])
+    with pytest.raises(RuntimeError, match="did not relax"):
+        _applyThickWait(_thickWaitKernel(), asm)
+
+
+def test_thick_wait_accepts_a_schedule_that_merges_the_two_gates():
+    """One retag can cover two fill ends, so a retag count is not the test.
+
+    gfx1250v0's cost table sinks the iter0 clone's LDS reads and its gate below
+    the convergence label, leaving one drain that gates both paths. This shape
+    used to be refused as a shortfall against InitCIterWmma=1, which cost six
+    kernels -- all of them TDMFuse=0, the default grouping. Nothing reads ahead
+    of the surviving gate, so there is nothing to refuse.
+    """
+    asm = _asm(_fillBlock("B", clone=True, wait=None), _fillBlock("B"))
+    out = _applyThickWait(_thickWaitKernel(InitCIterWmma=1), asm)
+    assert out.count("s_wait_tensorcnt 2") == 1
+    assert "s_wait_tensorcnt 0" not in out
+
+
+def test_thick_wait_shortfall_drops_one_kernel_instead_of_the_build():
+    """A real shortfall still raises per kernel, so the caller drops that
+    kernel and not the build. What makes it real is reads starting ahead of the
+    drain that gates them, which is what the gate exists to prevent -- not a
+    retag total falling short of a solution parameter.
+    """
+    asm = _asm(["label_DcpEarlyFillBEnd:",
+                "ds_load_b128 v[0:3], v[64] offset:128",
+                "s_wait_tensorcnt 0"], tail=["s_endpgm"])
+    with pytest.raises(RuntimeError, match="before any s_wait_tensorcnt"):
+        _applyThickWait(_thickWaitKernel(), asm)
+
+
+def test_thick_wait_refuses_to_walk_past_the_thick_gate_to_the_thin_drain():
+    """The gate right after the thick fill is the thick tensor's. The next one
+    drains the thin tensor's refill into the single block its reads are about
+    to touch, so reaching it means the emitted shape is not what this pass
+    assumes -- reject the kernel instead of relaxing a real dependency."""
+    asm = _asm(_fillBlock("B", wait="s_wait_tensorcnt 2"),
+               tail=["s_wait_tensorcnt 0", "s_endpgm"])
+    with pytest.raises(RuntimeError, match="did not relax"):
+        _applyThickWait(_thickWaitKernel(), asm)
+
+
+# ---------------------------------------------------------------------------
+# TDMFuse=1 is not this pass's business. memTokenLdsDcp gives A and B disjoint
+# tensor tokens, so the wait-count insertion pass computes the relaxed thick
+# gate from dataflow and emits it directly. These pin the no-op against the
+# layout the paired arm actually emits -- `[body..., label]`, label last.
+# ---------------------------------------------------------------------------
+_PAIRED_TOKENS = {"A": (0, 1), "B": (2, 3)}
+
+
+@pytest.mark.parametrize("asmArgs, asmKwargs, tokens", [
+    # the production layout itself
+    (((("B", 8, True),),), {}, _PAIRED_TOKENS),
+    # across the InitCIterWmma region clone and a long fill body
+    (((("B", 400, True, True), ("B", 400, True)),), {}, _PAIRED_TOKENS),
+    # a gate the wait-count insertion pass already emitted as 1, and a wider 2
+    (((("B", 4, True),),), {"tail": ["s_wait_tensorcnt 1", "s_endpgm"]}, _PAIRED_TOKENS),
+    (((("B", 4, True),),), {"tail": ["s_wait_tensorcnt 2", "s_endpgm"]}, _PAIRED_TOKENS),
+    # a thick fill that emitted no label at all
+    (((("A", 0, True),),), {"tail": ["s_endpgm"]}, _PAIRED_TOKENS),
+    # and with no LDS tokens on the writer at all
+    (((("B", 0, True),),), {}, None),
+], ids=["production", "clone+long", "gate1", "gate2", "unlabelled", "no-tokens"])
+def test_thick_wait_paired_is_a_no_op(asmArgs, asmKwargs, tokens):
+    """One branch, so one test. The paired arm returns the assembly untouched
+    before the scan, which makes the token map, the region clone, the body
+    length, the label and any pre-existing gate all the same code path."""
+    blocks = [_fillBlock(tc, body=body, paired=paired,
+                         clone=(rest[0] if rest else False))
+              for (tc, body, paired, *rest) in asmArgs[0]]
+    asm = _asm(*blocks, **asmKwargs)
+    assert _applyThickWait(_thickWaitKernel(TDMFuse=1), asm, memTokenLdsDcp=tokens) == asm
+
+
+def test_thick_wait_paired_leaves_a_downstream_zero_wait_alone():
+    """Regression for the rewrite this pass used to do.
+
+    The paired label is appended after the fill body, so a forward scan is
+    already outside the group and the first wait it meets belongs to unrelated
+    code. Relaxing that one to 1 would let reads start before a real dependency
+    had drained -- a live synchronisation hazard, not a missed optimisation.
+    """
+    asm = _asm(_fillBlock("B", body=8, paired=True),
+               tail=["s_wait_tensorcnt 0", "label_DcpLateFillAEnd:", "s_endpgm"])
+    out = _applyThickWait(_thickWaitKernel(TDMFuse=1), asm,
+                          memTokenLdsDcp=_PAIRED_TOKENS)
+    assert out == asm
+    assert "s_wait_tensorcnt 1" not in out
+    assert out.count("s_wait_tensorcnt 0") == 1
+
+
+@pytest.mark.parametrize("pgrA, pgrB, thick", [(1, 2, "B"), (2, 1, "A")])
+def test_thick_wait_target_follows_the_label_the_fill_emitted(pgrA, pgrB, thick):
+    """Only the double-buffered tensor gets a DcpEarlyFill label, so the target
+    is fixed by LDS block count and cannot be re-chosen by transfer size: the
+    other tensor's name matches no label in the emitted kernel."""
+    other = "A" if thick == "B" else "B"
+    asm = _asm(_fillBlock(other), tail=["s_endpgm"])
+    with pytest.raises(RuntimeError, match="label was emitted at all"):
+        _applyThickWait(_thickWaitKernel(pgrA, pgrB), asm)
+
+
 # ---------------------------------------------------------------------------
 # Thick/thin issue order (KernelWriter._dcpThickThinIssueOrder). Thick-first is
 # what makes the relaxed gate mean anything: s_wait_tensorcnt N is an
@@ -913,3 +1066,25 @@ def test_dcp_thick_thin_issue_order_is_a_pure_swap_of_its_arguments():
     tpA, tpB = object(), object()
     assert _issueOrder(1, 2, tpA, tpB) == (tpB, tpA)
     assert _issueOrder(2, 1, tpA, tpB) == (tpA, tpB)
+
+
+@pytest.mark.parametrize("pgrA, pgrB, thick, thin", [(1, 2, "B", "A"), (2, 1, "A", "B")])
+def test_the_ordered_pair_is_the_pair_the_emission_is_gated_on(pgrA, pgrB, thick, thin):
+    """The ordering has to hold in the emitted assembly, not just in the helper.
+
+    Only the thick tensor's early fill carries a DcpEarlyFill label, and that
+    label is what the wait pass finds and relaxes. So asserting which tensor's
+    gate moves proves the emission followed the helper: a site that reverted to
+    a positional A-then-B reading would swap thick and thin, and both arms would
+    fail here. Matching on the source text instead bound this to local-variable
+    spelling and let a semantic break through.
+    """
+    assert _issueOrder(pgrA, pgrB) == (thick, thin)
+
+    relaxed = _applyThickWait(_thickWaitKernel(pgrA, pgrB), _asm(_fillBlock(thick)))
+    assert relaxed.count("s_wait_tensorcnt 2") == 1, \
+        "the thick tensor named by the helper is not the one whose gate was relaxed"
+
+    with pytest.raises(RuntimeError, match="label was emitted at all"):
+        _applyThickWait(_thickWaitKernel(pgrA, pgrB),
+                        _asm(_fillBlock(thin), tail=["s_endpgm"]))

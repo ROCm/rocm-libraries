@@ -78,6 +78,7 @@ def test_wave_separation_still_gates_the_writer():
     assert TF.tdmSeparateABDescriptors(ks()) is True
     assert TF.tdmSeparateABDescriptors(ks(enableTDMA=False)) is False
     assert Stub().tdmSeparateABDescriptors(ks(enableTDMA=False)) is False
+    assert TF.decoupledThickGateRelaxation(ks(enableTDMA=False)) is None
 
 
 # --------------------------------------------------------------------------

@@ -777,6 +777,214 @@ def tdmWaveIssueOrder(ks, itemA, itemB):
     return dcpThickThinIssueOrder(((numLdsBlkA, itemA), (numLdsBlkB, itemB)))
 
 
+DCP_THICK_GATE_TOKENS = "tokens"
+DCP_THICK_GATE_TEXT = "text"
+
+# The count each mechanism's grouping actually supports. Not a tunable: it is
+# how many independent tensor ops the grouping leaves outstanding.
+DCP_THICK_GATE_SUPPORTED = {DCP_THICK_GATE_TEXT: 2, DCP_THICK_GATE_TOKENS: 1}
+
+
+class DcpThickGate(NamedTuple):
+    """How a divergent decoupled pair's thick-tensor gate gets relaxed."""
+    mechanism: str
+    tensorcnt: int
+
+
+def _parseThickGateCountOverride(spec):
+    """Parse the gate-pricing hook, e.g. "text=1" or "text=0,tokens=0".
+
+    DOWNWARD ONLY, and this is where that is enforced. `s_wait_tensorcnt N`
+    retires while N tensor ops are still outstanding, so lowering N is strictly
+    more conservative -- at 0 it is a full drain, which is always correct -- but
+    raising N above what the grouping supports lets LDS reads begin before their
+    data has landed. An upward request is refused here rather than measured.
+    """
+    out = {}
+    for item in (spec or "").replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        mechanism, _, value = item.partition("=")
+        mechanism = mechanism.strip()
+        if mechanism not in DCP_THICK_GATE_SUPPORTED:
+            raise ValueError(
+                "TENSILE_DCP_THICK_GATE_COUNT=%r: unknown mechanism %r, expected "
+                "one of %s" % (spec, mechanism, sorted(DCP_THICK_GATE_SUPPORTED)))
+        count = int(value.strip())
+        supported = DCP_THICK_GATE_SUPPORTED[mechanism]
+        if not 0 <= count <= supported:
+            raise ValueError(
+                "TENSILE_DCP_THICK_GATE_COUNT=%r sweeps %s upward: %d is outside "
+                "[0, %d]. s_wait_tensorcnt N retires with N tensor ops still "
+                "outstanding, so a count above what the grouping supports starts "
+                "LDS reads before their data lands. Sweep downward only."
+                % (spec, mechanism, count, supported))
+        out[mechanism] = count
+    return out
+
+
+# Read once at import so decoupledThickGateRelaxation stays pure for the life of
+# the process: two calls in one build can never disagree.
+_THICK_GATE_COUNT_OVERRIDE = _parseThickGateCountOverride(
+    os.environ.get("TENSILE_DCP_THICK_GATE_COUNT", ""))
+
+
+def dcpThickGateCountOverridden(mechanism):
+    """True when the gate-pricing hook is overriding `mechanism`'s count."""
+    return mechanism in _THICK_GATE_COUNT_OVERRIDE
+
+
+def decoupledThickGateRelaxation(ks):
+    """The relaxed thick-tensor gate a decoupled pair earns, or None.
+
+    LAYER 3. Sole owner of that decision: both emission paths read it and
+    neither decides anything itself.
+
+    `s_wait_tensorcnt N` is an age-ordered drain on one counter -- N is how many
+    tensor ops may still be outstanding when it retires, so 0 is a full drain
+    and a larger N is a WEAKER gate. A divergent pair leaves one tensor holding
+    more LDS blocks than the other, so the thin tensor's reads can begin while
+    the thick tensor's remaining block is still landing.
+
+      `(DCP_THICK_GATE_TOKENS, 1)`
+          The grouping gives A and B a descriptor set each, so they can be
+          handed disjoint TDM tensor tokens (`memTokenLdsDcp`) and the
+          wait-count insertion pass derives the gate from dataflow, emitting
+          `s_wait_tensorcnt 1` itself at the token-transition barriers. One
+          sibling fill is left outstanding, hence 1.
+      `(DCP_THICK_GATE_TEXT, 2)`
+          The grouping puts A and B in one set, so their tensor ops share a
+          token and the insertion pass can only emit a full drain.
+          `KernelWriter._dcpApplyThickWait1` relaxes the gate after the thick
+          fill's own label afterwards. That grouping leaves the thick tensor's
+          second block outstanding as well as the sibling fill, hence 2.
+      `None`
+          No relaxation. An equal pair or scalar PrefetchGlobalRead has no thin
+          side to start early. A separate-descriptor pair the TDM does not move
+          on both tensors, or whose thin side is not on a single block, gets
+          none either: there is no second tensor-token stream for a relaxed
+          count to skip past.
+
+    The *presence* of a relaxation follows from the PGR pair alone and is the
+    same under every grouping: every divergent pair gets one. The grouping
+    decides the *mechanism and count*. A census that counts `s_wait_tensorcnt 1`
+    alone therefore counts only the separate-descriptor spelling and misreports
+    the shared-descriptor grouping as unrelaxed, even though its gate is the
+    weaker of the two.
+
+    Why this asks the grouping and not TDMFuse
+    ------------------------------------------
+    `_tdmFuseCanShareDescriptors` can decline the grouping TDMFuse names -- on
+    TDMSplit, subtile, a missing MX scale, the wrong wave count -- and the
+    writer then falls back to the default, where A and B share one descriptor
+    set. Both emission sites used to test `TDMFuse == 1` directly, so a declined
+    solution would have been handed disjoint tokens for descriptors that are in
+    fact shared. The guard was not where the decision was, and it failed open.
+
+    That is the sixth instance in this project of a single root cause: a guard,
+    or a path resolution, decoupled from the thing it governs, so that when the
+    two disagree the guard permits instead of refusing. The fix is placement,
+    not another check -- `tdmSeparateABDescriptors` routes the question through
+    `tdmGrouping`, the same function the writer's own grouping comes from.
+
+    "By construction" only became true once the writer asked the same function.
+    It kept a second definition, `tdmFuseAMx or tdmFusePaired`, which agreed on
+    every wired row and would have disagreed on `B_MX`; it now delegates.
+    """
+    decoupled, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
+    if not (decoupled and numLdsBlkA != numLdsBlkB):
+        return None
+    if tdmGroupingSeparatesAB(ks):
+        if not tdmSeparateABDescriptors(ks):
+            return None
+        if min(numLdsBlkA, numLdsBlkB) != 1:
+            return None
+        mechanism = DCP_THICK_GATE_TOKENS
+    else:
+        mechanism = DCP_THICK_GATE_TEXT
+    return DcpThickGate(mechanism, _THICK_GATE_COUNT_OVERRIDE.get(
+        mechanism, DCP_THICK_GATE_SUPPORTED[mechanism]))
+
+
+_DCP_TENSORCNT_RE = re.compile(r"^s_wait_tensorcnt\s+(\d+)(?:\s|$)")
+_DCP_LDS_READ_RE = re.compile(r"^ds_(?:load|read)\w*\s")
+
+
+def dcpThickGateUncoveredSites(lines, marker, relaxed, retagged):
+    """Thick-fill sites the text pass left un-relaxed, as [(lineIndex, why)].
+
+    LAYER 3, and the verification half of decoupledThickGateRelaxation: that
+    function owns which count a divergent pair earns, this one owns whether the
+    emitted text actually carries it. `retagged` is the set of line indices the
+    pass rewrote on this kernel. Empty return means every site is covered.
+
+    Why this is a coverage question and not a count
+    -----------------------------------------------
+    The check this replaces asked whether the pass had retagged exactly
+    ``2 if InitCIterWmma == 1 else 1`` waits. That number comes from a solution
+    parameter and the waits come from the scheduler, so nothing held the two
+    together -- and on gfx1250v0 they came apart. Its cost table lets the whole
+    InitCIterWmma iter0 clone sink past its own gate: the clone keeps its
+    fill-end label, but its LDS reads and its ``s_wait_tensorcnt`` both move
+    below the convergence label, so one drain gates both paths. One retag,
+    correct code, and a refusal to emit it -- six kernels, every one TDMFuse=0,
+    which is the default grouping.
+
+    The count was never the property worth checking. What has to hold is that
+    no thick-fill site reaches an LDS read through a gate this pass did not
+    relax, so that is what is asked, of the emitted lines and nothing else:
+
+      - a site whose first ``s_wait_tensorcnt`` is one this pass relaxed is
+        covered, whether it relaxed it for this site or for a sibling that
+        shares the same drain;
+      - a site with no gate and no read below it is covered vacuously: a
+        header copy the loop emitted with nothing after it to hold back. The
+        shipped gfx1250 corpus emits a gateless site in 33 of its 72 decoupled
+        kernels, and the old count accepted those only because two of their
+        three sites happened to make the total come out right;
+      - a site that reaches ``ds_load`` first is NOT covered -- its reads would
+        begin ahead of the drain that gates them;
+      - a site whose first gate is one the pass did NOT rewrite is NOT covered,
+        even when that gate already reads `relaxed`. Reaching an unrewritten
+        gate means the emitted shape is not the one this pass assumes, and the
+        next gate down drains the thin tensor's refill into the single block
+        its reads are about to touch. Refuse rather than claim a gate that was
+        put there by something else;
+      - no sites at all is NOT covered, because the caller only runs this pass
+        for groupings this owner said have a fill to relax.
+
+    Reading the schedule's own output is the whole point. A guard decoupled
+    from the thing it governs is the root cause the owner above names, and the
+    old check was another instance of it -- failing closed rather than open,
+    which is why it cost kernels instead of correctness. This one cannot
+    diverge from the schedule, because the schedule is its only input.
+    """
+    sites = [i for i, line in enumerate(lines)
+             if marker in line and line.rstrip().endswith(":")]
+    if not sites:
+        return [(-1, "no %s label was emitted at all" % marker)]
+    uncovered = []
+    for i in sites:
+        why = None
+        for j in range(i + 1, len(lines)):
+            candidate = lines[j]
+            if _DCP_LDS_READ_RE.match(candidate):
+                why = ("reaches %s at line %d before any s_wait_tensorcnt"
+                       % (candidate.split()[0], j))
+                break
+            gate = _DCP_TENSORCNT_RE.match(candidate)
+            if gate:
+                if j not in retagged:
+                    why = ("first gate is s_wait_tensorcnt %s at line %d, which "
+                           "this pass did not relax to %d"
+                           % (gate.group(1), j, relaxed))
+                break
+        if why:
+            uncovered.append((i, why))
+    return uncovered
+
+
 def tdmWaveLdsBytes(ks, problemType=None):
     """LDS bytes each wave is responsible for filling, as {wave: bytes}.
 
