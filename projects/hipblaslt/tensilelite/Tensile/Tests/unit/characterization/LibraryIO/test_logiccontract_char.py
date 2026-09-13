@@ -114,17 +114,32 @@ def test_parse_logic_list_no_perfmetric(snapshot):
     assert _norm(L.parseLibraryLogicList(d, "src.yaml")) == snapshot
 
 
-def test_parse_logic_list_too_short():
+def test_parse_logic_list_range_logic_comes_from_index_eight():
+    d = _logic_list()
+    d[8] = {"rules": [[1, 2], [3, 4]]}
+    d[9] = "reserved"
+    assert L.parseLibraryLogicList(d, "src.yaml")["RangeLogic"] == d[8]
+
+
+def test_parse_logic_list_too_short(capsys):
     with pytest.raises(SystemExit):
         L.parseLibraryLogicList([{"MinimumRequiredVersion": "5.0.0"}], "src.yaml")
+    assert capsys.readouterr().out == (
+        "Tensile::FATAL: Library logic file src.yaml is missing required "
+        "fields (len = 1 < 9)\n"
+    )
 
 
-def test_parse_logic_list_missing_type():
+def test_parse_logic_list_missing_type(capsys):
     # data[11] absent/falsy -> missing matching property -> printExit.
     d = _logic_list()
     d[11] = None
     with pytest.raises(SystemExit):
         L.parseLibraryLogicList(d, "src.yaml")
+    assert capsys.readouterr().out == (
+        "Tensile::FATAL: Library logic file src.yaml is missing required "
+        "field matching property.\n"
+    )
 
 
 # ===========================================================================
@@ -168,6 +183,17 @@ def test_raw_library_logic_dict_format(snapshot):
         "DefaultSolution": {"KernelLanguage": "Assembly"},
     }
     assert _norm(L.rawLibraryLogic(data)) == snapshot
+
+
+def test_raw_library_logic_preserves_range_logic():
+    data = [
+        "5.0.0", "sched", "gfx942", ["Device 0049"],
+        {"OperationType": "GEMM"}, [{"SolutionIndex": 0}],
+        [0], [["k", "v"]], {"RangeRules": [[1, 2], [3, 4]]},
+    ]
+    result = L.rawLibraryLogic(data)
+    assert result[8] == data[8]
+    assert result[9] == []
 
 
 # ===========================================================================
@@ -261,6 +287,17 @@ def test_create_library_logic_tile_selection(monkeypatch, snapshot):
     assert _norm(data) == snapshot
 
 
+def test_create_library_logic_empty_tile_indices_are_preserved(monkeypatch):
+    monkeypatch.setattr(L, "getCUCount", lambda: 304)
+    logic_tuple = _logic_tuple({(1, 1, 1): [0, 1.0]}, tile=True)
+    logic_tuple[6] = []
+    data = L.createLibraryLogic(
+        "aquavanjaram", "gfx90a", ["Device 0049"], "Matching", logic_tuple
+    )
+    assert data["TileSelectionIndices"] == {"TileSelectionIndices": []}
+    assert len(data["Solutions"]) == 2
+
+
 def test_create_library_logic_with_metadata(monkeypatch, snapshot):
     # ProblemType.state carrying the optional DataTypeMetadata / MXSA / MXSB
     # keys -> the three guarded conversion branches run.
@@ -312,6 +349,16 @@ def test_get_cu_count_rocminfo(monkeypatch):
 
     monkeypatch.setattr(L.subprocess, "run", lambda *a, **k: _Res())
     assert L.getCUCount() == 110
+
+
+def test_get_cu_count_uses_last_rocminfo_device(monkeypatch):
+    monkeypatch.delenv("CU", raising=False)
+
+    class _Res:
+        stdout = b"Compute Unit:            110\nCompute Unit:            228\n"
+
+    monkeypatch.setattr(L.subprocess, "run", lambda *a, **k: _Res())
+    assert L.getCUCount() == 228
 
 
 def test_get_cu_count_rocminfo_no_match(monkeypatch):
