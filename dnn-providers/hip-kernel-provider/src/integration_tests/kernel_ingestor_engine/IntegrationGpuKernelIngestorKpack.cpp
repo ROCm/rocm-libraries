@@ -342,6 +342,20 @@ protected:
         ASSERT_TRUE(recoveryError.empty()) << recoveryError;
     }
 
+    void TearDown() override
+    {
+        if(_ownedStream != nullptr)
+        {
+            EXPECT_EQ(hipStreamSynchronize(_stream), hipSuccess);
+            // Restore the concrete stream even when a fatal assertion interrupted execution.
+            // The inherited teardown owns it; default-stream tokens must never be destroyed.
+            _stream = _ownedStream;
+            EXPECT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+            _ownedStream = nullptr;
+        }
+        IntegrationGraphVerificationHarness<float, int>::TearDown();
+    }
+
     static int64_t packedEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(PACKED_ENGINE_NAME);
@@ -362,8 +376,8 @@ protected:
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         // The packaged engine is an addition to the catalog, not a replacement: the shipped
-        // pointwise engine claims this graph too. Membership plus the pin above is what
-        // makes the execution below attributable to the packaged descriptors.
+        // pointwise engine claims this graph too. Check catalog membership here and the
+        // actual execution plan's engine identity after building below.
         std::vector<int64_t> rankedEngineIds;
         result = graph.get_ranked_engine_ids(rankedEngineIds);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -379,9 +393,39 @@ protected:
 
         result = graph.build_plans();
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t servingEngineId = 0;
+        ASSERT_EQ(graph.get_execution_plan_engine_id(servingEngineId).code, ErrorCode::OK);
+        ASSERT_EQ(servingEngineId, packedEngineId())
+            << "engine id " << servingEngineId << " served the graph, not the packaged "
+            << PACKED_ENGINE_NAME << " engine";
+    }
+
+    void executePackagedKernel(hipStream_t selectedStream)
+    {
+        // Keep setup and arch discovery on the owned concrete stream. _stream is also
+        // the stream executeAndVerify synchronizes; TearDown restores its ownership.
+        _ownedStream = _stream;
+        _stream = selectedStream;
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+
+        auto graph = buildPointwiseAddGraph();
+        ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
+
+        // The frontend's route into the engine's getMaxWorkspaceSize().
+        int64_t workspaceSize = 0;
+        auto result = graph->get_workspace_size(workspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_GE(workspaceSize, 0);
+        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+        executeAndVerify(*graph, workspace.get(), /*seed=*/0);
     }
 
     std::vector<std::filesystem::path> _archives;
+
+private:
+    hipStream_t _ownedStream = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -603,17 +647,22 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
 
 TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnDevice)
 {
-    auto graph = buildPointwiseAddGraph();
-    ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
+    executePackagedKernel(_stream);
+}
 
-    // The frontend's route into the engine's getMaxWorkspaceSize().
-    int64_t workspaceSize = 0;
-    auto result = graph->get_workspace_size(workspaceSize);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_GE(workspaceSize, 0);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnNullStream)
+{
+    executePackagedKernel(nullptr);
+}
 
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnLegacyStream)
+{
+    executePackagedKernel(hipStreamLegacy);
+}
+
+TEST_F(IntegrationGpuKernelIngestorKpack, ExecutesAPackagedKernelOnPerThreadStream)
+{
+    executePackagedKernel(hipStreamPerThread);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration

@@ -12,7 +12,8 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
-#include "ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"

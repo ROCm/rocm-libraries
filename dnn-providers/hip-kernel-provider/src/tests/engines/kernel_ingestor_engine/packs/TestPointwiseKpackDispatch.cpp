@@ -29,6 +29,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
@@ -65,12 +66,27 @@ using hip_kernel_provider::kernel_ingestor_engine::testing::GraphFixture;
 using hip_kernel_provider::kernel_ingestor_engine::testing::matchesGraph;
 using hip_kernel_provider::kernel_ingestor_engine::testing::POINTWISE_ADD;
 using hip_kernel_provider::kernel_ingestor_engine::testing::testDeviceProperties;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "pointwisekpack";
 
 DescriptorId id(uint8_t seed)
 {
     DescriptorId value{};
     value.fill(seed);
     return value;
+}
+
+/// What the pointwise pack's own pointwiseKernelSignature() declares: three device
+/// pointers. A descriptor built here has to agree with it or the dispatch is refused
+/// before the archive is ever opened, which would mask the failure each case is after.
+const std::vector<KernelArgument>& pointwiseSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
 }
 
 /// A KernelDefinition whose code comes from a kpack archive at
@@ -80,13 +96,18 @@ DescriptorId id(uint8_t seed)
 /// `treeRoot` is the containment boundary the loader would have stamped. Passed
 /// separately from originDirectory because they differ for a nested descriptor, which is
 /// exactly the case whose archive lives at the arch root above it.
+///
+/// `sha256` defaults to empty for the cases that only read metadata -- workspace sizing
+/// reaches no archive, so there are no bytes for a digest to describe. A case that
+/// prepares a dispatch must pass the descriptor's own digest, which the loader checks.
 KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
                                  const std::filesystem::path& treeRoot,
                                  const std::string& library,
                                  const std::string& tocKey,
                                  const std::string& symbol,
                                  int64_t blockSize,
-                                 uint8_t seed)
+                                 uint8_t seed,
+                                 const std::string& sha256 = {})
 {
     KernelDefinition kernel;
     kernel.kernelId = id(seed);
@@ -97,6 +118,8 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
     kernel.source.library = library;
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = symbol;
+    kernel.source.sha256 = sha256;
+    kernel.source.signature = pointwiseSignature();
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), blockSize},
@@ -108,8 +131,6 @@ KernelDefinition makeKpackKernel(const std::filesystem::path& originDirectory,
 // The workspace seam, unchanged
 // ---------------------------------------------------------------------------
 
-/// `workspaceBytes` reads metadata only, so it never reaches a loader and needs no
-/// device: the same handler, asked about a KPACK kernel, answers from the same metadata.
 TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
 {
     const GraphFixture fixture(buildPointwiseGraph(), testDeviceProperties());
@@ -125,6 +146,7 @@ TEST(TestPointwiseKpackDispatch, QueriesWorkspaceForAKpackKernel)
     const auto smallBlock = makeKpackKernel(
         "/nonexistent", "/nonexistent", "pack.kpack", "toc#0", "PointwiseAdd", 64, 0x50);
 
+    // Metadata only, so this never reaches a loader and needs no device.
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, largeBlock), 1024U);
     EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, smallBlock), 0U);
 }
@@ -260,6 +282,7 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     failing.source.library = "there-is-no-archive-here.kpack";
     failing.source.tocKey = "lib/libhip.so#0";
     failing.source.symbol = "PointwiseAdd";
+    failing.source.signature = pointwiseSignature();
     failing.originDirectory = emptyDirectory;
     failing.metadata = {{std::string(BLOCK_SIZE_FIELD), int64_t{256}},
                         {std::string(DTYPE_FIELD), std::string("FLOAT")}};
@@ -295,10 +318,6 @@ DescriptorSet makeTwoPackSet(const std::filesystem::path& emptyDirectory)
     return set;
 }
 
-/// This is the GPU-less half of the drop-costs-only-itself case. The front-ranked
-/// candidate names a kpack archive that is not there; the loader reports it at
-/// archive-open, before HIP is involved, so the whole path runs on a machine with no
-/// device. The graph is still served, and the failure is named rather than swallowed.
 TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
 {
     registerNativeIngestorSymbols();
@@ -307,8 +326,9 @@ TEST(TestPointwiseKpackDispatch, SurvivesAKpackWhoseArchiveIsAbsent)
     const NoHipDispatchHandler siblingHandler;
     scope.add(SIBLING_DISPATCH_SYMBOL, &siblingHandler);
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDirectory(
-        std::filesystem::temp_directory_path() / "hipdnn-kpack-absent-archive");
+    // The front-ranked candidate names an archive that is not there. Reported at
+    // archive-open, before HIP is involved, so this whole path runs without a device.
+    const ScopedDirectory emptyDirectory = claimScratchDirectory(SCRATCH_LABEL);
 
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
@@ -31,6 +32,7 @@
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
 using namespace hipdnn_integration_tests::bundle::testing_support;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -55,7 +57,7 @@ protected:
     void SetUp() override
     {
         ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("enforcement_rungs_"));
+        _scopedDir.emplace(claimScratchDirectory("enforcement_rungs"));
         _tempDir = _scopedDir->path();
     }
 

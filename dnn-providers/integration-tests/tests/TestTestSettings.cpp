@@ -8,10 +8,12 @@
 #include <fstream>
 #include <string>
 
-#include "ScratchDirectory.hpp"
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
 #include "harness/TestSettings.hpp"
 
 using hipdnn_integration_tests::TestSettings;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -27,7 +29,7 @@ class TempTomlFile
 {
 public:
     explicit TempTomlFile(const std::string& content)
-        : _dir(hipdnn_integration_tests::scratch::makeDir("test_settings_"))
+        : _dir(claimScratchDirectory("test_settings"))
         , _path(_dir.path() / "settings.toml")
     {
         std::ofstream ofs(_path);

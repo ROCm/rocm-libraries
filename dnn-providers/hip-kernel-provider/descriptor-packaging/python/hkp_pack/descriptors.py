@@ -286,7 +286,7 @@ def _validate_ukd_fields(ukd, where, log=print):
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
-        _require(ks, ["library", "toc_key", "symbol", "sha256"], where)
+        _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
     elif kind == "embedded_source":
         _require(ks, ["source_file", "entry_point"], where)
         _validate_embedded_source_file(ks["source_file"], where)

@@ -18,6 +18,7 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 
 #include "BundleFixtureFiles.hpp"
@@ -31,6 +32,7 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
@@ -44,7 +46,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("err_path_test_"));
+        _scopedDir.emplace(claimScratchDirectory("err_path"));
         _tempDir = _scopedDir->path();
     }
 

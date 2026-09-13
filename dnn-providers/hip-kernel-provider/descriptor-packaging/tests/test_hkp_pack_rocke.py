@@ -8,6 +8,7 @@ from typing import Literal, Optional
 
 import pytest
 
+from conftest import _arg, _kernel, _object, requires_msgpack
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline
@@ -168,13 +169,30 @@ class _FakeComgrError(Exception):
     pass
 
 
-def _patch_compiler(monkeypatch, name="stub_symbol", data=b"ELF\x00stub_symbol\x00"):
+STUB_ARGUMENTS = [
+    _arg("global_buffer", 8, 0, "in_ptr"),
+    _arg("global_buffer", 8, 8, "out_ptr"),
+    _arg("by_value", 4, 16, "scale"),
+]
+
+
+def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     """Stub the comgr entry, recording the backend the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
     rather than merely tolerating one. Without it, dropping the pin would leave
     every one of these tests green.
+
+    The default artifact is a real ELF carrying the AMDGPU metadata note, which
+    is what comgr emits: the packer reads a signature out of every object it
+    packs, so a placeholder that only spells the symbol in its bytes fails
+    before any guard under test is reached. Synthesising that note needs
+    msgpack, so the default -- and only the default -- is gated on it; a caller
+    supplying its own bytes needs nothing.
     """
+    if data is None:
+        requires_msgpack()
+        data = _object([_kernel(name, STUB_ARGUMENTS)])
     from hkp_pack import rocke_compile
 
     seen = {}
@@ -544,6 +562,24 @@ def test_rocke_compiles_and_packs(
     assert blob is not None
     assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
     assert ks["symbol"].encode("ascii") in blob
+    # Read off the object comgr actually produced. rocke emits argument names,
+    # which a HIP extern "C" kernel does not, so the dispatch-time comparison
+    # covers names here and not only kind and size.
+    signature = ks["signature"]
+    assert [a["kind"] for a in signature] == [
+        "global_buffer",
+        "global_buffer",
+        "global_buffer",
+        "global_buffer",
+        "by_value",
+    ]
+    assert [a["name"] for a in signature] == [
+        "q_ptr",
+        "k_ptr",
+        "v_ptr",
+        "o_ptr",
+        "scale",
+    ]
 
 
 def test_rocke_symbol_capture_differs_from_builder(

@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@ enum class KpackLoadStage
     ARCH_LOOKUP,
     ENTRY_LOOKUP,
     DECOMPRESS,
+    DIGEST_MISMATCH,
     MODULE_LOAD,
 };
 
@@ -40,6 +42,15 @@ struct KpackError
     /// codeName text.
     bool archiveAbsent = false;
 };
+
+/// Is a decompressed entry of @p reportedBytes credible for an archive file of
+/// @p archiveBytes on disk? @p archiveBytes of 0 means the file size could not be read,
+/// which stands the ratio half of the test down rather than guessing.
+///
+/// Exposed rather than left inline in codeObject() because the two ceilings are the whole
+/// substance of the check and nothing reachable through the reader exercises them: driving
+/// kpack_get_kernel into an implausible size means hand-building a corrupt archive.
+bool isCredibleCodeObjectSize(std::uintmax_t reportedBytes, std::uintmax_t archiveBytes);
 
 /// An owning decompressed code object. Frees through kpack_free_kernel, which is not
 /// operator delete, so this cannot be a vector or a unique_ptr with the default deleter.
@@ -120,6 +131,10 @@ private:
 
     /// void* rather than kpack_archive_t so this header does not include kpack.h.
     void* _archive = nullptr;
+
+    /// Read once at open; what codeObject measures an entry against. 0 case: see
+    /// isCredibleCodeObjectSize.
+    std::uintmax_t _archiveBytes = 0;
 };
 
 } // namespace hip_kernel_provider::compilation

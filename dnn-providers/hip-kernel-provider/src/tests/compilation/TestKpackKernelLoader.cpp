@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -27,7 +28,10 @@ namespace
 {
 
 using hipdnn_plugin_sdk::HipdnnPluginException;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "kpackloader";
 
 /// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
 /// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
@@ -35,6 +39,11 @@ using hipdnn_test_sdk::utilities::ScopedDirectory;
 /// the pinned reader meeting an archive it actually accepts. The parse-level cases
 /// need a real *container*, not a matching *device*; the device cases read this
 /// build's own packed archive -- see unitKpackRoot().
+///
+/// Its entries are placeholder payloads rather than HSA code objects, so KpackArchive
+/// turns them away at DECOMPRESS on the code-object magic check. Nothing past that stage
+/// -- the digest comparison, the device bind, the module load -- is reachable from here;
+/// those cases need a packed archive and therefore a device.
 constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
@@ -59,6 +68,11 @@ constexpr const char* PACKED_SECOND_SYMBOL = "ConvFwdSecondSymbol";
 /// A symbol no code object exports, used to reach the resolution-failure path.
 constexpr const char* ABSENT_SYMBOL = "there_is_no_such_symbol";
 
+/// Stands in for a digest on the paths that throw before verification runs. Deliberately
+/// not valid-looking: if such a case ever stops throwing early, the digest check must
+/// reject this rather than wave it through.
+constexpr const char* UNCHECKED_SHA256 = "not-a-digest-this-path-throws-first";
+
 /// What a descriptor-shaped label looks like where the loader is really called.
 const std::string& descriptorLabel()
 {
@@ -78,13 +92,21 @@ protected:
 
 TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
 {
-    const std::filesystem::path absent
-        = std::filesystem::temp_directory_path() / "hipdnn-kpack-there-is-no-archive-here.kpack";
+    // Inside a directory this case owns, so the name is absent because nothing has had
+    // the chance to create it -- not merely because nothing usually does.
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path absent = scratch.path() / "there-is-no-archive-here.kpack";
     ASSERT_FALSE(std::filesystem::exists(absent));
 
     try
     {
-        _loader.load(absent, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, PACKED_SYMBOL, descriptorLabel());
+        _loader.load(absent,
+                     ARCHIVE_TOC_KEY,
+                     ARCHIVE_ARCH,
+                     0,
+                     PACKED_SYMBOL,
+                     UNCHECKED_SHA256,
+                     descriptorLabel());
         FAIL() << "expected a missing archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -93,13 +115,16 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingArchive)
         EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
         EXPECT_NE(what.find(PACKED_SYMBOL), std::string::npos) << what;
         EXPECT_NE(what.find("does not exist"), std::string::npos) << what;
+        // An install that does not carry the archive is this machine's problem, not the
+        // descriptor author's, so the ingestor's candidate walk carries past it to the next
+        // kernel rather than stopping the build.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
 TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 {
-    const ScopedDirectory scratch(std::filesystem::temp_directory_path()
-                                  / "hipdnn-kpack-corrupt-archive");
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
     const std::filesystem::path garbage = scratch.path() / "corrupt.kpack";
     {
         std::ofstream out(garbage, std::ios::binary);
@@ -111,7 +136,13 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 
     try
     {
-        _loader.load(garbage, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, PACKED_SYMBOL, descriptorLabel());
+        _loader.load(garbage,
+                     ARCHIVE_TOC_KEY,
+                     ARCHIVE_ARCH,
+                     0,
+                     PACKED_SYMBOL,
+                     UNCHECKED_SHA256,
+                     descriptorLabel());
         FAIL() << "expected an unreadable archive to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -133,7 +164,13 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 
     try
     {
-        _loader.load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx942", PACKED_SYMBOL, descriptorLabel());
+        _loader.load(REAL_ARCHIVE,
+                     ARCHIVE_TOC_KEY,
+                     "gfx942",
+                     0,
+                     PACKED_SYMBOL,
+                     UNCHECKED_SHA256,
+                     descriptorLabel());
         FAIL() << "expected an arch mismatch to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -146,6 +183,7 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
         EXPECT_NE(what.find("gfx942"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1100"), std::string::npos) << what;
         EXPECT_NE(what.find("gfx1101"), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
@@ -156,8 +194,13 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
 
     try
     {
-        _loader.load(
-            REAL_ARCHIVE, "no/such/entry#7", ARCHIVE_ARCH, PACKED_SYMBOL, descriptorLabel());
+        _loader.load(REAL_ARCHIVE,
+                     "no/such/entry#7",
+                     ARCHIVE_ARCH,
+                     0,
+                     PACKED_SYMBOL,
+                     UNCHECKED_SHA256,
+                     descriptorLabel());
         FAIL() << "expected a missing toc_key to be reported";
     }
     catch(const HipdnnPluginException& error)
@@ -170,6 +213,7 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
         // signature of packer/descriptor skew, not of a mis-spelled entry point.
         EXPECT_NE(what.find("no entry for toc_key"), std::string::npos) << what;
         EXPECT_EQ(what.find("is not present in the loaded module"), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
@@ -196,8 +240,8 @@ TEST_F(TestKpackKernelLoader, ReportsAMissingSymbol)
     // resolution is a later, separate stage -- KpackKernelLoader::load never looks at the
     // symbol -- so the failure this case is after is raised by KpackProgram::getKernel
     // against a module HIP has accepted.
-    const auto program
-        = _loader.load(packed.archive, packed.tocKey, arch, ABSENT_SYMBOL, descriptorLabel());
+    const auto program = _loader.load(
+        packed.archive, packed.tocKey, arch, 0, ABSENT_SYMBOL, packed.sha256, descriptorLabel());
     ASSERT_NE(program, nullptr);
 
     try
@@ -245,10 +289,15 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     const size_t before = _cache.size();
 
     // Both symbols resolve...
-    const auto first
-        = _loader.load(packed.archive, packed.tocKey, arch, PACKED_SYMBOL, descriptorLabel());
-    const auto second = _loader.load(
-        packed.archive, packed.tocKey, arch, PACKED_SECOND_SYMBOL, descriptorLabel());
+    const auto first = _loader.load(
+        packed.archive, packed.tocKey, arch, 0, PACKED_SYMBOL, packed.sha256, descriptorLabel());
+    const auto second = _loader.load(packed.archive,
+                                     packed.tocKey,
+                                     arch,
+                                     0,
+                                     PACKED_SECOND_SYMBOL,
+                                     packed.sha256,
+                                     descriptorLabel());
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     EXPECT_NE(first->getKernel(PACKED_SYMBOL), nullptr);
@@ -264,6 +313,105 @@ TEST_F(TestKpackKernelLoader, TwoSymbolsResolveAgainstOneModule)
     EXPECT_NE(firstKpack->module(), nullptr);
     EXPECT_EQ(firstKpack->module(), secondKpack->module());
     EXPECT_EQ(_cache.size(), before + 1);
+}
+
+TEST_F(TestKpackKernelLoader, RejectsACodeObjectThatDoesNotMatchItsDeclaredDigest)
+{
+    SKIP_IF_NO_DEVICES();
+
+    std::string arch;
+    std::filesystem::path packaged;
+    hipDeviceProp_t properties{};
+    ASSERT_NO_FATAL_FAILURE(findPackedArchDirectory(properties, arch, packaged));
+    if(packaged.empty())
+    {
+        GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                     << "): " << unitKpackRoot() / arch
+                     << " does not exist. Environmental -- the build packs per arch and this "
+                        "device is outside GPU_TARGETS.";
+    }
+
+    PackedKernelSource packed;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
+
+    // Well-formed where UNCHECKED_SHA256 is not: this case must reach the comparison rather
+    // than be turned away by anything upstream of it. No real code object hashes to zero.
+    const std::string wrong(64, '0');
+    ASSERT_NE(packed.sha256, wrong);
+
+    try
+    {
+        _loader.load(
+            packed.archive, packed.tocKey, arch, 0, PACKED_SYMBOL, wrong, descriptorLabel());
+        FAIL() << "expected a code object that does not match its declared digest to be rejected";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_NE(what.find(descriptorLabel()), std::string::npos) << what;
+        EXPECT_NE(what.find(PACKED_SYMBOL), std::string::npos) << what;
+        // Both digests, so the reader can tell which end is stale rather than only that
+        // the two disagreed.
+        EXPECT_NE(what.find(wrong), std::string::npos) << what;
+        EXPECT_NE(what.find(packed.sha256), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    }
+
+    // Nothing was cached: the check runs before hipModuleLoadData, so no module was ever
+    // produced for these bytes. Were it to run after, this would hold a module the loader
+    // had already rejected.
+    EXPECT_EQ(_cache.size(), 0U);
+}
+
+TEST_F(TestKpackKernelLoader, RejectsASecondDescriptorThatDeclaresADifferentDigest)
+{
+    SKIP_IF_NO_DEVICES();
+
+    std::string arch;
+    std::filesystem::path packaged;
+    hipDeviceProp_t properties{};
+    ASSERT_NO_FATAL_FAILURE(findPackedArchDirectory(properties, arch, packaged));
+    if(packaged.empty())
+    {
+        GTEST_SKIP() << "nothing was packaged for this device (" << arch
+                     << "): " << unitKpackRoot() / arch
+                     << " does not exist. Environmental -- the build packs per arch and this "
+                        "device is outside GPU_TARGETS.";
+    }
+
+    PackedKernelSource packed;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packaged, PACKED_UKD_DESCRIPTOR, packed));
+
+    // The honest load first, so a module for this (archive, tocKey, arch, ordinal) is
+    // already resident. That is the state this case exists for: were the digest outside the
+    // cache key, the second call below would hit this entry and be handed a module verified
+    // against a digest it never declared.
+    const auto first = _loader.load(
+        packed.archive, packed.tocKey, arch, 0, PACKED_SYMBOL, packed.sha256, descriptorLabel());
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(_cache.size(), 1U);
+
+    const std::string wrong(64, '0');
+    ASSERT_NE(packed.sha256, wrong);
+
+    try
+    {
+        _loader.load(
+            packed.archive, packed.tocKey, arch, 0, PACKED_SECOND_SYMBOL, wrong, descriptorLabel());
+        FAIL() << "expected a resident module not to answer a different declared digest";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        const std::string what = error.what();
+        EXPECT_NE(what.find(wrong), std::string::npos) << what;
+        EXPECT_NE(what.find(packed.sha256), std::string::npos) << what;
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+    }
+
+    // Still one entry. The rejected caller missed the key, loaded, and failed its own
+    // digest check before anything could be cached -- so it neither reused the honest
+    // entry nor left a second one beside it.
+    EXPECT_EQ(_cache.size(), 1U);
 }
 
 } // namespace

@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -449,6 +450,32 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
     return *it->second;
 }
 
+/// The argument list this pack launches ConvFwd with, mirroring the launch() below one
+/// for one. It sits here rather than in the adapter that consumes it so that it is edited
+/// alongside that launch -- a stale copy rejects the correct kernel rather than the
+/// drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& convFwdKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    // The seven trailing extents (n, c, h, width, k, r, s), each an int.
+    static const KernelArgument s_extent{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer,
+                                                         s_buffer,
+                                                         s_buffer,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent};
+    return s_signature;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches the conv
  *        kernel. Everything graph/kernel-derived resolves once at prepare(); execute()
@@ -505,8 +532,8 @@ public:
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_CONV_BLOCK_SIZE", blockSize);
 
-        auto code
-            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, convFwdKernelSignature());
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
