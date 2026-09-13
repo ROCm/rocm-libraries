@@ -1,0 +1,82 @@
+/*
+MIT License
+
+Copyright (c) 2026 Advanced Micro Devices, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#ifndef RPP_TEST_TENSOR_MEAN_REF_H
+#define RPP_TEST_TENSOR_MEAN_REF_H
+
+#include <rpp/rpp.h>
+
+#include <cstddef>
+#include <vector>
+
+#include "framework/reduction.hpp"
+
+namespace rpptest {
+
+/*
+Reference model: tensor_mean
+
+RPP op
+  rppt_tensor_mean   (Image / Statistical)
+
+Description
+  Reduces each image's ROI to a channel-wise mean plus a total mean taken over
+  every pixel across the three channels. For a 1-channel image the single
+  result is sum / N.
+
+Expression
+  With N = roiWidth * roiHeight pixels per channel:
+
+  out[R/G/B] = sum(channel) / N
+  out[total] = (sum(R) + sum(G) + sum(B)) / (3*N)
+
+Per-type form
+  The mean is in the stored intensity space (U8 [0,255], I8 [-128,127],
+  F16/F32 [0,1]), consistent with the channel means; the golden accumulates in
+  double.
+*/
+template <typename T>
+std::vector<double> tensor_mean_reference(const T* src, const RpptDesc& d, const RpptROI* roi,
+                                          RpptRoiType type) {
+    const std::size_t stride = reduction_stride(d);
+    const std::vector<std::size_t> N = roi_pixel_counts(d, roi, type);
+    std::vector<double> sum(reduction_length(d), 0.0);
+    for_each_roi_value(src, d, roi, type,
+                       [&](Rpp32u n, Rpp32u c, double v) { sum[n * stride + c] += v; });
+
+    std::vector<double> out(reduction_length(d), 0.0);
+    for (Rpp32u n = 0; n < d.n; ++n) {
+        for (Rpp32u c = 0; c < d.c; ++c)
+            out[n * stride + c] = sum[n * stride + c] / static_cast<double>(N[n]);
+        if (d.c == 3)
+            out[n * stride + 3] =
+                (sum[n * stride + 0] + sum[n * stride + 1] + sum[n * stride + 2]) /
+                (3.0 * static_cast<double>(N[n]));
+    }
+    return out;
+}
+
+}  // namespace rpptest
+
+#endif  // RPP_TEST_TENSOR_MEAN_REF_H

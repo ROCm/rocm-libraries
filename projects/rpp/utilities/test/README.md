@@ -1,0 +1,101 @@
+# RPP Test Suite
+
+A standalone [GoogleTest](https://github.com/google/googletest) correctness suite for RPP tensor operations. Each op is checked against an independent, host-computed reference model across data types, layouts, ROIs, and both backends (HOST + HIP). It builds standalone against an *installed* RPP, or in-tree against an RPP build.
+
+## Requirements
+- An RPP install discoverable under `ROCM_PATH` (not needed for an in-tree build).
+- `ROCM_PATH` pointing at your ROCm install (defaults to `/opt/rocm` if unset).
+
+GoogleTest is fetched automatically at configure time (pinned to a tag; see `cmake/gtest.cmake`). Configure with `-DRPP_TEST_USE_SYSTEM_GTEST=ON` to use an installed GoogleTest instead, for builds with no network access. HIP tests are compiled only when the RPP being built against has the HIP backend.
+
+## Building
+```shell
+mkdir build && cd build
+cmake ..
+cmake --build . --parallel
+```
+
+Configured in-tree (as a subdirectory of an RPP build) the suite reuses that build's `rpp` target instead of finding an installed one; no other setup differs.
+
+## Running
+```shell
+./rpp_tests                        # run every test
+./rpp_tests --gtest_list_tests     # list tests without running
+./rpp_tests --help                 # full GTest options
+ctest -j8                          # run via CTest, one test per operator
+```
+
+CTest registers one test per GTest suite — that is, one per operator — discovered from the binary
+after each build. A failure names the operator that failed, and `--output-on-failure` prints the
+reporter's detail for it:
+
+```shell
+ctest -j8 --output-on-failure     # print the failing operator's output
+ctest -R Rotate                   # one operator (CTest test names are the GTest suite names)
+ctest -L Image_Geometric          # one category
+ctest -L voxel                    # one domain: image, misc, voxel, core
+ctest -N                          # list the registered tests
+ctest --no-label-summary          # drop the per-label timing block CTest prints after a run
+GTEST_COLOR=yes ctest ...         # keep colour; CTest captures output, so it is off by default
+```
+
+> [!NOTE]
+> Registering one CTest test per *case* instead is available via `cmake -DRPP_TEST_CTEST_PER_CASE=ON ..`.
+> It isolates each of the ~25000 cases in its own process, so a segfault or GPU fault takes down one
+> case rather than its whole operator suite. The isolation costs a process start plus RPP/HIP handle
+> setup per case: roughly 0.33s each, turning a ~17s run into hours. Use it when chasing a crash,
+> not routinely.
+
+## Output
+
+Console output comes from the suite's own reporter, which prints one line per test suite plus the
+detail of every failure. It replaces GTest's console printer only: `--gtest_list_tests` and
+`--gtest_output=xml:<path>` / `json:<path>` are unaffected, so IDE and CI integrations that read
+those work as they would against any GTest binary.
+
+```shell
+RPP_TEST_PLAIN_OUTPUT=1 ./rpp_tests   # stock GTest console output instead
+```
+
+Set `RPP_TEST_PLAIN_OUTPUT=1` for tooling that scrapes the `[ RUN      ]` / `[       OK ]` stream.
+
+## Test names & filtering
+
+Every case has a structured, greppable name:
+
+```
+{Domain}_{Category}/{Op}Test.{Intent}/{Backend}_{DType}_{Layout}_{Roi}_{Size}
+```
+
+e.g. `Image_Color/BrightnessTest.Correctness/HIP_U8toU8_PKD3_FullRoi_2x36x48`.
+
+Select subsets with `--gtest_filter` (wildcard `*`, `:`-separated patterns):
+
+| Goal | Filter |
+|------|--------|
+| One operation | `--gtest_filter='*BrightnessTest*'` |
+| One category | `--gtest_filter='Image_Color/*'` |
+| HIP cases only | `--gtest_filter='*/HIP_*'` |
+| All F32 PKD3, any op | `--gtest_filter='*F32*PKD3*'` |
+
+## Known-defect skip list
+
+Cases that fail against a documented kernel defect (or a non-reproducible result) are skipped rather
+than left red, so a normal run stays green. The list lives in `src/framework/skip_list.hpp` as
+GTest-filter-glob patterns; fixing a kernel means deleting the matching entry in the same change.
+Set `RPP_TEST_NO_SKIP_LIST=1` to run the listed cases anyway and check whether any have been fixed.
+
+## Layout
+```
+src/
+  main.cpp     entry point; installs the suite's console reporter
+  framework/   shared harness. config grid, backend memory, comparators
+  reference/   independent golden models for comparison
+  tests/       the tests themselves
+    core/      core RPP tests unrelated to op correctness
+    image/     image ops, grouped by category (color, geometric, ...)
+    misc/      misc ops, grouped by category
+    voxel/     voxel ops, grouped by category
+```
+
+Adding an op = a `reference/<op>_ref.hpp` golden model plus a short `TEST_P` under `tests/`.
