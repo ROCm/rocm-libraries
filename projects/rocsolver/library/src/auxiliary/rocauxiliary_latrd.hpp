@@ -42,41 +42,65 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 static constexpr int LATRD_DOT_THREADS = ROCSOLVER_ASAN_VALUE(256, 1024);
 
+// ----------------------------------------------------
+// launch as dim3(1,1,batch_count), dim3( LATRD_DOT_THREADS,1,1)
+// Note using a single thread block per batch item
+// ----------------------------------------------------
 template <int MAX_THDS, typename T, typename I, typename U>
-ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n,
-                                                                       U AA,
-                                                                       const rocblas_stride shiftA,
-                                                                       const rocblas_stride strideA,
-                                                                       T* WW,
-                                                                       const rocblas_stride shiftW,
-                                                                       const rocblas_stride strideW,
-                                                                       T* tauA,
-                                                                       const rocblas_stride strideP)
+ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
+    latrd_dot_scale_axpy_kernel(const I n,
+                                U AA,
+                                const rocblas_stride shiftA,
+                                const rocblas_stride strideA,
+                                T* WW,
+                                const rocblas_stride shiftW,
+                                const rocblas_stride strideW,
+                                T* tauA,
+                                const rocblas_stride strideP,
+                                const I ldsmemsize = 64 * 1024)
 {
     I bid = blockIdx.z;
     I tid = threadIdx.x;
 
     // select batch instance
-    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
-    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+    T const* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* const W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
+    T const* const tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     // shared variables
-    __shared__ T sval[MAX_THDS / WarpSize];
-    __shared__ T sh_A[MAX_THDS];
-    __shared__ T sh_W[MAX_THDS];
+    I const len_smem = ldsmemsize / sizeof(T);
+    I const len_sval = (MAX_THDS / warpSize);
+    I const len_sh_AW = std::min(n, (len_smem - len_sval) / 2);
+
+    extern __shared__ double smem[];
+    T* pfree = reinterpret_cast<T*>(&(smem[0]));
+
+    T* const sval = pfree;
+    pfree += len_sval;
+
+    T* const sh_A = pfree;
+    pfree += len_sh_AW;
+
+    T* const sh_W = pfree;
+    pfree += len_sh_AW;
 
     // dot
     T norm2 = 0;
-    for(I i = tid; i < n; i += MAX_THDS)
+    for(I i = tid; i < len_sh_AW; i += MAX_THDS)
     {
-        T tempA = A[i];
-        T tempW = W[i];
-        if(i < MAX_THDS)
-        {
-            sh_A[i] = tempA;
-            sh_W[i] = tempW;
-        }
+        T const tempA = A[i];
+        T const tempW = W[i];
+
+        norm2 += tempA * conj(tempW);
+
+        sh_A[i] = tempA;
+        sh_W[i] = tempW;
+    }
+
+    for(I i = len_sh_AW + tid; i < n; i += MAX_THDS)
+    {
+        T const tempA = A[i];
+        T const tempW = W[i];
 
         norm2 += tempA * conj(tempW);
     }
@@ -89,19 +113,62 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     if(tid == 0)
     {
         for(I k = 1; k < MAX_THDS / warpSize; k++)
+        {
             norm2 += sval[k];
+        }
         sval[0] = -0.5 * tau[0] * norm2;
     }
     __syncthreads();
 
     // axpy
-    for(I i = tid; i < n; i += MAX_THDS)
+    for(I i = tid; i < len_sh_AW; i += MAX_THDS)
     {
-        if(i < MAX_THDS)
-            W[i] = sh_W[i] + sval[0] * sh_A[i];
-        else
-            W[i] = W[i] + sval[0] * A[i];
+        W[i] = sh_W[i] + sval[0] * sh_A[i];
     }
+
+    for(I i = len_sh_AW + tid; i < n; i += MAX_THDS)
+    {
+        W[i] = W[i] + sval[0] * A[i];
+    }
+}
+
+template <typename T, typename I, typename U>
+void latrd_dot_scale_axpy(rocblas_handle handle,
+                          const I n,
+                          U AA,
+                          const rocblas_stride shiftA,
+                          const rocblas_stride strideA,
+                          T* WW,
+                          const rocblas_stride shiftW,
+                          const rocblas_stride strideW,
+                          T* tauA,
+                          const rocblas_stride strideP,
+                          const I batch_count)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    I const warpSize = props->warpSize;
+    I const sharedMemMaxSize = props->sharedMemPerBlock;
+
+    I const len_sdata = (LATRD_DOT_THREADS / warpSize);
+    I const size_sdata = sizeof(T) * len_sdata;
+
+    I const size_AW = sizeof(T) * n * 2;
+
+    I const ldsSize = std::min((size_sdata + size_AW), sharedMemMaxSize);
+
+    ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<LATRD_DOT_THREADS, T>),
+                            dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), ldsSize, stream,
+
+                            n,
+
+                            AA, shiftA, strideA,
+
+                            WW, shiftW, strideW,
+
+                            tauA, strideP, ldsSize);
 }
 
 /********************************************************************************/
@@ -297,14 +364,11 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
 
             rocblasCall_scal<T>(handle, n - j - 1, (tau + j), strideP, W,
                                 shiftW + idx2D(j + 1, j, ldw), 1, strideW, batch_count);
-
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
-                                    dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
-                                    stream, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
-                                    shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
+            latrd_dot_scale_axpy(handle, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
+                                 shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP,
+                                 batch_count);
         }
     }
-
     else
     {
         // reduce the last k columns of A
@@ -380,10 +444,9 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, j, (tau + j - 1), strideP, W, shiftW + idx2D(0, jw, ldw), 1,
                                 strideW, batch_count);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
-                                    dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
-                                    stream, j, A, shiftA + idx2D(0, j, lda), strideA, W,
-                                    shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP);
+            latrd_dot_scale_axpy(handle, j, A, shiftA + idx2D(0, j, lda), strideA, W,
+                                 shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP,
+                                 batch_count);
         }
     }
 
