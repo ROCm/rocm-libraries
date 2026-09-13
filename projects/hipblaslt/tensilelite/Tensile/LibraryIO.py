@@ -286,13 +286,13 @@ def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], bias
             #FIXME-problem, this ignores strides:
             f.write("  - Exact: {}\n".format(problemExact))
     if biasTypeArgs:
-        f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
+        f.write("- BiasTypeArgs: {}\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
     if activationArgs:
         f.write("- ActivationArgs:\n")
         for setting in activationArgs.settingList:
             f.write("  - [Enum: %s]\n"%(setting.activationEnum))
     if gateTypeArgs:
-        f.write("- GateTypeArgs: [{}]\n".format([gtype.value for gtype in gateTypeArgs.gateTypes]))
+        f.write("- GateTypeArgs: {}\n".format([gtype.value for gtype in gateTypeArgs.gateTypes]))
 
 def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
     """Find the character offset where solution entries begin, skipping the header."""

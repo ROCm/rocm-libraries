@@ -315,3 +315,19 @@ available where this change was authored.
 **Decision:** Sort every code object's input paths immediately before linking,
 so default and explicitly grouped code objects share one deterministic physical
 kernel order even though their inputs originate from different collection types.
+
+## D24 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+
+**ADR:** [`adr/0014-flatten-biastypeargs-solutions-header.md`](adr/0014-flatten-biastypeargs-solutions-header.md)
+
+**Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, and the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded. Intended behavior change, not a pinned bug.
+
+## D25 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+
+**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D24; no golden changes.
+
+## D26 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+
+**ADR:** [`adr/0015-fix-formgroups-none-crash.md`](adr/0015-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
+
+**Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.
