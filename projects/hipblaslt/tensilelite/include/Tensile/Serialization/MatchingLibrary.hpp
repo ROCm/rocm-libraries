@@ -26,10 +26,12 @@
 
 #pragma once
 
+#include <Tensile/AMDGPU.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/Distance.hpp>
 #include <Tensile/MatchingLibrary.hpp>
 #include <Tensile/SingleSolutionLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 
 #include <cstddef>
 #include <tuple>
@@ -41,6 +43,32 @@ namespace TensileLite
 {
     namespace Serialization
     {
+        /// Should the GridBased matching table carry a kd-tree index?
+        ///
+        /// TENSILE_GRIDBASED_KDTREE decides when set. Unset, the default is ON for MI300A only:
+        /// its GridBased tables are the ones large enough for the linear scan to dominate
+        /// selection cost, and every other part keeps its existing behaviour. Resolved here,
+        /// once per library load, rather than per lookup -- the lookup reads the resulting
+        /// `useKdTree` flag on the table, so the two can never disagree.
+        inline bool resolveGridBasedKDTree()
+        {
+            int const override_ = Debug::Instance().gridBasedKDTreeOverride();
+            if(override_ >= 0)
+                return override_ == 1;
+
+            // Deserialization can run without a device (CPU-only tooling and tests); fall back
+            // to the pre-existing behaviour rather than letting the probe abort the load.
+            try
+            {
+                auto hardware = hip::GetCurrentDevice();
+                return hardware != nullptr && isMI300A(*hardware);
+            }
+            catch(...)
+            {
+                return false;
+            }
+        }
+
         template <typename Key,
                   typename MyProblem,
                   typename Element,
@@ -71,7 +99,8 @@ namespace TensileLite
 
                     if constexpr(std::is_same<Distance, Matching::GridBasedDistance<Key>>{})
                     {
-                        if(Debug::Instance().gridBasedKDTree())
+                        table.useKdTree = resolveGridBasedKDTree();
+                        if(table.useKdTree)
                         {
                             // Creating K map
                             for(auto it = table.table.begin(); it != table.table.end(); ++it)
