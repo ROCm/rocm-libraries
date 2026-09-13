@@ -819,6 +819,26 @@ std::size_t Handle::GetGlobalMemorySize() const
     return result;
 }
 
+std::size_t Handle::GetL2CacheSize() const
+{
+    int result  = 0;
+    auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeL2CacheSize, this->impl->device);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status);
+
+    return result;
+}
+
+std::size_t Handle::GetClockRateKhz() const
+{
+    int result  = 0;
+    auto status = hipDeviceGetAttribute(&result, hipDeviceAttributeClockRate, this->impl->device);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status);
+
+    return result;
+}
+
 std::size_t Handle::GetMaxComputeUnits() const
 {
     const std::size_t num_cu = env::value(MIOPEN_DEVICE_CU);

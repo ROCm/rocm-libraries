@@ -57,6 +57,14 @@ exclude: |
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$|
+    # Machine-generated LGBM assets: native LightGBM text models + baked
+    # catalog/metadata + golden parity fixtures (large, not human-authored;
+    # exceed check-added-large-files and are not lintable/end-of-file-fixable).
+    # Match every lgbm_* asset under kernels/ so new metadata/model files stay
+    # covered without touching this list.
+    projects/miopen/src/conv/heuristics/lgbm_models/.*|
+    projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
+    projects/miopen/src/kernels/lgbm_.*\.(json|txt)|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
