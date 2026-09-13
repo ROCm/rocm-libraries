@@ -173,6 +173,26 @@ jobs:
       - name: Build
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
 
+      # The wrapper is off in every configuration here, and off has to mean
+      # invisible: a harness that leaked into the default build would otherwise be
+      # noticed only once it started failing somewhere else. Configure-time and
+      # GPU-free, so it rides the cheapest build in the matrix.
+      - name: Forwarding parity harness is absent with the wrapper off
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          # Capture before parsing: piping into sed would make sed's exit status
+          # the step's, so a ctest that failed outright would be read as the zero
+          # count this step is asserting. An assignment from a command
+          # substitution carries that command's status, so -e stops here instead.
+          listing=$(ctest --test-dir build -N -L forwarding_parity)
+          count=$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p')
+          echo "forwarding_parity tests registered: ${count:-<unparsed>}"
+          test "$count" = "0" || {
+            echo "expected no forwarding_parity tests without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            printf '%s\n' "$listing"
+            exit 1
+          }
+
       # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
       # exported public C API symbol set, and no _impl symbol leakage. This is a
       # symbol-level check -- signatures, struct layout and behaviour are outside
