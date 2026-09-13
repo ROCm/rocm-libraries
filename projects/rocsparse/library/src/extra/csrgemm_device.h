@@ -25,9 +25,24 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_handle.hpp"
 
 namespace rocsparse
 {
+    // Compute a grid dimension for the element-parallel scaling copy kernels. The
+    // (potentially 64-bit) element count is clamped against the device grid-size
+    // limit so it never silently narrows into dim3. The copy kernels run a
+    // grid-stride loop, so a clamped grid still covers the full element range.
+    // Shared by the csrgemm/bsrgemm scaling paths (AISPARSE-679).
+    template <uint32_t BLOCKSIZE, typename I>
+    inline dim3 csrgemm_scal_copy_blocks(rocsparse_handle handle, I size)
+    {
+        const int64_t nblocks = (size > 0) ? ((static_cast<int64_t>(size) - 1) / BLOCKSIZE + 1)
+                                           : static_cast<int64_t>(0);
+        return dim3(static_cast<uint32_t>(
+            rocsparse::min(nblocks, static_cast<int64_t>(handle->properties.maxGridSize[0]))));
+    }
+
     // Decrement
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
@@ -45,28 +60,22 @@ namespace rocsparse
                       rocsparse_index_base idx_base_in,
                       rocsparse_index_base idx_base_out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = in[idx] - idx_base_in + idx_base_out;
         }
-
-        out[idx] = in[idx] - idx_base_in + idx_base_out;
     }
 
     // Copy and scale an array
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void csrgemm_copy_scale_device(I size, T alpha, const T* in, T* out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = alpha * in[idx];
         }
-
-        out[idx] = alpha * in[idx];
     }
 
     // Compute number of intermediate products of each row

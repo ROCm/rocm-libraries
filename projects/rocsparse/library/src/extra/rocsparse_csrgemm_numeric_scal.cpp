@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_identity.hpp"
+#include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
 
@@ -57,14 +58,11 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         csrgemm_numeric_copy_scale_device(I size, T alpha, const T* in, T* out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = alpha * in[idx];
         }
-
-        out[idx] = alpha * in[idx];
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename T>
@@ -147,7 +145,8 @@ inline rocsparse_status rocsparse::csrgemm_numeric_scal_core(rocsparse_handle ha
 
         // Stream
 #define CSRGEMM_DIM 1024
-        dim3 csrgemm_numeric_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
+        dim3 csrgemm_numeric_blocks(
+            rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, nnz_D));
         dim3 csrgemm_numeric_threads(CSRGEMM_DIM);
         // Scale the matrix
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

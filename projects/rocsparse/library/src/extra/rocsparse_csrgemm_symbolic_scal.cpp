@@ -24,6 +24,7 @@
 
 #include "rocsparse_csrgemm_symbolic_scal.hpp"
 #include "../conversion/rocsparse_identity.hpp"
+#include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
@@ -41,14 +42,11 @@ namespace rocsparse
                                rocsparse_index_base idx_base_in,
                                rocsparse_index_base idx_base_out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = in[idx] - idx_base_in + idx_base_out;
         }
-
-        out[idx] = in[idx] - idx_base_in + idx_base_out;
     }
 }
 
@@ -110,7 +108,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_scal_core(rocsparse_handle         
     {
 #define CSRGEMM_DIM 1024
 
-        dim3 csrgemm_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
+        dim3 csrgemm_blocks(rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, nnz_D));
         dim3 csrgemm_threads(CSRGEMM_DIM);
 
         // Copy column entries, if D != C

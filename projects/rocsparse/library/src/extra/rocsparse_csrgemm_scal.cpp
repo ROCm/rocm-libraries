@@ -94,7 +94,7 @@ rocsparse_status rocsparse::csrgemm_scal_core(rocsparse_handle          handle,
     hipStream_t stream = handle->stream;
 
 #define CSRGEMM_DIM 1024
-    dim3 csrgemm_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
+    dim3 csrgemm_blocks(rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, nnz_D));
     dim3 csrgemm_threads(CSRGEMM_DIM);
 
     // Copy column entries, if D != C
