@@ -36,7 +36,8 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKCluster, streamKMulticast, streamK2DCluster, \
+                    clusterEnabled, streamKCluster, streamKMulticast, \
+                    streamK2DCluster, \
                     swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
@@ -5576,19 +5577,24 @@ class Solution(collections.abc.Mapping):
             if _segRes2["applicable"] else _segRes2["reason"]
           reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
 
+    def setLdsOffsetsOneBlock():
+      # One LDS block shared by both tensors: there is no second copy, so the
+      # segments pack tight and there is no swap stride to store.
+      state["LdsOffsetA"] = 0
+      state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetB"] = state["LdsOffsetMXSA"] + state["LdsNumElementsAlignedMXSA"]
+      state["LdsOffsetMXSB"] = state["LdsOffsetB"] + state["LdsNumElementsAlignedB"]
+      state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
+      state["StoreSwapAddr"] = False
+      return state["LdsOffsetMetadata"] + ldsNumBytesMetadata
+
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
         reject(state, printRejectionReason, "PGR=0 already use 1 LDS buffer only")
       # Should be able to support as long as NO scheduleLocalWrite
       if (not state["_ScheduleIterAlg"] == 2) and (not state["_ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
-      state["LdsOffsetA"] = 0
-      state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
-      state["LdsOffsetB"] = state["LdsOffsetMXSA"] + state["LdsNumElementsAlignedMXSA"]
-      state["LdsOffsetMXSB"] = state["LdsOffsetB"] + state["LdsNumElementsAlignedB"]
-      state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
-      ldsNumBytesAB = state["LdsOffsetMetadata"] + ldsNumBytesMetadata
-      state["StoreSwapAddr"] = False
+      ldsNumBytesAB = setLdsOffsetsOneBlock()
 
     # lds size is the greater of the two
     ldsNumBytes = max(ldsNumBytesAB, ldsNumBytesReduction, ldsNumBytesOccupancy)
@@ -5911,6 +5917,7 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Kernel Uses %u > %u bytes of LDS" % ( ldsSize, state["MaxLDS"]))
       state["ValidDepthU"] = False
       return
+
 
     # LoopUnroll  = DepthU / LocalSplitU
     if "LocalSplitU" in state:

@@ -2421,9 +2421,9 @@
     }),
     'PrefetchGlobalRead': dict({
       'head': list([
+        -1,
         0,
         1,
-        2,
       ]),
       'len': 17,
       'type': 'list',
