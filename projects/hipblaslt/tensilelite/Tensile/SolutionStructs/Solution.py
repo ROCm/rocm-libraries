@@ -6016,12 +6016,29 @@ class Solution(collections.abc.Mapping):
         return
       # TODO: support staggerU if needed
       _disableRuntimeStaggerU(state)
-      # TODO: support GSU if needed
-      state["InternalSupportParams"]["SupportUserGSU"] = False
-      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
-        reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
+      # A cluster's workgroups cooperate on one folded prefetch footprint, taking
+      # their slot from WorkGroup{i} % ClusterDim (Components/GL2Prefetch.py), so
+      # they have to agree on the K chunk. The cluster owns ClusterDim[1]
+      # consecutive raw y values, and the default mapping makes the group the
+      # fast axis of that y (GSUSumIdx = wg1 % GSU), which spreads peers across
+      # chunks and folds their divided WorkGroup1 onto fewer tiles. Round-robin
+      # makes it the slow axis instead (GSUSumIdx = wg1 / NumWorkGroups1) so a
+      # cluster shares one group and spans distinct tiles. Force it whenever a
+      # cluster is live rather than keying off the tuned GlobalSplitU, since
+      # SupportUserGSU is left on above and GSU can arrive at runtime; both
+      # branches are always emitted and picked off the GSU sgpr, so this only
+      # moves the host-side default and is inert at GSU<=1.
+      # Residual: a cluster straddling a tilesN boundary still splits across two
+      # groups, the same perf-only boundary-cluster caveat GL2Prefetch.init notes
+      # for padded WGs -- the prefetch only warms cache, so a coverage gap costs
+      # bandwidth, never correctness.
+      if state["ClusterDim"] != [1, 1]:
+        state["GlobalSplitUWorkGroupMappingRoundRobin"] = True
+      # 256 bytes is not multiple of 6 bits, causing math calculations errors
+      if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
+        reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
         return
-      if state["StreamK"] != 0 and state["StreamK"] != 3:
+      if state["StreamK"] not in [0, 3]:
         reject(state, printRejectionReason, "PrefetchGL2 only supports DP-first (StreamK==3) Stream-K")
         return
       if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
