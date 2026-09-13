@@ -19,7 +19,7 @@
 using hardware_t = origami::hardware_t;
 using namespace nanobind::literals;
 
-NB_MODULE(origami, m) {
+NB_MODULE(_pyorigami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
       .value("gfx90a", hardware_t::architecture_t::gfx90a)
       .value("gfx942", hardware_t::architecture_t::gfx942)
