@@ -481,8 +481,22 @@ class WaitGRCounts:
     B: int = 0
     SA: int = 0
     SB: int = 0
+    # When True, emit_wait_gr resolves the count as
+    # tileInfoA.numGRTotal + tileInfoB.numGRTotal + SA_count + SB_count
+    # — the exact number of batch-1 buffer_load instructions in flight.
+    # Used by the PGR=2 preloop GR reorder for the single-partition fast path.
+    use_num_gr_total: bool = False
+    # When True, A/B/SA/SB hold raw GRPlacement counts (one per subtile atom, not
+    # per buffer_load).  emit_wait_gr converts to buffer_loads via
+    # ceil(count / loadRatioGR), which is exact for any partition/GR-subtile geometry.
+    # Used by the PGR=2 preloop GR reorder when numPartitions > 1.
+    use_gr_placement_counts: bool = False
 
     def __str__(self):
+        if self.use_gr_placement_counts:
+            return f"mt1_gr_placements(A={self.A} B={self.B} SA={self.SA} SB={self.SB})"
+        if self.use_num_gr_total:
+            return "num_gr_total"
         parts = []
         for t in ('A', 'B', 'SA', 'SB'):
             v = getattr(self, t)
@@ -3288,6 +3302,50 @@ class LogicalScheduler:
                                        emitter.dtileInfo)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
 
+    @staticmethod
+    def _make_reorder_label_op(name: str) -> InlineModuleOp:
+        """InlineModuleOp that defines a local label (used by the StreamK-safe
+        PGR=2 preloop GR reorder to mark the partial-tile and rejoin points)."""
+        def _build_label(emitter):
+            from rocisa.code import Module, Label
+            m = Module(f"reorder_label_{name}")
+            m.add(Label(name, ""))
+            return m
+        return InlineModuleOp(build=_build_label, label=f"reorder_label_{name}")
+
+    @staticmethod
+    def _make_reorder_branch_op(target: str) -> InlineModuleOp:
+        """InlineModuleOp that emits an unconditional s_branch to a local label
+        (rejoin after the full-path MT1 wait in the reorder preloop)."""
+        def _build_branch(emitter):
+            from rocisa.code import Module, Label
+            from rocisa.instruction import SBranch
+            m = Module(f"reorder_branch_{target}")
+            m.add(SBranch(labelName=Label(target, "").getLabelName(),
+                          comment=f"full K tile: MT1 issued, skip partial wait"))
+            return m
+        return InlineModuleOp(build=_build_branch, label=f"reorder_branch_{target}")
+
+    @staticmethod
+    def _mt1_wait_gr_counts(mt1_ops: list, cfg: 'SchedulerConfig') -> 'WaitGRCounts':
+        """Return a WaitGRCounts for the full-path MT1 wait in the PGR=2 reorder.
+
+        For single-partition kernels, uses use_num_gr_total (fast path: tileInfo is not
+        needed at the scheduler level).  For multi-partition kernels, counts GRPlacement
+        atoms per tensor directly from mt1_ops so the emitter can convert to buffer_loads
+        via ceil(count / loadRatioGR) without assuming any GR/partition alignment.
+        """
+        if cfg.numPartitions == 1:
+            return WaitGRCounts(use_num_gr_total=True)
+        counts = {'A': 0, 'B': 0, 'SA': 0, 'SB': 0}
+        for op in mt1_ops:
+            if isinstance(op, GRPlacement):
+                counts[op.tensor] = counts.get(op.tensor, 0) + 1
+        return WaitGRCounts(
+            use_gr_placement_counts=True,
+            A=counts['A'], B=counts['B'], SA=counts['SA'], SB=counts['SB'],
+        )
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
@@ -3380,30 +3438,50 @@ class LogicalScheduler:
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
-                emitted = self._to_emitted([
-                    *preloop_ops,
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *mt1_ops,
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
             else:
-                emitted = self._to_emitted([
+                preloop_ops = [
                     *self._make_gr_all_tensors(0, all_tiles),
                     *self._make_depops_all_tensors(GRIncOp),
-                    initC_op,
-                    WaitGROp(wait_gr_counts=WaitGRCounts()),
-                    SyncOp(),
-                    *self._make_lr_all_tensors(lr_tiles),
-                    SkipOp(compare='LE', value=1, target='NLL'),
-                    *self._make_preloop_mt1_grs(),
-                    *gl2_preloop_ops,
-                    SkipOp(compare='LE', value=2, target='NGLL'),
-                ])
+                ]
+                mt1_ops = self._make_preloop_mt1_grs()
+
+            # PGR=2 preloop GR reorder — unconditional for all PGR=2 subtile kernels.
+            #
+            # Hoists the MT1 GR batch ahead of initC/wait/sync/LR so both MT0 and
+            # MT1 are in flight during the accumulator-zeroing window.  The wait then
+            # only drains MT0 (vmcnt = num_gr_total leaves MT1's loads in flight),
+            # deferring MT1 latency into the main k-loop for free.  Validated on
+            # SK0 (data-parallel) and SK3 (StreamK=3) MXFP4 kernels on gfx950.
+            #
+            # Under StreamK a workgroup may own only a partial K range and hit
+            # loopCounter<=1, routing it to the NLL (no-load-loop). Two invariants
+            # must hold for that path:
+            #   1. initC / WaitGR / Sync / LR must still run — the NLL body assumes
+            #      zeroed accumulators, MT0 resident in LDS, and the first LR done.
+            #   2. MT1 GR must NOT be issued — its SRD has been advanced past this
+            #      workgroup's K range; the buffer_load would fault.
+            #
+            # A two-branch structure handles this: full-tile path issues MT1 then
+            # waits vmcnt(num_gr_total); partial-tile path skips MT1 and drains
+            # vmcnt(0). Both paths rejoin before Sync/LR/SkipNLL, exactly as stock.
+            emitted = self._to_emitted([
+                *preloop_ops,
+                initC_op,
+                SkipOp(compare='LE', value=1,
+                       target='PreloopReorderPartial', rawLabel=True,
+                       branchComment='partial K tile: skip MT1 GR prefetch'),
+                *mt1_ops,
+                WaitGROp(wait_gr_counts=self._mt1_wait_gr_counts(mt1_ops, cfg)),
+                self._make_reorder_branch_op('PreloopReorderJoin'),
+                self._make_reorder_label_op('PreloopReorderPartial'),
+                WaitGROp(wait_gr_counts=WaitGRCounts(), force_drain=True),
+                self._make_reorder_label_op('PreloopReorderJoin'),
+                SyncOp(),
+                *self._make_lr_all_tensors(lr_tiles),
+                SkipOp(compare='LE', value=1, target='NLL'),
+                *gl2_preloop_ops,
+                SkipOp(compare='LE', value=2, target='NGLL'),
+            ])
 
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
