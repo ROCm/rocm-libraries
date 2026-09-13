@@ -25,7 +25,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
     // Cover the stride-1 dgrad instances: 7x7 pad-3 (tiles 7/14/28/56),
-    // 3x3 pad-1 (tiles 7/14/56), 5x5 pad-2 (tiles 7/14/28), group==channels.
+    // 3x3 pad-1 (tiles 7/14/28/56), 5x5 pad-2 (tiles 7/14/28), group==channels.
     return std::vector{
         // clang-format off
         // 7x7 stride-1 pad-3 (convnext depthwise stages)
@@ -42,6 +42,8 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {32, 3, 14, 14}},
                  {datatype, miopenTensorNCHW, {3, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 3}},
+        TestCase{{datatype, miopenTensorNCHW, {32, 2, 28, 28}},
+                 {datatype, miopenTensorNCHW, {2, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         TestCase{{datatype, miopenTensorNCHW, {32, 2, 56, 56}},
                  {datatype, miopenTensorNCHW, {2, 1, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         // 5x5 stride-1 pad-2
