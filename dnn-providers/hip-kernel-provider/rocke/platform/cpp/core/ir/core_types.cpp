@@ -486,6 +486,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* gpu.* */
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.device_print",
 
     /* memref.* */
     "memref.global_load",
@@ -719,6 +720,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* gpu.* */
     /* gpu.thread_id */ true,
     /* gpu.block_id  */ true,
+    /* gpu.device_print */ false,
 
     /* memref.* (all effectful) */
     /* global_load                  */ false,
