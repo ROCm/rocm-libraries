@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_assign_async.hpp"
+#include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_indextype_utils.hpp"
 
@@ -29,23 +30,29 @@ namespace rocsparse
 {
     template <typename T>
     ROCSPARSE_KERNEL(32)
-    void assign_kernel(T* dest, T value)
+    void assign_kernel(int64_t n, T* dest, T value)
     {
-        const uint32_t batch_index = blockIdx.y;
         if(hipThreadIdx_x == 0)
         {
-            dest[batch_index] = value;
+            // Grid-stride over the batch dimension so batch counts above the
+            // grid-y limit (65535) are handled correctly.
+            for(int64_t batch_index = blockIdx.y; batch_index < n; batch_index += gridDim.y)
+            {
+                dest[batch_index] = value;
+            }
         }
     }
 
     template <typename T>
     ROCSPARSE_KERNEL(32)
-    void assign_device_kernel(T* dest, const T* value)
+    void assign_device_kernel(int64_t n, T* dest, const T* value)
     {
-        const uint32_t batch_index = blockIdx.y;
         if(hipThreadIdx_x == 0)
         {
-            dest[batch_index] = value[0];
+            for(int64_t batch_index = blockIdx.y; batch_index < n; batch_index += gridDim.y)
+            {
+                dest[batch_index] = value[0];
+            }
         }
     }
 }
@@ -54,16 +61,28 @@ template <typename T>
 rocsparse_status
     rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_device_kernel, dim3(1, n), dim3(32), 0, stream, dest, value);
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(rocsparse::assign_device_kernel,
+                                       dim3(1, rocsparse::get_batch_grid_size(n)),
+                                       dim3(32),
+                                       0,
+                                       stream,
+                                       n,
+                                       dest,
+                                       value);
     return rocsparse_status_success;
 }
 
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_kernel, dim3(1, n), dim3(32), 0, stream, dest, value);
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(rocsparse::assign_kernel,
+                                       dim3(1, rocsparse::get_batch_grid_size(n)),
+                                       dim3(32),
+                                       0,
+                                       stream,
+                                       n,
+                                       dest,
+                                       value);
     return rocsparse_status_success;
 }
 
