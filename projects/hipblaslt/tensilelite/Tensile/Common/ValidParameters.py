@@ -1220,6 +1220,37 @@ validParameters = { # we need to make sure this matches develop
     #
     # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
     "TDMFuse": [0, 1, 2, 3],
+    # TDMCross -- which wave issues which member of a TDM descriptor group.
+    # Orthogonal to TDMFuse: that picks the grouping, this rearranges the waves
+    # over it. Components/TDMFuse.py:tdmWaveAssignment is the only consumer that
+    # decides codegen; tdmCrossRejectReason also reads the parameter, to name the
+    # value it refuses.
+    #
+    # A boolean in effect, not an int enum. tdmCross() is
+    # `ks.get("TDMCross", 0) or 0` and every caller compares against the default
+    # rather than dispatching on the value, so any nonzero selects the one
+    # crossed arrangement: TDMCross=2 is TDMCross=1, not a third shape. Growing a
+    # third arrangement means teaching _arrangedGroups to dispatch on the value,
+    # so this list is not "room to grow" on its own.
+    #
+    #   0  Default. The shipped arrangement, member order as the grouping table
+    #      writes it. Hidden from the kernel name, like TDMFuse=0.
+    #   1  Crossed. Reverses the wave order of every partitioned group after the
+    #      first, so each wave is handed one large item and one small one
+    #      instead of two of a kind. A wave that issues only scales finishes
+    #      early and then waits at the barrier; crossing is the load-balance
+    #      answer to that.
+    #
+    # An int enum rather than a bool: groupings with more than two partitioned
+    # groups admit more than one non-trivial arrangement, and widening a bool
+    # later would rename every solution that carries it.
+    #
+    # Rejected wherever fewer than two groups are split across waves, since
+    # there is then nothing to cross -- see tdmCrossRejectReason. That is
+    # derived from the grouping's structure, not from a TDMFuse value, so it
+    # covers scale-less types (whose groups degenerate) and any grouping added
+    # later without a new branch.
+    "TDMCross": [0, 1],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

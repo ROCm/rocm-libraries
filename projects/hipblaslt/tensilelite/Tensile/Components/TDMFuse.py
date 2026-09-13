@@ -1009,3 +1009,64 @@ def tdmWaveLdsBytes(ks, problemType=None):
         perTensor[tc] = size * blocks[tc]
     return {w: sum(perTensor[tc] for tc in members)
             for w, members in tdmWaveAssignment(ks).items()}
+
+
+def tdmCrossRejectReason(ks):
+    """Why this solution cannot take a non-default TDMCross, or None.
+
+    Derived from the group structure, never from a TDMFuse integer, so a new
+    grouping row inherits the right answer without a new branch. In particular
+    B_MX inherits A_MX's rejection mirrored, for free.
+
+    Interactions this rejection has with the rest of the pipeline:
+
+      TDMFuse       decides the grouping; crossing only rearranges it. A
+                    grouping that TDMFuse itself rejects never reaches here,
+                    so TDMFuse's reason is reported in preference to this one.
+                    That is deliberate: an arrangement of a grouping that
+                    cannot be built is not a separate defect.
+      NumWaves      crossing needs distinct waves to cross between.
+      MX scaling    a scale-less type degenerates to one live group, so it is
+                    rejected by the group-count rule rather than by a type test.
+      decoupled PGR block counts do not gate crossing -- crossing preserves
+                    total LDS exactly (see tdmWaveLdsBytes), it only moves which
+                    wave fills which part.
+    """
+    if tdmCross(ks) == TDM_CROSS_DEFAULT:
+        return None
+    numWaves = ks.get("NumWaves", 1)
+    if numWaves <= 1:
+        return ("TDMCross=%d rearranges which wave issues which member of a "
+                "descriptor group, which needs wave-separated TDM (NumWaves > 1); "
+                "got NumWaves=%d" % (tdmCross(ks), numWaves))
+    groups = partitionedGroups(ks)
+    if len(groups) < 2:
+        return ("TDMCross=%d crosses one descriptor group against another, and "
+                "the %s grouping leaves %d group(s) split across waves (%s); with "
+                "fewer than two there is nothing to cross"
+                % (tdmCross(ks), tdmGrouping(ks).name, len(groups),
+                   " + ".join("{%s}" % ",".join(g) for g in liveGroups(ks)) or "none"))
+    if tdmFusePaired(ks):
+        return ("TDMCross=%d over the paired grouping is not implemented. The "
+                "paired sets are {A,MXSA} and {MXSB,B}, one member of each on "
+                "either parity, and crossing asks for both data tensors on one "
+                "parity and both scales on the other. _tdmPairedParityOrder "
+                "answers within its own argument pair, so it cannot express "
+                "that arrangement and invents an even/odd pair from argument "
+                "position; initialisation and the tail then program different "
+                "descriptors. Verified under FFM: crossed paired is correct "
+                "while K divides DepthU and wrong at every K that leaves a "
+                "tail (640, 1152, 8320 at 64x512), for StaggerU 0 and 32 alike"
+                % tdmCross(ks))
+    pgrA, pgrB = ks.get("PrefetchGlobalReadA"), ks.get("PrefetchGlobalReadB")
+    if pgrA is not None and pgrB is not None and pgrA != pgrB:
+        return ("TDMCross=%d with decoupled prefetch depths (PrefetchGlobalReadA=%s "
+                "!= PrefetchGlobalReadB=%s) computes wrong results at every size. "
+                "Crossing moves a scale onto the wave that carries the other data "
+                "tensor, and the decoupled per-tensor prefetch depth is still "
+                "applied by the pre-crossing pairing, so the two disagree about "
+                "which scale belongs to which data tensor. Verified under FFM: "
+                "equal depths cross correctly up to K=16384, unequal depths fail "
+                "in both directions (PGRA<PGRB and PGRB<PGRA)"
+                % (tdmCross(ks), pgrA, pgrB))
+    return None

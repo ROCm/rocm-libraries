@@ -62,6 +62,13 @@ BenchmarkProblems:
         - TDMInst: [3]
         - TDMSplit: [False]
         - TDMFuse: [0, 1, 2, 3]
+        # TDMCross=0 is the shipped arrangement, so this half of the sweep
+        # reproduces the pre-existing 218 kernels byte for byte and the yaml is
+        # its own byte-identity regression test at no extra cost.
+        # TDMCross=1 is rejected wherever fewer than two descriptor groups
+        # are split across waves, which is every TDMFuse=2 and =3 arm -- those
+        # rejections are expected, not defects.
+        - TDMCross: [0, 1]
         - InitCIterWmma: [0, 1]
         - PrefetchGlobalRead: [-1, 0, 1, 2]
         - PrefetchGlobalReadA: [-1, 0, 1, 2]
@@ -102,5 +109,12 @@ BenchmarkProblems:
           - Exact: [512, 512, 1, 512]   #2*DepthU
           - Exact: [512, 512, 1, 1024]
           - Exact: [512, 512, 1, 1152]  #tail
+          # M != N. The crossed arrangement swaps which parity carries MXSA and
+          # MXSB, so a wave that takes the other member's global-read increment
+          # only drifts when the two increments differ. They are equal while
+          # M == N, which is why a square-only sweep cannot witness TDMCross at
+          # all. Both directions, so neither scale is privileged.
+          - Exact: [512, 1024, 1, 1152]
+          - Exact: [1024, 512, 1, 1152]
         - ActivationArgs:
           - [Enum: none]
