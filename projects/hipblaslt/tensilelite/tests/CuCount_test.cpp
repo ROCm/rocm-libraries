@@ -2,10 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -22,6 +27,7 @@
 
 #include "FallbackTestUtils.hpp"
 #include "LogReporter.hpp"
+#include "ResultReporter.hpp"
 #include "SolutionIterator.hpp"
 
 using namespace TensileLite;
@@ -451,6 +457,43 @@ namespace
 
         return pack;
     }
+
+    // TENSILE_STREAMK5_FORCE_MODE short-circuits SK5 mode resolution, so any
+    // test that exercises resolution must pin it rather than inherit it from
+    // the environment or from a sibling test in this binary.
+    class ScopedStreamK5ForceMode
+    {
+    public:
+        explicit ScopedStreamK5ForceMode(const char* value)
+        {
+            const char* prior = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+            m_had             = (prior != nullptr);
+            if(m_had)
+                m_saved = prior;
+
+            if(value)
+                setenv("TENSILE_STREAMK5_FORCE_MODE", value, /*overwrite=*/1);
+            else
+                unsetenv("TENSILE_STREAMK5_FORCE_MODE");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ~ScopedStreamK5ForceMode()
+        {
+            if(m_had)
+                setenv("TENSILE_STREAMK5_FORCE_MODE", m_saved.c_str(), /*overwrite=*/1);
+            else
+                unsetenv("TENSILE_STREAMK5_FORCE_MODE");
+            Debug::Instance().reloadDebugBitsForTest();
+        }
+
+        ScopedStreamK5ForceMode(ScopedStreamK5ForceMode const&)            = delete;
+        ScopedStreamK5ForceMode& operator=(ScopedStreamK5ForceMode const&) = delete;
+
+    private:
+        bool        m_had = false;
+        std::string m_saved;
+    };
 
     void initEquality512Solution(ContractionSolution& solution, int streamK)
     {
@@ -938,6 +981,26 @@ namespace
             return nullptr;
         }
     };
+
+    class RecordingReporter : public Client::ResultReporter
+    {
+    public:
+        std::vector<std::pair<std::string, std::string>> reportedStrings;
+
+        void reportValue_string(std::string const& key, std::string const& value) override
+        {
+            reportedStrings.emplace_back(key, value);
+        }
+        void reportValue_uint(std::string const&, uint64_t) override {}
+        void reportValue_int(std::string const&, int64_t) override {}
+        void reportValue_double(std::string const&, double) override {}
+        void reportValue_sizes(std::string const&, std::vector<size_t> const&) override {}
+        void reportValue_vecOfSizes(std::string const&,
+                                    std::vector<std::vector<size_t>> const&) override
+        {
+        }
+        void finalizeReport() override {}
+    };
 } // namespace
 
 TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
@@ -1002,6 +1065,74 @@ TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
         << "SK3-static solution must remain selectable when NUM_XCD is unknown";
 }
 
+// Unknown hardware and SK5: resolving the sub-mode is what decides whether the
+// solution is selectable, so the three outcomes are tested separately.
+//
+// Policy: a mode that RESOLVES without analytical hardware is honoured --
+// explicitly static stays selectable, explicitly dynamic is excluded. A mode
+// that cannot resolve (AUTO, or OFF with smCountTarget > 0, both of which enter
+// the origami heuristic) throws rather than silently substituting a schedule.
+TEST(StreamKDynamicQueueXcdGateTest, Sk5UnknownHardwareHonoursResolvedMode)
+{
+    ScopedStreamK5ForceMode noForce(nullptr);
+    ASSERT_EQ(Debug::Instance().streamK5ForceMode(), -1)
+        << "TENSILE_STREAMK5_FORCE_MODE must be unset or this test proves nothing";
+
+    hip::HipAMDGPU noAnalytical;
+    noAnalytical.processor        = AMDGPU::Processor::gfx942;
+    noAnalytical.computeUnitCount = 304;
+    noAnalytical.deviceName       = "test-gfx942-no-analytical";
+    ASSERT_EQ(noAnalytical.analyticalHardware, nullptr);
+
+    ContractionSolution hybridSolution;
+    initEquality512Solution(hybridSolution, 5);
+
+    auto problemOff = makeGemmProblem(512, 512, 512);
+    problemOff.setParams().setStreamKTileSchedulingMode(0);
+    problemOff.setParams().setSmCountTarget(0);
+    EXPECT_TRUE(hybridSolution.streamKDynamicQueueSupported(problemOff, noAnalytical))
+        << "SK5 resolving to the static sub-path must stay selectable when NUM_XCD is unknown";
+
+    auto problemOn = makeGemmProblem(512, 512, 512);
+    problemOn.setParams().setStreamKTileSchedulingMode(1);
+    EXPECT_FALSE(hybridSolution.streamKDynamicQueueSupported(problemOn, noAnalytical))
+        << "SK5 resolving to the dynamic sub-path must be excluded when NUM_XCD is unknown";
+
+    auto problemAuto = makeGemmProblem(512, 512, 512);
+    problemAuto.setParams().setStreamKTileSchedulingMode(2);
+    EXPECT_THROW(hybridSolution.streamKDynamicQueueSupported(problemAuto, noAnalytical),
+                 std::runtime_error)
+        << "AUTO cannot resolve without analytical hardware and must not pick a schedule silently";
+
+    auto problemOffHeuristic = makeGemmProblem(512, 512, 512);
+    problemOffHeuristic.setParams().setStreamKTileSchedulingMode(0);
+    problemOffHeuristic.setParams().setSmCountTarget(128);
+    EXPECT_THROW(hybridSolution.streamKDynamicQueueSupported(problemOffHeuristic, noAnalytical),
+                 std::runtime_error)
+        << "OFF + smCountTarget>0 enters the same heuristic as AUTO and must behave identically";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, Sk5ForcedStaticStaysSelectableOnUnknownHardware)
+{
+    // TENSILE_STREAMK5_FORCE_MODE=0 short-circuits mode resolution to static
+    // before the heuristic is reached, so even AUTO stays selectable.
+    ScopedStreamK5ForceMode forceStatic("0");
+    ASSERT_EQ(Debug::Instance().streamK5ForceMode(), 0);
+
+    hip::HipAMDGPU noAnalytical;
+    noAnalytical.processor        = AMDGPU::Processor::gfx942;
+    noAnalytical.computeUnitCount = 304;
+    noAnalytical.deviceName       = "test-gfx942-no-analytical";
+
+    ContractionSolution hybridSolution;
+    initEquality512Solution(hybridSolution, 5);
+    auto problem = makeGemmProblem(512, 512, 512);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_TRUE(hybridSolution.streamKDynamicQueueSupported(problem, noAnalytical))
+        << "Forced-static SK5 must stay selectable when NUM_XCD is unknown";
+}
+
 // Selection-predicate contract: on MI300A (6 XCD) the dynamic-queue solution is
 // EXCLUDED from selection (supported == false) so a different solution serves
 // the GEMM, while on MI300X (8 XCD) the identical solution stays selectable.
@@ -1043,13 +1174,7 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
     auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
     TestSolutionIterator iterator(mi300a);
     auto                 problem = makeGemmProblem(512, 512, 512);
-    std::ostringstream   reportOutput;
-    auto reporter = std::make_shared<Client::LogReporter>(
-        Client::LogLevel::Terse,
-        std::initializer_list<std::string>{Client::ResultKey::Validation},
-        reportOutput,
-        false,
-        false);
+    auto reporter = std::make_shared<RecordingReporter>();
     iterator.setReporter(reporter);
 
     ContractionSolution dynamicSolution;
@@ -1057,13 +1182,63 @@ TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamic
     EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true))
         << "The explicit all-solutions client path must not launch an eight-queue "
            "dynamic kernel on a six-XCD MI300A";
+    ASSERT_EQ(reporter->reportedStrings.size(), 1u);
+    EXPECT_EQ(reporter->reportedStrings[0].first, Client::ResultKey::Validation);
+    EXPECT_EQ(reporter->reportedStrings[0].second, "UNSUPPORTED_XCD_TOPOLOGY");
+
+    reporter->reportedStrings.clear();
     EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, false))
         << "Topology filtering must also apply during non-reporting prediction checks";
+    EXPECT_TRUE(reporter->reportedStrings.empty());
 
     ContractionSolution staticSolution;
     initEquality512Solution(staticSolution, 3);
     EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
         << "The topology guard must retain static StreamK coverage on MI300A";
+    EXPECT_TRUE(reporter->reportedStrings.empty());
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorReportsAssertsBeforeTopology)
+{
+    auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
+    TestSolutionIterator iterator(mi300a);
+    auto                 problem  = makeGemmProblem(512, 512, 512);
+    auto                 reporter = std::make_shared<RecordingReporter>();
+    iterator.setReporter(reporter);
+
+    ContractionSolution dynamicSolution;
+    initEquality512Solution(dynamicSolution, 4);
+    dynamicSolution.problemPredicate
+        = std::make_shared<Predicates::False<ContractionProblemGemm>>();
+
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true));
+    ASSERT_EQ(reporter->reportedStrings.size(), 1u);
+    EXPECT_EQ(reporter->reportedStrings[0].first, Client::ResultKey::Validation);
+    EXPECT_EQ(reporter->reportedStrings[0].second, "DID_NOT_SATISFY_ASSERTS");
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, LogReporterTreatsUnsupportedTopologyAsTerse)
+{
+    std::ostringstream reportOutput;
+    Client::LogReporter reporter(
+        Client::LogLevel::Terse,
+        std::initializer_list<std::string>{Client::ResultKey::Validation,
+                                           Client::ResultKey::TimeUS,
+                                           Client::ResultKey::SpeedGFlops},
+        reportOutput,
+        false,
+        false);
+
+    reporter.preProblem(nullptr);
+    reporter.preSolution(nullptr);
+    reporter.report(Client::ResultKey::TimeUS, 1.0);
+    reporter.report(Client::ResultKey::SpeedGFlops, 0.0);
+    reporter.report(Client::ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
+    reporter.postSolution();
+    // Deliberately no postProblem(): it printf()s a banner to stdout rather
+    // than to the captured stream, which would leak into this binary's output.
+
+    EXPECT_NE(reportOutput.str().find("UNSUPPORTED_XCD_TOPOLOGY"), std::string::npos);
 }
 
 // ===========================================================================
