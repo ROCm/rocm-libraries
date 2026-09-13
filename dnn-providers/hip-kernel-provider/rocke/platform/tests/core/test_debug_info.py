@@ -762,6 +762,26 @@ class TestPythonPathSplitMirror(unittest.TestCase):
 LLVM_BIN_ENV = "ROCKE_TEST_LLVM_BIN"
 
 
+def configured_llvm_tool(name):
+    """Find ``name`` only in an explicitly configured LLVM toolchain."""
+    configured = []
+    if os.environ.get(LLVM_BIN_ENV):
+        configured.append(os.environ[LLVM_BIN_ENV])
+    if os.environ.get("ROCM_PATH"):
+        configured.extend(
+            os.path.join(os.environ["ROCM_PATH"], suffix)
+            for suffix in (
+                os.path.join("llvm", "bin"),
+                os.path.join("lib", "llvm", "bin"),
+            )
+        )
+    for directory in configured:
+        candidate = shutil.which(name, path=directory)
+        if candidate:
+            return candidate
+    return None
+
+
 def llvm_tool(name):
     """An LLVM tool from the configured toolchain, PATH, or the ROCm default.
 
@@ -780,19 +800,59 @@ def llvm_tool(name):
     unrunnable file, so the route this prefers was skipped on Windows and the
     system tool answered in its place -- the exact substitution above.
     """
-    configured = []
-    if os.environ.get(LLVM_BIN_ENV):
-        configured.append(os.environ[LLVM_BIN_ENV])
-    if os.environ.get("ROCM_PATH"):
-        configured.append(os.path.join(os.environ["ROCM_PATH"], "llvm", "bin"))
-    for directory in configured:
-        candidate = shutil.which(name, path=directory)
-        if candidate:
-            return candidate
+    candidate = configured_llvm_tool(name)
+    if candidate:
+        return candidate
     found = shutil.which(name)
     if found:
         return found
     return shutil.which(name, path=os.path.join("/opt/rocm", "llvm", "bin"))
+
+
+def llvm_codegen_tool():
+    """Return an AMDGPU object-code driver from one coherent toolchain.
+
+    Some ROCm packages ship ``clang`` but not ``llc``. Prefer either driver
+    from an explicitly configured toolchain over an unrelated tool on PATH;
+    otherwise retain the historical PATH-first discovery order.
+    """
+    for name in ("llc", "clang"):
+        candidate = configured_llvm_tool(name)
+        if candidate:
+            return name, candidate
+    for name in ("llc", "clang"):
+        candidate = llvm_tool(name)
+        if candidate:
+            return name, candidate
+    return None, None
+
+
+def amdgpu_object_command(driver, tool, bitcode, output, arch="gfx950"):
+    """Build the equivalent llc or clang command for one AMDGPU object."""
+    if driver == "llc":
+        return [
+            tool,
+            "-mtriple=amdgcn-amd-amdhsa",
+            f"-mcpu={arch}",
+            "-filetype=obj",
+            bitcode,
+            "-o",
+            output,
+        ]
+    if driver == "clang":
+        # Let the .bc suffix select LLVM bitcode input. Passing ``-x ir`` makes
+        # clang treat this as frontend input and loses the inline DWARF chain.
+        return [
+            tool,
+            "--target=amdgcn-amd-amdhsa",
+            f"-mcpu={arch}",
+            "-nogpulib",
+            "-c",
+            bitcode,
+            "-o",
+            output,
+        ]
+    raise ValueError(f"unsupported LLVM codegen driver: {driver!r}")
 
 
 class TestLlvmToolDiscovery(unittest.TestCase):
@@ -881,6 +941,64 @@ class TestLlvmToolDiscovery(unittest.TestCase):
                 elif found is not None:
                     self.assertTrue(os.path.isfile(found))
 
+    def test_lib_llvm_bin_layout_is_searched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = self.make_tool(os.path.join(tmp, "lib", "llvm", "bin"), "llc")
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
+                env.pop(LLVM_BIN_ENV, None)
+                self.assertSameTool(llvm_tool("llc"), expected)
+
+    def test_configured_llc_wins_over_configured_clang(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = self.fake_bin(tmp, "llc")
+            self.fake_bin(tmp, "clang")
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
+                env.pop(LLVM_BIN_ENV, None)
+                driver, tool = llvm_codegen_tool()
+            self.assertEqual(driver, "llc")
+            self.assertSameTool(tool, expected)
+
+    def test_configured_clang_beats_unrelated_path_llc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            configured_clang = self.fake_bin(tmp, "clang")
+            path_dir = os.path.join(tmp, "path")
+            self.make_tool(path_dir, "llc")
+            with mock.patch.dict(
+                os.environ,
+                {"ROCM_PATH": tmp, "PATH": path_dir},
+            ) as env:
+                env.pop(LLVM_BIN_ENV, None)
+                driver, tool = llvm_codegen_tool()
+            self.assertEqual(driver, "clang")
+            self.assertSameTool(tool, configured_clang)
+
+    def test_codegen_commands_are_equivalent(self):
+        self.assertEqual(
+            amdgpu_object_command("llc", "llc", "k.bc", "k.o"),
+            [
+                "llc",
+                "-mtriple=amdgcn-amd-amdhsa",
+                "-mcpu=gfx950",
+                "-filetype=obj",
+                "k.bc",
+                "-o",
+                "k.o",
+            ],
+        )
+        self.assertEqual(
+            amdgpu_object_command("clang", "clang", "k.bc", "k.o"),
+            [
+                "clang",
+                "--target=amdgcn-amd-amdhsa",
+                "-mcpu=gfx950",
+                "-nogpulib",
+                "-c",
+                "k.bc",
+                "-o",
+                "k.o",
+            ],
+        )
+
 
 class TestObjectRoundTrip(unittest.TestCase):
     """The metadata has to survive into a real code object, not just the IR.
@@ -894,8 +1012,11 @@ class TestObjectRoundTrip(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tools = {n: llvm_tool(n) for n in ("llvm-as", "llc", "llvm-dwarfdump")}
+        cls.tools = {n: llvm_tool(n) for n in ("llvm-as", "llvm-dwarfdump")}
+        cls.codegen = llvm_codegen_tool()
         missing = [n for n, p in cls.tools.items() if p is None]
+        if cls.codegen[1] is None:
+            missing.append("llc or clang")
         if missing:
             raise unittest.SkipTest(f"missing LLVM tools: {', '.join(missing)}")
 
@@ -909,15 +1030,9 @@ class TestObjectRoundTrip(unittest.TestCase):
                 [self.tools["llvm-as"], paths["ll"], "-o", paths["bc"]], check=True
             )
             subprocess.run(
-                [
-                    self.tools["llc"],
-                    "-mtriple=amdgcn-amd-amdhsa",
-                    "-mcpu=gfx950",
-                    "-filetype=obj",
-                    paths["bc"],
-                    "-o",
-                    paths["o"],
-                ],
+                amdgpu_object_command(
+                    self.codegen[0], self.codegen[1], paths["bc"], paths["o"]
+                ),
                 check=True,
             )
             return subprocess.run(
