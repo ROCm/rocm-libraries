@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 
 #include <algorithm>
@@ -28,6 +9,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -120,12 +103,37 @@ std::string wavesOf(GfxArchID arch, uint32_t vgprs) {
     return waves == std::numeric_limits<int>::max() ? "n/a" : std::to_string(waves);
 }
 
+/// How many values carry an index ceiling, and the tightest one.
+///
+/// The Allocate counterpart of the held-range list: same constraint, but it
+/// reaches the allocator as a limit per value rather than as frozen registers,
+/// so there are no ranges to name and the report counts instead.
+struct CappedValues {
+    size_t count = 0;
+    uint32_t ceiling = 0;
+};
+
+CappedValues cappedValuesOf(const Function& function, const AllocationConstraints& constraints) {
+    constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
+    CappedValues capped;
+    const size_t valueCount = function.ssaArena().valueCount();
+    for (size_t id = 1; id <= valueCount; ++id) {
+        const uint32_t ceiling = constraints.maxIndexFor(static_cast<SSAValueID>(id));
+        if (ceiling == kNoLimit) continue;
+        if (capped.count == 0 || ceiling < capped.ceiling) capped.ceiling = ceiling;
+        ++capped.count;
+    }
+    return capped;
+}
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
-                         const AllocationRules& rules, const char* allocator) {
+                         const AllocationRules& rules,
+                         std::span<const AllocationScope::HeldRange> unbankable,
+                         const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -154,6 +162,36 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // which keeps every existing report byte-identical.
     for (const AllocationRule& rule : rules.all()) {
         text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
+    }
+    // The live-ins left unpinned. Named because moving them rests on nothing
+    // having defined them, which holds only while lifting saw every definition.
+    // Silent when there are none, like the rules above.
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    if (!undefined.empty()) {
+        text += " undefinedLiveIn[";
+        for (size_t i = 0; i < undefined.size(); ++i) {
+            text += (i > 0 ? " %" : "%") + std::to_string(undefined[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        text += "]";
+    }
+    // What was done about operands that cannot name a bank. Reported in both
+    // modes, because under Hold these registers are why the high-water mark
+    // cannot fall below them, and under Allocate the constraint is still in
+    // force even though nothing is frozen -- a silent report there would read
+    // as no constraint at all.
+    if (!unbankable.empty()) {
+        text += " unbankable[held";
+        for (const AllocationScope::HeldRange& range : unbankable) {
+            text += " " + regTypeToString(range.regClass) + std::to_string(range.start);
+            if (range.end != range.start) text += ":" + std::to_string(range.end);
+        }
+        text += "]";
+    } else if (const CappedValues capped = cappedValuesOf(function, constraints);
+               capped.count > 0) {
+        text += " unbankable[allocated " + std::to_string(capped.count) + " value(s) max " +
+                std::to_string(capped.ceiling) + "]";
     }
     return text;
 }
@@ -250,6 +288,17 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
         scope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
     }
 
+    // Before the requested holds, so a register in both reports the constraint
+    // rather than the request.
+    //
+    // Allocate holds nothing. The ceiling is collected under either policy, so
+    // the same constraint reaches the allocator as a limit to place under.
+    const std::vector<AllocationScope::HeldRange> unbankable =
+        options.unbankableOperands == RegisterAllocationOptions::UnbankableOperands::Hold
+            ? AllocationScope::unbankableOperandRegisters(function, target)
+            : std::vector<AllocationScope::HeldRange>{};
+    if (!unbankable.empty()) scope.holdUnbankableOperands(constraints, unbankable);
+
     if (!options.pinRegisters.empty()) {
         // A backwards pair holds nothing, which reads as "holding made no
         // difference". Hold nothing by passing nothing instead.
@@ -282,7 +331,7 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
     // Before destruction, which clears the attached SSA the report reads.
     if (options.report && report != nullptr) {
         *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
-                               allocator.name());
+                               unbankable, allocator.name());
     }
 
     if (options.applyToOperands) {

@@ -31,6 +31,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/ssa/AllocationResult.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
@@ -202,6 +203,39 @@ TEST_F(SSADestructionTest, ANonIdentityColoringActuallyRewritesTheOperands) {
     const std::string after = physicalIR();
     EXPECT_TRUE(contains(after, "v[104:107] = \"st.ds_load_b128\"(v100)")) << after;
     EXPECT_TRUE(contains(after, "v108 = \"st.v_add_f32\"(v104, v105)")) << after;
+}
+
+TEST_F(SSADestructionTest, ATrue16HalfSelectorSurvivesRenaming) {
+    // Lifting a half read as a read of the whole DWORD is only correct if the
+    // selector follows the register it qualifies. Destruction rewrites reg.idx and
+    // never touches modifiers, and the emitter indexes the selector by operand
+    // position rather than register index, so renaming v32 to v132 must leave
+    // the operand reading the low half of its new register.
+    BasicBlock* entry = makeEntry();
+    AsmIRBuilder builder(*entry, kArch);
+    StinkyInstruction* cvt = builder.create(getMCIDByUOp(GFX::v_cvt_f32_bf16, kArch));
+    cvt->addDestReg(StinkyRegister("v", 12, 1));
+    cvt->addSrcReg(StinkyRegister("v", 32, 1));
+    cvt->addModifier<True16Modifiers>(
+        True16Modifiers(HighBitSel::NONE, HighBitSel::NONE, {HighBitSel::LOW}));
+    lift();
+
+    constexpr unsigned kShift = 100;
+    AllocationResult shifted(*func);
+    for (StinkySSAValue* value : func->ssaArena().values()) {
+        ASSERT_NE(value, nullptr);
+        ASSERT_TRUE(value->hasPhysicalBinding());
+        const StinkySSAValue::PhysicalBinding& binding = value->physical();
+        shifted.assign(value->valueId(), RegKey{binding.type, binding.idx + kShift, RegHalf::NONE});
+    }
+
+    const SSADestructionResult result = destroyAttachedSSA(*func, shifted);
+
+    ASSERT_TRUE(result.ok()) << result.toString();
+    EXPECT_EQ(cvt->getSrcRegs()[0].reg.idx, 132u);
+    EXPECT_EQ(cvt->getDestRegs()[0].reg.idx, 112u);
+    ASSERT_NE(cvt->getModifier<True16Modifiers>(), nullptr);
+    EXPECT_EQ(cvt->getModifier<True16Modifiers>()->getSrc(0), HighBitSel::LOW);
 }
 
 TEST_F(SSADestructionTest, RejectsARangeSplitAcrossNonConsecutiveRegisters) {

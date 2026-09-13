@@ -1,28 +1,10 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #include <algorithm>
+#include <optional>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -61,17 +43,26 @@ uint32_t highestRegisterCount(const Function& function, RegType regClass) {
     return count;
 }
 
-uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
-                           const std::array<int, 3>& workgroupIds) {
-    const uint32_t used = highestRegisterCount(function, RegType::S);
-
+uint32_t dispatchFilledSgprCount(int numSgprPreload, const std::array<int, 3>& workgroupIds) {
     // The kernarg segment pointer occupies two, matching the `numSgprPreload + 2`
     // the descriptor emits as .amdhsa_user_sgpr_count.
-    uint32_t abi = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
+    uint32_t filled = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
     for (int enabled : workgroupIds) {
-        if (enabled > 0) ++abi;
+        if (enabled > 0) ++filled;
     }
-    return std::max(used, abi);
+    return filled;
+}
+
+std::optional<uint32_t> settledDispatchFilledSgprCount(int numSgprPreload,
+                                                       const std::array<int, 3>& workgroupIds) {
+    if (numSgprPreload <= 0) return std::nullopt;
+    return dispatchFilledSgprCount(numSgprPreload, workgroupIds);
+}
+
+uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
+                           const std::array<int, 3>& workgroupIds) {
+    return std::max(highestRegisterCount(function, RegType::S),
+                    dispatchFilledSgprCount(numSgprPreload, workgroupIds));
 }
 
 }  // namespace stinkytofu

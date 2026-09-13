@@ -544,7 +544,8 @@ flowchart LR
     Arena --> Hint["hintFor()<br/>from PhysicalBinding"]
     Ops["srcRegs / destRegs<br/>via liftedSSAUnits()"] --> Tuple["tupleRuns()"]
     Args["block ssaArguments()"] -->|has incoming| Aff["affinitySets()"]
-    Args -->|no incoming| Pin["isPinned()"]
+    Args -->|"no incoming, dispatch-filled"| Pin["isPinned()"]
+    Args -->|"no incoming, above that line"| Undef["undefinedLiveIns()"]
     RMW["read-write dest/src pair"] --> Aff
     Rules["AllocationRules::addRelations"] --> Tuple
     Rules --> Aff
@@ -556,7 +557,7 @@ Everything is stored per value ID, so every query is an array lookup. Only `isAl
 |---|---|---|
 | Consecutive range | operand + `liftedSSAUnits()` | `tupleRuns()`: one operand's slots occupy consecutive units, in operand order |
 | Merge | `SSABlockArgument.incoming` | `affinitySets()`: the argument and every incoming value get one colour |
-| Pinned | block argument with no incoming | `isPinned()`: must keep its original register |
+| Pinned | block argument with no incoming, in a register the dispatch fills | `isPinned()`: must keep its original register |
 | Hint | `PhysicalBinding` | `hintFor()`: first candidate, not an obligation |
 | Class | `StinkySSAValue::type()` | `classOf()` / `isAllocatable()` |
 | Tied / RMW | overlapping bindings on a src and a dest, or `isReadWrite` | may share a unit; `collectReadWriteTies` adds an `AffinitySet` so they must |
@@ -572,6 +573,10 @@ Three things deliberately yield no constraint, which is as useful to know:
 **Read-write operands must share a colour.** `s_cmov_b32 d, s` is `if (SCC) d = s`: on the untaken path `d` keeps what it already held. `HwInstDesc` marks that field `isReadWrite` and `AsmVerifierPass` already requires the register in both `destRegs` and `srcRegs`. The IR models the old value as an extra implicit source that the assembler does not print. Overlapping bindings *permit* sharing; `collectReadWriteTies` adds an `AffinitySet` per pair so the colourer *must* keep them together — the same mechanism as a merge. `tests/filecheck/allocation_read_write_tie.stir` uses an untied input so the colouring has to bring the two together rather than merely preserve them.
 
 **Pinning is legality, not policy.** A block argument with no incoming edges is a function live-in: its value arrives in a specific register that the dispatch filled before any instruction ran, so nothing in the function defines it and relocating it changes what the kernel reads. A policy that ignores `isPinned()` emits wrong code, not a slower kernel. A placement rule that forbids that register has no repair: the kernel comes out uncoloured.
+
+**But only up to where the dispatch stops writing.** "No incoming edge" says nothing defines the value; the pin claims something *else* does, and that holds only inside the ABI prefix — `settledDispatchFilledSgprCount()`: preloaded kernargs plus two for the kernarg segment pointer, then one per enabled workgroup id, so 32 for a kernel with `.amdhsa_user_sgpr_count 29`. A scalar live-in above that line was written by nobody, so any register serves it equally and a pin there preserves contents that do not exist — at `s[100:107]` on a 106-register chip it cannot be honoured at all, which is why an SGPR-heavy kernel came back uncoloured. Those values stay movable and are listed in `undefinedLiveIns()`, which the shadow report names: "nothing defines it" and "it is undefined" differ by whether lifting saw every definition, so a run that moves one should be able to say which.
+
+Every unknown pins. The line arrives as `kSigDispatchFilledSgprsMetaKey` on the Function, the descriptor not being reachable from a pass, and absent or zero reads as the whole file — so a `.stir` file or a test keeps the old behaviour. A kernel with no preloaded kernargs never publishes it at all, the descriptor leaving it unsettled whether the kernarg segment pointer sits in `s[0:1]` ahead of the workgroup ids; understating the line is the one direction that produces wrong code. Vector live-ins stay pinned regardless, the workitem ids being packed in a layout this does not model.
 
 **Alignment is a placement rule, not a constraint.** Neither `AllocationConstraints` nor `destroyAttachedSSA` checks it — both check consecutiveness alone. A row such as `ScalarTupleAlignment` forbids a bad base through `forbidsBase`, and the verifier rechecks it, so a policy that ignores the table is refused rather than assembled. A chip with an empty table still does not enforce alignment. Do not route an arch preference through `hintFor()`: that is the register the producer used, so it would vanish for any value with no hint.
 
@@ -897,7 +902,7 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 `RegisterAllocationOptions::report` emits one line per kernel comparing the colouring against the producer's, as a `ShadowReport` analysis remark. `stinkytofu-opt` exposes it as `report` (needs `--remarks`):
 
 ```text
-@kernel: greedy-compact shadow: values=230 v[peak=62 highest=65->65 regionPeak=40 waves=14->14] s[peak=5 highest=69->69] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active]
+@kernel: greedy-compact shadow: values=230 v[peak=62 highest=65->65 regionPeak=40 waves=14->14] s[peak=5 highest=69->69] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active] rule[VectorTupleAlignment=active]
 ```
 
 `peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]` so a report is interpretable without knowing the triple or the caps.
@@ -1108,6 +1113,16 @@ Ungated: it is a property of the instruction encoding, true of every module of t
 `forbidsBase`, and this is the shape the framework was designed around: a fact about which indexes are legal, no instruction, every scalar tuple. `greedy-compact` packs against the lowest free index; a pinned live-in at `s0` would otherwise land a pair on `s[1:2]`. `tests/filecheck/allocation_rule_scalar_alignment.stir` pins the fixed colouring.
 
 The rule constrains a *block's* base. A block wider than any single operand — overlapping tuple runs — could still place an interior operand oddly. Section 14.7 records that; the common case of one operand per block is exact.
+
+#### `VectorTupleAlignment` — placement, `Active` always
+
+A VGPR tuple must start on an even index at every width above one; a single VGPR sits anywhere. The assembler rejects anything else with `vgpr tuples must be 64 bit aligned`.
+
+This is a *different* requirement from the scalar one, which is why it is a separate row rather than another arm of `ScalarTupleAlignment`. Scalars align to their width, vectors to a flat 64 bits, so `v[2:5]` is legal where `s[2:5]` is not, and `ds_load_b96 v[2:4]` is legal at a width the scalar rule would round up to four. Neither predicate can answer for the other.
+
+Ungated, for the same reason as its scalar sibling: it is a property of the instruction encoding. It also wants no Audit stage — the producer's own VGPR tuples assemble today.
+
+The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md`, "Multi-DWORD VGPR ranges were placed at odd bases". `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
 
 ### 14.6. Diagnostics
 
