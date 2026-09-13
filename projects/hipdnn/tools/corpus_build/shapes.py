@@ -218,6 +218,12 @@ class Filter:
 
     dtypes: tuple[str, ...] = ()
     head_dims: tuple[int, ...] = ()
+    #: Which masks to keep, as the `causal` flag's values -- `(False,)` for non-causal only.
+    #: A whole engine can live on one side of this: AITER's gfx950 forward table is two
+    #: kernels, both `mask 0`, so it declines every causal graph on that architecture. A
+    #: corpus drawn without the facet is ~80% causal, which is ~80% wasted draws when the
+    #: corpus is being built to train that engine.
+    causal: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
         for dtype in self.dtypes:
@@ -226,15 +232,21 @@ class Filter:
         for head_dim in self.head_dims:
             if not isinstance(head_dim, int) or head_dim < 1:
                 raise ValueError(f"head dim must be a positive int, got {head_dim!r}")
+        for flag in self.causal:
+            if not isinstance(flag, bool):
+                raise ValueError(f"causal must be a bool, got {flag!r}")
 
     def __bool__(self) -> bool:
-        return bool(self.dtypes or self.head_dims)
+        return bool(self.dtypes or self.head_dims or self.causal)
 
     def admits(self, shape: Shape) -> bool:
         if self.dtypes and shape.dtype not in self.dtypes:
             return False
-        return not (self.head_dims and shape.head_dim not in self.head_dims)
+        if self.head_dims and shape.head_dim not in self.head_dims:
+            return False
+        return not (self.causal and bool(shape.causal) not in self.causal)
 
     def describe(self) -> dict:
         """The filter as the manifest records it, so a corpus says what it excluded."""
-        return {"dtypes": list(self.dtypes), "head_dims": list(self.head_dims)}
+        return {"dtypes": list(self.dtypes), "head_dims": list(self.head_dims),
+                "causal": list(self.causal)}
