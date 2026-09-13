@@ -10,6 +10,7 @@ Phase 1a TDD: these tests are written BEFORE the implementation exists.
 Run: python3 -m pytest tests/test_codegen_common.py -v
 """
 
+import itertools
 import logging
 import sys
 import unittest
@@ -20,7 +21,10 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from codegen_common import (  # noqa: E402
+    ARCH_VALIDITY_RULES,
     TileConfig,
+    arch_config_supported,
+    arch_warp_tile_key,
     TraitConfigBase,
     CommonTypeMappings,
     generate_cpp_compilation_unit,
@@ -38,6 +42,10 @@ from codegen_common import (  # noqa: E402
     gemm_aquant_effective_epilogue,
     make_bquant_kernel_name,
     make_gemm_rowcolquant_kernel_name,
+    normalize_gfx_arch,
+    rowcol_tensor_quant_default_tile,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+    ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250,
     make_aquant_kernel_name,
     # Shared quant spec-sweep plumbing (see TestQuantSpecSweepHelpers).
     fp8_warp_tile_k_for_arch,
@@ -631,6 +639,235 @@ class TestArchWarpTileK(unittest.TestCase):
         # 128 on a non-gfx950 target compiles and then emits all zeros, so an
         # unrecognised arch must never fall through to it.
         self.assertEqual(fp8_warp_tile_k_for_arch("gfx90a"), 32)
+
+
+class TestCentralArchFilter(unittest.TestCase):
+    """arch_config_supported -- the single arch-validity gate every sweep uses.
+
+    Motivating measurement (gfx1250 / MI400, grouped rowcolquant + tensorquant
+    default_config sweep, 11,840 rows): 2,908 wrong-result rows were 100%
+    warp_tile 32x32x32 (a wave64 MFMA shape), 0 of 3,760 16x16x64 rows were
+    wrong, and 3,220 launch aborts were 100% warp_m*warp_n == 8.
+    """
+
+    def test_no_arch_disables_every_check(self):
+        for arch in (None, ""):
+            self.assertTrue(arch_config_supported(
+                arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+                pipeline="compv3", scheduler="intrawave"))
+
+    def test_unknown_arch_is_permissive(self):
+        self.assertTrue(arch_config_supported(
+            "gfx9999", dtype="fp8", warp_m=7, warp_n=7, warp_k=7,
+            warp_tile_m=1, warp_tile_n=1, warp_tile_k=1,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_gfx1250_rejects_wave64_mfma_warp_tile(self):
+        self.assertFalse(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_gfx1250_accepts_its_wmma_warp_tiles(self):
+        for wtk in (64, 128):
+            self.assertTrue(arch_config_supported(
+                "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                warp_tile_m=16, warp_tile_n=16, warp_tile_k=wtk,
+                pipeline="compv3", scheduler="intrawave"), wtk)
+
+    def test_gfx1250_rejects_eight_warp_compv3_intrawave(self):
+        for wm, wn in ((2, 4), (4, 2), (1, 8), (8, 1)):
+            self.assertFalse(arch_config_supported(
+                "gfx1250", dtype="fp8", warp_m=wm, warp_n=wn, warp_k=1,
+                warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                pipeline="compv3", scheduler="intrawave"), (wm, wn))
+
+    def test_gfx1250_allows_four_warp_compv3_intrawave(self):
+        self.assertTrue(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_only_gfx1250_is_gated(self):
+        """The gate is opt-in per arch. This is the load-bearing invariant: no
+        arch outside ARCH_VALIDITY_RULES can ever be narrowed."""
+        self.assertEqual(set(ARCH_VALIDITY_RULES), {"gfx1250"})
+
+    def test_gfx9_is_a_constant_true_no_op(self):
+        """Exhaustive over the sweep axis space: on gfx90a/gfx942/gfx950 the
+        predicate must return True for EVERY input, including inputs the arch
+        tables do not list.
+
+        An earlier revision applied the warp-map rule to every arch, which
+        deleted 9,144 of 35,496 gfx942 candidates and 6,624 of 35,496 gfx950
+        candidates from a raw expansion of the grouped quant default_config
+        ranges -- WARP_SUPPORTED_COMBINATIONS is a curated Old-TE whitelist
+        (gfx942 has no [4,2,1] / [2,4,1] / [4,4,1] row), not the set of warp maps
+        the hardware can run. Losing gfx9 coverage to fix gfx1250 is not an
+        acceptable trade, so this test fails if any rule ever reaches gfx9."""
+        def axes():
+            return itertools.product(
+                (4, 2, 1), (4, 2, 1), (1, 2),      # warp_m, warp_n, warp_k
+                (4, 16, 32), (16, 32, 64), (8, 16, 32, 64, 128),  # warp tile
+                ("fp8", "bf8", "fp16", "bf16", "int8", "fp32"),
+                ("compv3", "compv4", "mem"),
+                ("intrawave", "interwave"),
+            )
+
+        for arch in ("gfx90a", "gfx942", "gfx950"):
+            for wm, wn, wk, wtm, wtn, wtk, dt, pipe, sched in axes():
+                if not arch_config_supported(
+                    arch, dtype=dt, warp_m=wm, warp_n=wn, warp_k=wk,
+                    warp_tile_m=wtm, warp_tile_n=wtn, warp_tile_k=wtk,
+                    pipeline=pipe, scheduler=sched,
+                ):
+                    self.fail(
+                        f"{arch} rejected {(wm, wn, wk)} {(wtm, wtn, wtk)} "
+                        f"{dt}/{pipe}/{sched} -- the gate must be a no-op on gfx9"
+                    )
+
+    def test_ungated_wave32_archs_are_also_untouched(self):
+        """gfx1100/gfx1200/gfx1201 are wave32 too, but no measurement exists for
+        them, so they must stay ungated -- their whole warp table is 8-warp and a
+        family-wide rule would delete every one of their compv3 kernels."""
+        for arch in ("gfx1100", "gfx1200", "gfx1201"):
+            self.assertTrue(arch_config_supported(
+                arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+                pipeline="compv3", scheduler="intrawave"), arch)
+
+    def test_warp_tile_key(self):
+        self.assertEqual(arch_warp_tile_key("fp8"), "fp8_fp8_fp32")
+        self.assertEqual(arch_warp_tile_key("int8"), "int8_int8_int32")
+        self.assertEqual(arch_warp_tile_key("fp8", "bf8"), "fp8_bf8_fp32")
+
+    # -- arch normalization inside the gate ---------------------------------
+    #
+    # A real gfx1250 part reports "gfx1250:xnack-". Looked up raw that string has
+    # no ARCH_VALIDITY_RULES row, so every rule below it was skipped and the gate
+    # returned True -- inert on the most common real-world spelling of the only
+    # arch it gates.
+
+    def test_suffixed_gfx1250_is_still_gated(self):
+        for arch in ("gfx1250:xnack-", "gfx1250:xnack+", "gfx1250:sramecc-:xnack-"):
+            with self.subTest(arch=arch):
+                self.assertFalse(arch_config_supported(
+                    arch, dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=32, warp_tile_n=32, warp_tile_k=32,
+                    pipeline="compv3", scheduler="intrawave"))
+                self.assertFalse(arch_config_supported(
+                    arch, dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+                    warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                    pipeline="compv3", scheduler="intrawave"))
+
+    def test_suffixed_gfx1250_still_accepts_valid_configs(self):
+        self.assertTrue(arch_config_supported(
+            "gfx1250:xnack-", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+            pipeline="compv3", scheduler="intrawave"))
+
+    def test_suffixed_gfx9_stays_ungated(self):
+        self.assertTrue(arch_config_supported(
+            "gfx942:sramecc+:xnack-", dtype="fp8", warp_m=4, warp_n=4, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+            pipeline="mem", scheduler="interwave"))
+
+    # -- the warps-per-block cap is arch-wide, not pipeline-keyed -----------
+    #
+    # The measured failure was "cannot find symbol": no launchable kernel entry
+    # was emitted for an 8-warp block at all. That is a wave32 block-size
+    # property of gfx1250, not a property of the pipeline scheduled into it, so
+    # a cap keyed only to (compv3, intrawave) left mem admitting exactly the
+    # maps that were measured to abort.
+
+    def test_gfx1250_rejects_eight_warp_blocks_on_every_pipeline(self):
+        for pipe in ("compv3", "compv4", "mem"):
+            for sched in ("intrawave", "interwave"):
+                for wm, wn in ((2, 4), (4, 2), (1, 8), (8, 1)):
+                    with self.subTest(pipeline=pipe, scheduler=sched, warps=(wm, wn)):
+                        self.assertFalse(arch_config_supported(
+                            "gfx1250", dtype="fp8", warp_m=wm, warp_n=wn, warp_k=1,
+                            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                            pipeline=pipe, scheduler=sched))
+
+    def test_gfx1250_cap_applies_when_traits_are_not_supplied(self):
+        """A caller that omits pipeline/scheduler must not escape the cap."""
+        self.assertFalse(arch_config_supported(
+            "gfx1250", dtype="fp8", warp_m=2, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=64))
+
+    def test_gfx1250_four_warp_blocks_survive_on_every_pipeline(self):
+        for pipe in ("compv3", "compv4", "mem"):
+            with self.subTest(pipeline=pipe):
+                self.assertTrue(arch_config_supported(
+                    "gfx1250", dtype="fp8", warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+                    pipeline=pipe, scheduler="intrawave"))
+
+
+class TestNormalizeGfxArch(unittest.TestCase):
+    """Feature suffixes must be stripped exactly once, here."""
+
+    def test_bare_target_is_unchanged(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250"), "gfx1250")
+        self.assertEqual(normalize_gfx_arch("gfx942"), "gfx942")
+
+    def test_single_suffix_is_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx1250:xnack-"), "gfx1250")
+
+    def test_multiple_suffixes_are_stripped(self):
+        self.assertEqual(normalize_gfx_arch("gfx942:sramecc+:xnack-"), "gfx942")
+
+    def test_unknown_or_malformed_input_is_passed_through(self):
+        # Not a validator: an unrecognised or empty string must come back
+        # unchanged (minus any suffix) so the caller's own arch test decides.
+        self.assertEqual(normalize_gfx_arch(""), "")
+        self.assertEqual(normalize_gfx_arch("notagfx:weird"), "notagfx")
+        self.assertEqual(normalize_gfx_arch(":xnack-"), "")
+
+
+class TestRowColTensorQuantDefaultTile(unittest.TestCase):
+    """gfx1250 tile selection is EXACT, not a gfx12 family match.
+
+    gfx1200/gfx1201 are WMMA parts too, but their 8-bit warp fragment is
+    16x16x16, not gfx1250's 16x16x64/16x16x128. Handing them the gfx1250 tile
+    compiles cleanly and returns garbage, so a family match here is a
+    silent-wrong-answer bug.
+    """
+
+    def test_gfx1250_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_gfx1250_with_feature_suffix_takes_the_gfx1250_tile(self):
+        self.assertEqual(
+            rowcol_tensor_quant_default_tile("gfx1250:xnack-"),
+            dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250),
+        )
+
+    def test_other_gfx12_parts_do_not_inherit_the_gfx1250_tile(self):
+        for arch in ("gfx1200", "gfx1201", "gfx1201:xnack-"):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_gfx9_parts_take_the_mfma_tile(self):
+        for arch in ("gfx942", "gfx950", "gfx942:sramecc+:xnack-", ""):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    rowcol_tensor_quant_default_tile(arch),
+                    dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE),
+                )
+
+    def test_returns_a_copy_not_the_shared_dict(self):
+        t = rowcol_tensor_quant_default_tile("gfx1250")
+        t["tile_m"] = -1
+        self.assertNotEqual(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250["tile_m"], -1)
 
 
 if __name__ == "__main__":
