@@ -1,0 +1,10 @@
+ROCBLAS_ABI_6 {
+  global:
+    _ZN11rocrand_cpp*;
+    _ZNK11rocrand_cpp*;
+    _ZTVN11rocrand_cpp*;
+    _ZTIN11rocrand_cpp*;
+    _ZTSN11rocrand_cpp*;
+  local:
+    *;
+};

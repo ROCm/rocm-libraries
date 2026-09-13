@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Cohort specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Cohort specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology" id="toc-terminology">Terminology</a></li>
+<li><a href="#1-cohort-identity" id="toc-1-cohort-identity">1. Cohort
+identity</a>
+<ul>
+<li><a href="#11-what-the-identity-asserts"
+id="toc-11-what-the-identity-asserts">1.1 What the identity
+asserts</a></li>
+<li><a href="#12-matching" id="toc-12-matching">1.2 Matching</a></li>
+<li><a href="#13-naming" id="toc-13-naming">1.3 Naming</a></li>
+<li><a href="#14-cohort-identity-is-not-provider-identity"
+id="toc-14-cohort-identity-is-not-provider-identity">1.4 Cohort identity
+is not provider identity</a></li>
+<li><a href="#15-what-a-cohort-identity-is-not"
+id="toc-15-what-a-cohort-identity-is-not">1.5 What a cohort identity is
+not</a></li>
+</ul></li>
+<li><a href="#2-membership" id="toc-2-membership">2. Membership</a>
+<ul>
+<li><a href="#21-the-required-domain-set-is-consumer-specified"
+id="toc-21-the-required-domain-set-is-consumer-specified">2.1 The
+required domain set is consumer-specified</a></li>
+<li><a href="#22-device-bounding" id="toc-22-device-bounding">2.2 Device
+bounding</a></li>
+<li><a href="#23-protocol-bounding" id="toc-23-protocol-bounding">2.3
+Protocol bounding</a></li>
+<li><a href="#24-capability-bounding"
+id="toc-24-capability-bounding">2.4 Capability bounding</a></li>
+</ul></li>
+<li><a href="#3-co-selection" id="toc-3-co-selection">3.
+Co-selection</a>
+<ul>
+<li><a href="#31-atomicity" id="toc-31-atomicity">3.1 Atomicity</a></li>
+<li><a href="#32-requirements" id="toc-32-requirements">3.2
+Requirements</a></li>
+<li><a href="#33-the-selection-is-final-for-the-object"
+id="toc-33-the-selection-is-final-for-the-object">3.3 The selection is
+final for the object</a></li>
+<li><a href="#34-cohort-level-diagnostics"
+id="toc-34-cohort-level-diagnostics">3.4 Cohort-level
+diagnostics</a></li>
+<li><a href="#35-co-selection-is-not-object-interchange"
+id="toc-35-co-selection-is-not-object-interchange">3.5 Co-selection is
+not object interchange</a></li>
+</ul></li>
+<li><a href="#4-distribution-build-identity"
+id="toc-4-distribution-build-identity">4. Distribution build
+identity</a></li>
+<li><a href="#5-packaging-constraints-a-cohort-imposes"
+id="toc-5-packaging-constraints-a-cohort-imposes">5. Packaging
+constraints a cohort imposes</a></li>
+<li><a href="#6-upgrade" id="toc-6-upgrade">6. Upgrade</a></li>
+<li><a href="#7-rollback" id="toc-7-rollback">7. Rollback</a></li>
+<li><a href="#8-conformance-obligations"
+id="toc-8-conformance-obligations">8. Conformance obligations</a></li>
+<li><a href="#9-open-decisions" id="toc-9-open-decisions">9. Open
+decisions</a></li>
+<li><a href="#10-cross-links" id="toc-10-cross-links">10.
+Cross-links</a></li>
+</ul>
+</nav>
+<p>Status: specification. The cohort concept, exact-name matching,
+per-domain validation, and the atomic complete-set rule in
+../draft-plan-reboot are ADOPTED as the target design; the implementing
+mechanisms are partial. Implementation status, source citations, test
+inventories, and prototype evidence for every rule below live in <a
+href="cohort.html">ledger/cohort</a>, which is non-normative.</p>
+<h2 id="scope">Scope</h2>
+<p>This document owns cohort identity, cohort membership, the
+consistency rules that govern co-selecting a set of providers, and
+cohort upgrade and rollback.</p>
+<h2 id="non-goals">Non-goals</h2>
+<p>Discovery, candidate ordering, and selection mechanics belong to <a
+href="broker.html">broker</a>. The manifest file, its schema, and its
+device/architecture representation belong to <a
+href="manifest.html">manifest</a>. Protocol identity, versioning, status
+taxonomy, argument ownership, object lifetime, and concurrency belong to
+<a href="provider-protocol.html">provider-protocol</a>. Lease and
+binding validity belong to <a
+href="provider-binding.html">provider-binding</a>. The public API/ABI
+belongs to <a href="facade.html">facade</a>. Module loading belongs to
+<a href="provider-module.html">provider-module</a>.</p>
+<p>This document does not define numerical or behavioral equivalence
+between cohorts. Selecting a complete cohort is a compatibility
+statement, not a correctness statement. It does not specify packaging
+tooling or distribution policy beyond the constraints a cohort places on
+them.</p>
+<h2 id="terminology">Terminology</h2>
+<p>Terms not defined here are used as defined in
+../draft-plan-reboot.</p>
+<p><strong>Cohort.</strong> A set of providers qualified to work
+together for a defined device, capability profile, protocol version, and
+distribution build. Members may be separate binaries with separate
+private contexts. Membership permits coordinated selection only.</p>
+<p><strong>Cohort identity.</strong> The string value that names a
+cohort, declared per provider entry in a manifest and carried onto the
+broker-issued lease.</p>
+<p><strong>Complete set.</strong> The leases, one per domain a consumer
+requires, that all carry the same cohort identity and all pass their
+per-domain validation.</p>
+<p><strong>Distribution build identity.</strong> A value identifying the
+coordinated build a set of artifacts was produced from. Distinct from
+cohort identity: see section 4.</p>
+<hr />
+<h1 id="1-cohort-identity">1. Cohort identity</h1>
+<h2 id="11-what-the-identity-asserts">1.1 What the identity asserts</h2>
+<p>A cohort identity is an assertion by the party that produced the
+manifest that every provider entry bearing that identity was built,
+packaged, and qualified as one set for the device profiles those entries
+declare. Nothing in the runtime verifies the assertion; it is trusted
+because the manifest is trusted (see <a
+href="manifest.html">manifest</a>).</p>
+<h2 id="12-matching">1.2 Matching</h2>
+<ul>
+<li>An implementation MUST match cohort identity by exact string
+equality and by nothing else: no normalization, no case folding, no
+prefix matching, no wildcard.</li>
+<li>An empty requested identity MUST match every entry, including
+entries that declare no cohort.</li>
+<li>A declared identity of the empty string MUST be read as "this
+provider declares no cohort", never as a cohort named "".</li>
+</ul>
+<h2 id="13-naming">1.3 Naming</h2>
+<ul>
+<li>A cohort identity MUST be a string.</li>
+<li>A cohort identity MUST be nonempty for any provider that
+participates in a multi-domain consumer path.</li>
+<li>A cohort identity MUST be stable for the life of a distribution
+build. Two artifacts that are not interchangeable MUST NOT share an
+identity.</li>
+<li>A cohort identity MUST NOT be reused across an incompatible rebuild
+(see section 6).</li>
+<li>A cohort identity SHOULD be scoped by producer so that two vendors
+shipping into one provider directory cannot collide.</li>
+</ul>
+<h2 id="14-cohort-identity-is-not-provider-identity">1.4 Cohort identity
+is not provider identity</h2>
+<p>Cohort identity and provider identity are independent axes and MUST
+NOT be conflated. One provider identity MAY appear in more than one
+cohort, and one cohort routinely contains several provider
+identities.</p>
+<ul>
+<li>A consumer that needs a specific implementation MUST constrain
+provider identity.</li>
+<li>A consumer that needs a coordinated set MUST constrain cohort
+identity.</li>
+<li>Constraining one MUST NOT be treated as constraining the other.</li>
+</ul>
+<h2 id="15-what-a-cohort-identity-is-not">1.5 What a cohort identity is
+not</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Concept</th>
+<th>Relationship to cohort identity</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Provider identity</td>
+<td>Names one implementation; a cohort contains many. Section 1.4.</td>
+</tr>
+<tr class="even">
+<td>Package version</td>
+<td>No runtime relationship. Per package, so it says nothing about
+cross-package qualification.</td>
+</tr>
+<tr class="odd">
+<td>Public ABI version</td>
+<td>Orthogonal. A cohort is a private-side grouping. A cohort change
+MUST NOT change the public ABI version, and a public ABI bump does not
+by itself imply a new cohort. See <a href="facade.html">facade</a>.</td>
+</tr>
+<tr class="even">
+<td>Protocol version</td>
+<td>Negotiated per candidate, independently of cohort. Both MUST hold;
+neither implies the other. See <a
+href="provider-protocol.html">provider-protocol</a>.</td>
+</tr>
+<tr class="odd">
+<td>ELF build ID</td>
+<td>Identifies exactly one binary and cannot express that several
+binaries belong together. It MAY support provenance checks; it MUST NOT
+be used as a cohort identity.</td>
+</tr>
+<tr class="even">
+<td>Distribution build identity</td>
+<td>The intended carrier for "produced by the same coordinated build".
+Section 4.</td>
+</tr>
+</tbody>
+</table>
+<p>A cohort identity MUST NOT be read as evidence of protocol
+compatibility, capability presence, device support, or build
+provenance.</p>
+<hr />
+<h1 id="2-membership">2. Membership</h1>
+<h2 id="21-the-required-domain-set-is-consumer-specified">2.1 The
+required domain set is consumer-specified</h2>
+<p>A cohort declares no domain inventory. The required domain set is a
+property of the consumer path.</p>
+<ul>
+<li>A consumer that requires more than one domain MUST declare its
+required domain set before selecting any of them, and MUST require one
+cohort identity across the whole set.</li>
+<li>A consumer that requires exactly one domain MAY leave cohort
+unconstrained.</li>
+</ul>
+<h2 id="22-device-bounding">2.2 Device bounding</h2>
+<p>Device identity and architecture matching are specified in <a
+href="broker.html">broker</a> and <a href="manifest.html">manifest</a>.
+The cohort-level obligations are:</p>
+<ul>
+<li>Every member of a cohort that a consumer requires for a given device
+MUST match that device's architecture. A cohort whose one member matches
+the device and whose another does not is an incomplete cohort for that
+device and MUST be rejected as a set, never partially accepted.</li>
+<li>A cohort MAY declare different architecture lists for different
+member domains. The consumer's effective device coverage is the
+intersection.</li>
+<li>Whether a member may advertise a wildcard architecture, and the rule
+binding a kernel-bearing member's advertised list to its compile
+targets, are specified in <a href="manifest.html">manifest</a>.</li>
+</ul>
+<h2 id="23-protocol-bounding">2.3 Protocol bounding</h2>
+<p>Cohort membership and protocol compatibility are independent gates
+and both MUST pass. The negotiation itself is specified in <a
+href="provider-protocol.html">provider-protocol</a>.</p>
+<ul>
+<li>Every member of a required cohort MUST independently satisfy
+protocol negotiation. A cohort identity MUST NOT waive, weaken, or
+substitute for any negotiation check.</li>
+<li>All members of one cohort SHOULD stamp the same protocol version
+tuple. Whether this is a requirement is TBD-4.</li>
+</ul>
+<h2 id="24-capability-bounding">2.4 Capability bounding</h2>
+<p>Capability advertisement is specified in <a
+href="provider-protocol.html">provider-protocol</a>. The cohort-level
+obligations are:</p>
+<ul>
+<li>A capability profile MUST be evaluated per domain, per candidate,
+before that candidate is committed to.</li>
+<li>A capability satisfied by one member of a cohort MUST NOT be
+credited to another member.</li>
+<li>A cohort identity MUST NOT be read as evidence of a capability.</li>
+</ul>
+<hr />
+<h1 id="3-co-selection">3. Co-selection</h1>
+<h2 id="31-atomicity">3.1 Atomicity</h2>
+<p>A consumer that requires N domains under one cohort MUST acquire all
+N or none. It MUST NOT create any provider context, and MUST NOT return
+a public object to the caller, until every required domain in the same
+cohort has been selected and validated.</p>
+<p>The failure this prevents is silent. If one domain is committed
+before its sibling is checked, a missing sibling degrades into a
+partially initialized public object whose behavior differs from the
+qualified configuration, and the divergence surfaces later as a
+numerical or performance anomaly rather than as a startup error.</p>
+<pre class="mermaid"><code>flowchart TD
+    A[Consumer requires domain set D for device K] --&gt; B[Enumerate candidate cohorts for primary domain, K]
+    B --&gt; C{Any cohort left?}
+    C -- no --&gt; Z[Reject: no complete cohort]
+    C -- yes --&gt; D[Take next cohort C in deterministic order]
+    D --&gt; E[Select primary domain, K, prefix, C]
+    E --&gt; F{Protocol, callbacks, capabilities OK?}
+    F -- no --&gt; C
+    F -- yes --&gt; G[Select each dependent domain, K, prefix, C]
+    G --&gt; H{All dependents present and valid?}
+    H -- no --&gt; C
+    H -- yes --&gt; I[Create provider contexts]
+    I --&gt; J{All contexts created?}
+    J -- no --&gt; K[Destroy partial contexts, release leases]
+    K --&gt; C
+    J -- yes --&gt; L[Pin leases and contexts to the public object]</code></pre>
+<h2 id="32-requirements">3.2 Requirements</h2>
+<ul>
+<li>A multi-domain consumer MUST enumerate cohorts and evaluate each as
+a whole, in the deterministic candidate order defined by <a
+href="broker.html">broker</a>. It MUST NOT commit to the first
+primary-domain candidate and then hope its dependents exist.</li>
+<li>Failure to complete a cohort MUST advance to the next candidate
+cohort, not fail the whole selection, until candidates are
+exhausted.</li>
+<li>Exhaustion MUST be an error that names the requested domain set, the
+device, and the reason each candidate cohort was rejected (section
+3.4).</li>
+<li>Partial construction MUST unwind. Any provider context created while
+assembling a cohort that then fails MUST be destroyed before the next
+cohort is tried.</li>
+<li>A consumer MUST NOT relax to a single-domain path because the
+multi-domain path was incomplete, unless that relaxation is an
+explicitly declared policy of that consumer, decided before selection
+rather than as recovery from a failed selection.</li>
+<li>Cohort enumeration order and the rank cohort identity holds within
+it are specified in <a href="broker.html">broker</a>. A distribution
+that wants one cohort preferred MUST express that with entry priority,
+never by relying on lexical cohort order.</li>
+</ul>
+<h2 id="33-the-selection-is-final-for-the-object">3.3 The selection is
+final for the object</h2>
+<p>Lease validity and retention are specified in <a
+href="provider-binding.html">provider-binding</a>. The cohort-level
+obligations are:</p>
+<ul>
+<li>A public object MUST retain every lease of its cohort for its whole
+lifetime, not only the primary domain's lease. It MUST NOT silently move
+to a different cohort, provider, or module.</li>
+<li>Cohort identity MUST be observable from an established public object
+for diagnostic purposes.</li>
+<li>Release MUST run in dependency order: a provider context MUST be
+destroyed before any service binding it borrowed from a cohort
+sibling.</li>
+<li>Whether deferred selection is permitted at all is an open question
+owned by <a
+href="architecture-component-model.html">architecture-component-model</a>
+X24. This document MUST NOT be read as granting that permission.</li>
+</ul>
+<h2 id="34-cohort-level-diagnostics">3.4 Cohort-level diagnostics</h2>
+<p>The failure this prevents is a cohort selection that fails with a
+single unhelpful line, leaving an operator unable to tell whether the
+cause is a missing package, a wrong architecture, an old protocol, or a
+missing capability bit. Per-candidate rejection diagnostics are owned by
+<a href="broker.html">broker</a>; the cohort-level obligations are:</p>
+<ul>
+<li>A cohort-level failure MUST report the requested domain set, the
+device architecture and ordinal, the cohorts enumerated, and for each
+cohort the domain that failed and why.</li>
+<li>The four rejection classes MUST be distinguishable in the message:
+no cohort candidate at all; cohort present but a required domain
+missing; domain present but protocol incompatible; domain and protocol
+fine but a required capability bit absent.</li>
+<li>Diagnostics MUST NOT change selection.</li>
+</ul>
+<h2 id="35-co-selection-is-not-object-interchange">3.5 Co-selection is
+not object interchange</h2>
+<p>This is the rule most likely to be misread. Cohort membership permits
+coordinated <strong>selection</strong>. It does not make provider
+objects interchangeable.</p>
+<ul>
+<li>An opaque provider context obtained from one provider MUST NOT be
+passed to another provider, even a cohort sibling. Every domain protocol
+represents its context as an untyped pointer, so nothing in the type
+system prevents the mistake.</li>
+<li>A cohort key carried in a cross-provider service reference is
+broker-defined opaque identity. A provider MAY compare or copy it and
+MUST NOT use it to infer provider state. It MUST NOT be treated as an
+authenticator.</li>
+<li>How a cross-provider service reference is represented,
+authenticated, validated, and revoked is specified in <a
+href="provider-binding.html">provider-binding</a>; this document states
+no rules of its own about it.</li>
+</ul>
+<hr />
+<h1 id="4-distribution-build-identity">4. Distribution build
+identity</h1>
+<p>Cohort identity says "qualified together". Distribution build
+identity says "produced by one coordinated build". A cohort needs both,
+because an identity reused across a rebuild pairs mismatched binaries
+under exact-name matching without any check noticing.</p>
+<ul>
+<li>Each provider MUST report a distribution build identity that is
+equal across all members of one coordinated build and different across
+any two builds that are not interchangeable.</li>
+<li>The broker MUST reject a cohort whose members do not agree on that
+identity, and MUST do so before returning a public context.</li>
+<li>The mismatch MUST be a rejection with a diagnostic, not a silent
+downgrade to a single-domain path.</li>
+<li>A distribution build identity MUST NOT be derived from an ELF build
+ID, because a build ID is per binary and cannot express set
+membership.</li>
+<li>The manifest schema MUST gain a place to declare or cross-check the
+expected identity, or the rule MUST be defined as response-only.</li>
+</ul>
+<p>The whole of this section is blocked on TBD-1 and TBD-2.</p>
+<hr />
+<h1 id="5-packaging-constraints-a-cohort-imposes">5. Packaging
+constraints a cohort imposes</h1>
+<p>Packaging policy is out of scope; these are the constraints cohort
+membership places on it.</p>
+<ul>
+<li>A package MUST NOT ship a partial cohort. If any entry declares
+cohort C and any consumer path requires domains D1 and D2 under one
+cohort, the installed set MUST contain a C-labelled entry for both,
+matching on architecture.</li>
+<li>Package dependency metadata MUST make the members of a cohort
+co-installable and co-upgradable as a unit.</li>
+<li>Two cohorts MUST be able to coexist in one provider directory
+without interfering.</li>
+<li>Cross-manifest duplicate provider-identity detection MUST exist
+before multiple cohorts are shipped into one directory (TBD-10).</li>
+</ul>
+<hr />
+<h1 id="6-upgrade">6. Upgrade</h1>
+<ul>
+<li>Upgrading a cohort MUST be atomic from the perspective of a process
+that starts after the upgrade: the installed set MUST never present a
+mixture of old and new cohort members under one identity.</li>
+<li>A rebuild that changes any member's private behavior in a way that
+is not compatible with the other members MUST take a new cohort
+identity.</li>
+<li>A rebuild that preserves semantics for every member MAY retain the
+cohort identity; the distribution build identity (section 4) is what
+then distinguishes the two builds.</li>
+<li>An in-flight process MUST NOT be affected by an on-disk upgrade. A
+cohort selection pinned under section 3.3 stays pinned.</li>
+<li>Two cohort generations MAY be installed simultaneously only if
+selection can distinguish them.</li>
+</ul>
+<hr />
+<h1 id="7-rollback">7. Rollback</h1>
+<ul>
+<li>Rolling back a cohort MUST restore a complete set. A rollback that
+removes one new member while leaving another is an incomplete cohort and
+MUST fail selection loudly rather than degrade.</li>
+<li>Rollback MUST NOT depend on cohort identities being ordered. Nothing
+may assume that a newer cohort sorts after an older one.</li>
+<li>After a rollback, a newly started process MUST select the
+rolled-back cohort. Processes already running keep their pinned
+selection, which is correct and MUST NOT be treated as a rollback
+failure.</li>
+<li>A rollback that reintroduces a previously used cohort identity with
+different binaries is the identity-reuse hazard of section 6 and MUST be
+prevented by the same rule.</li>
+</ul>
+<hr />
+<h1 id="8-conformance-obligations">8. Conformance obligations</h1>
+<p>An implementation claiming conformance with this document MUST:</p>
+<ol type="1">
+<li>Match cohort identity by exact string equality and by nothing
+else.</li>
+<li>Evaluate every required domain of a cohort before creating any
+provider context.</li>
+<li>Destroy any partially created context before evaluating the next
+cohort.</li>
+<li>Enumerate cohorts in the deterministic candidate order defined by <a
+href="broker.html">broker</a>.</li>
+<li>Report, per rejected cohort, which domain failed and in which of the
+four classes of section 3.4.</li>
+<li>Pin every lease of the accepted cohort to the public object for that
+object's lifetime.</li>
+<li>Refuse to pass an opaque object from one provider to another.</li>
+<li>Never treat cohort identity as evidence of protocol compatibility,
+capability presence, device support, or build provenance.</li>
+</ol>
+<hr />
+<h1 id="9-open-decisions">9. Open decisions</h1>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Question</th>
+<th>What is blocked</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Does distribution build identity become a selection constraint, and
+what does a mismatch do?</td>
+<td>Section 4 in full</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>What value is a distribution build identity: release stamp, source
+revision, or package version?</td>
+<td>TBD-1; the identity-reuse rule of section 6</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Is there a grammar for cohort identity strings (charset, length,
+required producer prefix), and is it validated the way architecture
+values are?</td>
+<td>Section 1.3; multi-vendor coexistence</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Is one protocol version tuple across all members of a cohort a
+requirement or a description of the current single-release state?</td>
+<td>The SHOULD in section 2.3; whether a mixed-minor cohort is
+legal</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Should the required domain set be declarative and checkable at
+package time rather than implicit in consumer code?</td>
+<td>Section 2.1; the partial-cohort packaging rule of section 5, which
+is unenforceable without a declaration</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Should single-domain consumer paths that are in practice paired
+become cohort-constrained?</td>
+<td>Whether section 3.1 is universal or applies only to declared
+multi-domain paths</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Must a multi-domain consumer enumerate cohorts, or may it propagate
+the cohort of an unconstrained first selection?</td>
+<td>Fallback behavior when the top-ranked primary candidate's cohort has
+no member for a dependent domain</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Is cross-manifest duplicate provider identity legal, or a defect to
+be rejected?</td>
+<td>The coexistence rule of section 5</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>Should the package artifact check read cohort identity and reject a
+partial cohort?</td>
+<td>The packaging rule of section 5</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Is there a cohort rollback test obligation?</td>
+<td>Section 7</td>
+</tr>
+</tbody>
+</table>
+<p>One obligation in this document may not be cohort-owned and is kept
+here pending an owner decision: the observability of cohort identity
+from an established object in section 3.3 (candidate owner <a
+href="facade.html">facade</a>). Open decisions raised by the prior
+revision of this file that are not cohort contracts (capability bit
+allocation, public handle validation, lease retention lifetime,
+multi-vendor discovery, feature-mask matching, alternate query symbols,
+recording-provider scope, test-plan questions) are recorded in <a
+href="cohort.html">ledger/cohort</a> for reassignment to their owning
+specs.</p>
+<hr />
+<h1 id="10-cross-links">10. Cross-links</h1>
+<ul>
+<li>../draft-plan-reboot - parent concepts document.</li>
+<li><a
+href="architecture-component-model.html">architecture-component-model</a>
+- where the cohort sits.</li>
+<li><a href="broker.html">broker</a> - enumeration, ordering,
+validation, selection.</li>
+<li><a href="manifest.html">manifest</a> - where the cohort key is
+declared.</li>
+<li><a href="provider-protocol.html">provider-protocol</a> -
+negotiation, capabilities, object lifetime.</li>
+<li><a href="provider-binding.html">provider-binding</a> - lease
+validity and retention.</li>
+<li><a href="facade.html">facade</a> - the public identity a selection
+is made on behalf of.</li>
+<li><a href="provider.html">provider</a> - provider identity,
+distinguished in section 1.4.</li>
+<li><a href="provider-module.html">provider-module</a> - the loading
+unit; one cohort spans several.</li>
+<li><a href="cohort.html">ledger/cohort</a> - non-normative evidence,
+status, and citations.</li>
+</ul>
+</body>
+</html>

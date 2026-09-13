@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Provider protocol specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Provider protocol specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology" id="toc-terminology">Terminology</a></li>
+<li><a href="#1-c-abi" id="toc-1-c-abi">1. C ABI</a></li>
+<li><a href="#2-query-and-bootstrap-contract"
+id="toc-2-query-and-bootstrap-contract">2. Query and bootstrap
+contract</a>
+<ul>
+<li><a href="#21-the-exported-symbol"
+id="toc-21-the-exported-symbol">2.1 The exported symbol</a></li>
+<li><a href="#22-query-call-sequence"
+id="toc-22-query-call-sequence">2.2 Query call sequence</a></li>
+</ul></li>
+<li><a href="#3-domains" id="toc-3-domains">3. Domains</a></li>
+<li><a href="#4-request-and-response-records"
+id="toc-4-request-and-response-records">4. Request and response
+records</a>
+<ul>
+<li><a href="#41-the-abi-header" id="toc-41-the-abi-header">4.1 The ABI
+header</a></li>
+<li><a href="#42-request-record" id="toc-42-request-record">4.2 Request
+record</a></li>
+<li><a href="#43-response-record" id="toc-43-response-record">4.3
+Response record</a></li>
+<li><a href="#44-well-formedness-of-a-response-and-its-table"
+id="toc-44-well-formedness-of-a-response-and-its-table">4.4
+Well-formedness of a response and its table</a></li>
+</ul></li>
+<li><a href="#5-dispatch-tables" id="toc-5-dispatch-tables">5. Dispatch
+tables</a>
+<ul>
+<li><a href="#51-shape" id="toc-51-shape">5.1 Shape</a></li>
+<li><a href="#52-table-inventory" id="toc-52-table-inventory">5.2 Table
+inventory</a></li>
+<li><a href="#53-mandatory-prefix" id="toc-53-mandatory-prefix">5.3
+Mandatory prefix</a></li>
+<li><a href="#54-required-and-optional-callbacks"
+id="toc-54-required-and-optional-callbacks">5.4 Required and optional
+callbacks</a></li>
+</ul></li>
+<li><a href="#6-operation-parameter-and-result-records"
+id="toc-6-operation-parameter-and-result-records">6. Operation parameter
+and result records</a></li>
+<li><a href="#7-opaque-contexts-ownership-and-lifetime"
+id="toc-7-opaque-contexts-ownership-and-lifetime">7. Opaque contexts,
+ownership, and lifetime</a>
+<ul>
+<li><a href="#71-context-representation"
+id="toc-71-context-representation">7.1 Context representation</a></li>
+<li><a href="#72-table-and-module-lifetime"
+id="toc-72-table-and-module-lifetime">7.2 Table and module
+lifetime</a></li>
+<li><a href="#73-pointer-ownership-across-a-call"
+id="toc-73-pointer-ownership-across-a-call">7.3 Pointer ownership across
+a call</a></li>
+<li><a href="#74-creation-and-destruction"
+id="toc-74-creation-and-destruction">7.4 Creation and
+destruction</a></li>
+</ul></li>
+<li><a href="#8-host-services-device-key-and-status"
+id="toc-8-host-services-device-key-and-status">8. Host services, device
+key, and status</a>
+<ul>
+<li><a href="#81-host-services-record"
+id="toc-81-host-services-record">8.1 Host services record</a></li>
+<li><a href="#82-device-key" id="toc-82-device-key">8.2 Device
+key</a></li>
+<li><a href="#83-status-taxonomy" id="toc-83-status-taxonomy">8.3 Status
+taxonomy</a></li>
+</ul></li>
+<li><a href="#9-capability-negotiation"
+id="toc-9-capability-negotiation">9. Capability negotiation</a></li>
+<li><a href="#10-version-evolution" id="toc-10-version-evolution">10.
+Version evolution</a></li>
+<li><a href="#11-concurrency" id="toc-11-concurrency">11.
+Concurrency</a></li>
+<li><a href="#12-boundary-to-the-rocblas-private-backend-contract"
+id="toc-12-boundary-to-the-rocblas-private-backend-contract">12.
+Boundary to the rocBLAS private backend contract</a></li>
+<li><a href="#open-decisions-tbd" id="toc-open-decisions-tbd">Open
+decisions (TBD)</a></li>
+<li><a href="#cross-links" id="toc-cross-links">Cross-links</a></li>
+</ul>
+</nav>
+<p>Normative specification of the private ABI between a compatibility
+facade, a broker, and a provider. It is a distribution-private contract,
+not a public third-party ABI: a provider is part of the same
+distribution as the facade that loads it. Implementation status, source
+citations, test inventory, and prototype measurements live in <a
+href="provider-protocol.html">ledger/provider-protocol</a>.</p>
+<h2 id="scope">Scope</h2>
+<p>This specification owns: the versioned bootstrap query (exported
+symbol, request record, response record); domain identity; dispatch
+table shape, layout rules, and the mandatory prefix; operation parameter
+and result records; the status taxonomy, defined once here and
+referenced by every other specification; argument ownership, object
+lifetime, and concurrency for protocol calls; capability and profile
+negotiation carried on the boundary; and the ABI version constants and
+compatibility-check rules applied to a candidate.</p>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+<li>Manifest syntax, discovery, trust, candidate ordering: <a
+href="manifest.html">manifest</a>, <a
+href="broker.html">broker</a>.</li>
+<li>The public API or ABI of any math library: <a
+href="facade.html">facade</a>.</li>
+<li>Translating a record onto an implementation, and mapping its errors
+onto the section 8 taxonomy: <a
+href="provider-adapter.html">provider-adapter</a>.</li>
+<li>The binding object, its validity and invalidation: <a
+href="provider-binding.html">provider-binding</a>.</li>
+<li>Shared-object identity, load, and unload: <a
+href="provider-module.html">provider-module</a>.</li>
+<li>Numerical semantics. Structural closure across the boundary is not
+numerical equivalence.</li>
+</ul>
+<h2 id="terminology">Terminology</h2>
+<p>Terms from ../draft-plan-reboot are used unchanged. Local terms:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Bootstrap query</td>
+<td>The single call through the exported query symbol that exchanges a
+request record for a response record.</td>
+</tr>
+<tr class="even">
+<td>Dispatch table</td>
+<td>A fixed-layout C struct of function pointers for one domain,
+published by the response. The parent document calls this the operation
+table; the two names denote the same record.</td>
+</tr>
+<tr class="odd">
+<td>Mandatory prefix</td>
+<td>The leading byte range of a dispatch table that a consumer requires
+through <code>required_table_size</code>.</td>
+</tr>
+<tr class="even">
+<td>Transport status</td>
+<td>The <code>rocm_interfaces_status</code> value reporting whether a
+call crossed the protocol boundary.</td>
+</tr>
+<tr class="odd">
+<td>Semantic status</td>
+<td>The domain-native status reporting what the operation did.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-c-abi">1. C ABI</h2>
+<p><strong>1.1</strong> Every protocol declaration MUST be C-linkage,
+wrapped in <code>extern "C"</code> under <code>__cplusplus</code>.</p>
+<p><strong>1.2</strong> Every exported protocol entry point MUST be
+annotated <code>ROCM_INTERFACES_EXPORT</code>, and every protocol
+function-pointer typedef MUST carry <code>ROCM_INTERFACES_CALL</code>.
+Both macros are defined in <code>common.h</code>. The rocBLAS private
+backend contract of section 12 is the one declared exception; it uses
+its own export macro and no calling-convention macro (TBD-15).</p>
+<p><strong>1.3</strong> Protocol records MUST be fixed-layout C
+aggregates. They MUST NOT contain C++ types, virtual functions,
+references, or anything whose layout depends on a compiler flag. Scalar
+domain typedefs and enums from the imitated library
+(<code>rocblas_status</code>, <code>rocblas_datatype</code>,
+<code>rocblas_operation</code>, <code>rocrand_status</code>,
+<code>hipblasStatus_t</code>, and similar) MAY appear by value as record
+fields; they are reused rather than mirrored.</p>
+<p><strong>1.4</strong> Implementation handle types MUST NOT cross the
+boundary. <code>rocblas_handle</code>, <code>hipblasLtHandle_t</code>,
+<code>hipblasLtMatmulAlgo_t</code>, <code>hipStream_t</code>,
+<code>hipEvent_t</code>, <code>rocrand_generator</code>, and the like
+MUST be erased to <code>void*</code> or to an opaque fixed-width token
+array.</p>
+<p><strong>1.5</strong> No C++ exception MAY cross a protocol boundary
+in either direction.</p>
+<ul>
+<li>The bootstrap query function MUST be <code>noexcept</code> and MUST
+convert every failure into a <code>rocm_interfaces_status</code>.</li>
+<li>Dispatch entries SHOULD be <code>noexcept</code> and MUST translate
+any escape into a domain status. Whether <code>noexcept</code> is
+mandatory on every slot is TBD-1.</li>
+<li>A callback reached through a service reference MUST NOT let an
+exception escape.</li>
+</ul>
+<p><strong>1.6</strong> A protocol callback MUST NOT assume the caller
+performed alignment-safe access on its behalf. A reader of
+provider-supplied memory MUST validate the advertised byte boundary
+before any read, and MUST NOT perform a typed load at an offset the
+provider controls until that boundary check has passed.</p>
+<h2 id="2-query-and-bootstrap-contract">2. Query and bootstrap
+contract</h2>
+<h3 id="21-the-exported-symbol">2.1 The exported symbol</h3>
+<p><strong>2.1.1</strong> The protocol has exactly one entry point: the
+query symbol whose default name is
+<code>ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL</code>, the string literal
+<code>"rocm_interfaces_provider_query_v1"</code>. A provider module MUST
+expose it; the module's export surface is specified in <a
+href="provider-module.html">provider-module</a>. Its type is:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> rocm_interfaces_status<span class="op">(</span>ROCM_INTERFACES_CALL<span class="op">*</span> rocm_interfaces_provider_query_fn<span class="op">)(</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> rocm_interfaces_provider_request<span class="op">*</span> request<span class="op">,</span> rocm_interfaces_provider_response<span class="op">*</span> response<span class="op">);</span></span></code></pre></div>
+<p><strong>2.1.2</strong> A manifest entry MAY name a different symbol
+through the optional <code>query_symbol</code> key. This conflicts with
+2.1.1, because a module built under the provider version script hides
+every other name: TBD-2.</p>
+<p><strong>2.1.3</strong> The bootstrap query MUST NOT be conflated with
+the rocBLAS private backend query, which is a separate contract with its
+own symbol, version macros, and header layout (section 12).</p>
+<h3 id="22-query-call-sequence">2.2 Query call sequence</h3>
+<pre class="mermaid"><code>sequenceDiagram
+    participant F as Facade
+    participant B as Broker
+    participant M as Provider module
+    F-&gt;&gt;B: select(domain, architecture, required_table_size, cohort, required_abi_minor)
+    B-&gt;&gt;M: load module and resolve query symbol
+    B-&gt;&gt;M: query(request{header, domain, required_table_size, host})
+    M--&gt;&gt;B: status + response{header, provider_id, build_id, table, table_size, capability_mask}
+    B-&gt;&gt;B: response header checks, table checks, identity check
+    B--&gt;&gt;F: binding (table pointer, provider_id, cohort_id, capability_mask)
+    F-&gt;&gt;F: capability and required-callback checks
+    F-&gt;&gt;M: table-&gt;create_context(options, &amp;context)</code></pre>
+<p><strong>2.2.1</strong> The caller of the query MUST stamp the request
+header itself: <code>header.abi_minor</code> carries the minor the
+consumer requires and <code>required_table_size</code> carries the
+prefix it requires. A provider MUST observe exactly the values the
+consumer asked for.</p>
+<p><strong>2.2.2</strong> A provider query MUST validate, in this order,
+before publishing a table: (1) null <code>request</code> or
+<code>response</code>, returning
+<code>ROCM_INTERFACES_STATUS_INVALID_ARGUMENT</code>; (2) the request
+header; (3) the response header; (4) the host-services header when
+<code>request-&gt;host</code> is non-null, each returning
+<code>ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI</code>; (5) the requested
+domain, returning <code>ROCM_INTERFACES_STATUS_NOT_SUPPORTED</code>; (6)
+<code>required_table_size</code>, returning
+<code>ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI</code>.</p>
+<p><strong>2.2.3</strong> A provider MUST reject a
+<code>required_table_size</code> larger than the table it can publish,
+with <code>ROCM_INTERFACES_STATUS_INCOMPATIBLE_ABI</code>. It MUST NOT
+publish a shorter table and let the consumer discover the shortfall.</p>
+<p><strong>2.2.4</strong> A provider MUST NOT treat a query as a
+commitment. The query MAY be called repeatedly, from several threads,
+and after an earlier failure. No party MAY cache a negative verdict: a
+transiently failing query MUST be retried on a later selection.</p>
+<p><strong>2.2.5</strong> A provider SHOULD defer expensive backend
+initialization out of the query.</p>
+<p><strong>2.2.6</strong> <code>request-&gt;host</code> MAY be null on
+the wire, and a provider MUST NOT dereference it without checking.
+Whether a provider MAY additionally require a non-null host is open and
+MUST NOT be answered differently by different specifications; the shared
+entry is <a
+href="architecture-component-model.html">architecture-component-model</a>
+X3.</p>
+<h2 id="3-domains">3. Domains</h2>
+<p><strong>3.1</strong> A bootstrap query is scoped to exactly one
+domain. The domain enumeration is
+<code>rocm_interfaces_domain</code>:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Enumerator</th>
+<th>Value</th>
+<th>Manifest string</th>
+<th>Dispatch table type</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ROCM_INTERFACES_DOMAIN_BLAS</code></td>
+<td>1</td>
+<td><code>blas</code></td>
+<td><code>rocm_blas_provider_v1</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_INTERFACES_DOMAIN_SOLVER</code></td>
+<td>2</td>
+<td><code>solver</code></td>
+<td><code>rocm_solver_provider_v1</code></td>
+</tr>
+<tr class="odd">
+<td><code>ROCM_INTERFACES_DOMAIN_RAND</code></td>
+<td>3</td>
+<td><code>rand</code></td>
+<td><code>rocm_rand_provider_v1</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_INTERFACES_DOMAIN_BLASLT</code></td>
+<td>4</td>
+<td><code>blaslt</code></td>
+<td><code>rocm_blaslt_provider_v1</code>, extended by
+<code>rocm_rocblas_blaslt_provider_v1</code> and
+<code>rocm_hipblaslt_ai_gemm_provider_v1</code></td>
+</tr>
+<tr class="odd">
+<td><code>ROCM_INTERFACES_DOMAIN_ROCBLAS_BRIDGE</code></td>
+<td>5</td>
+<td><code>rocblas_bridge</code></td>
+<td><code>rocm_rocblas_bridge_v1</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_INTERFACES_DOMAIN_BLAS_V2</code></td>
+<td>6</td>
+<td><code>blas_v2</code></td>
+<td><code>rocm_blas_v2_provider</code></td>
+</tr>
+</tbody>
+</table>
+<p>The manifest strings in this table are the complete accepted
+vocabulary; any other string MUST be rejected as an unknown domain.</p>
+<p><strong>3.2</strong> Domain values MUST be append-only. A value MUST
+NOT be reused for a different contract.</p>
+<p><strong>3.3</strong> Domains are independent contracts. A provider
+MUST NOT assume that a record shape shared by name between two domains
+is shared by layout or by enumerator value.
+<code>rocm_blas_batch_kind</code> and
+<code>rocm_blas_v2_batch_kind</code> disagree by one on every
+enumerator; no document or adapter MAY treat one batch encoding as
+covering both protocols.</p>
+<p><strong>3.4</strong> A domain's dispatch table type MAY be generated
+rather than hand-declared. A generated table is subject to every rule in
+this specification.</p>
+<h2 id="4-request-and-response-records">4. Request and response
+records</h2>
+<h3 id="41-the-abi-header">4.1 The ABI header</h3>
+<p><strong>4.1.1</strong> Every extensible protocol record and every
+dispatch table, except the rocBLAS private backend table of section 12,
+MUST begin with:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> <span class="kw">struct</span> rocm_interfaces_abi_header <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> struct_size<span class="op">;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint16_t</span> abi_major<span class="op">;</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint16_t</span> abi_minor<span class="op">;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> rocm_interfaces_abi_header<span class="op">;</span></span></code></pre></div>
+<p><strong>4.1.2</strong> <code>struct_size</code> MUST be the byte
+count of the record as the writer built it. A reader MUST NOT read a
+field whose end offset exceeds <code>struct_size</code>, and MUST leave
+its own prior state untouched for a field the writer did not supply.</p>
+<h3 id="42-request-record">4.2 Request record</h3>
+<div class="sourceCode" id="cb4"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> <span class="kw">struct</span> rocm_interfaces_provider_request <span class="op">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_abi_header header<span class="op">;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_domain domain<span class="op">;</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> required_table_size<span class="op">;</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> rocm_interfaces_host_services<span class="op">*</span> host<span class="op">;</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> rocm_interfaces_provider_request<span class="op">;</span></span></code></pre></div>
+<ul>
+<li><code>header.abi_minor</code> carries the semantic level the
+consumer requires, not the level it was built at.</li>
+<li><code>required_table_size</code> carries the mandatory prefix in
+bytes and MUST be at least
+<code>sizeof(rocm_interfaces_abi_header)</code>. A smaller value MUST be
+rejected before any candidate is queried.</li>
+<li><code>host</code> MAY be null (2.2.6). The record is
+<code>const</code> to the provider; a provider MUST NOT write through
+it.</li>
+</ul>
+<h3 id="43-response-record">4.3 Response record</h3>
+<div class="sourceCode" id="cb5"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> <span class="kw">struct</span> rocm_interfaces_provider_response <span class="op">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_abi_header header<span class="op">;</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> <span class="dt">char</span><span class="op">*</span> provider_id<span class="op">;</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> <span class="dt">char</span><span class="op">*</span> build_id<span class="op">;</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> <span class="dt">void</span><span class="op">*</span> dispatch_table<span class="op">;</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> dispatch_table_size<span class="op">;</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint64_t</span> capability_mask<span class="op">;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> rocm_interfaces_provider_response<span class="op">;</span></span></code></pre></div>
+<p><strong>4.3.1</strong> <code>provider_id</code> MUST be non-null and
+nonempty, and MUST equal the configured identity when the manifest entry
+declares one.</p>
+<p><strong>4.3.2</strong> <code>provider_id</code> and
+<code>build_id</code> MUST point at storage with static lifetime.</p>
+<p><strong>4.3.3</strong> <code>build_id</code> identifies a
+semantics-preserving rebuild. Every provider MUST write it. Whether it
+becomes a selection or compatibility constraint is TBD-3.</p>
+<p><strong>4.3.4</strong> <code>dispatch_table</code> MUST point at
+storage that outlives every binding taken on it, and a provider MUST NOT
+mutate a published table: the consumer retains the pointer and calls
+through it for the life of the binding.</p>
+<h3 id="44-well-formedness-of-a-response-and-its-table">4.4
+Well-formedness of a response and its table</h3>
+<p>A response and the dispatch table it publishes are well-formed only
+when every row below holds. A provider MUST NOT publish a response that
+violates one. The order in which a broker applies these as a
+compatibility-check sequence, and its rejection diagnostics and failure
+behavior, are specified in <a href="broker.html">broker</a>; a reader
+MUST validate the advertised byte boundaries before any read of provider
+memory (1.6).</p>
+<table>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Well-formed when</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>query return</td>
+<td><code>query()</code> returned SUCCESS; on any other status the
+response publishes nothing</td>
+</tr>
+<tr class="even">
+<td><code>response.header.struct_size</code></td>
+<td>at least <code>sizeof(rocm_interfaces_provider_response)</code></td>
+</tr>
+<tr class="odd">
+<td><code>response.header.abi_major</code></td>
+<td>equals <code>ROCM_INTERFACES_ABI_MAJOR</code></td>
+</tr>
+<tr class="even">
+<td><code>response.header.abi_minor</code></td>
+<td>at least the minor the consumer requested</td>
+</tr>
+<tr class="odd">
+<td><code>dispatch_table</code></td>
+<td>non-null</td>
+</tr>
+<tr class="even">
+<td><code>dispatch_table_size</code></td>
+<td>at least <code>sizeof(rocm_interfaces_abi_header)</code>, and at
+least <code>required_table_size</code></td>
+</tr>
+<tr class="odd">
+<td><code>table_header.struct_size</code></td>
+<td>equals <code>response.dispatch_table_size</code>, and is at least
+<code>required_table_size</code></td>
+</tr>
+<tr class="even">
+<td><code>table_header.abi_major</code></td>
+<td>equals <code>ROCM_INTERFACES_ABI_MAJOR</code></td>
+</tr>
+<tr class="odd">
+<td><code>table_header.abi_minor</code></td>
+<td>at least the minor the consumer requested</td>
+</tr>
+<tr class="even">
+<td>version pair</td>
+<td>table <code>(abi_major, abi_minor)</code> equals response
+<code>(abi_major, abi_minor)</code></td>
+</tr>
+<tr class="odd">
+<td><code>provider_id</code></td>
+<td>non-null, nonempty, and equal to the configured identity when one is
+declared (4.3.1)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>4.4.1</strong> A consumer MUST NOT request semantics newer
+than the headers it was built from:
+<code>required_abi_minor &gt; ROCM_INTERFACES_ABI_MINOR</code> MUST be
+refused before any candidate is queried.</p>
+<h2 id="5-dispatch-tables">5. Dispatch tables</h2>
+<h3 id="51-shape">5.1 Shape</h3>
+<p><strong>5.1.1</strong> A dispatch table MUST be a fixed-layout struct
+whose first member is <code>rocm_interfaces_abi_header</code>, followed
+by function pointers in a fixed declared order.</p>
+<p><strong>5.1.2</strong> <code>table.header.struct_size</code> MUST be
+the complete table byte count and MUST equal
+<code>response.dispatch_table_size</code>. It MUST NOT be the consumer's
+requested prefix size.</p>
+<h3 id="52-table-inventory">5.2 Table inventory</h3>
+<p>One table type per domain, named in 3.1. The declared member sequence
+of each is fixed by 5.1.1 and is listed in <a
+href="provider-protocol.html">ledger/provider-protocol</a>.</p>
+<h3 id="53-mandatory-prefix">5.3 Mandatory prefix</h3>
+<p><strong>5.3.1</strong> A consumer declares the prefix it requires
+through <code>required_table_size</code>. A provider MUST supply at
+least that prefix or fail the query.</p>
+<p><strong>5.3.2</strong> Once a prefix is released, every byte of it
+MUST remain identical in size, offset, field type, callback signature,
+calling convention, and semantics. New entries MUST be appended.</p>
+<p><strong>5.3.3</strong> The RAND mandatory prefix ends immediately
+before <code>initialize_generator</code>: it covers
+<code>create_generator</code>, <code>destroy_generator</code>,
+<code>configure_generator</code>, and <code>generate</code>.</p>
+<p><strong>5.3.4</strong> The BLASLt extension chain makes its prefixes
+structural: <code>rocm_rocblas_blaslt_provider_v1</code> MUST embed
+<code>rocm_blaslt_provider_v1</code> at offset zero as its first member
+<code>legacy</code>, and <code>rocm_hipblaslt_ai_gemm_provider_v1</code>
+MUST embed <code>rocm_rocblas_blaslt_provider_v1</code> at offset zero
+as its first member <code>service</code>. A provider advertising the
+borrowed-service capability MUST return at least the complete legacy
+prefix.</p>
+<p><strong>5.3.5</strong> A new protocol generation SHOULD express its
+frozen prefix structurally (embedded prefix structs) or with per-member
+ABI-minor annotations in the header, not in prose. Which members of
+<code>rocm_rand_provider_v1</code> and
+<code>rocm_solver_provider_v1</code> constitute the frozen prefix is not
+expressed in the headers: TBD-4.</p>
+<p><strong>5.3.6</strong> The advertised prefix of
+<code>rocm_solver_blas_services_v1</code>, the BLAS services handed to a
+solver provider, ends at <code>triangular_matrix</code>. A consumer MUST
+NOT read or advertise a newer BLAS-v2 tail that selection did not
+guarantee. Whether <code>matrix_transform</code> is deliberately outside
+that prefix, and whether the boundary MUST be marked in
+<code>solver.h</code>, is TBD-5.</p>
+<h3 id="54-required-and-optional-callbacks">5.4 Required and optional
+callbacks</h3>
+<p><strong>5.4.1</strong> Generic selection MUST NOT inspect individual
+function pointers. The broker validates sizes, versions, and identity
+only.</p>
+<p><strong>5.4.2</strong> The domain consumer MUST null-check every
+entry it intends to call, immediately after selection and before
+creating a provider context.</p>
+<p><strong>5.4.3</strong> A null mandatory callback discovered after
+successful negotiation MUST be a fail-closed configuration error.
+Fallback MUST NOT be re-enabled after a successful provider
+negotiation.</p>
+<p><strong>5.4.4</strong> An optional callback MAY be null. A consumer
+that finds one null MUST either skip the optional path or return the
+domain's not-implemented status; it MUST NOT synthesize behavior the
+provider did not offer.</p>
+<h2 id="6-operation-parameter-and-result-records">6. Operation parameter
+and result records</h2>
+<p><strong>6.1</strong> Every operation parameter record and operation
+result record MUST begin with <code>rocm_interfaces_abi_header</code>
+and MUST be extended only by appending fields.</p>
+<p><strong>6.2</strong> A consumer of an output record MUST initialize
+the record's header before the call, and the provider MUST validate the
+header of every output slot before writing any of them.</p>
+<p><strong>6.3</strong> Reserved fields exist in several records.
+Whether "reserved input fields MUST be zero" is protocol-wide or
+specific to the BLASLt service records is TBD-6; where a header states
+the rule, the receiving side MUST enforce it.</p>
+<p><strong>6.4</strong> When a record grows, the appended fields MUST be
+documented in the header as belonging to a specific ABI minor, and a
+provider built against the earlier prefix MUST be permitted to ignore
+them.</p>
+<p><strong>6.5</strong> An algorithm token is a fixed-width opaque
+array, not a pointer, and tokens of different widths are not
+interchangeable: <code>rocm_blaslt_heuristic_result</code> carries
+<code>uint64_t algorithm_token[2]</code>,
+<code>rocm_blas_v2_solution</code> carries
+<code>uint64_t provider_algorithm_token[4]</code>.</p>
+<p><strong>6.6</strong> A protocol record MUST NOT be stretched to carry
+an operation shape it cannot express. A declared enumerator does not
+imply representability: <code>ROCM_BLAS_BATCH_GROUPED</code> and
+<code>ROCM_BLAS_V2_BATCH_GROUPED</code> exist, but a narrow matmul
+request cannot express per-group shapes, operations, leading dimensions,
+and scalars, so the narrow edge MUST return the domain's not-implemented
+status rather than approximate the operation.</p>
+<h2 id="7-opaque-contexts-ownership-and-lifetime">7. Opaque contexts,
+ownership, and lifetime</h2>
+<h3 id="71-context-representation">7.1 Context representation</h3>
+<p><strong>7.1.1</strong> Provider state MUST be opaque to the consumer.
+Every domain passes it as an untyped <code>void*</code>.</p>
+<p><strong>7.1.2</strong> A consumer MUST NOT dereference, copy, compare
+for ordering, or otherwise interpret a provider context pointer. It MUST
+pass it back unchanged as the first argument to entries of the same
+table from the same provider instance.</p>
+<p><strong>7.1.3</strong> A provider MUST reject a null context with the
+domain's invalid-handle status.</p>
+<p><strong>7.1.4</strong> Cross-domain service state a provider receives
+MUST NOT be a raw pointer to consumer internals. It MUST be an
+authenticated token that the issuing consumer validates on every call
+against a live registry, together with table identity and profile,
+capability, and cohort-key agreement.</p>
+<p><strong>7.1.5</strong> A revoked or foreign service token MUST be
+rejected, not trusted: the semantic status MUST be the domain's
+invalid-handle status and the transport status MUST be
+<code>ROCM_INTERFACES_STATUS_INVALID_OBJECT</code>.</p>
+<h3 id="72-table-and-module-lifetime">7.2 Table and module lifetime</h3>
+<p><strong>7.2.1</strong> A published dispatch table MUST remain mapped
+and unmodified for as long as any binding on it exists. Module residency
+is specified in <a href="provider-module.html">provider-module</a>; what
+a consumer retains is specified in <a
+href="provider-binding.html">provider-binding</a>. Whether a consumer
+may pin a provider for the process lifetime is undecided and owned here
+as TBD-7; this specification states no rule either way until that
+decision closes.</p>
+<h3 id="73-pointer-ownership-across-a-call">7.3 Pointer ownership across
+a call</h3>
+<p><strong>7.3.1</strong> A provider MUST NOT retain a pointer to a
+request record, or to any record reachable from it, after the call
+returns. Fields the provider needs beyond the call MUST be copied.</p>
+<p><strong>7.3.2</strong> Where a header states a retention rule for a
+specific field, that rule is binding and narrows nothing in 7.3.1.
+Execution state supplied per call MUST be treated as a snapshot: a
+provider MUST NOT observe a mixture of concurrent setter updates, and a
+query-size out-pointer is valid only for the duration of the
+callback.</p>
+<p><strong>7.3.3</strong> A service reference is valid only for the
+lifetime of the receiving provider context. The complete reference MUST
+be passed as the first argument to callbacks in its table. A
+broker-defined <code>cohort_key</code> MAY be compared and copied, but a
+provider MUST NOT infer provider state from it.</p>
+<p><strong>7.3.4</strong> Caller-supplied storage MUST NOT be treated as
+provider workspace.</p>
+<p><strong>7.3.5</strong> A provider MUST NOT allocate a buffer on the
+consumer's behalf except where an entry explicitly transfers ownership.
+The transferring entries are <code>create_poisson_distribution</code>
+and <code>create_discrete_distribution</code> in
+<code>rocm_rand_provider_v1</code>, whose results MUST be released
+through <code>destroy_discrete_distribution</code>.
+<code>get_direction_vectors32</code>,
+<code>get_direction_vectors64</code>,
+<code>get_scramble_constants32</code>, and
+<code>get_scramble_constants64</code> return borrowed pointers that MUST
+NOT be freed.</p>
+<p><strong>7.3.6</strong> An algorithm token returned by
+<code>heuristic</code>, <code>matmul_query</code>, or
+<code>prepare</code> is private to the issuing provider context. It MUST
+NOT be replayed against a different context, and the issuing provider
+MUST reject a token that does not belong to the context it was presented
+with.</p>
+<h3 id="74-creation-and-destruction">7.4 Creation and destruction</h3>
+<p><strong>7.4.1</strong> Context creation MUST be failure-atomic: on
+any failure the provider MUST leave no allocated state and MUST NOT
+write a context pointer.</p>
+<p><strong>7.4.2</strong> <code>destroy_context</code> MUST release all
+provider state unconditionally, including when an underlying
+implementation reports failure. Two shipped paths currently release only
+on backend success; which policy is adopted is TBD-8.</p>
+<p><strong>7.4.3</strong> Destruction order across a cohort MUST be
+specified by the consuming binding, and a dependent context MUST be
+destroyed before the service it borrowed. Destroying a service binding
+MUST revoke its token immediately; a call that already acquired the
+token retains the service state until it returns.</p>
+<p><strong>7.4.4</strong> Whether aborting the process is adopted
+behavior when a borrowed provider context fails to create or destroy is
+TBD-9.</p>
+<h2 id="8-host-services-device-key-and-status">8. Host services, device
+key, and status</h2>
+<h3 id="81-host-services-record">8.1 Host services record</h3>
+<div class="sourceCode" id="cb6"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> <span class="kw">struct</span> rocm_interfaces_host_services <span class="op">{</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_abi_header header<span class="op">;</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">void</span><span class="op">*</span> user_data<span class="op">;</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_allocate_fn allocate<span class="op">;</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_deallocate_fn deallocate<span class="op">;</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_trace_fn trace<span class="op">;</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> rocm_interfaces_host_services<span class="op">;</span></span></code></pre></div>
+<p>with
+<code>allocate(void* user_data, size_t size, size_t alignment) -&gt; void*</code>,
+<code>deallocate(void* user_data, void* allocation, size_t alignment) -&gt; void</code>,
+and
+<code>trace(void* user_data, const char* domain, const char* operation, const void* payload, size_t payload_size) -&gt; void</code>.</p>
+<p><strong>8.1.1</strong> Each of <code>allocate</code>,
+<code>deallocate</code>, and <code>trace</code> MAY be null. A provider
+MUST check before calling.</p>
+<p><strong>8.1.2</strong> A provider MUST NOT let an exception escape
+from inside a host callback back across the boundary, and MUST NOT let a
+misbehaving host callback change its own result.</p>
+<p><strong>8.1.3</strong> The consumer, not the caller of the public
+API, owns the host services pointer: a consumer MUST set
+<code>host</code> on every options record it builds and MUST discard any
+caller value.</p>
+<h3 id="82-device-key">8.2 Device key</h3>
+<div class="sourceCode" id="cb7"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">typedef</span> <span class="kw">struct</span> rocm_interfaces_device_key <span class="op">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_abi_header header<span class="op">;</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int32_t</span> device_ordinal<span class="op">;</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">char</span> architecture<span class="op">[</span>ROCM_INTERFACES_ARCHITECTURE_NAME_CAPACITY<span class="op">];</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint64_t</span> feature_mask<span class="op">;</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> rocm_interfaces_device_key<span class="op">;</span></span></code></pre></div>
+<p><code>ROCM_INTERFACES_ARCHITECTURE_NAME_CAPACITY</code> is
+<code>16u</code>; <code>ROCM_INTERFACES_ARCHITECTURE_UNKNOWN</code> is
+<code>"gfx000"</code>.</p>
+<p><strong>8.2.1</strong> <code>architecture</code> MUST hold the
+canonical base architecture without feature suffixes and MUST contain a
+NUL terminator inside the fixed array. Feature state MUST be carried in
+<code>feature_mask</code> using
+<code>rocm_interfaces_device_feature</code>:
+<code>XNACK_KNOWN = 1u&lt;&lt;0</code>,
+<code>XNACK_ENABLED = 1u&lt;&lt;1</code>,
+<code>SRAM_ECC_KNOWN = 1u&lt;&lt;2</code>,
+<code>SRAM_ECC_ENABLED = 1u&lt;&lt;3</code>. A KNOWN bit without its
+ENABLED bit means the feature is disabled; a clear KNOWN bit means the
+state was not reported. How the broker derives a device key and uses it
+for candidate matching is specified in <a
+href="broker.html">broker</a>.</p>
+<h3 id="83-status-taxonomy">8.3 Status taxonomy</h3>
+<p>This section is the single definition of the protocol status
+taxonomy. No other specification defines, renumbers, or extends it.</p>
+<p><strong>8.3.1</strong> <code>rocm_interfaces_status</code> is the
+transport status of the protocol boundary. Its values, all prefixed
+<code>ROCM_INTERFACES_STATUS_</code>, are:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Enumerator</th>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>SUCCESS</code></td>
+<td>0</td>
+<td>The call crossed the boundary and produced a result.</td>
+</tr>
+<tr class="even">
+<td><code>INVALID_ARGUMENT</code></td>
+<td>1</td>
+<td>A required argument was null or structurally unusable.</td>
+</tr>
+<tr class="odd">
+<td><code>OUT_OF_MEMORY</code></td>
+<td>2</td>
+<td>An allocation required to cross the boundary failed.</td>
+</tr>
+<tr class="even">
+<td><code>NOT_SUPPORTED</code></td>
+<td>3</td>
+<td>The requested domain or facility is not offered.</td>
+</tr>
+<tr class="odd">
+<td><code>NO_SOLUTION</code></td>
+<td>4</td>
+<td>No candidate solution satisfies the request.</td>
+</tr>
+<tr class="even">
+<td><code>INCOMPATIBLE_ABI</code></td>
+<td>5</td>
+<td>A header, version, or prefix requirement was not met.</td>
+</tr>
+<tr class="odd">
+<td><code>PROVIDER_FAILURE</code></td>
+<td>6</td>
+<td>The provider produced a result the consumer refused to trust.</td>
+</tr>
+<tr class="even">
+<td><code>INVALID_OBJECT</code></td>
+<td>7</td>
+<td>A token, context, or reference was revoked, foreign, or
+reentered.</td>
+</tr>
+<tr class="odd">
+<td><code>INTERNAL_ERROR</code></td>
+<td>8</td>
+<td>An unclassifiable failure inside the boundary implementation.</td>
+</tr>
+</tbody>
+</table>
+<p>Which of <code>NO_SOLUTION</code>, <code>INVALID_OBJECT</code>, and
+<code>INTERNAL_ERROR</code> are reachable from a bootstrap query, as
+opposed to only from service callbacks, is TBD-10.</p>
+<p><strong>8.3.2</strong> Domain operations MUST return the domain's
+native semantic status, not a transport status:
+<code>rocblas_status</code> for BLAS, BLASLt, solver, and BLAS_V2;
+<code>rocrand_status</code> for RAND; <code>hipblasStatus_t</code> for
+the hipBLASLt direct entries. Mapping an underlying implementation's
+errors onto a semantic status is specified in <a
+href="provider-adapter.html">provider-adapter</a>.</p>
+<p><strong>8.3.3</strong> Where a call carries both, the transport
+status and the semantic status MUST be reported separately. The
+transport status MUST report only whether the result crossed the
+boundary successfully, never what the operation computed.</p>
+<p><strong>8.3.4</strong> A result record MUST record where its semantic
+status came from. <code>rocm_rocblas_blaslt_outcome_origin</code> is
+<code>RETURNED_STATUS = 1</code> (the implementation returned it
+normally), <code>CAUGHT_EXCEPTION = 2</code> (the adapter converted a
+caught exception), and <code>BOUNDARY_FAILURE = 3</code> (no trustworthy
+semantic result crossed). A result record MUST be pre-initialized to
+<code>BOUNDARY_FAILURE</code>, so an unwritten record is distinguishable
+from a real outcome.</p>
+<p><strong>8.3.5</strong> An execution-capable call MUST report
+conservatively whether it touched observable state.
+<code>rocm_rocblas_blaslt_execution_effect</code> is
+<code>NOT_STARTED = 1</code> (no work enqueued, no caller or workspace
+byte modified, no persistent execution or numerics state changed),
+<code>MAY_HAVE_EFFECTS = 2</code> (work began, or the callee cannot
+prove the stronger result), and <code>SUBMITTED = 3</code> (host
+submission completed successfully). A consumer owns fallback policy and
+MUST consider the request, the semantic status, the origin, and the
+effect together; it MUST NOT treat <code>NOT_STARTED</code> alone as
+permission to fall through.</p>
+<p><strong>8.3.6</strong> A consumer MUST NOT trust a provider result
+record without validating it: the header, origin validity, the invariant
+that success implies <code>RETURNED_STATUS</code> and
+<code>SUBMITTED</code>, and the invariant that failure implies not
+<code>SUBMITTED</code>. On violation the consumer MUST reset the record
+and return <code>ROCM_INTERFACES_STATUS_PROVIDER_FAILURE</code>.</p>
+<h2 id="9-capability-negotiation">9. Capability negotiation</h2>
+<p><strong>9.1</strong> <code>response.capability_mask</code> is a
+<code>uint64_t</code> bitmask advertising optional guarantees. A
+capability bit SHOULD be nonzero, so that a zero-initialized record
+advertises no optional guarantee.</p>
+<p><strong>9.2</strong> A consumer that depends on an optional guarantee
+MUST require its bit before accepting a candidate, and MUST skip a
+candidate that lacks it rather than degrade silently.</p>
+<p><strong>9.3</strong> Declared bit values:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Macro</th>
+<th>Value</th>
+<th>Field it travels in</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ROCM_ROCBLAS_BLASLT_CAPABILITY_OUTCOME_ORIGIN</code></td>
+<td>1</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_ROCBLAS_BLASLT_CAPABILITY_EXECUTION_EFFECT</code></td>
+<td>2</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="odd">
+<td><code>ROCM_ROCBLAS_BLASLT_CAPABILITY_AI_GEMM_F16_F32</code></td>
+<td>4</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_ROCBLAS_BLASLT_PROFILE_GEMM_PREPARE_EXECUTE_V1_CAPABILITIES</code></td>
+<td>OR of the three above</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="odd">
+<td><code>ROCM_BLAS_V2_CAPABILITY_BORROWED_BLASLT_AI_GEMM</code></td>
+<td>1</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_HIPBLASLT_CAPABILITY_DIRECT_AI_GEMM</code></td>
+<td>8</td>
+<td><code>capability_mask</code></td>
+</tr>
+<tr class="odd">
+<td><code>ROCM_ROCBLAS_BLASLT_PROFILE_GEMM_PREPARE_EXECUTE_V1</code></td>
+<td>1</td>
+<td><code>profile</code></td>
+</tr>
+<tr class="even">
+<td><code>ROCM_HIPBLASLT_PROFILE_AI_GEMM_F16_F32_V1</code></td>
+<td>1</td>
+<td><code>profile</code></td>
+</tr>
+</tbody>
+</table>
+<p>Profile id zero always means "no profile".</p>
+<p><strong>9.3.1</strong> Two capability bits in different domains
+currently share value 1 on the same
+<code>uint64_t capability_mask</code>, and there is no rule assigning
+bit ranges per domain: TBD-11. Until that is settled, a consumer MUST
+interpret a capability bit only in the context of the domain it
+selected.</p>
+<p><strong>9.4</strong> A profile is a coarser negotiation unit than a
+bit: it names a required callback set plus a required capability set. A
+receiving provider MUST validate profile equality and
+<code>(capabilities &amp; required) == required</code> before using a
+service reference, and MUST fail creation rather than proceed when
+validation fails.</p>
+<p><strong>9.5</strong> Behavior flags are distinct from capabilities. A
+behavior flag such as
+<code>ROCM_BLAS_V2_BEHAVIOR_PUBLIC_EXTENDED_API</code> is a per-call
+flag on the execution record, not a provider capability, and MUST NOT be
+advertised in <code>capability_mask</code>. A provider MUST preserve the
+validation result of the entry point a flag selects, including when the
+caller deliberately supplies an invalid datatype.</p>
+<h2 id="10-version-evolution">10. Version evolution</h2>
+<p><strong>10.1</strong> <code>ROCM_INTERFACES_ABI_MAJOR</code> is
+<code>1u</code>, <code>ROCM_INTERFACES_ABI_MINOR</code> is
+<code>2u</code>, and <code>ROCM_INTERFACES_ABI_BASE_MINOR</code> is
+<code>0u</code>. Whether <code>ROCM_INTERFACES_ABI_BASE_MINOR</code> is
+normative or a spelling convenience is TBD-12.</p>
+<p><strong>10.2</strong> A major mismatch MUST be fatal to selection:
+both <code>response.header.abi_major</code> and
+<code>table_header.abi_major</code> MUST equal
+<code>ROCM_INTERFACES_ABI_MAJOR</code>.</p>
+<p><strong>10.3</strong> A provider minor MUST be at least the minor the
+consumer requested. An older consumer MAY therefore accept a newer
+provider and ignore its tail; a current consumer MAY choose an older
+provider only by deliberately requesting that older semantic level
+together with a prefix the provider covers.</p>
+<p><strong>10.4</strong> The minor MUST NOT roll over or reset within a
+major. Exhausting its range requires a new major.</p>
+<p><strong>10.5</strong> A change that preserves layout, callable
+signatures, enum values, ownership, and observable semantics MUST NOT
+change the ABI numbers. Such a rebuild is identified by
+<code>build_id</code> (4.3.3).</p>
+<p><strong>10.6</strong> The response and the selected table MUST stamp
+the same <code>(abi_major, abi_minor)</code> tuple; a mixed tuple is
+malformed. Whether one tuple is additionally required to be global
+across all domains in a deployment is TBD-13.</p>
+<p><strong>10.7</strong> Every release MUST extend the conformance
+controls before its headers or providers ship.</p>
+<h2 id="11-concurrency">11. Concurrency</h2>
+<p><strong>11.1</strong> The bootstrap query MUST be safe to call
+concurrently, and MUST tolerate reentrancy on the calling thread.</p>
+<p><strong>11.2</strong> Dynamic-loader calls MUST be serialized
+process-wide by a single process-wide lock shared by every component in
+the distribution. The lock's owning artifact is specified in <a
+href="provider-module.html">provider-module</a>.</p>
+<p><strong>11.3</strong> Whether concurrent dispatch on one provider
+context is supported is not specified (TBD-14). Until settled, a
+consumer MUST NOT assume a context is internally thread-safe, and a
+provider MUST NOT assume the consumer serializes.</p>
+<p><strong>11.4</strong> Same-thread reentry from a provider back into a
+service it borrowed MUST be rejected with
+<code>ROCM_INTERFACES_STATUS_INVALID_OBJECT</code> rather than allowed
+to cycle.</p>
+<h2 id="12-boundary-to-the-rocblas-private-backend-contract">12.
+Boundary to the rocBLAS private backend contract</h2>
+<p>The rocBLAS private backend contract is adjacent to this protocol and
+MUST NOT be conflated with it.
+<code>rocblas_internal_backend_api_v1</code> does not begin with
+<code>rocm_interfaces_abi_header</code>; its prefix is
+<code>size_t struct_size; uint32_t abi_major; uint32_t abi_minor;</code>.
+Any statement that every table in this system shares one header shape
+MUST exclude it. Two of its rules bind a provider that uses it:</p>
+<ul>
+<li>A DSO exporting <code>rocblas_internal_backend_query_v1</code>
+guarantees that references originating inside that DSO bind to that same
+implementation - on ELF this holds only when that DSO is linked with
+<code>-Bsymbolic-functions</code> - so the resolver stays safe when a
+public facade exporting the same <code>rocblas_*</code> names was loaded
+first.</li>
+<li>A provider MUST NOT synthesize a finite switch over argument counts
+for the varargs helpers; the normalized array-taking callbacks exist for
+that reason.</li>
+</ul>
+<p>Whether it comes under <code>rocm_interfaces_abi_header</code> and
+the common ABI macros is TBD-15.</p>
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Question</th>
+<th>Blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Must every dispatch-table slot be <code>noexcept</code>, or is
+per-adapter discretion accepted?</td>
+<td>1.5</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Is the manifest <code>query_symbol</code> override supported, or
+vestigial? An override cannot resolve under the provider version
+script.</td>
+<td>2.1.2; the manifest allowed-key set</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Does <code>build_id</code> ever become a selection or compatibility
+constraint?</td>
+<td>4.3.3, 10.5; cohort build identity in <a
+href="cohort.html">cohort</a></td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Which members of <code>rocm_rand_provider_v1</code> and
+<code>rocm_solver_provider_v1</code> are the frozen mandatory
+prefix?</td>
+<td>5.3.2, 5.3.5</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Is <code>matrix_transform</code> deliberately outside the solver
+BLAS-services advertised prefix, and must <code>solver.h</code> mark the
+boundary?</td>
+<td>5.3.6</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Is "reserved input fields must be zero" protocol-wide, or specific
+to the BLASLt service records?</td>
+<td>6.3</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Is process-lifetime pinning of a selected provider adopted policy,
+or an unbounded-retention defect?</td>
+<td>7.2.1; unload semantics in <a
+href="provider-module.html">provider-module</a></td>
+</tr>
+<tr class="even">
+<td>TBD-8</td>
+<td>Must <code>destroy_context</code> release provider state
+unconditionally, including on a non-success backend status?</td>
+<td>7.4.2</td>
+</tr>
+<tr class="odd">
+<td>TBD-9</td>
+<td>Is aborting the process on borrowed-provider create/destroy failure
+adopted behavior?</td>
+<td>7.4.4</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Which of <code>NO_SOLUTION</code>, <code>INVALID_OBJECT</code>, and
+<code>INTERNAL_ERROR</code> are reachable from a bootstrap query?</td>
+<td>8.3.1</td>
+</tr>
+<tr class="odd">
+<td>TBD-11</td>
+<td>Are capability-bit namespaces per domain or global? Two capability
+bits in different domains share value 1 on one mask.</td>
+<td>9.3.1</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>Is <code>ROCM_INTERFACES_ABI_BASE_MINOR</code> normative, and what
+does requesting the base minor promise a consumer?</td>
+<td>10.1</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>Is one global <code>(abi_major, abi_minor)</code> tuple across all
+domains required, or is per-domain agreement sufficient?</td>
+<td>10.6</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Must a provider be internally thread-safe per context, or must the
+consumer serialize?</td>
+<td>11.3</td>
+</tr>
+<tr class="odd">
+<td>TBD-15</td>
+<td>Does <code>rocblas_internal_backend_api_v1</code> come under
+<code>rocm_interfaces_abi_header</code> and the common ABI macros?</td>
+<td>1.2, section 12</td>
+</tr>
+<tr class="even">
+<td>TBD-16</td>
+<td>Are ctest target names part of the contract, and how is "check not
+configured here" distinguished from "check absent"?</td>
+<td>the conformance evidence in <a
+href="provider-protocol.html">ledger/provider-protocol</a></td>
+</tr>
+<tr class="odd">
+<td>TBD-17</td>
+<td>Must every protocol header have a check that compiles it as C, or is
+rule 1.1 narrowed to the headers a C consumer actually uses?</td>
+<td>1.1</td>
+</tr>
+<tr class="even">
+<td>TBD-18</td>
+<td>Must a conformance check compare a provider table's member layout
+against its header declaration, not just its byte count and version
+tuple?</td>
+<td>1.3, 1.4, 5.1.1, 5.3.2</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cross-links">Cross-links</h2>
+<ul>
+<li><a
+href="architecture-component-model.html">architecture-component-model</a>
+- lanes and call directions.</li>
+<li><a href="broker.html">broker</a> - discovery, ordering, device key,
+and the <code>select()</code> contract behind 4.4.</li>
+<li><a href="facade.html">facade</a> - the public side of the boundary
+this protocol serves.</li>
+<li><a href="provider.html">provider</a> - the provider as a complete
+facility.</li>
+<li><a href="provider-adapter.html">provider-adapter</a> - translating
+this protocol onto an implementation.</li>
+<li><a href="provider-module.html">provider-module</a> - the loadable
+artifact, its exports, its lifetime.</li>
+<li><a href="provider-binding.html">provider-binding</a> - what a
+consumer retains after selection.</li>
+<li><a href="manifest.html">manifest</a> - manifest schema, discovery,
+and filesystem trust.</li>
+<li><a href="cohort.html">cohort</a> - coordinated multi-domain
+selection.</li>
+<li><a href="provider-protocol.html">ledger/provider-protocol</a> -
+non-normative evidence.</li>
+</ul>
+<p>Parent: ../draft-plan-reboot. Reference material reconciled here, not
+superseded: ../provider-protocols, ../03-abi-and-versioning-contract,
+../07-status-and-roadmap.</p>
+</body>
+</html>

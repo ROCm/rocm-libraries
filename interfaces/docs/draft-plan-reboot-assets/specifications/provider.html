@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Provider specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Provider specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#status" id="toc-status">Status</a></li>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology-local-to-this-document"
+id="toc-terminology-local-to-this-document">Terminology local to this
+document</a></li>
+<li><a href="#1-composition" id="toc-1-composition">1.
+Composition</a></li>
+<li><a href="#2-identity" id="toc-2-identity">2. Identity</a></li>
+<li><a href="#3-domains-and-capabilities"
+id="toc-3-domains-and-capabilities">3. Domains and capabilities</a></li>
+<li><a href="#4-implementation-dependencies"
+id="toc-4-implementation-dependencies">4. Implementation
+dependencies</a></li>
+<li><a href="#5-state-and-lifecycle" id="toc-5-state-and-lifecycle">5.
+State and lifecycle</a></li>
+<li><a href="#6-diagnostics" id="toc-6-diagnostics">6.
+Diagnostics</a></li>
+<li><a href="#7-compatibility" id="toc-7-compatibility">7.
+Compatibility</a></li>
+<li><a href="#8-conformance" id="toc-8-conformance">8.
+Conformance</a></li>
+<li><a href="#open-decisions-tbd" id="toc-open-decisions-tbd">Open
+decisions (TBD)</a></li>
+<li><a href="#related-specifications"
+id="toc-related-specifications">Related specifications</a></li>
+</ul>
+</nav>
+<h2 id="status">Status</h2>
+<p>This is a normative specification of the provider as a whole
+facility. It is not a report of shipped behavior. Implementation status,
+source citations, test inventories, and the long rationale are
+non-normative and live in <a
+href="provider.html">ledger/provider</a>.</p>
+<p>This document is an aggregate. It states only what is true of a
+provider as a whole. Every part of a provider is specified elsewhere,
+and this document adds no rules of its own about those parts:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Part</th>
+<th>Owning specification</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Protocol identity, query entry point, table layout, status taxonomy,
+argument ownership, object lifetime, concurrency</td>
+<td><a href="provider-protocol.html">provider-protocol</a></td>
+</tr>
+<tr class="even">
+<td>Translation to an underlying implementation, error mapping,
+adapter-local state</td>
+<td><a href="provider-adapter.html">provider-adapter</a></td>
+</tr>
+<tr class="odd">
+<td>Shared-object file identity, exported symbols, load and unload</td>
+<td><a href="provider-module.html">provider-module</a></td>
+</tr>
+<tr class="even">
+<td>The binding object, its handle, validity and invalidation</td>
+<td><a href="provider-binding.html">provider-binding</a></td>
+</tr>
+<tr class="odd">
+<td>Manifest name, location, schema, fields, trust</td>
+<td><a href="manifest.html">manifest</a></td>
+</tr>
+<tr class="even">
+<td>Cohort identity, membership, co-selection, upgrade</td>
+<td><a href="cohort.html">cohort</a></td>
+</tr>
+<tr class="odd">
+<td>Discovery, candidate ordering, compatibility checks, selection</td>
+<td><a href="broker.html">broker</a></td>
+</tr>
+<tr class="even">
+<td>Public API, ABI, and library identity</td>
+<td><a href="facade.html">facade</a></td>
+</tr>
+</tbody>
+</table>
+<p>Terminology is defined in ../draft-plan-reboot. Where that document
+and this one disagree, it defines the terms and this one defines the
+obligations.</p>
+<h2 id="scope">Scope</h2>
+<ul>
+<li>What a provider is, and which parts of a distribution belong to
+it.</li>
+<li>Provider identity and build identity.</li>
+<li>Which domains a provider may serve, and the capability guarantees it
+may advertise.</li>
+<li>The provider's implementation dependencies and how it reaches
+them.</li>
+<li>The provider-as-a-whole lifecycle obligations: composition,
+residency, context lifecycle, diagnostics, versioning tolerance,
+packaging.</li>
+<li>The conformance obligation on a release.</li>
+</ul>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+<li>No wire format, table layout, or status taxonomy. See <a
+href="provider-protocol.html">provider-protocol</a>.</li>
+<li>No selection policy, candidate ordering, or architecture matching.
+See <a href="broker.html">broker</a>.</li>
+<li>No manifest schema. See <a href="manifest.html">manifest</a>.</li>
+<li>No cohort qualification policy. See <a
+href="cohort.html">cohort</a>.</li>
+<li>No numerical behavior, performance, or tuning. A structurally
+conforming provider may still be numerically wrong; structural closure
+is not equivalence.</li>
+<li>No third-party providers built outside the distribution. The
+protocol is a distribution-internal contract, not a public plugin
+ABI.</li>
+</ul>
+<h2 id="terminology-local-to-this-document">Terminology local to this
+document</h2>
+<ul>
+<li><strong>Provider</strong> - the complete distribution-private
+facility that supplies one or more capabilities without owning the
+application-facing API, ABI, or public-library identity.</li>
+<li><strong>Implementation dependency</strong> - the canonical math
+library, or other code, that the provider ultimately calls, for example
+<code>librocblas.so.5</code>.</li>
+<li><strong>Domain</strong> - one capability family addressed by one
+dispatch-table type. The enumeration is defined in <a
+href="provider-protocol.html">provider-protocol</a>.</li>
+</ul>
+<p>Provider module, adapter, protocol, binding, broker, facade, and
+cohort are defined in ../draft-plan-reboot and specified in the files
+listed above.</p>
+<h2 id="1-composition">1. Composition</h2>
+<p>A provider is a facility, not a file. The unit of packaging is the
+module; the unit of contract is the provider.</p>
+<pre class="mermaid"><code>flowchart TB
+  subgraph Provider[&quot;Provider (logical facility)&quot;]
+    Q[&quot;Protocol implementation&quot;]
+    A[&quot;Adapter&quot;]
+    S[&quot;Private state&quot;]
+    M[&quot;Manifest entries&quot;]
+  end
+  Provider --&gt; Mod1[&quot;Module A&quot;]
+  Provider --&gt; Mod2[&quot;Module B&quot;]
+  Mod1 --&gt; Dep[&quot;Implementation dependency&quot;]
+  Mod2 --&gt; Dep
+  Broker[&quot;Broker&quot;] --&gt;|reads| M
+  Broker --&gt;|load + query| Mod1
+  Broker --&gt;|returns| Bind[&quot;Provider binding&quot;]</code></pre>
+<p>A conforming provider MUST consist of all of the following. A
+candidate missing any one of them is not a provider.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Component</th>
+<th>Obligation</th>
+<th>Specified in</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Protocol implementation</td>
+<td>One bootstrap query entry point per module, one dispatch table per
+served domain</td>
+<td><a href="provider-protocol.html">provider-protocol</a></td>
+</tr>
+<tr class="even">
+<td>Adapter</td>
+<td>Translation of protocol records, statuses, and opaque state to the
+implementation dependency</td>
+<td><a href="provider-adapter.html">provider-adapter</a></td>
+</tr>
+<tr class="odd">
+<td>Module or modules</td>
+<td>One or more loadable binary artifacts carrying the above</td>
+<td><a href="provider-module.html">provider-module</a></td>
+</tr>
+<tr class="even">
+<td>Manifest entries</td>
+<td>One entry per (domain, architecture) the provider offers</td>
+<td><a href="manifest.html">manifest</a></td>
+</tr>
+<tr class="odd">
+<td>Private state</td>
+<td>All provider-owned context, caches, and tokens, reachable only
+through opaque handles</td>
+<td>this document, section 5</td>
+</tr>
+<tr class="even">
+<td>Implementation dependencies</td>
+<td>The libraries the provider calls, reached at run time</td>
+<td>this document, section 4</td>
+</tr>
+</tbody>
+</table>
+<p>Composition rules:</p>
+<ul>
+<li>A provider MAY span more than one module. A provider that spans
+modules MUST make each module independently loadable and independently
+queryable. Nothing in the system groups modules; the broker loads one
+module at a time.</li>
+<li>A module MAY carry more than one domain, and MAY carry parts of more
+than one provider only if each part remains independently identifiable
+by provider identity and domain.</li>
+<li>A provider MUST NOT own or export any public math-library symbol.
+Its dynamic export surface is fixed by <a
+href="provider-module.html">provider-module</a>.</li>
+<li>A provider MUST NOT link a canonical math-library implementation
+target. Header-only targets are permitted. This is a build-time
+obligation on every provider target.</li>
+<li>A provider MUST NOT assume it is the only provider in the process,
+that it is loaded once, or that it stays loaded.</li>
+<li>A provider that is not installed is a test fixture, not a provider.
+Whether the in-tree recording fixtures ever become a delivery surface is
+<a href="#open-decisions-tbd">TBD-17</a>.</li>
+</ul>
+<h2 id="2-identity">2. Identity</h2>
+<p>A provider carries three distinct identifiers. They are not
+interchangeable.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Identifier</th>
+<th>Meaning</th>
+<th>Where it is asserted</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>id</code></td>
+<td>provider identity - names the facility</td>
+<td>manifest entry, and the query response</td>
+</tr>
+<tr class="even">
+<td><code>build_id</code></td>
+<td>build identity - names the build the semantics come from</td>
+<td>the query response only</td>
+</tr>
+<tr class="odd">
+<td><code>cohort</code></td>
+<td>cohort identity - names a qualified set</td>
+<td>manifest entry; see <a href="cohort.html">cohort</a></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A provider MUST publish a non-null, nonempty provider identity in
+every successful query response.</li>
+<li>When a manifest entry declares a nonempty identity, the response
+identity MUST equal it byte for byte.</li>
+<li>Provider identity MUST be stable across rebuilds of the same
+provider. It names the facility, not the binary.</li>
+<li>Provider identity SHOULD be unique across the distribution. Whether
+the same (identity, domain, architecture) triple is legal in two
+manifests is <a href="#open-decisions-tbd">TBD-1</a>.</li>
+<li>A provider SHOULD publish a build identity naming the build from
+which its semantics come. A provider MUST NOT rely on build identity
+being validated by anyone; whether it becomes a selection or
+compatibility constraint is <a
+href="#open-decisions-tbd">TBD-2</a>.</li>
+<li>A provider that participates in a cohort MUST declare the cohort
+string in every manifest entry that belongs to that cohort, and MUST NOT
+treat cohort membership as permission to share objects with another
+cohort member. Cohort rules are in <a
+href="cohort.html">cohort</a>.</li>
+</ul>
+<h2 id="3-domains-and-capabilities">3. Domains and capabilities</h2>
+<ul>
+<li>A provider MUST answer a query for a domain it declares in a
+manifest entry, and MUST reject any other domain with the not-supported
+status defined in <a
+href="provider-protocol.html">provider-protocol</a>.</li>
+<li>A provider MUST return a distinct, correctly typed table for each
+domain it serves, and MUST NOT serve one domain with another domain's
+table, including between a domain and its successor generation.</li>
+<li>Capability-mask and capability-profile semantics - what a bit
+asserts, what a profile requires of the party that advertises it and of
+the party that receives it, and the rule that a bit is meaningful only
+within the domain that was queried - are <a
+href="provider-protocol.html">provider-protocol</a> section 9's, and a
+provider MUST obey them. This document's TBD-3 and <a
+href="provider-protocol.html">provider-protocol</a> TBD-11 are the same
+open question about per-domain versus global bit namespaces.</li>
+<li>A provider MUST NOT advertise, in a manifest or a capability mask, a
+bit, a profile, an architecture, or any other guarantee its shipped code
+does not implement, including the complete table prefix a bit implies.
+An unset mask means no optional guarantees. Advertising an architecture
+for which the provider's device code was not compiled is a defect, not a
+preference.</li>
+</ul>
+<h2 id="4-implementation-dependencies">4. Implementation
+dependencies</h2>
+<p>The threat is a provider that binds a canonical math library the
+wrong way: linked at build time, resolved out of the global symbol
+namespace, or opened from a path an attacker controls. Any of those
+turns a private provider into a source of ODR collisions, wrong-library
+dispatch, or code execution.</p>
+<ul>
+<li>A provider MUST reach every implementation dependency at run time by
+explicit dynamic load, and MUST NOT link it (section 1).</li>
+<li>A missing or incomplete dependency MUST be a clean query failure,
+not a crash, and MUST be retryable on a later query.</li>
+<li>A provider MUST NOT expose an implementation handle type across the
+protocol boundary.</li>
+</ul>
+<p>How a dependency is named, acquired lazily and once, validated before
+use, routed through a private backend query entry point, and serialized
+against the process-wide dynamic-loader lock is specified in <a
+href="provider-adapter.html">provider-adapter</a> section 2 and <a
+href="provider-module.html">provider-module</a>. Type erasure duties are
+specified in <a href="provider-adapter.html">provider-adapter</a>.</p>
+<h2 id="5-state-and-lifecycle">5. State and lifecycle</h2>
+<p>The provider lifecycle runs discovery, load, query, context creation,
+dispatch, context destruction, and unload. Discovery, load, and
+selection are the broker's, in <a href="broker.html">broker</a>; the
+retained result is the binding, in <a
+href="provider-binding.html">provider-binding</a>.</p>
+<ul>
+<li>All provider-owned state MUST be reachable only through opaque
+handles the protocol defines. A provider MUST NOT publish state through
+a global the facade or another provider can reach.</li>
+<li>A provider MUST be safe to unload and reload within one process. Any
+state kept in module-scope statics is destroyed on unload, and a
+provider MUST NOT depend on it surviving.</li>
+<li>Whether a consumer may pin a lease for the process lifetime rather
+than accept unload churn is undecided (<a
+href="provider-protocol.html">provider-protocol</a> TBD-7); this
+specification states no rule either way until that decision closes.</li>
+<li>A provider MUST NOT cache the fact that a query failed. A
+transiently failing provider is retried on the next selection.</li>
+<li>Context creation MUST be failure-atomic: an intermediate failure
+MUST leave no provider-side allocation behind.</li>
+<li>Context destruction MUST release provider-side state
+unconditionally, including when the implementation dependency reports a
+failure on the destroy path.</li>
+<li>An established context MUST NOT be rebound to a different
+provider.</li>
+<li>Where a provider borrows a service from another provider, the
+borrowed reference is valid only for the lifetime of the receiving
+context, the receiving context MUST be destroyed before the binding that
+supplied the service, and the provider MUST reject a stale or foreign
+service reference rather than dereferencing it.</li>
+<li>A provider MUST NOT re-enter, directly or transitively, the service
+edge it was called through.</li>
+<li>A provider MUST be safe to query concurrently from multiple
+threads.</li>
+<li>Whether a single provider context may be dispatched concurrently is
+undecided (<a href="provider-protocol.html">provider-protocol</a>
+TBD-14). Until it is closed, a provider MUST document its own choice,
+and a provider that is not internally thread-safe per context MUST say
+so.</li>
+</ul>
+<h2 id="6-diagnostics">6. Diagnostics</h2>
+<p>The threat is a provider that fails invisibly. A rejected candidate
+that says nothing is indistinguishable from a candidate that was never
+considered, and a provider that writes to the process's standard streams
+corrupts the output of the application that linked the facade.</p>
+<ul>
+<li>A provider MUST NOT write to stdout or stderr. Its only sanctioned
+diagnostic channel is the host trace callback defined in <a
+href="provider-protocol.html">provider-protocol</a>.</li>
+<li>A provider MUST treat host callbacks as untrusted C ABI: validate
+the host header before use, null-check the callback, and wrap the call
+so a throwing host cannot escape.</li>
+<li>A provider SHOULD trace on a query failure that is not a plain
+domain mismatch, so a rejection is explainable without a rebuild.</li>
+<li>A provider MUST make its rejections attributable, and MUST NOT fail
+silently.</li>
+<li>A provider MUST NOT let a diagnostic affect selection or dispatch
+outcome.</li>
+</ul>
+<h2 id="7-compatibility">7. Compatibility</h2>
+<p>Protocol versioning is specified in <a
+href="provider-protocol.html">provider-protocol</a> and manifest schema
+versioning in <a href="manifest.html">manifest</a>. The obligations on a
+provider as a whole:</p>
+<ul>
+<li>A provider MUST tolerate a request whose protocol minor is older
+than its own, and MUST answer with a table whose prefix satisfies the
+smaller size it was given.</li>
+<li>A provider MUST behave correctly when a caller's record is shorter
+than the current one, treating fields the record does not cover as
+absent rather than reading them.</li>
+<li>A provider MUST zero every reserved output field and MUST reject a
+nonzero reserved input field. Whether this generalizes protocol-wide is
+<a href="provider-protocol.html">provider-protocol</a> TBD-6.</li>
+<li>A provider MUST assert at compile time every layout assumption it
+relies on, including the offset of an embedded prefix in a table it
+extends.</li>
+<li>A provider implementing an experimental protocol MUST NOT present it
+to anyone as a stable ABI.</li>
+<li>A provider's module and manifest MUST ship together in the same
+install component and directory, and every manifest entry in a shipped
+package MUST resolve to a module that exists beside it.</li>
+</ul>
+<h2 id="8-conformance">8. Conformance</h2>
+<p>A release MUST NOT claim provider conformance on the strength of a
+check that did not register. Test families that silently do not register
+when an optional canonical library is absent are not evidence. A
+required minimum test set is <a
+href="#open-decisions-tbd">TBD-19</a>.</p>
+<p>The conformance obligations and the named ctest targets that
+currently cover them are inventoried in <a
+href="provider.html">ledger/provider</a>, rows C1 through C21. That
+inventory is evidence, not contract; the contracts are the MUST
+statements above and in the owning specifications.</p>
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<p>Only decisions that block a provider-level contract are listed. Ids
+are stable across the compression; decisions owned by another
+specification are cited there and repeated here only when a provider
+obligation depends on them. The full pre-compression table, including
+TBD-4 through TBD-11, TBD-13 through TBD-16, TBD-18, TBD-20, TBD-21,
+TBD-22, and TBD-24, is preserved in <a
+href="provider.html">ledger/provider</a>.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Id</th>
+<th>Question</th>
+<th>Blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Is the same (identity, domain, architecture) triple legal across two
+manifests?</td>
+<td>Whether provider identity is a global key.</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Does build identity ever become a selection or compatibility
+constraint?</td>
+<td>Whether cohort identity can ever mean "built together".</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Are capability-bit namespaces per-domain or global?</td>
+<td>Any cross-domain capability reasoning; safe addition of new
+bits.</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>May one provider context be dispatched concurrently? Owned by
+provider-protocol.</td>
+<td>Whether per-context caching is a race or a caller obligation.</td>
+</tr>
+<tr class="odd">
+<td>TBD-17</td>
+<td>Are the in-tree recording modules permanently test-only?</td>
+<td>Whether their export and manifest conformance are release
+requirements.</td>
+</tr>
+<tr class="even">
+<td>TBD-19</td>
+<td>Is there a required minimum test set a configuration MUST
+register?</td>
+<td>Any claim that a green test run means conformance.</td>
+</tr>
+<tr class="odd">
+<td>TBD-23</td>
+<td>Does the generated bridge provider obey these obligations, and what
+proves it?</td>
+<td>Every rule whose only evidence is the hand-written adapters.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="related-specifications">Related specifications</h2>
+<ul>
+<li>../draft-plan-reboot - parent concepts document and authoritative
+terminology.</li>
+<li><a
+href="architecture-component-model.html">architecture-component-model</a>
+- how the components fit.</li>
+<li><a href="broker.html">broker</a>, <a href="facade.html">facade</a>,
+<a href="manifest.html">manifest</a>, <a href="cohort.html">cohort</a> -
+the components a provider is selected by, hidden behind, described in,
+and qualified with.</li>
+<li><a href="provider-protocol.html">provider-protocol</a>, <a
+href="provider-adapter.html">provider-adapter</a>, <a
+href="provider-module.html">provider-module</a>, <a
+href="provider-binding.html">provider-binding</a> - the parts a provider
+is composed of.</li>
+<li><a href="provider.html">ledger/provider</a> - non-normative evidence
+for this specification.</li>
+</ul>
+</body>
+</html>

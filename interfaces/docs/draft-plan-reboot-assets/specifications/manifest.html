@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Provider manifest specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Provider manifest specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#1-scope" id="toc-1-scope">1. Scope</a></li>
+<li><a href="#2-non-goals" id="toc-2-non-goals">2. Non-goals</a></li>
+<li><a href="#3-terminology" id="toc-3-terminology">3.
+Terminology</a></li>
+<li><a href="#4-file-name" id="toc-4-file-name">4. File name</a></li>
+<li><a href="#5-installation-location"
+id="toc-5-installation-location">5. Installation location</a></li>
+<li><a href="#6-discovery" id="toc-6-discovery">6. Discovery</a></li>
+<li><a href="#7-document-shape-schema-version-and-fields"
+id="toc-7-document-shape-schema-version-and-fields">7. Document shape,
+schema version, and fields</a>
+<ul>
+<li><a href="#71-provider-identity" id="toc-71-provider-identity">7.1
+Provider identity</a></li>
+<li><a href="#72-cohort-naming" id="toc-72-cohort-naming">7.2 Cohort
+naming</a></li>
+<li><a href="#73-domains" id="toc-73-domains">7.3 Domains</a></li>
+</ul></li>
+<li><a href="#8-module-path-rules" id="toc-8-module-path-rules">8.
+Module path rules</a></li>
+<li><a href="#9-device-and-gpu-architecture-representation"
+id="toc-9-device-and-gpu-architecture-representation">9. Device and GPU
+architecture representation</a></li>
+<li><a href="#10-priority" id="toc-10-priority">10. Priority</a></li>
+<li><a href="#11-query-symbol" id="toc-11-query-symbol">11. Query
+symbol</a></li>
+<li><a href="#12-trust-and-permissions"
+id="toc-12-trust-and-permissions">12. Trust and permissions</a></li>
+<li><a href="#13-symlink-handling" id="toc-13-symlink-handling">13.
+Symlink handling</a></li>
+<li><a href="#14-atomic-parsing-and-toctou"
+id="toc-14-atomic-parsing-and-toctou">14. Atomic parsing and
+TOCTOU</a></li>
+<li><a href="#15-diagnostics" id="toc-15-diagnostics">15.
+Diagnostics</a></li>
+<li><a href="#16-validation-procedure"
+id="toc-16-validation-procedure">16. Validation procedure</a></li>
+<li><a href="#17-packaging-conformance"
+id="toc-17-packaging-conformance">17. Packaging conformance</a></li>
+<li><a href="#18-open-decisions-tbd" id="toc-18-open-decisions-tbd">18.
+Open decisions (TBD)</a></li>
+<li><a href="#19-related-specifications"
+id="toc-19-related-specifications">19. Related specifications</a></li>
+</ul>
+</nav>
+<p>This is a specification, not a description of finished work.
+Implementation status, source citations, test inventories, and the
+evidence behind every claim live in <a
+href="manifest.html">ledger/manifest</a>. Example documents live in
+manifest-examples.</p>
+<p>The manifest format is project policy. Nothing in ELF, in the dynamic
+loader, or in any platform packaging standard defines it. JSON, the file
+name, the key names, the <code>gfx</code> vocabulary, the priority
+tie-break, and the trusted-path rules are decisions this project made
+and can change. Only the things the manifest points at - a shared
+object, an exported symbol name, a version node - are constrained by
+ELF, and those rules belong to <a href="provider-module.html">Provider
+module</a>.</p>
+<h2 id="1-scope">1. Scope</h2>
+<p>This document specifies where a provider manifest lives and what it
+is called; the JSON document a broker MUST accept and the documents it
+MUST reject; the meaning of every field; the filesystem trust applied
+before a byte is read; the order in which validation runs and what a
+partially valid document does to registry state; the diagnostics a
+rejection MUST produce; and how a packaged manifest is checked.</p>
+<h2 id="2-non-goals">2. Non-goals</h2>
+<ul>
+<li>The provider protocol, dispatch tables, status taxonomy, and ABI
+negotiation. See <a href="provider-protocol.html">Provider
+protocol</a>.</li>
+<li>What a provider module exports, its version node, its visibility
+rules. See <a href="provider-module.html">Provider module</a>.</li>
+<li>Candidate ordering beyond the manifest-supplied inputs, cohort
+selection, lease lifetime. See <a href="broker.html">Broker</a> and <a
+href="cohort.html">Cohort</a>.</li>
+<li>How a facade obtains a registry or a device key. See <a
+href="facade.html">Facade</a>.</li>
+<li>Non-Linux trust policy; section 12 states what is compiled out and
+TBD-5 keeps it open.</li>
+</ul>
+<h2 id="3-terminology">3. Terminology</h2>
+<p>Terms are used as defined in ../draft-plan-reboot. Local to this
+document:</p>
+<ul>
+<li><strong>Manifest</strong> - distribution-private metadata describing
+provider candidates to the broker. A manifest is a file; it is not the
+provider and not the module.</li>
+<li><strong>Entry</strong> - one object in the <code>providers</code>
+array. One entry with N architectures expands to N registry
+entries.</li>
+<li><strong>Manifest directory</strong> - the parent directory of the
+canonicalized manifest path. All module paths resolve against it and
+MUST stay inside it.</li>
+<li><strong>Trusted path</strong> - a path whose every component passes
+the owner and mode checks of section 12.</li>
+</ul>
+<h2 id="4-file-name">4. File name</h2>
+<ul>
+<li>A manifest file name MUST end in <code>.json</code>. Runtime does
+not enforce this; the packaging check discovers manifests by extension,
+so a manifest named otherwise is installed and silently skipped rather
+than rejected.</li>
+<li>A new provider family SHOULD follow the observed
+<code>&lt;family&gt;-&lt;distribution&gt;.json</code> pattern. This is
+convention, not an enforced rule.</li>
+<li>A manifest file name MUST NOT be relied on for discovery by pattern.
+No directory glob exists; see section 6.</li>
+</ul>
+<h2 id="5-installation-location">5. Installation location</h2>
+<p>Every provider family installs its module and its manifest into
+<code>${CMAKE_INSTALL_LIBDIR}/rocm/interfaces/providers</code> under
+CPack component <code>providers</code>.</p>
+<ul>
+<li>A manifest and every module it names MUST install into the same
+directory. Section 8 forbids a module path from leaving the manifest
+directory, and the package-artifact check fails a package in which a
+named module is absent from the manifest's directory.</li>
+<li>Because module and manifest are co-located, <code>module</code>
+SHOULD be a bare file name. Multi-segment relative paths are legal
+(section 8) but a shipped manifest has no reason to need one.</li>
+<li>A manifest MUST NOT be installed into a directory that is group- or
+other-writable, or owned by an untrusted uid. Section 12 rejects it at
+load time, which turns a packaging mistake into a runtime failure rather
+than a silent hijack.</li>
+</ul>
+<h2 id="6-discovery">6. Discovery</h2>
+<p>Discovery is single-file, per facade. There is no directory scan and
+no <code>manifest.d</code> merge.</p>
+<ul>
+<li>Each facade DSO MUST be compiled with one default relative manifest
+path and MUST resolve it against the directory of the facade DSO itself,
+not against a configured prefix.</li>
+<li>A default relative manifest path that is empty or absolute, or a
+facade whose own module path cannot be determined, MUST resolve to no
+manifest rather than to a fallback location.</li>
+<li>An installation MAY override the manifest for one domain by a
+per-facade environment variable.</li>
+<li>An installation MAY bypass the manifest entirely with a per-facade
+direct-module override, which is consulted before the manifest. Whether
+direct-module overrides are a supported deployment surface or a
+developer seam is unsettled; see the ledger.</li>
+<li>Registry entries are append-only: there is no unload, remove, or
+replace. Loading the same manifest twice duplicates its entries.</li>
+</ul>
+<p>Two vendors cannot both ship providers for one domain and expect both
+to be discovered, because each facade reads exactly one file.
+Multi-vendor discovery is TBD-1.</p>
+<p>The broker's use of the resolved path is specified in <a
+href="broker.html">Broker</a>.</p>
+<h2 id="7-document-shape-schema-version-and-fields">7. Document shape,
+schema version, and fields</h2>
+<p>The root value MUST be a JSON object with exactly two keys, both
+required:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Key</th>
+<th>Type</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>schema_version</code></td>
+<td>integer</td>
+<td>MUST be the integer <code>1</code>. A non-integer, or any other
+integer, MUST be rejected.</td>
+</tr>
+<tr class="even">
+<td><code>providers</code></td>
+<td>array</td>
+<td>MUST be a nonempty array of provider entries.</td>
+</tr>
+</tbody>
+</table>
+<p>Any other root key MUST be rejected. The unknown-key check MUST run
+before the missing-key check, so a document that both carries a new key
+and omits a required one reports the unknown key.</p>
+<p>A producer MUST emit <code>schema_version</code> <code>1</code> and a
+consumer MUST reject anything else. What a future runtime does with
+version 2 is TBD-2.</p>
+<p>Each element of <code>providers</code> MUST be a JSON object. Exactly
+seven keys are allowed; three are required. Any other key in an entry
+MUST be rejected.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Key</th>
+<th>Required</th>
+<th>Type</th>
+<th>Default</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>id</code></td>
+<td>yes</td>
+<td>string</td>
+<td>-</td>
+<td>MUST be nonempty. The provider identity.</td>
+</tr>
+<tr class="even">
+<td><code>domain</code></td>
+<td>yes</td>
+<td>string</td>
+<td>-</td>
+<td>MUST be nonempty and MUST be one of the six names in section
+7.3.</td>
+</tr>
+<tr class="odd">
+<td><code>module</code></td>
+<td>yes</td>
+<td>string</td>
+<td>-</td>
+<td>MUST be nonempty and MUST satisfy section 8.</td>
+</tr>
+<tr class="even">
+<td><code>cohort</code></td>
+<td>no</td>
+<td>string</td>
+<td><code>""</code></td>
+<td>MAY be empty. Any string; no format rule.</td>
+</tr>
+<tr class="odd">
+<td><code>query_symbol</code></td>
+<td>no</td>
+<td>string</td>
+<td><code>rocm_interfaces_provider_query_v1</code></td>
+<td>MUST be nonempty when present. See section 11.</td>
+</tr>
+<tr class="even">
+<td><code>priority</code></td>
+<td>no</td>
+<td>integer</td>
+<td><code>0</code></td>
+<td>MUST be an integer within the range of C++ <code>int</code>. See
+section 10.</td>
+</tr>
+<tr class="odd">
+<td><code>gfx</code></td>
+<td>no</td>
+<td>array of string</td>
+<td><code>["*"]</code></td>
+<td>MUST be a nonempty array of strings, each satisfying section 9.</td>
+</tr>
+</tbody>
+</table>
+<p>A minimal conforming document, with every optional field
+defaulted:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;schema_version&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;providers&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;system-rocrand&quot;</span><span class="fu">,</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;domain&quot;</span><span class="fu">:</span> <span class="st">&quot;rand&quot;</span><span class="fu">,</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;module&quot;</span><span class="fu">:</span> <span class="st">&quot;librocrand-provider-system.so&quot;</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Further valid shapes, and every rejected document with its
+diagnostic, are in manifest-examples.</p>
+<h3 id="71-provider-identity">7.1 Provider identity</h3>
+<ul>
+<li>An <code>id</code> MUST be nonempty.</li>
+<li>An <code>id</code> MUST match the <code>provider_id</code> string
+the module writes into its query response. What the broker does with a
+mismatch is specified in <a href="broker.html">Broker</a>.</li>
+<li>An <code>id</code> SHOULD be stable across releases of the same
+provider, because it is what a manifest author, a diagnostic, and a
+support ticket all name.</li>
+<li>The same <code>id</code> MAY appear in several entries, in several
+domains, and in several manifests.</li>
+<li>Within one manifest load, the tuple (domain, architecture, id) MUST
+be unique; a repeat MUST be rejected. The duplicate set is per load, so
+the same tuple loaded from two different manifests is not detected.
+Whether that is legal is TBD-3.</li>
+<li>A new provider SHOULD follow the observed
+<code>&lt;distribution&gt;-&lt;implementation&gt;</code> convention.
+Nothing enforces it.</li>
+</ul>
+<h3 id="72-cohort-naming">7.2 Cohort naming</h3>
+<p><code>cohort</code> is an optional entry key whose value MUST be a
+JSON string; this document specifies only that field's type and
+optionality. Cohort identity, what it asserts, how it is matched, how it
+is named, and what an absent or empty value means are specified in <a
+href="cohort.html">Cohort</a>; this document states no rules of its own
+about them. TBD-6 and TBD-7 are the two missing halves.</p>
+<h3 id="73-domains">7.3 Domains</h3>
+<p><code>domain</code> MUST be one of exactly these six strings:
+<code>blas</code>, <code>solver</code>, <code>rand</code>,
+<code>blaslt</code>, <code>rocblas_bridge</code>, <code>blas_v2</code>.
+Any other string MUST be rejected.</p>
+<ul>
+<li><code>blas_v2</code> is a separate domain from <code>blas</code>,
+not a newer minor of it; the two contracts are kept apart so they can be
+compared without pretending ABI continuity.</li>
+<li>One module MAY be named by entries in several domains.</li>
+<li>Adding a domain string is a schema change even though
+<code>schema_version</code> would not move: the vocabulary is closed by
+the parser, so an older runtime rejects a manifest naming a new domain.
+Producers MUST NOT ship a domain name a targeted runtime does not
+know.</li>
+</ul>
+<h2 id="8-module-path-rules">8. Module path rules</h2>
+<p><code>module</code> names the provider module relative to the
+manifest directory. Requirements, applied in this order:</p>
+<ol type="1">
+<li>The value MUST be a nonempty string.</li>
+<li>The path MUST be relative. An absolute path MUST be rejected.</li>
+<li><code>manifest_directory / module</code> MUST pass the full
+trusted-path validation of section 12 with purpose
+<code>provider module</code>. This opens the file, so the module MUST
+already exist and be readable when the manifest is loaded: a manifest
+naming a module that ships later fails at load, not at first use.</li>
+<li>The canonicalized module path MUST be inside the canonicalized
+manifest directory. A path that resolves outside it MUST be
+rejected.</li>
+</ol>
+<p>Trust is validated before containment, so a module that is both
+outside the directory and untrusted reports the trust failure.</p>
+<ul>
+<li>A multi-segment relative path is permitted.</li>
+<li>A <code>module</code> value MUST NOT contain <code>..</code> in a
+form that escapes; a <code>..</code> that stays inside passes
+containment but SHOULD NOT be written.</li>
+<li>A shipped manifest SHOULD use a bare file name, matching section
+5.</li>
+<li>A manifest load MUST NOT inspect the module's exported symbols.
+Export policing is build-time; see <a
+href="provider-module.html">Provider module</a>.</li>
+</ul>
+<h2 id="9-device-and-gpu-architecture-representation">9. Device and GPU
+architecture representation</h2>
+<p><code>gfx</code> states which devices an entry serves. It is an array
+so one entry can cover several architectures; each element expands to
+its own registry entry.</p>
+<p>A <code>gfx</code> element MUST be either the exact wildcard
+<code>"*"</code> or a canonical base architecture name. A canonical base
+architecture name MUST start with <code>gfx</code>, MUST have every
+following character in <code>[0-9a-f]</code>, MUST be at least 6
+characters long, and MUST be short enough that the name plus its NUL
+fits the fixed architecture-name capacity of the device key.</p>
+<p>Therefore <code>"gfx90a"</code>, <code>"gfx942"</code>,
+<code>"gfx1201"</code> and <code>"*"</code> are valid, and each of the
+following MUST be rejected: an uppercase name, a HIP target ID carrying
+a feature suffix such as <code>"gfx90a:xnack+"</code>, a JSON number,
+and the reserved request-only name <code>"gfx000"</code>.
+<code>gfx000</code> is legal only in a device request, never in a
+manifest or any other registration.</p>
+<p>Matching compares the configured wildcard or base name against the
+requested base name only. Consequently <strong>the manifest cannot
+express feature bits</strong>: there is no way to say "this provider
+serves gfx90a only with xnack enabled". A provider whose validity
+depends on xnack or sramecc MUST reject the device itself, from its
+query or its context creation. Whether feature constraints belong in the
+manifest at all is TBD-11.</p>
+<p>Kernel-bearing providers MUST NOT advertise <code>"*"</code>. A
+kernel-bearing provider's manifest MUST be generated from the compile
+targets, MUST fail configuration on an empty, wildcard,
+<code>all</code>, or <code>native</code> target list, MUST reject any
+target not matching the HIP target-ID grammar, and MUST strip the
+target-ID suffix and deduplicate before emitting <code>gfx</code>. This
+rule is enforced today for one provider only; making it mechanical for
+every kernel-bearing family is TBD-13.</p>
+<h2 id="10-priority">10. Priority</h2>
+<p><code>priority</code> is a signed integer, default 0, higher wins -
+and it is strictly subordinate to architecture exactness. The complete
+candidate ordering is specified in <a href="broker.html">Broker</a>.</p>
+<ul>
+<li>Priority exists for local overrides. A manifest author MUST NOT use
+priority to express architecture preference, because exactness overrides
+it.</li>
+</ul>
+<h2 id="11-query-symbol">11. Query symbol</h2>
+<p>The default query symbol is
+<code>rocm_interfaces_provider_query_v1</code>. Its signature and
+contract belong to <a href="provider-protocol.html">Provider
+protocol</a>.</p>
+<p>An entry MAY override the name with <code>query_symbol</code>. How
+the broker resolves it, and what an unresolvable name does to the
+candidate, is specified in <a href="broker.html">Broker</a>.</p>
+<ul>
+<li>A manifest entry SHOULD omit <code>query_symbol</code>.</li>
+<li>A manifest entry MUST NOT set <code>query_symbol</code> to a name
+the module does not export. Every provider module in this project
+exports exactly the default symbol and nothing else, so in practice any
+override fails to resolve.</li>
+<li><code>query_symbol</code> MUST NOT be confused with the private
+rocBLAS backend query symbol, which is never named by a manifest.</li>
+<li>Whether <code>query_symbol</code> is a supported field at all is
+TBD-4.</li>
+</ul>
+<h2 id="12-trust-and-permissions">12. Trust and permissions</h2>
+<p>The threat is a writable path component. If any directory on the way
+to a manifest, or to a module, can be modified by an untrusted user,
+that user chooses which code the process loads into itself. Manifest
+parsing is therefore preceded by a full path validation, and the
+validated descriptor - not the path - is what gets read.</p>
+<p>Opening a trusted file, for purpose <code>provider manifest</code> or
+<code>provider module</code>, MUST:</p>
+<ol type="1">
+<li>make the path absolute and lexically normal, then canonicalize
+it;</li>
+<li>validate the whole component chain of the absolute path, and, when
+the canonical path differs, the canonical chain as well;</li>
+<li>open the canonical path read-only, close-on-exec, and without
+following a final symlink;</li>
+<li>re-verify identity on the descriptor (section 14).</li>
+</ol>
+<p>Component rules:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Check</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Owner</td>
+<td>Every component's owning uid MUST be the effective uid or the owner
+of <code>/</code></td>
+</tr>
+<tr class="even">
+<td>Final component type</td>
+<td>MUST be a regular file</td>
+</tr>
+<tr class="odd">
+<td>Final component mode</td>
+<td>MUST NOT be group- or other-writable</td>
+</tr>
+<tr class="even">
+<td>Non-final component type</td>
+<td>MUST be a directory</td>
+</tr>
+<tr class="odd">
+<td>Non-final component mode</td>
+<td>MUST NOT be group- or other-writable, unless it is a root-owned
+sticky directory</td>
+</tr>
+<tr class="even">
+<td>Root path</td>
+<td>The path MUST NOT name the filesystem root</td>
+</tr>
+</tbody>
+</table>
+<p>A diagnostic MUST name which purpose failed, so a reader can tell a
+manifest failure from a module failure.</p>
+<p>Non-Linux platforms MUST be treated as unspecified, not as
+permissive-by-design. Provider discovery is not enabled off Linux
+because an equivalent native trust and signing policy has not been
+defined and qualified. Defining a Windows owner-SID/ACL equivalent is
+TBD-5.</p>
+<p>There is no signature check on a manifest or a module. Trust is
+filesystem-ownership trust only.</p>
+<h2 id="13-symlink-handling">13. Symlink handling</h2>
+<p>A symlink MAY name a module inside the manifest directory and MUST be
+rejected when it resolves outside it, including through an intermediate
+directory symlink, since both the literal and the canonical chains are
+validated. A symlink component's own mode bits MUST NOT be treated as
+the trust decision; the resolved canonical chain carries the checks and
+the descriptor is opened without following a final link.</p>
+<p>A packaged manifest SHOULD name a real file, not a symlink.</p>
+<h2 id="14-atomic-parsing-and-toctou">14. Atomic parsing and TOCTOU</h2>
+<p>Three properties are required.</p>
+<p><strong>Document atomicity.</strong> A manifest is all-or-nothing.
+Entries MUST be accumulated in loader-local state and MUST be published
+into shared registry state only after the last entry validates. A
+rejected manifest MUST NOT leave any entry behind, even when its first
+entries were well formed.</p>
+<p><strong>Byte-source atomicity.</strong> The bytes parsed MUST come
+from the descriptor that was validated, not from a reopened path, so
+that a path substituted between validation and parse cannot be
+observed.</p>
+<p><strong>Identity recheck.</strong> After opening, the implementation
+MUST re-stat the descriptor, re-run the chain validation, and re-stat
+the path, and MUST fail when device and inode do not match. Because
+<code>dlopen</code> takes a path and cannot take a descriptor, the same
+recheck MUST be repeated immediately after the module is loaded, and the
+module MUST be unloaded when it fails.</p>
+<h2 id="15-diagnostics">15. Diagnostics</h2>
+<p>Two diagnostic surfaces exist and they are not interchangeable.</p>
+<p><strong>Parse and trust failures are exceptions.</strong> Schema
+rules throw <code>std::invalid_argument</code>. The path layer throws
+both <code>std::invalid_argument</code> and
+<code>std::runtime_error</code>, and which one surfaces depends on the
+object and the failure. A conforming consumer MUST therefore catch
+<code>std::exception</code>, not <code>std::invalid_argument</code>,
+around a manifest load.</p>
+<p><strong>Selection rejections are traces</strong>, not exceptions.
+Their routing and containment are specified in <a
+href="broker.html">Broker</a>.</p>
+<p>Rules:</p>
+<ul>
+<li>A manifest error MUST fail the load. It MUST NOT be downgraded to a
+warning and MUST NOT cause a fallback to some other provider.</li>
+<li>A diagnostic MUST identify the file. Manifest-level messages MUST
+carry the manifest path.</li>
+<li>A rejection message MUST name the offending key, value, or
+path.</li>
+<li>A JSON syntax error MUST be reported as a manifest parse failure
+naming the path.</li>
+<li>Message text MUST NOT be assumed stable. Whether any subset is
+contractual is TBD-14.</li>
+</ul>
+<h2 id="16-validation-procedure">16. Validation procedure</h2>
+<p>A conforming implementation MUST perform the following in this order.
+Steps are numbered so a negative test can name the step it targets.</p>
+<pre class="mermaid"><code>flowchart TD
+    A[manifest path] --&gt; B[open_trusted_file purpose=provider manifest]
+    B --&gt; C[read_all from descriptor]
+    C --&gt; D[JSON parse]
+    D --&gt; E[root shape: exactly schema_version + providers]
+    E --&gt; F[schema_version == 1 and providers is a nonempty array]
+    F --&gt; G[for each entry]
+    G --&gt; H[entry shape: allowed keys, required keys present]
+    H --&gt; I[id, domain, module as nonempty strings]
+    I --&gt; J[module relative]
+    J --&gt; K[open_trusted_file purpose=provider module]
+    K --&gt; L[is_within manifest directory]
+    L --&gt; M[priority integer in int range]
+    M --&gt; N[cohort is a string]
+    N --&gt; O[query_symbol nonempty when present]
+    O --&gt; P[gfx nonempty array of valid base gfx or wildcard]
+    P --&gt; Q[duplicate domain/arch/id check within this call]
+    Q --&gt; R[append to local parsed vector]
+    R --&gt; G
+    G --&gt; S[lock registry and splice parsed]</code></pre>
+<ol type="1">
+<li>Validate and open the manifest path as a trusted file (section 12).
+Failure: throw.</li>
+<li>Read the bytes from the validated descriptor (section 14). Failure:
+throw.</li>
+<li>Parse JSON. A syntax error MUST produce a diagnostic naming the
+path.</li>
+<li>Enforce the root object shape: unknown key first, then missing key
+(section 7).</li>
+<li>Enforce <code>schema_version == 1</code> and a nonempty
+<code>providers</code> array.</li>
+<li>For each entry, enforce the entry object shape.</li>
+<li>Read <code>id</code>, <code>domain</code>, <code>module</code> as
+nonempty strings; map <code>domain</code> through the closed
+vocabulary.</li>
+<li>Reject an absolute <code>module</code>; validate the joined path as
+a trusted file; reject a canonical path outside the manifest
+directory.</li>
+<li>Read <code>priority</code> (integer, int range), <code>cohort</code>
+(string), <code>query_symbol</code> (nonempty string when present).</li>
+<li>Read <code>gfx</code>, defaulting to <code>["*"]</code>; require a
+nonempty array of strings; validate each against section 9 with the
+wildcard allowed and <code>gfx000</code> forbidden.</li>
+<li>For each architecture, insert (domain, architecture, id) into a
+per-load duplicate set and reject a repeat; append one entry to the
+local vector.</li>
+<li>Only after every entry succeeds, take the registry lock and splice
+the local vector in.</li>
+</ol>
+<p>Steps 1 through 11 MUST NOT mutate shared registry state.</p>
+<h2 id="17-packaging-conformance">17. Packaging conformance</h2>
+<p>A new provider family MUST add a generated manifest, an install rule
+placing it beside its modules, and either coverage under the
+package-artifact check or its own generated-manifest shape check modeled
+on <code>rocm_interfaces.solver_manifest</code>. The package-artifact
+checks (<code>rocm_interfaces.package_deb_artifact</code>,
+<code>rocm_interfaces.package_rpm_artifact</code>) require that each
+packaged manifest parses, is nonempty, and names only modules present in
+the same installed directory. A release gate MUST require those two
+targets to have run, not merely to have not failed, because they
+self-skip when the packaging tools are absent (TBD-10).</p>
+<p>The full check inventory and its caveats are in <a
+href="manifest.html">ledger/manifest</a>.</p>
+<h2 id="18-open-decisions-tbd">18. Open decisions (TBD)</h2>
+<p>Each entry blocks a contract this document cannot state. Supporting
+detail is in the ledger.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Id</th>
+<th>Question</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>May several vendors ship providers for one domain into the providers
+directory and be discovered together?</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Is <code>schema_version</code> a named constant, and what does a
+future runtime do with version 2?</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Is the same (domain, architecture, id) legal across two
+manifests?</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Is <code>query_symbol</code> supported, or vestigial?</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Is the trusted-path requirement Linux-only by design, or is a
+Windows owner-SID/ACL equivalent required?</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Should a manifest declare capability profiles, and under what
+bit-allocation registry?</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Should the manifest carry a build identity, and what does a mismatch
+do?</td>
+</tr>
+<tr class="even">
+<td>TBD-8</td>
+<td>Is the Windows branch of loader-relative default manifest resolution
+a requirement, and what covers it?</td>
+</tr>
+<tr class="odd">
+<td>TBD-9</td>
+<td>Are the recording providers a delivery surface, and therefore
+subject to sections 4, 5, and 17?</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Must a release gate assert that the package-artifact targets
+actually ran, rather than only that they did not fail?</td>
+</tr>
+<tr class="odd">
+<td>TBD-11</td>
+<td>Should a manifest be able to constrain device features (xnack,
+sramecc)?</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>Which manifest rules must a release gate hold, given that eight of
+them are implemented but covered by no named check?</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>How is "kernel-bearing providers MUST NOT advertise a wildcard" made
+mechanical beyond the one provider that generates its <code>gfx</code>
+from compile targets?</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Are the rejection message strings part of the contract, and which
+ones MAY a producer depend on?</td>
+</tr>
+</tbody>
+</table>
+<h2 id="19-related-specifications">19. Related specifications</h2>
+<ul>
+<li><a href="architecture-component-model.html">Architecture component
+model</a> - where the manifest sits and who may read it.</li>
+<li><a href="broker.html">Broker</a> - candidate ordering, queries, ABI
+checks, leases.</li>
+<li><a href="cohort.html">Cohort</a> - what a cohort must guarantee; the
+<code>cohort</code> string is one input.</li>
+<li><a href="provider.html">Provider</a> - the provider as a whole
+facility.</li>
+<li><a href="provider-module.html">Provider module</a> - the binary a
+<code>module</code> value names.</li>
+<li><a href="provider-protocol.html">Provider protocol</a> - the query
+symbol's contract and the status taxonomy.</li>
+<li><a href="provider-adapter.html">Provider adapter</a> - how a
+provider implements the query.</li>
+<li><a href="provider-binding.html">Provider binding</a> - the object a
+facade retains after selection.</li>
+<li><a href="facade.html">Facade</a> - the public library that triggers
+manifest loading.</li>
+<li>Concepts and definitions - authoritative terminology.</li>
+<li>manifest-examples - valid and rejected documents.</li>
+<li><a href="manifest.html">ledger/manifest</a> - non-normative
+evidence, status, and citations.</li>
+</ul>
+</body>
+</html>
