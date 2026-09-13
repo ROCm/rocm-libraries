@@ -660,7 +660,6 @@ namespace rocsparse_clients
 
         case rocsparse_format_csc:
         {
-#ifdef ROCSPARSE_WITH_CSC_TRSV
             // A CSC matrix is the transpose of the CSR matrix sharing the same
             // arrays, so host_cscsv forwards to host_csrsv with the transpose
             // operation and the fill mode flipped (and, for the conjugate
@@ -719,7 +718,6 @@ namespace rocsparse_clients
                     exact[i]    = solve_pivot;
                 }
             }
-#endif
             break;
         }
 
@@ -750,15 +748,6 @@ void testing_sptrsv(const Arguments& arg)
     {
         return;
     }
-
-#ifndef ROCSPARSE_WITH_CSC_TRSV
-    // CSC triangular solve support can be disabled at build time
-    // (BUILD_WITH_CSC_TRSV=OFF); skip the CSC cases in that configuration.
-    if(arg.formatA == rocsparse_format_csc)
-    {
-        return;
-    }
-#endif
 
 #ifndef ROCSPARSE_WITH_DIAGONAL_SOLVE
     if(arg.solve_mode != rocsparse_solve_mode_triangular)

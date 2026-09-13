@@ -5207,8 +5207,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -5301,8 +5301,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -6276,7 +6276,6 @@ void host_bsric0(rocsparse_direction               direction,
 template <typename T>
 static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
 {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
     // Apply the boost magnitude (>= 0) along the direction of the original pivot
     // so its sign (real) or phase (complex) is preserved and a negative boost can
     // never swap the pivot sign, matching the device kernels.
@@ -6284,9 +6283,6 @@ static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
     const auto abs_boost = std::abs(boost_val);
     return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
                            : static_cast<T>(abs_boost);
-#else
-    return boost_val;
-#endif
 }
 
 template <typename T, typename U>

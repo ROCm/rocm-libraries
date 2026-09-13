@@ -52,10 +52,6 @@ endif()
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables referenced via #cmakedefine in the
 # .h.in must be set (or unset) prior to the configure_file() calls.
-set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
-set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
-set(ROCSPARSE_WITH_U16_REMOVED ${BUILD_WITH_U16_REMOVED})
-set(ROCSPARSE_WITH_ILU0_BOOST_SIGN ${ROCSPARSE_ENABLE_ILU0_BOOST_SIGN})
 set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
 set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
 set(ROCSPARSE_WITH_ELL_TRSV ${BUILD_WITH_ELL_TRSV})
@@ -74,8 +70,8 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
 # flags that appear in a public header but are intentionally build-only and never
 # reach consumers; only ROCSPARSE_WITH_MEMSTAT qualifies (it gates dev-only
 # memory-tracing routines in rocsparse-auxiliary.h). Other build-only flags
-# (ASAN, ROCBLAS, CSC_TRSV, CSC_TRSM) are used solely in src, never in public
-# headers, so the guardrail never sees them and they do not need excluding.
+# (ASAN, ROCBLAS) are used solely in src, never in public headers, so the
+# guardrail never sees them and they do not need excluding.
 include(CheckFeatureFlags)
 check_config_header_flags(
   PREFIX   ROCSPARSE_WITH_
@@ -116,17 +112,12 @@ endif()
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
 # Optionally remove the deprecated rocsparse_indextype_u16 index type from the
-# public API. The ROCSPARSE_WITH_U16_REMOVED flag itself is baked into the
-# installed rocsparse-version.h (see configure_file above) so that it propagates
-# to downstream consumers and makes their use of the enumerator a compile error.
-# ROCSPARSE_KEEP_INTERNAL_U16 is defined only for the library's own translation
-# units, keeping the enumerator available so that internal switch statements
-# remain valid (avoiding -Wswitch warnings) while still returning "not
-# implemented" for the deprecated value.
-if(BUILD_WITH_U16_REMOVED)
-    target_compile_definitions(rocsparse PRIVATE ROCSPARSE_KEEP_INTERNAL_U16)
-    message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
-endif()
+# public API. ROCSPARSE_KEEP_INTERNAL_U16 is defined only for the library's own
+# translation units, keeping the enumerator available so that internal switch
+# statements remain valid (avoiding -Wswitch warnings) while still returning
+# "not implemented" for the deprecated value.
+target_compile_definitions(rocsparse PRIVATE ROCSPARSE_KEEP_INTERNAL_U16)
+message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
 
 # Target include directories
 target_include_directories(rocsparse
@@ -201,16 +192,6 @@ if (NOT WIN32)
       endif()
     endif()
   endif()
-endif()
-
-# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv)
-if(BUILD_WITH_CSC_TRSV)
-  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSV)
-endif()
-
-# CSC triangular solve support (rocsparse_spsm / rocsparse_sptrsm)
-if(BUILD_WITH_CSC_TRSM)
-  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSM)
 endif()
 
 # Target properties

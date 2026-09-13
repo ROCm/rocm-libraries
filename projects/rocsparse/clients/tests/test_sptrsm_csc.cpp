@@ -25,9 +25,6 @@
 #include "test.hpp"
 #include "testing_sptrsm_csc.hpp"
 
-// CSC support can be disabled at build time (BUILD_WITH_CSC_TRSM=OFF), in which
-// case the sptrsm_csc tests are not registered.
-#ifdef ROCSPARSE_WITH_CSC_TRSM
 TEST_ROUTINE_WITH_CONFIG(sptrsm_csc,
                          level3,
                          rocsparse_test_config_ijt,
@@ -46,4 +43,3 @@ TEST_ROUTINE_WITH_CONFIG(sptrsm_csc,
                          arg.orderC,
                          arg.matrix,
                          arg.graph_test);
-#endif

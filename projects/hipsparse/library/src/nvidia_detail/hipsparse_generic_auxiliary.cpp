@@ -494,7 +494,10 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 }
 #endif
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -528,7 +531,7 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 }
 #endif
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
                                           int64_t                     mb,
                                           int64_t                     nb,
@@ -561,6 +564,7 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
+// clang-format on
 
 #if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseDestroySpMat(hipsparseConstSpMatDescr_t spMatDescr)
