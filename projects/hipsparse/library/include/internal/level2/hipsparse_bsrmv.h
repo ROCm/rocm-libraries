@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -117,6 +117,78 @@ hipsparseStatus_t hipsparseSbsrmv(hipsparseHandle_t         handle,
                                   const float*              x,
                                   const float*              beta,
                                   float*                    y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and where \f$m = mb \times blockDim\f$ and \f$n= nb \times blockDim\f$.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA            matrix storage of BSR blocks.
+*  @param[in]
+*  transA          matrix operation type.
+*  @param[in]
+*  mb              number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb              number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse BSR matrix. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrSortedValA   array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedRowPtrA array of \p mb+1 elements that point to the start of every block row of
+*                  the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedColIndA array of \p nnzb elements containing the block column indices of the sparse
+*                  BSR matrix.
+*  @param[in]
+*  blockDim        block dimension of the sparse BSR matrix. Must be positive.
+*  @param[in]
+*  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[inout]
+*  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, or \p nnzb is negative, \p blockDim is less than or equal to zero, or
+*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
                                   hipsparseDirection_t      dirA,
@@ -133,6 +205,78 @@ hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
                                   const double*             x,
                                   const double*             beta,
                                   double*                   y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and where \f$m = mb \times blockDim\f$ and \f$n= nb \times blockDim\f$.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA            matrix storage of BSR blocks.
+*  @param[in]
+*  transA          matrix operation type.
+*  @param[in]
+*  mb              number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb              number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse BSR matrix. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrSortedValA   array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedRowPtrA array of \p mb+1 elements that point to the start of every block row of
+*                  the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedColIndA array of \p nnzb elements containing the block column indices of the sparse
+*                  BSR matrix.
+*  @param[in]
+*  blockDim        block dimension of the sparse BSR matrix. Must be positive.
+*  @param[in]
+*  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[inout]
+*  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, or \p nnzb is negative, \p blockDim is less than or equal to zero, or
+*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
                                   hipsparseDirection_t      dirA,
@@ -149,6 +293,78 @@ hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
                                   const hipComplex*         x,
                                   const hipComplex*         beta,
                                   hipComplex*               y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
+*  \f[
+*    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*  and where \f$m = mb \times blockDim\f$ and \f$n= nb \times blockDim\f$.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA            matrix storage of BSR blocks.
+*  @param[in]
+*  transA          matrix operation type.
+*  @param[in]
+*  mb              number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb              number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse BSR matrix. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrSortedValA   array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedRowPtrA array of \p mb+1 elements that point to the start of every block row of
+*                  the sparse BSR matrix.
+*  @param[in]
+*  bsrSortedColIndA array of \p nnzb elements containing the block column indices of the sparse
+*                  BSR matrix.
+*  @param[in]
+*  blockDim        block dimension of the sparse BSR matrix. Must be positive.
+*  @param[in]
+*  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[inout]
+*  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, or \p nnzb is negative, \p blockDim is less than or equal to zero, or
+*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZbsrmv(hipsparseHandle_t         handle,
                                   hipsparseDirection_t      dirA,
