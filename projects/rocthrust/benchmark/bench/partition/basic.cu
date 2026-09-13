@@ -26,21 +26,13 @@
  *
  ******************************************************************************/
 
-// Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
-
-// rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/partition.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
 #include <string>
-#include <vector>
+
+#include "bench_utils.hpp"
 
 template <class T>
 struct less_then_t
@@ -53,150 +45,84 @@ struct less_then_t
   }
 };
 
-struct basic
+template <typename T>
+struct partition_benchmark : public primbench::benchmark_interface
 {
-  template <typename T, typename Policy>
-  float64_t run(thrust::device_vector<T>& input,
-                thrust::device_vector<T>& output,
-                const std::size_t elements,
-                less_then_t<T> select_op,
-                Policy policy)
+  partition_benchmark(size_t items, int entropy_reduction)
+      : m_items(items)
+      , entropy_reduction(entropy_reduction)
+  {}
+
+  primbench::json meta() const override
   {
-    thrust::partition_copy(
-      policy,
-      input.cbegin(),
-      input.cend(),
-      output.begin(),
-      thrust::make_reverse_iterator(output.begin() + elements),
-      select_op);
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::partition_copy(
-      policy,
-      input.cbegin(),
-      input.cend(),
-      output.begin(),
-      thrust::make_reverse_iterator(output.begin() + elements),
-      select_op);
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "partition")
+      .add("subalgo", "basic")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items)
+      .add("entropy", std::to_string(bench_utils::get_entropy_percentage(entropy_reduction)));
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    T val = bench_utils::value_from_entropy<T>(bench_utils::get_entropy_percentage(entropy_reduction));
+
+    less_then_t<T> select_op{val};
+
+    thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed);
+    thrust::device_vector<T> out(m_items);
+
+    state.set_items(m_items);
+    state.add_reads<T>(m_items);
+    state.add_writes<T>(m_items);
+
+    state.run([&] {
+      thrust::partition_copy(
+        policy(alloc).on(state.stream),
+        in.cbegin(),
+        in.cend(),
+        out.begin(),
+        thrust::make_reverse_iterator(out.begin() + m_items),
+        select_op);
+    });
+  }
+
+private:
+  size_t m_items;
+  int entropy_reduction;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(
-  benchmark::State& state, const std::size_t elements, const std::string seed_type, const int entropy_reduction)
-{
-  using select_op_t = less_then_t<T>;
-
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  T val = bench_utils::value_from_entropy<T>(bench_utils::get_entropy_percentage(entropy_reduction));
-  select_op_t select_op{val};
-
-  thrust::device_vector<T> input = bench_utils::generate(elements, seed_type);
-
-  // Output
-  thrust::device_vector<T> output(elements);
-
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(input, output, elements, select_op, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  // BytesProcessed include read and written bytes, so when the BytesProcessed/s are reported
-  // it will actually be the global memory bandwidth gotten.
-  state.SetBytesProcessed(state.iterations() * 2 * elements * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * elements);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements, EntropyReduction)                                                         \
-  benchmark::RegisterBenchmark(                                                                                 \
-    bench_utils::bench_naming::format_name(                                                                     \
-      "{algo:partition,subalgo:" + name + ",input_type:" #T + ",elements:" + bench_utils::format_pow2(Elements) \
-      + ",entropy:" + std::to_string(bench_utils::get_entropy_percentage(EntropyReduction)))                    \
-      .c_str(),                                                                                                 \
-    run_benchmark<Benchmark, T>,                                                                                \
-    Elements,                                                                                                   \
-    seed_type,                                                                                                  \
-    EntropyReduction)
-
-#define BENCHMARK_TYPE_ENTROPY(type, entropy)                              \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-      bs.push_back(CREATE_BENCHMARK(type, size, entropy));                 \
-  }
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  constexpr int entropy_reductions[] = {0, 2, 4200}; // 1.000, 0.544, 0.000;
-
-  for (int entropy_reduction : entropy_reductions)
-  {
-    std::vector<benchmark::Benchmark*> bs;
-    BENCHMARK_TYPE_ENTROPY(int8_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int16_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int32_t, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(int64_t, entropy_reduction)
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-    BENCHMARK_TYPE_ENTROPY(int128_t, entropy_reduction)
-#endif
-    BENCHMARK_TYPE_ENTROPY(float, entropy_reduction)
-    BENCHMARK_TYPE_ENTROPY(double, entropy_reduction)
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-  }
-}
+#define QUEUE(T, E)                                     \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+    executor.queue<partition_benchmark<T>>(size, E);
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 100;
+  settings.batch_window_size    = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  constexpr int entropy_reductions[] = {0, 2, 4200}; // 1.000, 0.544, 0.000;
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
-
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<basic>("basic", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
+  for (int e : entropy_reductions)
   {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
+    QUEUE(int8_t, e)
+    QUEUE(int16_t, e)
+    QUEUE(int32_t, e)
+    QUEUE(int64_t, e)
+
+#ifndef _MSC_VER
+    QUEUE(int128_t, e)
+#endif
+
+    QUEUE(float, e)
+    QUEUE(double, e)
   }
 
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

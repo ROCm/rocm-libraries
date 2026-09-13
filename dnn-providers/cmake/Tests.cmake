@@ -279,7 +279,7 @@ endfunction()
 # - RPATH settings for relocatable test executables
 # - Installation rules for test binaries
 # - CTest registration
-# - YAML-driven category labels when DNN_PROVIDER_CTEST_CATEGORIES_YAML is set,
+#   YAML-driven category labels when DNN_PROVIDER_TEST_CATEGORY_YAMLS is set,
 #   otherwise legacy labels such as unit_test/integration_test
 #
 #   APPEND_FUNCTION_SUFFIX - Legacy grouping name retained by add_unit_test_target/add_integration_test_target
@@ -338,18 +338,25 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     endif()
     set(_MERGED_TEST_ENVIRONMENT ${TEST_ENVIRONMENT} ${ARG_ENVIRONMENT})
 
-    # YAML-driven categorization (currently miopen-provider only) generates
-    # its own tiered suites via apply_test_category_labels() after this
-    # function returns; registering the raw, unfiltered ${TARGET} test here
-    # would just duplicate the *_full_suite entry with zero labels (never
-    # selectable via `ctest -L`, always run by a bare `ctest`).
+    # YAML-driven categorization (apply_test_category_labels(), keyed off
+    # DNN_PROVIDER_TEST_CATEGORY_YAMLS) generates its own tiered suites after this
+    # function returns; registering the raw, unfiltered ${TARGET} test here would
+    # just duplicate the *_full_suite entry with zero labels (never selectable via
+    # `ctest -L`, always run by a bare `ctest`).
+    #
+    # Providers with a pre-registered external CTest-name suite also set
+    # DNN_PROVIDER_CTEST_CATEGORIES_YAML for apply_ctest_category_labels(), but every
+    # existing caller (miopen-provider, hipblaslt-provider, hip-kernel-provider) folds
+    # that same YAML path into DNN_PROVIDER_TEST_CATEGORY_YAMLS too, so checking only
+    # the latter covers both GTest-filter-only projects (integration-tests) and
+    # providers with an external CTest-name YAML.
     #
     # Callers cannot set properties on ${TARGET} below since it was never
     # registered as a CTest test in this mode -- publish the merged
     # environment instead so the caller can forward it explicitly to
     # whichever suites apply_test_category_labels()/apply_ctest_category_labels()
     # actually creates.
-    if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+    if(DNN_PROVIDER_TEST_CATEGORY_YAMLS)
         set(${TARGET}_TEST_ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}" PARENT_SCOPE)
         return()
     endif()
@@ -415,132 +422,6 @@ function(add_integration_test_target TARGET WORKING_DIR)
     endif()
 endfunction()
 
-# ~~~
-# Adds a tiered test target with Smoke/Standard/Comprehensive/Full ctest entries.
-#
-# Use this instead of add_unit_test_target() for test binaries that use GTest
-# prefix-based tier filtering (INSTANTIATE_TEST_SUITE_P with Smoke/Standard/
-# Comprehensive/Full prefixes).  Creates four ctest entries with appropriate
-# exclusion/inclusion filters, cumulative labels, and per-tier timeouts.
-# The smoke-only entry is accumulated for install staging so TheRock CI
-# (which runs bare ctest with no -L filter) only executes quick tests.
-#
-# Usage:
-#   add_tiered_test_target(TARGET WORKING_DIR
-#       [SMOKE_TIMEOUT seconds]          # default 600
-#       [STANDARD_TIMEOUT seconds]       # default 1800
-#       [COMPREHENSIVE_TIMEOUT seconds]  # default 3600
-#       [FULL_TIMEOUT seconds])          # default 7200
-# ~~~
-function(add_tiered_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG ""
-        "SMOKE_TIMEOUT;STANDARD_TIMEOUT;COMPREHENSIVE_TIMEOUT;FULL_TIMEOUT" "" ${ARGN})
-
-    # Default timeouts
-    if(NOT ARG_SMOKE_TIMEOUT)
-        set(ARG_SMOKE_TIMEOUT 600)
-    endif()
-    if(NOT ARG_STANDARD_TIMEOUT)
-        set(ARG_STANDARD_TIMEOUT 1800)
-    endif()
-    if(NOT ARG_COMPREHENSIVE_TIMEOUT)
-        set(ARG_COMPREHENSIVE_TIMEOUT 3600)
-    endif()
-    if(NOT ARG_FULL_TIMEOUT)
-        set(ARG_FULL_TIMEOUT 7200)
-    endif()
-
-    set(TARGET_EXE "${TARGET}${CMAKE_EXECUTABLE_SUFFIX}")
-
-    message(STATUS "Adding tiered test target: ${TARGET} -> ${TARGET_EXE}")
-
-    # -- Infra setup (same as _add_test_target_internal, without the unfiltered add_test) --
-    set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
-        CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
-    set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL}
-        "${CMAKE_INSTALL_BINDIR}/${TARGET_EXE}"
-        CACHE INTERNAL "Accumulated global check executable paths" FORCE)
-
-    set_target_properties(${TARGET} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
-        INSTALL_RPATH
-            "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
-        INSTALL_RPATH_USE_LINK_PATH TRUE
-        BUILD_RPATH_USE_ORIGIN TRUE)
-    install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-    # On Windows, stage the shadowed ROCm DLLs before this test binary is built so a
-    # partial build + manual ctest doesn't load the stale System32 amd_comgr.dll.
-    if(TARGET stage_shadowed_rocm_dlls)
-        add_dependencies(${TARGET} stage_shadowed_rocm_dlls)
-    endif()
-
-    # -- Four ctest entries with cumulative labels --
-    # Each tier gets a FAIL_REGULAR_EXPRESSION guard.  GTest prints "Running 0
-    # tests from 0 test suites" and exits 0 when no tests match a filter — the
-    # guard turns that silent pass into a ctest failure so accidentally empty
-    # tiers are caught early.  If a tier is intentionally empty, add a single
-    # INSTANTIATE_TEST_SUITE_P with a minimal case rather than removing the guard.
-    set(_no_tests_re "Running 0 tests from 0 test suites")
-
-    # Smoke: catch-all exclusion (everything not Standard/Comprehensive/Full).
-    # The "unit_test" label is intentional — smoke tests are quick enough to
-    # run in the unit-check target alongside real unit tests.
-    add_test(NAME ${TARGET}_quick
-        COMMAND ${TARGET} --gtest_filter=-Standard*:Comprehensive*:Full*
-        WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET}_quick PROPERTIES
-        LABELS "quick;standard;comprehensive;full;unit_test" TIMEOUT ${ARG_SMOKE_TIMEOUT}
-        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
-
-    add_test(NAME ${TARGET}_standard
-        COMMAND ${TARGET} --gtest_filter=Standard*
-        WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET}_standard PROPERTIES
-        LABELS "standard;comprehensive;full;slow" TIMEOUT ${ARG_STANDARD_TIMEOUT}
-        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
-
-    add_test(NAME ${TARGET}_comprehensive
-        COMMAND ${TARGET} --gtest_filter=Comprehensive*
-        WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET}_comprehensive PROPERTIES
-        LABELS "comprehensive;full;slow" TIMEOUT ${ARG_COMPREHENSIVE_TIMEOUT}
-        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
-
-    add_test(NAME ${TARGET}_full
-        COMMAND ${TARGET} --gtest_filter=Full*
-        WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET}_full PROPERTIES
-        LABELS "full;slow" TIMEOUT ${ARG_FULL_TIMEOUT}
-        FAIL_REGULAR_EXPRESSION "${_no_tests_re}")
-
-    if(TEST_ENVIRONMENT)
-        set_tests_properties(
-            ${TARGET}_quick ${TARGET}_standard ${TARGET}_comprehensive ${TARGET}_full
-            PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
-    endif()
-    # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) via ENVIRONMENT_MODIFICATION so
-    # the runtime PATH is extended, not replaced.
-    if(TEST_ENVIRONMENT_MODIFICATION)
-        set_tests_properties(
-            ${TARGET}_quick ${TARGET}_standard ${TARGET}_comprehensive ${TARGET}_full
-            PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
-    endif()
-    # Clear the build-local MIOpen cache before these tests run (ASAN builds only). See the
-    # hipdnn_clear_miopen_test_cache fixture above.
-    if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
-        set_tests_properties(
-            ${TARGET}_quick ${TARGET}_standard ${TARGET}_comprehensive ${TARGET}_full
-            PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache)
-    endif()
-
-    # -- Install staging: smoke only --
-    # Accumulated in a global property so install_integration_tests_ctest_files()
-    # can emit all tiered entries automatically.
-    set_property(GLOBAL APPEND_STRING PROPERTY TIERED_TEST_INSTALL_STAGING
-        "add_test(${TARGET}_quick \"../${TARGET_EXE}\" --gtest_filter=-Standard*:Comprehensive*:Full*)\nset_tests_properties(${TARGET}_quick PROPERTIES LABELS \"quick\" TIMEOUT ${ARG_SMOKE_TIMEOUT})\n")
-endfunction() # add_tiered_test_target
-
 # Install CTest configuration files for direct test execution. This should be called once at the end
 # of the main CMakeLists.txt after all tests are registered.
 #
@@ -569,14 +450,6 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
-
-    # Append tiered test entries (smoke tier only for CI).
-    # These are accumulated by add_tiered_test_target() calls.
-    get_property(_tiered_staging GLOBAL PROPERTY TIERED_TEST_INSTALL_STAGING)
-    if(_tiered_staging)
-        file(APPEND "${INSTALLED_CTEST_FILE}" "\n# Tiered test entries (smoke tier only for CI)\n")
-        file(APPEND "${INSTALLED_CTEST_FILE}" "${_tiered_staging}")
-    endif()
 
     # Append external integration test entries (cross-provider suite).
     # These are accumulated by add_external_integration_test_target() calls

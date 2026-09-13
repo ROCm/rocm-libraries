@@ -25,7 +25,7 @@
 #ifndef TESTING_SPMV_BSR_HPP
 #define TESTING_SPMV_BSR_HPP
 
-#include <hipsparse/hipsparse-version.h>
+#include <hipsparse/hipsparse-config.h>
 
 #ifdef HIPSPARSE_WITH_SPMV_BSR
 

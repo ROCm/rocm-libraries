@@ -33,6 +33,7 @@ on:
 permissions:
   contents: read
 
+# Each Linux matrix row builds and tests one project/target combination.
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})

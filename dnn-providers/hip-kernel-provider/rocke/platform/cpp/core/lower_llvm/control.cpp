@@ -997,24 +997,53 @@ static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
-/* Python _op_tile_s_waitcnt: explicit s_waitcnt from attrs. */
+/* Python _op_tile_s_waitcnt: explicit s_waitcnt from attrs.
+ *
+ * gfx1250: the monolithic llvm.amdgcn.s.waitcnt is not selectable. Emit
+ * split llvm.amdgcn.s.wait.loadcnt (vmcnt) / llvm.amdgcn.s.wait.dscnt
+ * (lgkmcnt) instead, mirroring Python _op_tile_s_waitcnt (lower_llvm.py
+ * lines 4083-4099). */
 static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L))
     {
         return;
     }
-    /* gfx1250: the split wait counters are inserted by the backend and the
-     * legacy s_waitcnt intrinsic is not selectable, so emit nothing. */
-    if(L->backend && !L->backend->emits_legacy_s_waitcnt)
-    {
-        return;
-    }
-    rocke_ll_need(L, "s.waitcnt");
     int64_t vm = -1, lk = -1, ec = -1;
     rocke_attr_get_int(&op->attrs, "vmcnt", &vm);
     rocke_attr_get_int(&op->attrs, "lgkmcnt", &lk);
     rocke_attr_get_int(&op->attrs, "expcnt", &ec);
+
+    if(L->backend && !L->backend->emits_legacy_s_waitcnt)
+    {
+        /* gfx1250: emit split wait intrinsics. Mapping:
+         *   vmcnt  -> loadcnt (drain pending global loads)
+         *             storecnt (drain pending global stores)
+         *   lgkmcnt -> dscnt  (drain pending LDS ops)
+         *              kmcnt  (drain pending scalar memory ops)
+         *   expcnt -> expcnt  (drain pending exports / VSRC writes) */
+        if(vm >= 0)
+        {
+            rocke_ll_need(L, "s.wait.loadcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.loadcnt(i16 %d)", (int)vm);
+            rocke_ll_need(L, "s.wait.storecnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.storecnt(i16 %d)", (int)vm);
+        }
+        if(lk >= 0)
+        {
+            rocke_ll_need(L, "s.wait.dscnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.dscnt(i16 %d)", (int)lk);
+            rocke_ll_need(L, "s.wait.kmcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.kmcnt(i16 %d)", (int)lk);
+        }
+        if(ec >= 0)
+        {
+            rocke_ll_need(L, "s.wait.expcnt");
+            rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.expcnt(i16 %d)", (int)ec);
+        }
+        return;
+    }
+    rocke_ll_need(L, "s.waitcnt");
     int mask = ll_backend_waitcnt(L, (int)vm, (int)ec, (int)lk);
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
 }
@@ -1696,6 +1725,64 @@ static void
     }
 }
 
+/* Python _op_tile_exec_and_saveexec: s_and_saveexec_b64 dst, src.
+ * exec = exec & src; dst = old exec (i64). */
+static void _op_tile_exec_and_saveexec(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* mask = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_and_saveexec_b64 $0, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, mask));
+}
+
+/* Python _op_tile_exec_xor: s_xor_b64 dst, exec, src.
+ * dst = exec XOR src (complement mask). */
+static void _op_tile_exec_xor(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* saved = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_xor_b64 $0, exec, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, saved));
+}
+
+/* Python _op_tile_exec_or_saveexec: s_or_saveexec_b64 dst, src.
+ * exec |= src; dst = old exec (i64). */
+static void _op_tile_exec_or_saveexec(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_results < 1)
+        return;
+    const rocke_value_t* compl_v = op->operands[0];
+    const rocke_value_t* res = op->results[0];
+    rocke_ll_emitf(L,
+                   "  %s = call i64 asm sideeffect "
+                   "\"s_or_saveexec_b64 $0, $1\", \"=s,s\"(i64 %s)",
+                   res->name,
+                   rocke_ll_operand(L, compl_v));
+}
+
+/* Python _op_tile_exec_or: s_or_b64 exec, exec, src.
+ * Restore exec to all lanes (void, side-effect only). */
+static void _op_tile_exec_or(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1)
+        return;
+    const rocke_value_t* saved = op->operands[0];
+    rocke_ll_emitf(L,
+                   "  call void asm sideeffect "
+                   "\"s_or_b64 exec, exec, $0\", \"s\"(i64 %s)",
+                   rocke_ll_operand(L, saved));
+}
+
 /* Python _op_scf_if: i1 cond branch into a fresh then-block, lower the
  * then-region, then a join block, with a deferred %IF_END placeholder.
  *
@@ -1743,6 +1830,76 @@ static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
     {
         const char* repl = rocke_arena_printf(&L->arena, "%%%s", end_blk->label);
         ll_block_replace(L, cur, "%IF_END", repl);
+    }
+}
+
+/* Python _op_scf_if_else: true LLVM if/else with a shared join block.
+ *
+ * Both branches converge at the same join block, which keeps s_barrier calls
+ * alive through simplifycfg (LLVM cannot remove a barrier reachable from both
+ * sides of a conditional branch).
+ *
+ * LLVM IR shape:
+ *     br i1 %cond, label %if.then, label %if.else
+ *   if.then:
+ *     [then region]
+ *     br label %if.end
+ *   if.else:
+ *     [else region]
+ *     br label %if.end
+ *   if.end:
+ *     [continuation]
+ *
+ * Mirrors Python _op_scf_if_else (lower_llvm.py lines 5276-5346).
+ */
+static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_regions < 2)
+        return;
+    const rocke_value_t* cond = op->operands[0];
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    rocke_ll_block_t* then_blk = rocke_ll_new_block(L, "if.then");
+    if(cur && then_blk)
+    {
+        /* emit conditional branch; use %IF_ELSE placeholder for the else label. */
+        rocke_ll_block_emitf(L,
+                             cur,
+                             "  br i1 %s, label %%%s, label %%IF_ELSE",
+                             rocke_ll_operand(L, cond),
+                             then_blk->label);
+        cur->terminated = true;
+    }
+    /* Lower then branch. */
+    rocke_ll_lower_region(L, op->regions[0]);
+    rocke_ll_block_t* then_last = rocke_ll_current(L);
+    /* then falls through to join; use %IF_END placeholder. */
+    if(then_last && !then_last->terminated)
+    {
+        rocke_ll_block_emitf(L, then_last, "  br label %%IF_END");
+        then_last->terminated = true;
+    }
+    /* Create else block (becomes _current). */
+    rocke_ll_block_t* else_blk = rocke_ll_new_block(L, "if.else");
+    /* Lower else branch. */
+    rocke_ll_lower_region(L, op->regions[1]);
+    rocke_ll_block_t* else_last = rocke_ll_current(L);
+    /* Create join block. */
+    rocke_ll_block_t* end_blk = rocke_ll_new_block(L, "if.end");
+    if(else_last && !else_last->terminated && end_blk)
+    {
+        rocke_ll_block_emitf(L, else_last, "  br label %%%s", end_blk->label);
+        else_last->terminated = true;
+    }
+    /* Backpatch placeholders. */
+    if(cur && else_blk)
+    {
+        const char* else_repl = rocke_arena_printf(&L->arena, "%%%s", else_blk->label);
+        ll_block_replace(L, cur, "%IF_ELSE", else_repl);
+    }
+    if(then_last && end_blk)
+    {
+        const char* end_repl = rocke_arena_printf(&L->arena, "%%%s", end_blk->label);
+        ll_block_replace(L, then_last, "%IF_END", end_repl);
     }
 }
 
@@ -1829,9 +1986,16 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);
 
+    /* tile.* -- exec-mask (wavelet pipeline, MFMA path) */
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_AND_SAVEEXEC, _op_tile_exec_and_saveexec);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_XOR, _op_tile_exec_xor);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_OR_SAVEEXEC, _op_tile_exec_or_saveexec);
+    rocke_ll_set_handler(ROCKE_OP_TILE_EXEC_OR, _op_tile_exec_or);
+
     /* scf.* / cf.* control flow */
     rocke_ll_set_handler(ROCKE_OP_SCF_FOR, _op_scf_for);
     rocke_ll_set_handler(ROCKE_OP_SCF_IF, _op_scf_if);
+    rocke_ll_set_handler(ROCKE_OP_SCF_IF_ELSE, _op_scf_if_else);
     rocke_ll_set_handler(ROCKE_OP_SCF_YIELD, _op_scf_yield);
     rocke_ll_set_handler(ROCKE_OP_CF_RETURN, _op_cf_return);
 }

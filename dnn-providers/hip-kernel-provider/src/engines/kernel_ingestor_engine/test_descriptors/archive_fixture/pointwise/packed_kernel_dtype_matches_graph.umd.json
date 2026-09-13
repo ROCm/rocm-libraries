@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "c3820f5b-71e6-4a49-8d10-b2f4970e6c58",
+  "name": "packed: kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.pointwise.kernel_match"
+}

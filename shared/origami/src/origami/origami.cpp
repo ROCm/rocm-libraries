@@ -42,7 +42,7 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
  * @param hardware Hardware characteristics
  * @param config Kernel configuration.
  * @param skGrid SK grid.
- * @return A workgroup_mapping_t struct: best predicted (wgmxccchunk, wgmxcc, wgm).
+ * @return A workgroup_mapping_t struct: best predicted (wgmxccsplitk, wgmxccchunk, wgmxcc, wgm).
  */
 workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                              const hardware_t& hardware,
@@ -62,19 +62,17 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   int ntb = config.cache_hints_b;
 
   // Early Exit: problem sizes are invalid
-  if(M < 1 || N < 1 || K < 1 || batch < 1)
-  {
-    return workgroup_mapping_t{0, 0, 0};
-  }
+  if (M < 1 || N < 1 || K < 1 || batch < 1) { return workgroup_mapping_t{0, 0, 0}; }
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
-  size_t numCUs             = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  size_t numXCD             = hardware.NUM_XCD;
-  size_t numCUsPerXCD       = numCUs / numXCD;
-  size_t defaultWGMXCCCHUNK = 0;
-  size_t defaultWGMXCC      = hardware.NUM_XCD;
-  int32_t defaultWGM        = ceil(std::sqrt(numCUsPerXCD));
+  size_t  numCUs              = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  size_t  numXCD              = hardware.NUM_XCD;
+  size_t  numCUsPerXCD        = numCUs / numXCD;
+  size_t  defaultWGMXCCSPLITK = 0;
+  size_t  defaultWGMXCCCHUNK  = 0;
+  size_t  defaultWGMXCC       = hardware.NUM_XCD;
+  int32_t defaultWGM          = ceil(std::sqrt(numCUsPerXCD));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -92,14 +90,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // That loop assumes consecutive StreamKIdx values are dispatched in physical WG order.
   // The chunk transform reorders WG IDs across XCDs, breaking this assumption and potentially
   // filling all GPU execution slots with spinning fixup waves resulting in a cooperative deadlock.
-  bool sk_has_partial_tiles = (skGrid > 0 && skGrid < (numMTs * batch) && (numMTs * batch) % skGrid != 0);
-
-  // The same hazard exists when a single output tile is finished by more than one workgroup
-  // because the K dimension is split across workgroups (skGrid > tiles): the fixup handoff
-  // still needs a tile's co-op workgroups to stay in consecutive physical-WG order, and the
-  // chunk transform reorders them. Disable chunking whenever tiles are split or partial.
-  bool sk_split_tiles  = (skGrid > 0 && split_factor > 1);
-  bool sk_disable_chunk = sk_has_partial_tiles || sk_split_tiles;
+  bool sk_has_partial_tiles =
+      (skGrid > 0 && skGrid < (numMTs * batch) && (numMTs * batch) % skGrid != 0);
 
   // -------------------
   // NonTemporal Cases
@@ -112,24 +104,25 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // If we are using wgmxcc, we can use chunking, otherwise we don't need chunking.
     // Moreover, we only use chunking if all XCDs take the same number of tiles, otherwise
     // we in each group (chunk) we have more than one XCD.
-    bool use_chunk = use_wgmxcc && ((numMTs < numCUs && numMTs % numXCD == 0) || (numMTs % numCUs == 0));
+    bool use_chunk =
+        use_wgmxcc && ((numMTs < numCUs && numMTs % numXCD == 0) || (numMTs % numCUs == 0));
 
     // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
-    if (sk_disable_chunk) out_wgmxccchunk = 0;
+    if (sk_has_partial_tiles) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
     // The reason is that nontemporal dimension always load for all L2 tiles, so we can only
     // maximize the reuse in the other dimension.
     if(nta > 3 && ntb < 4)
-      return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
+      return workgroup_mapping_t{0, out_wgmxccchunk, out_wgmxcc, use_wgm ? static_cast<int>(numMT_N) : 1};
     else if(nta < 4 && ntb > 3)
       // We use negative value here
-      return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
+      return workgroup_mapping_t{0, out_wgmxccchunk, out_wgmxcc, use_wgm ? -static_cast<int>(numMT_M) : 1};
     else if(nta > 3 && ntb > 3)
       // Nothing to do in this case.
-      return workgroup_mapping_t{0, numXCD, 1};
+      return workgroup_mapping_t{0, 0, numXCD, 1};
   }
 
   // -------------------
@@ -146,20 +139,50 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgmxccchunk = 0;
       wgmxcc      = 0;
       wgm         = 1;
-    }
-    // This gives a nice strided read pattern for batched GEMMs
-    else if (numMTs % numXCD == 0) {
-      wgmxccchunk = 0;
-      wgmxcc      = 0;
-      wgm         = 1;
     } else {
       wgmxccchunk = (numCUsPerXCD / numMTs) * numMTs;
       wgmxcc      = numXCD;
       wgm         = 1;
+      if (numMT_M > 1 && numMT_N > 1)
+        wgm = std::min(defaultWGM, static_cast<int32_t>(numMT_N));
     }
 
-    if (sk_disable_chunk) wgmxccchunk = 0;
-    return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
+    if (sk_has_partial_tiles) wgmxccchunk = 0;
+    return workgroup_mapping_t{0, wgmxccchunk, wgmxcc, wgm};
+  }
+
+  // -------------------
+  // WGMXCCSPLITK Prediction (K-Coherent reorder)
+  // -------------------
+  // K-Coherent reorders WGs into K-last order then chunks them across XCDs so
+  // (m,n) tiles at the same k-level land on the same XCD.  Requires:
+  //   - split_factor > 1 (StreamK actually splits K)
+  //   - MT_K * elem_bytes >= kCoherentMinBytesPerKIter.  This is a performance
+  //     floor, not an alignment requirement: the reorder is a bijection on
+  //     workgroup IDs, so every tile is computed and written exactly once
+  //     whatever the DU chunk size.  What it buys is L2 locality between the
+  //     k-levels of one (m,n) tile, and that stops paying once a K-iteration
+  //     covers too little of a cache line to keep the grouped XCD reads dense.
+  //   - skGrid <= numCUs: the reorder only groups k-levels within a single wave
+  //     of workgroups, so beyond one wave there is nothing to gain.  numCUs is
+  //     the resolved budget, so a CU cap tightens this too.  It also keeps the
+  //     chunk at or below skGrid/numXCD <= numCUsPerXCD, well inside the 8-bit
+  //     chunk field of the kernel argument (ContractionSolution internalArg1,
+  //     bits 21:14), which would otherwise wrap.
+  // The codegen handles non-multiple skGrid via tail identity-mapping, so we no
+  // longer require skGrid % numMTs == 0 here.
+  size_t out_wgmxccsplitk = defaultWGMXCCSPLITK;
+  {
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
+    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
+                                data_type_to_bytes(problem.b_dtype));
+    size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
+
+    if (split_factor > 1 && bytesPerKIter >= kCoherentMinBytesPerKIter
+        && !sk_has_partial_tiles && skGrid <= numCUs) {
+      // Use floor division: K * MN <= skGrid.  Tail WGs are identity-mapped.
+      out_wgmxccsplitk = numMTs > 0 ? skGrid / numMTs : 0;
+    }
   }
 
   // -------------------
@@ -167,24 +190,64 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // -------------------
   size_t out_wgmxccchunk = defaultWGMXCCCHUNK;
 
-  // For large square-ish GEMMs, we can benefit from chunking.
-  constexpr size_t skinnyFactor = 12;
-  bool isMallImportant =
-      (batch == 1 && split_factor == 1 && numMTs > 4 * numCUs && numMT_M > 16 && numMT_N > 16);
-  bool isSkinnyCase = std::min(numMT_M, numMT_N) <= skinnyFactor * std::max(numMT_M, numMT_N);
-  if (isMallImportant && !isSkinnyCase)
-    out_wgmxccchunk = numCUsPerXCD;
-  else
-    out_wgmxccchunk = 0;
+  if (out_wgmxccsplitk > 1) {
+    // Chunked K-Coherent: chiplet_transform_chunked distributes K-last positions.
+    // chunk must be <= skGrid/numXCD so the chunked transform completes at least
+    // one full round.  Otherwise Q=0 and everything is identity-mapped.
+    //
+    // For small MN (MN <= maxChunk): chunk = MN * num_k_per_chunk.
+    // For large MN: chunk is a partial set of MN tiles at one k-level.
+    constexpr size_t cacheLineBytes = 128;
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
+    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
+                                data_type_to_bytes(problem.b_dtype));
+    size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
+    size_t maxChunk      = numXCD > 0 ? skGrid / numXCD : 0;
 
-  if (sk_disable_chunk) out_wgmxccchunk = 0;
+    if (numMTs > 0 && numMTs <= maxChunk) {
+      size_t minKPerChunk = (bytesPerKIter >= kCoherentMinBytesPerKIter)
+          ? 1
+          : math::safe_ceil_div(cacheLineBytes, bytesPerKIter);
+      size_t maxKPerChunk = maxChunk / numMTs;
+      size_t numK         = (maxKPerChunk / minKPerChunk) * minKPerChunk;
+      if (numK == 0) numK = minKPerChunk;
+      out_wgmxccchunk = numMTs * numK;
+    } else {
+      out_wgmxccchunk = maxChunk;
+    }
+  } else {
+    // For large square-ish GEMMs without split-K, we can benefit from chunking.
+    constexpr size_t skinnyFactor = 12;
+    bool isMallImportant =
+        (batch == 1 && split_factor == 1 && numMTs > 4 * numCUs && numMT_M > 16 && numMT_N > 16);
+    bool isSkinnyCase = std::min(numMT_M, numMT_N) <= skinnyFactor * std::max(numMT_M, numMT_N);
+    if (isMallImportant && !isSkinnyCase)
+      out_wgmxccchunk = numCUsPerXCD;
+    else
+      out_wgmxccchunk = 0;
+  }
+
+  if (sk_has_partial_tiles) out_wgmxccchunk = 0;
 
   // -------------------
   // WGMXCC Prediction
   // -------------------
   size_t out_wgmxcc = defaultWGMXCC;
 
-  if (split_factor % numXCD == 0) out_wgmxcc = 0;
+  if (split_factor % numXCD == 0) {
+    // The hardware round-robin dispatch already distributes k-splits evenly.
+    // No mapping needed (and K-Coherent would just add overhead).
+    out_wgmxcc = 0;
+    out_wgmxccsplitk = 0;
+    out_wgmxccchunk  = 0;
+  } else if (split_factor < numXCD && numXCD % split_factor != 0) {
+    out_wgmxccsplitk = 0;
+    out_wgmxccchunk  = 0;
+    out_wgmxcc = numXCD;
+  } else if (out_wgmxccsplitk > 1) {
+    // K-Coherent always needs XCC mapping active for the chunked distribution.
+    out_wgmxcc = numXCD;
+  }
   // Small output tiles with no split
   else if (numMTs <= numXCD && split_factor == 1)
     out_wgmxcc = 0;
@@ -207,13 +270,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   else {
     // List of candidates for WGM values
     size_t numWGsPerXCD = std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD);
-    int wgm_cap_size = std::min(numMT_N, numWGsPerXCD);
+    int wgm_cap_size    = std::min(numMT_N, numWGsPerXCD);
     std::set<int> wgmSet;
     // Add initial candidates that are <= wgm_cap_size
     for (int val : {1, 2, 3, 4, 6, 8}) {
-      if (val <= wgm_cap_size) {
-        wgmSet.insert(val);
-      }
+      if (val <= wgm_cap_size) { wgmSet.insert(val); }
     }
     // Add all divisors of wgm_cap_size
     for (int i = 1; i <= std::sqrt(wgm_cap_size); i++) {
@@ -221,7 +282,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
         wgmSet.insert(i);
         wgmSet.insert(wgm_cap_size / i);
       }
-    }    
+    }
     std::vector<int> wgmList(wgmSet.begin(), wgmSet.end());
 
     // Setup
@@ -233,6 +294,19 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Loop through all WGM values and find the best one
     int bestWGM = 1;
     int bestL2  = std::numeric_limits<int>::max();
+    constexpr size_t kCoherentMinBytesPerKIter = 64;
+    double elemBytes = std::max(data_type_to_bytes(problem.a_dtype),
+                                data_type_to_bytes(problem.b_dtype));
+    size_t bytesPerKIter = static_cast<size_t>(MT_K * elemBytes);
+
+    // L2 ties are order-sensitive. Wider WGM can improve reuse order, but a
+    // wrong reuse direction is expensive, so prefer the smaller tied WGM
+    // wherever K-Coherent is in play: at 64 B per K-iteration the larger tied
+    // WGM measured up to 9% slower on the shapes that run the chunked
+    // dispatch, because the L2 estimate below models chunked and non-chunked
+    // ranges differently and a tie under one is not a tie under the other.
+    bool preferLargerWGMTie = bytesPerKIter < kCoherentMinBytesPerKIter;
+
     for (auto wgm : wgmList) {
       auto wgmL2Estimate = 0;
       auto slabTiles     = numMT_M * std::min(wgm, static_cast<int>(numMT_N));
@@ -261,10 +335,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
             xccEnd   = xccStart + adjustedEndTileInRound - 1 + (x < r ? 1 : 0);
           }
 
-          // xccStart and xccEnd are supposed to be tile IDs
-          // In case of splitting, they are WG IDs. Modify to get tile IDs
-          xccStart /= split_factor;
-          xccEnd /= split_factor;
+          // xccStart and xccEnd are WG IDs after the chiplet remap.
+          // Convert to unique-tile-ID range that this XCD touches:
+          if (out_wgmxccsplitk == 0) {
+            xccStart /= split_factor;
+            xccEnd /= split_factor;
+          }
 
           auto slabStart = xccStart / slabTiles;
           auto slabEnd   = xccEnd / slabTiles;
@@ -309,16 +385,17 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       if (wgmL2Estimate < bestL2) {
         bestL2  = wgmL2Estimate;
         bestWGM = wgm;
+      } else if (wgmL2Estimate == bestL2) {
+        if ((preferLargerWGMTie && wgm > bestWGM) ||
+            (!preferLargerWGMTie && wgm < bestWGM))
+          bestWGM = wgm;
       }
     }
     // Set the best WGM
     out_wgm = bestWGM;
   }
 
-  // Split/partial Stream-K tiles must not use the chunk transform (see sk_disable_chunk).
-  if (sk_disable_chunk) out_wgmxccchunk = 0;
-
-  return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
+  return workgroup_mapping_t{out_wgmxccsplitk, out_wgmxccchunk, out_wgmxcc, out_wgm};
 }
 
 /**
@@ -368,10 +445,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   int ntb = config.cache_hints_b;
 
   // Early Exit: problem sizes are invalid
-  if(M < 1 || N < 1 || K < 1 || batch < 1)
-  {
-    return staggerU_t{0, 0, 0};
-  }
+  if (M < 1 || N < 1 || K < 1 || batch < 1) { return staggerU_t{0, 0, 0}; }
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
@@ -394,13 +468,11 @@ staggerU_t select_staggerU(const problem_t& problem,
   if (batch != 1) return staggerU_t{0, 0, 0};
 
   // Early Exit: no staggerU needed
-  if (numMT_K > 64)
-    return staggerU_t{0, 0, 0};
+  if (numMT_K > 64) return staggerU_t{0, 0, 0};
 
   // Early Exit: splitK
   // TODO: support splitK
-  if (split_factor > 1)     
-      return staggerU_t{0, 0, 0};
+  if (split_factor > 1) return staggerU_t{0, 0, 0};
 
   // helper function to round up to power of 2
   auto next_pow2 = [](size_t v) -> size_t {
@@ -411,15 +483,14 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   // Compute stride shift and max staggerU from K
   constexpr size_t L2_CACHE_LINE_BYTES = 128;
-  size_t bpe_a = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
-  size_t bpe_b = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
-  double min_bpe = std::min(bpe_a, bpe_b);
-  size_t bytes_per_k_iter = static_cast<size_t>(MT_K * min_bpe);
-  size_t min_shift = 0;
-  while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5)
-    min_shift++;
+  size_t bpe_a                         = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+  size_t bpe_b                         = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+  double min_bpe                       = std::min(bpe_a, bpe_b);
+  size_t bytes_per_k_iter              = static_cast<size_t>(MT_K * min_bpe);
+  size_t min_shift                     = 0;
+  while ((bytes_per_k_iter << min_shift) < L2_CACHE_LINE_BYTES && min_shift < 5) min_shift++;
   size_t out_staggerUStrideShift = min_shift;
-  size_t max_staggerU = numMT_K >> out_staggerUStrideShift;
+  size_t max_staggerU            = numMT_K >> out_staggerUStrideShift;
   // Round down to power of 2 and cap at 32
   {
     size_t p = 1;
@@ -428,14 +499,11 @@ staggerU_t select_staggerU(const problem_t& problem,
   }
 
   // Early Exit: few K-slices
-  if (max_staggerU == 1)
-    return staggerU_t{0, 0, 0};
+  if (max_staggerU == 1) return staggerU_t{0, 0, 0};
 
   // Early Exit: Non-temporal cases
-  if (nta > 3)
-    return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
-  if (ntb > 3)
-    return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
+  if (nta > 3) return staggerU_t{0, max_staggerU, out_staggerUStrideShift};
+  if (ntb > 3) return staggerU_t{1, max_staggerU, out_staggerUStrideShift};
 
   // Find WGM
   size_t abs_wgm = std::abs(wgm);
@@ -454,8 +522,7 @@ staggerU_t select_staggerU(const problem_t& problem,
     while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_N < numMT_N) L2Tile_N++;
     // Account for XCD misalignment: when tiles don't fill exact rows,
     // some XCDs start mid-row and span an extra row.
-    if (numWGsPerL2Tile % L2Tile_N != 0)
-      L2Tile_M = std::min(L2Tile_M + 1, numMT_M);
+    if (numWGsPerL2Tile % L2Tile_N != 0) L2Tile_M = std::min(L2Tile_M + 1, numMT_M);
   } else if (wgm < 0) {
     // Negative WGM: column-major mapping
     L2Tile_M             = (abs_wgm < numMT_M) ? abs_wgm : numMT_M;
@@ -464,8 +531,7 @@ staggerU_t select_staggerU(const problem_t& problem,
     while (L2Tile_M * L2Tile_N < numWGsPerL2Tile && L2Tile_M < numMT_M) L2Tile_M++;
     // Account for XCD misalignment: when tiles don't fill exact columns,
     // some XCDs start mid-column and span an extra column.
-    if (numWGsPerL2Tile % L2Tile_M != 0)
-      L2Tile_N = std::min(L2Tile_N + 1, numMT_N);
+    if (numWGsPerL2Tile % L2Tile_M != 0) L2Tile_N = std::min(L2Tile_N + 1, numMT_N);
   } else {
     std::cerr << "[ORIGAMI]: Invalid WGM value " << wgm << " in select_staggerU" << std::endl;
     return staggerU_t{0, 0, 0};
@@ -486,9 +552,8 @@ staggerU_t select_staggerU(const problem_t& problem,
     B_contention = L2Tile_M * L2Tile_M * MT_N * bpe_b;
   }
   size_t L2_mapping = (B_contention > A_contention) ? 0 : 1;
-  size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M)
-                                        : std::min(L2Tile_N, numMT_N);
-  L2_value = std::min(L2_value, max_staggerU);
+  size_t L2_value   = (L2_mapping == 0) ? std::min(L2Tile_M, numMT_M) : std::min(L2Tile_N, numMT_N);
+  L2_value          = std::min(L2_value, max_staggerU);
   // L2 capacity check.
   // Stagger only expands the SHARED matrix — the other matrix's footprint is unchanged:
   //   SUM0: A unchanged (each M-position already reads different A data),
@@ -496,55 +561,54 @@ staggerU_t select_staggerU(const problem_t& problem,
   //   SUM1: B unchanged, A expanded by min(stagger, L2Tile_N) K-offsets.
   size_t working_set;
   if (L2_mapping == 0) {
-    working_set = MT_K * (L2Tile_M * MT_M * bpe_a +
-                          std::min(L2_value, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
+    working_set =
+        MT_K * (L2Tile_M * MT_M * bpe_a + std::min(L2_value, L2Tile_M) * L2Tile_N * MT_N * bpe_b);
   } else {
-    working_set = MT_K * (std::min(L2_value, L2Tile_N) * L2Tile_M * MT_M * bpe_a +
-                          L2Tile_N * MT_N * bpe_b);
+    working_set =
+        MT_K * (std::min(L2_value, L2Tile_N) * L2Tile_M * MT_M * bpe_a + L2Tile_N * MT_N * bpe_b);
   }
   // 0.95 is a heuristic to make sure we don't exceed L2 capacity and if we are not
   // underestimating the working set. The effect of a false prediction is more severe
   // than not predicting at all.
-  if (working_set > 0.95 * hardware.L2_capacity)
-    return staggerU_t{0, 0, 0};
+  if (working_set > 0.95 * hardware.L2_capacity) return staggerU_t{0, 0, 0};
   // Early Exit: L2 value is already max_staggerU
   if (L2_value == max_staggerU)
     return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
-  
+
   // Compute MALL optimal direction
   // Prefer direction with more XCD groups
   size_t numXCD_M = math::safe_ceil_div(numMT_M, L2Tile_M);
   size_t numXCD_N = math::safe_ceil_div(numMT_N, L2Tile_N);
   size_t Mall_mapping;
   if (numXCD_M > numXCD_N) {
-    Mall_mapping = 0; 
+    Mall_mapping = 0;
   } else {
-    Mall_mapping = 1; 
+    Mall_mapping = 1;
   }
 
   // Decide L2 vs MALL direction
   // If they agree, use that direction. If they disagree, check how many intra-XCD
-  // offsets survive switching to MALL direction. Otherwise the L2 loss is too 
+  // offsets survive switching to MALL direction. Otherwise the L2 loss is too
   // severe, keep L2 direction.
   size_t out_staggerUMapping = 0;
-  size_t out_staggerU = 0;
+  size_t out_staggerU        = 0;
   if (L2_mapping == Mall_mapping) {
     out_staggerUMapping = L2_mapping;
-    out_staggerU = max_staggerU;
+    out_staggerU        = max_staggerU;
   } else {
     // L2 and MALL disagree. Only switch when BOTH conditions hold:
     // 1. Contention is close (ratio < 2)
     // 2. L2 tile is asymmetric (ratio > 2)
-    size_t L2_winner = std::max(A_contention, B_contention);
-    size_t L2_loser  = std::min(A_contention, B_contention);
+    size_t L2_winner      = std::max(A_contention, B_contention);
+    size_t L2_loser       = std::min(A_contention, B_contention);
     bool contention_close = (L2_winner < 2 * L2_loser);
     bool tile_asymmetric  = (std::max(L2Tile_M, L2Tile_N) > 2 * std::min(L2Tile_M, L2Tile_N));
     if (contention_close && tile_asymmetric) {
       out_staggerUMapping = Mall_mapping;
-      out_staggerU = max_staggerU;
+      out_staggerU        = max_staggerU;
     } else {
       out_staggerUMapping = L2_mapping;
-      out_staggerU = L2_value;
+      out_staggerU        = L2_value;
     }
   }
 
@@ -560,9 +624,9 @@ namespace {
 constexpr double kRejectedLatency = std::numeric_limits<double>::max();
 
 void log_config_rejection(const config_t& config, const char* reason) {
-  OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
-             << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
-             << ") REJECTED: " << reason);
+  OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k << ") MI=("
+                             << config.mi.m << "," << config.mi.n << "," << config.mi.k
+                             << ") REJECTED: " << reason);
 }
 
 double compute_ranked_latency(const problem_t& problem,
@@ -618,24 +682,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
 
   // Fallback: when the analytical model rejected every candidate, rank the
   // invalid configs so the caller still gets a usable kernel rather than failing.
-  if (valid_configs.empty()) {
-    valid_configs = std::move(invalid_configs);
-  }
+  if (valid_configs.empty()) { valid_configs = std::move(invalid_configs); }
 
-  std::stable_sort(valid_configs.begin(),
-                   valid_configs.end(),
-                   [](const auto& a, const auto& b) {
-                     return a.latency < b.latency;
-                   });
+  std::stable_sort(valid_configs.begin(), valid_configs.end(), [](const auto& a, const auto& b) {
+    return a.latency < b.latency;
+  });
 
   std::vector<prediction_result_t> results;
   results.reserve(valid_configs.size());
   std::transform(valid_configs.begin(),
                  valid_configs.end(),
                  std::back_inserter(results),
-                 [&](const auto& r) -> prediction_result_t {
-                   return {r.latency, r.config.get()};
-                 });
+                 [&](const auto& r) -> prediction_result_t { return {r.latency, r.config.get()}; });
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
@@ -749,9 +807,9 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
-  OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << ","
-             << results[0].config.mt.n << "," << results[0].config.mt.k << ")"
-             << " latency=" << results[0].latency);
+  OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
+                                          << "," << results[0].config.mt.k << ")"
+                                          << " latency=" << results[0].latency);
 
   return results;
 }

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -323,11 +325,17 @@ inline hipdnn_frontend::PointwiseMode
     }
 }
 
-/// Create a Data SDK ITensor from a frontend DataType enum
+/// Create a Data SDK ITensor from a frontend DataType enum.
+///
+/// When packSubByteElements is true, sub-byte types are stored in their packed
+/// device layout (e.g. FP4 as two 4-bit values per byte) so the buffer can be
+/// handed directly to a GPU kernel. Leave it false for the CPU-reference bundle,
+/// which needs one element per byte for element-wise access.
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensor(hipdnn_frontend::DataType dataType,
                  const std::vector<int64_t>& dims,
-                 const std::vector<int64_t>& strides)
+                 const std::vector<int64_t>& strides,
+                 bool packSubByteElements = false)
 {
     using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_data_sdk::types;
@@ -356,12 +364,32 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     case hipdnn_frontend::DataType::FP8_E8M0:
         return std::make_unique<Tensor<fp8_e8m0>>(dims, strides);
     case hipdnn_frontend::DataType::FP4_E2M1:
+        // Packed (two 4-bit values per byte) for a GPU-consumable buffer, or
+        // unpacked (one code per byte) for element-wise host access.
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp4Tensor>(dims, strides);
+        }
         return std::make_unique<Tensor<fp4_e2m1>>(dims, strides);
     case hipdnn_frontend::DataType::INT4:
+        if(packSubByteElements)
+        {
+            throw std::runtime_error("createTensor: packed layout not implemented for INT4");
+        }
         return std::make_unique<Tensor<uint8_t>>(dims, strides);
     case hipdnn_frontend::DataType::FP6_E2M3:
+        // Packed (four 6-bit values per three bytes) for a GPU-consumable
+        // buffer, or unpacked (one code per byte) for element-wise host access.
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e2m3>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_frontend::DataType::FP6_E3M2:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e3m2>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
     case hipdnn_frontend::DataType::BOOLEAN:
         return std::make_unique<Tensor<bool>>(dims, strides);
@@ -374,11 +402,16 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     }
 }
 
-/// Create a Data SDK ITensor from frontend TensorAttributes
+/// Create a Data SDK ITensor from frontend TensorAttributes. Set packSubByteElements for
+/// a GPU-side buffer so sub-byte types (FP4, FP6) use their packed device layout.
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
-    createTensorFromAttribute(const hipdnn_frontend::graph::TensorAttributes& attribute)
+    createTensorFromAttribute(const hipdnn_frontend::graph::TensorAttributes& attribute,
+                              bool packSubByteElements = false)
 {
-    return createTensor(attribute.get_data_type(), attribute.get_dim(), attribute.get_stride());
+    return createTensor(attribute.get_data_type(),
+                        attribute.get_dim(),
+                        attribute.get_stride(),
+                        packSubByteElements);
 }
 
 } // namespace hipdnn_test_sdk::utilities

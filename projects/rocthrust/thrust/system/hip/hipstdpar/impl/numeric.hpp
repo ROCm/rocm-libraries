@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,6 @@
 #if defined(__HIPSTDPAR__)
 
 #  include <thrust/adjacent_difference.h>
-#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/inner_product.h>
 #  include <thrust/reduce.h>
@@ -66,7 +65,7 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::adjacent_difference(THRUST_NS_QUALIFIER::device, fi, li, fo);
+  return ::thrust::adjacent_difference(::thrust::device, fi, li, fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -87,7 +86,7 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::adjacent_difference(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op));
+  return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
 template <typename I,
@@ -117,7 +116,7 @@ inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequ
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l);
+  return ::thrust::reduce(::thrust::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -134,7 +133,7 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l, ::std::move(x));
+  return ::thrust::reduce(::thrust::device, f, l, ::std::move(x));
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -154,7 +153,7 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::reduce(THRUST_NS_QUALIFIER::device, f, l, ::std::move(x), ::std::move(op));
+  return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(op));
 }
 
 template <typename I,
@@ -183,7 +182,7 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::exclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(x));
+  return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x));
 }
 
 template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -205,7 +204,7 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::exclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(x), ::std::move(op));
+  return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
 }
 
 template <typename I,
@@ -236,7 +235,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo);
+  return ::thrust::inclusive_scan(::thrust::device, fi, li, fo);
 }
 
 template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -257,7 +256,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op));
+  return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
 template <typename I,
@@ -295,14 +294,14 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 
   ::hipstd::__maybe_bind_globals();
 
-  auto lo = THRUST_NS_QUALIFIER::inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, op);
+  auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op);
 
   auto fn   = [op = ::std::move(op), x = ::std::move(x)](auto&& y) { return op(x, y); };
   using fn_t = decltype(fn);
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)
   {
-    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::std::move(fn));
+    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
   }
   else
   {
@@ -310,15 +309,15 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
     O result;
     try
     {
-      result = THRUST_NS_QUALIFIER::transform(
-        THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      result = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+    ::thrust::hip_rocprim::throw_on_error(
       ::hipDeviceSynchronize(), "hipstdpar inclusive_scan: failed to synchronize");
     guard.destroy_and_free();
     return result;
@@ -353,7 +352,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::inner_product(THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(x));
+  return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x));
 }
 
 template <typename I0, typename I1, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
@@ -377,8 +376,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::inner_product(
-    THRUST_NS_QUALIFIER::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
+  return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
 }
 
 template <
@@ -413,8 +411,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x,
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::transform_reduce(
-    THRUST_NS_QUALIFIER::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
+  return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
 
 template <
@@ -451,8 +448,8 @@ inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::transform_exclusive_scan(
-    THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
+  return ::thrust::transform_exclusive_scan(
+    ::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
 
 template <
@@ -491,8 +488,7 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return THRUST_NS_QUALIFIER::transform_inclusive_scan(
-    THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
+  return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
 }
 
 template <
@@ -533,15 +529,14 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
 
   ::hipstd::__maybe_bind_globals();
 
-  auto lo =
-    THRUST_NS_QUALIFIER::transform_inclusive_scan(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(op1), op0);
+  auto lo = ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), op0);
 
   auto fn    = [op0 = ::std::move(op0), x = ::std::move(x)](auto&& y) { return op0(x, y); };
   using fn_t = decltype(fn);
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)
   {
-    return THRUST_NS_QUALIFIER::transform(THRUST_NS_QUALIFIER::device, fo, lo, fo, ::std::move(fn));
+    return ::thrust::transform(::thrust::device, fo, lo, fo, ::std::move(fn));
   }
   else
   {
@@ -549,15 +544,15 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
     O result;
     try
     {
-      result = THRUST_NS_QUALIFIER::transform(
-        THRUST_NS_QUALIFIER::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
+      result = ::thrust::transform(
+        ::thrust::device, fo, lo, fo, ::hipstd::detail::callable_proxy<fn_t>{guard.get()});
     }
     catch (...)
     {
       (void) ::hipDeviceSynchronize();
       throw;
     }
-    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(
+    ::thrust::hip_rocprim::throw_on_error(
       ::hipDeviceSynchronize(), "hipstdpar transform_inclusive_scan: failed to synchronize");
     guard.destroy_and_free();
     return result;

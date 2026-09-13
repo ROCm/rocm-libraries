@@ -2727,9 +2727,13 @@ namespace
 
                 verification_data = std::make_unique<reference_fft_data_t>(
                     params.plan_helper.make_params_for_reference_cpu());
-                // generate input data and launch compute
-                verification_data->initialize_input(fft_input_random_generator_host);
-                verification_data->launch_async_compute();
+                // Unnecessary to initialize input data and/or launch async computing
+                // if the reference data is already available (cached from a previous
+                // test)
+                if(verification_data->needs_input_initialization())
+                    verification_data->initialize_input(fft_input_random_generator_host);
+                if(verification_data->needs_computing())
+                    verification_data->launch_async_compute();
             }
             ROCFFT_CATCH_TEST_EXCEPTIONS;
         }
@@ -2849,7 +2853,7 @@ namespace
                     copy_buffers(verification_data->get_buffers<fft_io::fft_io_in>(),
                                  tmp_host_buf_vec,
                                  verification_data->get_params().ilength(),
-                                 verification_data->get_params().nbatch,
+                                 params.get_nbatch(),
                                  verification_data->get_params().precision,
                                  verification_data->get_params().itype,
                                  verification_data->get_params().istride,

@@ -61,7 +61,8 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
                                            miopen::solver::conv::ConvDepthwiseFwd2D,
                                            miopen::solver::conv::ConvDepthwiseBwdData2D,
-                                           miopen::solver::conv::ConvDepthwiseFwd3D>{};
+                                           miopen::solver::conv::ConvDepthwiseFwd3D,
+                                           miopen::solver::conv::ConvHipConv>{};
 }
 
 static auto GetImplicitGemmSolvers()
@@ -71,7 +72,6 @@ static auto GetImplicitGemmSolvers()
         miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops,
         miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm,
         miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1Xdlops,
-        miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1Xdlops,
         miopen::solver::conv::ConvHipImplicitGemmV4R1Fwd,
         miopen::solver::conv::ConvHipImplicitGemmV4R4Fwd,
         miopen::solver::conv::ConvMlirIgemmFwdXdlops,
@@ -79,7 +79,6 @@ static auto GetImplicitGemmSolvers()
         miopen::solver::conv::ConvMlirIgemmBwdXdlops,
         miopen::solver::conv::ConvMlirIgemmBwd,
         miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1,
-        miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1,
         miopen::solver::conv::ConvAsmImplicitGemmV4R1DynamicFwd_1x1,
         miopen::solver::conv::ConvAsmImplicitGemmV4R1DynamicFwd,
         miopen::solver::conv::ConvAsmImplicitGemmV4R1DynamicBwd,
@@ -87,7 +86,6 @@ static auto GetImplicitGemmSolvers()
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlops,
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC,
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC,
-        miopen::solver::conv::ConvCkIgemmFwdV6r1DlopsNchw,
 #if MIOPEN_BACKEND_HIP
         miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
@@ -205,7 +203,8 @@ static auto GetBwdWrW2DSolvers()
                                            miopen::solver::conv::ConvHipBwdWrW53,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
-                                           miopen::solver::conv::ConvDirectNaiveConvWrw>{};
+                                           miopen::solver::conv::ConvDirectNaiveConvWrw,
+                                           miopen::solver::conv::ConvHipConv>{};
 }
 
 static auto GetFFTSolvers() { return miopen::solver::SolverContainer<miopen::solver::conv::fft>{}; }

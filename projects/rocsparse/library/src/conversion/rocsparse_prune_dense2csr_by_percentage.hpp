@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,8 @@ namespace rocsparse
     template <typename T>
     rocsparse_status
         prune_dense2csr_by_percentage_buffer_size_template(rocsparse_handle          handle,
-                                                           rocsparse_int             m,
-                                                           rocsparse_int             n,
+                                                           int64_t                   m,
+                                                           int64_t                   n,
                                                            const T*                  A,
                                                            int64_t                   lda,
                                                            T                         percentage,
@@ -46,8 +46,8 @@ namespace rocsparse
     template <typename T>
     rocsparse_status
         prune_dense2csr_nnz_by_percentage_template(rocsparse_handle          handle,
-                                                   rocsparse_int             m,
-                                                   rocsparse_int             n,
+                                                   int64_t                   m,
+                                                   int64_t                   n,
                                                    const T*                  A,
                                                    int64_t                   lda,
                                                    T                         percentage,
@@ -59,8 +59,8 @@ namespace rocsparse
 
     template <typename T>
     rocsparse_status prune_dense2csr_by_percentage_template(rocsparse_handle          handle,
-                                                            rocsparse_int             m,
-                                                            rocsparse_int             n,
+                                                            int64_t                   m,
+                                                            int64_t                   n,
                                                             const T*                  A,
                                                             int64_t                   lda,
                                                             T                         percentage,

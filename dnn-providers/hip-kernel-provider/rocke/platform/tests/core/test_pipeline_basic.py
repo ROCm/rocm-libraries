@@ -240,6 +240,7 @@ class TestIsValidSpecBasicPipeline:
             wave_size=64,
             pipeline="basic",
             async_dma=async_dma,
+            vector_size_c=1,
         )
 
     def test_basic_sync_is_valid(self):
@@ -285,6 +286,7 @@ class TestBuildConvBasicPipeline:
             wave_size=64,
             pipeline="basic",
             epilogue=epilogue,
+            vector_size_c=1,
         )
         return build_implicit_gemm_conv(spec, arch="gfx950")
 

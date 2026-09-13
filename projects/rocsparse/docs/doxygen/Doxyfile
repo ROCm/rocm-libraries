@@ -2432,7 +2432,9 @@ PREDEFINED             = __attribute__(x)= \
                          __inline= \
                          ROCSPARSE_EXPORT= \
                          ROCSPARSE_WITH_HANDLE_CREATE= \
-                         ROCSPARSE_WITH_ILDLT0
+                         ROCSPARSE_WITH_ILDLT0 \
+                         ROCSPARSE_WITH_SPMAT_SCALE \
+                         ROCSPARSE_WITH_DIAGONAL_SOLVE
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

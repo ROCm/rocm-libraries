@@ -435,8 +435,8 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=ushort"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=ushort"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=__bf16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));

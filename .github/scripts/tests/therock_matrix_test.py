@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_matrix
@@ -11,6 +12,21 @@ import therock_matrix
 class TheRockMatrixTest(unittest.TestCase):
     def test_collect_projects_to_run_without_additional_option(self):
         subtrees = ["projects/hipblaslt"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        blas_entry = project_to_run[0]
+        self.assertIn(
+            "hipsparselt",
+            blas_entry["projects_to_test"].split(","),
+        )
+
+    def test_collect_projects_to_run_for_nested_tensilelite_subtree(self):
+        # projects/hipblaslt/tensilelite is a registered nested subtree
+        # (repos-config.json), distinct from projects/hipblaslt in change
+        # detection, but must still behave like a hipblaslt change here: same
+        # "blas" bucket, same sparselt activation, same rocjitsu selection.
+        subtrees = ["projects/hipblaslt/tensilelite"]
 
         project_to_run = therock_matrix.collect_projects_to_run(subtrees)
         self.assertEqual(len(project_to_run), 1)
@@ -42,6 +58,55 @@ class TheRockMatrixTest(unittest.TestCase):
 
         project_to_run = therock_matrix.collect_projects_to_run(subtrees)
         self.assertEqual(len(project_to_run), 1)
+
+    def test_collect_projects_to_run_hiptensor_linux(self):
+        # On Linux CK links rocRAND + roctracer/rocprofiler-sdk, so hipTensor
+        # must enable RAND and ROCPROFV3 in addition to CK itself.
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hiptensor"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        options = project_to_run[0]["cmake_options"].split(" ")
+        self.assertIn("hiptensor", project_to_run[0]["projects_to_test"].split(","))
+        self.assertIn("-DTHEROCK_ENABLE_HIPTENSOR=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
+
+    def test_collect_projects_to_run_hiptensor_windows(self):
+        # The profiler (ROCPROFV3) is not built on Windows, so it must NOT be
+        # passed there; RAND is still required by CK.
+        with mock.patch.dict(os.environ, {"PLATFORM": "windows"}):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hiptensor"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        options = project_to_run[0]["cmake_options"].split(" ")
+        self.assertIn("-DTHEROCK_ENABLE_HIPTENSOR=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
+        self.assertNotIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
+
+    def test_collect_projects_to_run_rpp_linux(self):
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(len(project_to_run), 1)
+        rpp_entry = project_to_run[0]
+        options = rpp_entry["cmake_options"].split(" ")
+        self.assertEqual(rpp_entry["projects_to_test"], "rpp")
+        self.assertIn("-DTHEROCK_ENABLE_RPP=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_ALL=OFF", options)
+        # The platform restriction is a matrix-selection detail and must not
+        # leak into the row consumed by the workflow.
+        self.assertNotIn("platforms", rpp_entry)
+
+    def test_collect_projects_to_run_rpp_windows(self):
+        # RPP is experimental on Windows in TheRock and its test job is
+        # Linux-only, so the Windows matrix must not carry an rpp row at all.
+        with mock.patch.dict(os.environ, {"PLATFORM": "windows"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(project_to_run, [])
 
     def test_collect_projects_to_run_dependency_graph(self):
         subtrees = ["projects/miopen", "projects/hipblaslt"]
@@ -75,6 +140,8 @@ class TheRockMatrixTest(unittest.TestCase):
             ["projects/miopen", "projects/hipblaslt"]
         )
         therock_matrix.collect_projects_to_run(["projects/miopen", "projects/rocwmma"])
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            therock_matrix.collect_projects_to_run(["projects/rpp"])
 
         self.assertEqual(therock_matrix.project_map, project_map_before)
         self.assertEqual(therock_matrix.additional_options, additional_options_before)

@@ -225,7 +225,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_spgeam_reuse_csr.cpp
   test_spgeam_csr_2.cpp
   test_spgeam_reuse_csr_2.cpp
-  test_spmat_scale.cpp
   test_gtsv.cpp
   test_gemvi.cpp
   test_sddmm.cpp
@@ -250,6 +249,25 @@ endif()
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+endif()
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_spsv_ell.cpp
+    test_sptrsv_ell.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_sddmm_batched_ell.cpp
+    test_sddmm_batched_coo.cpp
+    test_sddmm_batched_coo_aos.cpp
+    test_sddmm_batched_csr.cpp
+    test_sddmm_batched_csc.cpp)
 endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
@@ -391,7 +409,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spgeam_reuse_csr.cpp
 ../testings/testing_spgeam_csr_2.cpp
 ../testings/testing_spgeam_reuse_csr_2.cpp
-../testings/testing_spmat_scale.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp
@@ -411,6 +428,25 @@ rocsparse_test_listeners.cpp
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
+
+if(BUILD_WITH_ELL_TRSV)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_spsv_ell.cpp
+    ../testings/testing_sptrsv_ell.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_sddmm_batched_ell.cpp
+    ../testings/testing_sddmm_batched_coo.cpp
+    ../testings/testing_sddmm_batched_coo_aos.cpp
+    ../testings/testing_sddmm_batched_csr.cpp
+    ../testings/testing_sddmm_batched_csc.cpp)
 endif()
 
 

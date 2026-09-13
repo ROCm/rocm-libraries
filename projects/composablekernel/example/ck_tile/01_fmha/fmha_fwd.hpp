@@ -233,12 +233,19 @@ struct FmhaMasks
 // runtime args, some will passed to karg, some will used to compute grids/blocks
 struct fmha_fwd_args
 {
+    std::string* selected_kernel_name = nullptr;
+
     const void* q_ptr;
     const void* k_ptr;
     const void* v_ptr;
     const void* bias_ptr; // bias or alibi_slope pointer
     const void* q_descale_ptr;
     const void* k_descale_ptr;
+    // With BLOCKSCALE on gfx1250 the V descale rides an E8M0 scale operand, which keeps
+    // only the exponent: a value that is not a power of two is truncated toward zero
+    // (1.9 becomes 1.0), silently. Snap the scale to a power of two before quantizing and
+    // quantize with that same value. The caller must guarantee this; neither the kernel
+    // nor fmha_fwd() can validate it (the pointer is device memory).
     const void* v_descale_ptr;
     void* rand_val_ptr;
     void* lse_ptr;
@@ -701,6 +708,15 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
     if(page_block_size >= kN0)
         return ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
 
+    // Scattered 1D paged KV (page_size=1 LINEAR + SGLANG_PAGE_TABLE_1D): the page
+    // table holds arbitrary physical-page indices into the whole KV pool, so the
+    // per-page SRD voffset (physical_page * stride_page_block + within_page) is not
+    // bounded by this dispatch's num_total_pages and can wrap the signed int32 on
+    // its own, independent of base[31:0] + pool_bytes. The address-size check below
+    // cannot see this, so force the 64-bit-safe path for single-token pages.
+    if(page_block_size == 1)
+        return ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS;
+
     // Maximum byte offsets that buffer_load will add to K/V base pointers.
     // Each page is addressed as page_id * batch_stride * element_bytes.
     const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
@@ -778,6 +794,9 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.nhead_stride_q_descale,
                                              args.nhead_stride_k_descale,
                                              args.nhead_stride_v_descale,
+                                             args.batch_stride_q_descale,
+                                             args.batch_stride_k_descale,
+                                             args.batch_stride_v_descale,
                                              args.window_size_left,
                                              args.window_size_right,
                                              args.sink_size,
@@ -1550,6 +1569,9 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
 template <typename Traits_, typename Arch = void>
 float fmha_fwd_(const ck_tile::stream_config&, fmha_fwd_args);
 
+template <typename Traits_, typename Arch = void>
+ck_tile::index_t fmha_fwd_kvscale_align_();
+
 template <ck_tile::index_t HDim_,
           typename DataType_,
           bool kIsGroupMode_,
@@ -1739,6 +1761,12 @@ struct fmha_fwd_traits
     // TODO: padding check is inside this api
 };
 float fmha_fwd(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
+
+inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
+
+ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
+                                              ck_tile::index_t hdim_q,
+                                              ck_tile::index_t hdim_v);
 
 struct fmha_fwd_pagedkv_traits
 {

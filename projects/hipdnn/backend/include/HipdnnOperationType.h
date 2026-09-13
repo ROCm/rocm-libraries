@@ -44,4 +44,6 @@ typedef enum
     HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT = 19, ///< RMS normalization backward
     HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT = 20, ///< Layer normalization backward
     HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT = 21, ///< Resample backward operation
+    HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT = 22, ///< Forward MoE grouped matmul
+    HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT = 23, ///< Backward MoE grouped matmul
 } hipdnnOperationType_ext_t;

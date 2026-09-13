@@ -17,3 +17,17 @@ struct RMSNormFwdArgs
     long long stride;
     double eps;
 };
+
+struct RMSNormBwdArgs
+{
+    const void* gradOutput;
+    const void* input;
+    const void* scale;
+    const void* invRms;
+    void* gradInput;
+    void* gradScale;
+    void* gradBias;
+    long long innerSize;
+    long long outerSize;
+    long long stride;
+};
