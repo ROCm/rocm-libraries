@@ -104,6 +104,16 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   return key + cof + dn
 
 
+# A parameter absent from the solution state is omitted from the kernel name,
+# which keeps legacy kernel names stable when a parameter is off. Naming absent
+# keys instead (via _ABSENT_KEY_LEVEL) is a snapshot-breaking change.
+#
+# PGRA/PGRB at level 0 must not name the scalar PrefetchGlobalRead: legacy PGR=1
+# and decoupled (1,1) would both read PGRA1_PGRB1 despite different LDS layouts.
+_NAME_ABSENT_KEYS = False
+_ABSENT_KEY_LEVEL = {"PrefetchGlobalReadA": 0, "PrefetchGlobalReadB": 0}
+
+
 @lru_cache(maxsize=None)
 def getParameterNameAbbreviation( name: str ):
   return ''.join(c for c in name if c.isupper())
@@ -214,10 +224,30 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
+  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
+  if state.get("LDSSegmentInterleave") == 1:
+    requiredParametersTemp.add("LDSSegmentInterleave")
+
+  # Name TDMFuse only when nonzero: 0 leaves defineTdmSgprs's default grouping.
+  # TDMF0 would rename legacy kernels without asserting a real difference.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
+
+  # LDSSegmentInterleave, TDMFuse and TDMCross opt in above.
+  # PGRA/PGRB use _ABSENT_KEY_LEVEL when _NAME_ABSENT_KEYS is True.
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key == "CustomKernelName":
       continue
-    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    if key in state:
+      value = state[key]
+    elif _NAME_ABSENT_KEYS and key in _ABSENT_KEY_LEVEL:
+      value = _ABSENT_KEY_LEVEL[key]
+    else:
+      continue
+    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, value)}')
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
