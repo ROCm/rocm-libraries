@@ -18,7 +18,8 @@
 import math
 
 from rocisa.code import Module
-from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
+from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr, ContinuousRegister
+from rocisa.functions import vectorStaticDivideAndRemainder
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
@@ -276,15 +277,19 @@ def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
 
   stmp = writer.sgprPool.checkOut(1, tag="_graTileAssignmentScaleSwizzledCommon_stmp")
 
-  module.add(VLShiftRightB32(dst=vgpr(vtmp),
-                            shiftHex=hex(int(math.log2(numThreadsPerGroup))), src=vgpr("Serial"),
-                            comment="%s: grOffset = serial / %d" % (tc, loadWidth)))
+  # numThreadsPerGroup follows the scale K-subtile count, which is not always a
+  # power of two, so the split has to be a real divide rather than a shift and a
+  # mask.  The helper picks the shift itself when it can.
+  divTmp = writer.vgprPool.checkOut(2, tag="_graTileAssignmentScaleSwizzledCommon_div")
+  module.add(vectorStaticDivideAndRemainder(
+      vtmp, ti_.sharedVgprGROffset[0], "Serial", numThreadsPerGroup,
+      ContinuousRegister(divTmp, 2),
+      comment="%s: groupId = serial / %u, threadId = serial %% %u"
+              % (tc, numThreadsPerGroup, numThreadsPerGroup)))
+  writer.vgprPool.checkIn(divTmp)
   module.add(SLShiftLeftB32(sgpr(stmp), int(math.log2(ti_.bpe)), sgpr("Strides%s"%tc), comment="*= bpe (%d)"%(ti_.bpe)))
 
   module.add(VMulLOU32(dst=vgpr(vtmp), src1=vgpr(vtmp), src0=sgpr(stmp), comment="Apply scale%s stride to each group"%tc))
-  module.add(VAndB32(dst=vgpr(ti_.sharedVgprGROffset[0]),
-                     src0=hex(numThreadsPerGroup - 1), src1=vgpr("Serial"),
-                     comment="%s: grOffset = serial %% %d" % (tc, loadWidth)))
   module.add(VLShiftLeftB32(dst=vgpr(ti_.sharedVgprGROffset[0]),
                             shiftHex=hex(loadWidthShift), src=vgpr(ti_.sharedVgprGROffset[0]),
                             comment="Scale by load width for each thread in group"))

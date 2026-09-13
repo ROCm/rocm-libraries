@@ -3903,7 +3903,7 @@ DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
 # logicalIR: DSLoadB96TrB6
 DSLoadB96TrB6 = _make_ds_load_class("DSLoadB96TrB6", "ds_load_tr6_b96")
 # logicalIR: DSLoadB64TrB4
-DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_tr4_b64")
+DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_b64_tr_b4")
 # logicalIR: DSLoadB64TrB16
 DSLoadB64TrB16 = _make_ds_load_class("DSLoadB64TrB16", "ds_load_tr16_b64")
 # logicalIR: DSLoadB128TrB16

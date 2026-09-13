@@ -9,7 +9,7 @@ Kernel.py.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 from rocisa.container import vgpr, sgpr, accvgpr
 from rocisa.enum import RegisterType
@@ -706,3 +706,103 @@ class LRTag_1x2:
 @dataclass(frozen=True)
 class LRTag_TLU1:
   """LR emit strategy: column-major (TLU=1), 8×1 subtile shape."""
+
+
+class GRCoopSpread(NamedTuple):
+  coopWaves:   int   # waves whose loads tile one strip between them
+  windowSplit: int   # K windows the fetch group is additionally spread over
+
+
+def _spreadRank(kSlices: int, kWindows: int) -> Tuple[int, int]:
+  """Rank a candidate: widest total spread wins, ties go to more K slices.
+
+  Preferring slices keeps a shape that already fits on the layout it has today.
+  """
+  return (kSlices * kWindows, kSlices)
+
+
+def planGRCoopSpread(wavesPerStrip: int,
+                     otherWaves:    int,
+                     stripBytes:    int,
+                     numWindows:    int,
+                     bytesPerLoad) -> GRCoopSpread:
+  """Largest fetch group that still tiles a strip evenly.
+
+  An operand depends on one axis only, so the waves on the other axis need the
+  bytes but need not fetch them.  Spreading the fetch over the whole group covers
+  a strip once instead of once per other-axis wave.  A strip is cut into K slices,
+  and where slices alone cannot absorb the group the remainder goes over K windows
+  -- a window being one strip column of the macro tile further on.
+
+  Degrades to no spreading when nothing divides evenly, which is slower but always
+  valid.  Raises on geometry it cannot plan for at all.
+  """
+  geometry = dict(wavesPerStrip=wavesPerStrip, otherWaves=otherWaves,
+                  stripBytes=stripBytes, numWindows=numWindows)
+  if any(v < 1 for v in geometry.values()):
+    raise ValueError("planGRCoopSpread: expected positive geometry, got %r" % (geometry,))
+
+  loadBytes = bytesPerLoad(1)
+  if loadBytes < 1:
+    raise ValueError("planGRCoopSpread: bytesPerLoad(1) must be positive, got %r"
+                     % (loadBytes,))
+  if stripBytes % loadBytes:
+    # A trailing partial load has no owner, so every wave count leaves a
+    # remainder and the search would quietly decline to spread at all.
+    raise ValueError(
+      "planGRCoopSpread: strip of %d bytes is not a whole number of %d-byte loads"
+      % (stripBytes, loadBytes))
+
+  if otherWaves <= 1:
+    return GRCoopSpread(wavesPerStrip, 1)
+
+  fetchGroup = wavesPerStrip * otherWaves
+
+  def tilesStrip(waves):
+    return stripBytes % bytesPerLoad(waves) == 0
+
+  def validated(spread):
+    return _validateGRCoopSpread(spread, wavesPerStrip, fetchGroup, tilesStrip, numWindows)
+
+  if wavesPerStrip > 1:
+    wholeGroupFits = fetchGroup > wavesPerStrip and tilesStrip(fetchGroup)
+    return validated(GRCoopSpread(fetchGroup if wholeGroupFits else wavesPerStrip, 1))
+
+  best = GRCoopSpread(wavesPerStrip, 1)
+  kSlices = 1
+  while kSlices <= fetchGroup:
+    if tilesStrip(kSlices):
+      kWindows = 1
+      while kWindows <= numWindows and kSlices * kWindows <= fetchGroup:
+        candidate = GRCoopSpread(kSlices, kWindows)
+        if numWindows % kWindows == 0 and _spreadRank(*candidate) > _spreadRank(*best):
+          best = candidate
+        kWindows *= 2
+    kSlices *= 2
+  return validated(best)
+
+
+def _validateGRCoopSpread(spread, wavesPerStrip, fetchGroup, tilesStrip, numWindows):
+  """Check what the consumers of the result assume, before they act on it.
+
+  None of these surface as a rejected solution on their own: grKSplit is
+  coopWaves // wavesPerStrip and truncates, and a wave reaches its windows by a
+  runtime stride over numWindows.
+  """
+  coopWaves, windowSplit = spread
+  if coopWaves < wavesPerStrip or coopWaves % wavesPerStrip:
+    raise RuntimeError(
+      "planGRCoopSpread: coopWaves=%d is not a whole multiple of wavesPerStrip=%d"
+      % (coopWaves, wavesPerStrip))
+  # Only a widened group must tile the strip; staying at wavesPerStrip may
+  # legitimately overshoot, giving the supported loadRatioGR >= 2 mode.
+  if coopWaves > wavesPerStrip and not tilesStrip(coopWaves):
+    raise RuntimeError("planGRCoopSpread: widened to %d waves, which do not tile the strip"
+                       % (coopWaves,))
+  if numWindows % windowSplit:
+    raise RuntimeError("planGRCoopSpread: windowSplit=%d does not divide numWindows=%d"
+                       % (windowSplit, numWindows))
+  if coopWaves * windowSplit > fetchGroup:
+    raise RuntimeError("planGRCoopSpread: spread %dx%d exceeds the %d-wave fetch group"
+                       % (coopWaves, windowSplit, fetchGroup))
+  return spread
