@@ -5,6 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 
 #include <string>
 
@@ -43,15 +44,7 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(hi
 
     int deviceId = 0;
     const auto stream = handle->getStream();
-    hipError_t status;
-    if(stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread)
-    {
-        status = hipStreamGetDevice(stream, &deviceId);
-    }
-    else
-    {
-        status = hipGetDevice(&deviceId);
-    }
+    const auto status = hipdnn_plugin_sdk::getDeviceFromStream(stream, &deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,

@@ -12,6 +12,7 @@
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <iostream>
 #include <map>
 
@@ -137,15 +138,7 @@ BackendLogState& getBackendLogState()
 void logHipDeviceInfo(hipStream_t stream)
 {
     int deviceId = 0;
-    hipError_t err;
-    if(stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread)
-    {
-        err = hipStreamGetDevice(stream, &deviceId);
-    }
-    else
-    {
-        err = hipGetDevice(&deviceId);
-    }
+    auto err = hipdnn_plugin_sdk::getDeviceFromStream(stream, &deviceId);
     if(err != hipSuccess)
     {
         HIPDNN_BACKEND_LOG_WARN("Failed to get device from stream: {}", hipGetErrorString(err));

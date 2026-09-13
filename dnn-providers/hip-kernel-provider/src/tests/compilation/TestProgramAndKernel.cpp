@@ -183,10 +183,10 @@ protected:
 
 enum class StreamKind
 {
-    Null,
-    Legacy,
-    PerThread,
-    Concrete
+    NULL_STREAM,
+    LEGACY,
+    PER_THREAD,
+    CONCRETE
 };
 
 class TestKernelStreamDeviceBinding
@@ -206,15 +206,15 @@ TEST_P(TestKernelStreamDeviceBinding, LaunchesOnModuleDeviceAndRestoresCaller)
     hipStream_t stream = nullptr;
     switch(kind)
     {
-    case StreamKind::Null:
+    case StreamKind::NULL_STREAM:
         break;
-    case StreamKind::Legacy:
+    case StreamKind::LEGACY:
         stream = hipStreamLegacy;
         break;
-    case StreamKind::PerThread:
+    case StreamKind::PER_THREAD:
         stream = hipStreamPerThread;
         break;
-    case StreamKind::Concrete:
+    case StreamKind::CONCRETE:
         ASSERT_NO_FATAL_FAILURE(createStream(_moduleDevice));
         stream = _stream.get();
         break;
@@ -238,10 +238,10 @@ TEST_P(TestKernelStreamDeviceBinding, LaunchesOnModuleDeviceAndRestoresCaller)
 
 INSTANTIATE_TEST_SUITE_P(StreamKinds,
                          TestKernelStreamDeviceBinding,
-                         ::testing::Combine(::testing::Values(StreamKind::Null,
-                                                              StreamKind::Legacy,
-                                                              StreamKind::PerThread,
-                                                              StreamKind::Concrete),
+                         ::testing::Combine(::testing::Values(StreamKind::NULL_STREAM,
+                                                              StreamKind::LEGACY,
+                                                              StreamKind::PER_THREAD,
+                                                              StreamKind::CONCRETE),
                                             ::testing::Bool()));
 
 TEST_F(TestKernelDeviceBinding, RejectsAConcreteStreamFromAnotherDevice)

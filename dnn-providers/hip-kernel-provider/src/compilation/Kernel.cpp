@@ -10,6 +10,7 @@
 #include <string>
 #include <utility>
 
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::compilation
@@ -62,13 +63,13 @@ void Kernel::launchImpl(hipStream_t stream, void** kernelParams) const
         // already refuses it, so what this check buys is the diagnosis rather than the
         // correctness. Default stream tokens are device-relative, so they are exempt:
         // the bind below makes their current device the module's own.
-        if(stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread)
+        if(!hipdnn_plugin_sdk::isDefaultStream(stream))
         {
             // Seeded to -1, not 0: a runtime that returns hipSuccess without writing the
             // out-parameter would otherwise go unseen. Mirrors HandleDeviceResolver::deviceId.
             int streamDevice = -1;
-            if(hipStreamGetDevice(stream, &streamDevice) == hipSuccess && streamDevice >= 0
-               && streamDevice != _deviceOrdinal)
+            if(hipdnn_plugin_sdk::getDeviceFromStream(stream, &streamDevice) == hipSuccess
+               && streamDevice >= 0 && streamDevice != _deviceOrdinal)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

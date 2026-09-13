@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 
@@ -33,7 +34,7 @@ public:
 
         // Default stream tokens are relative to the live current device.
         const auto stream = handle.getStream();
-        if(stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread)
+        if(!hipdnn_plugin_sdk::isDefaultStream(stream))
         {
             if(queryStreamDevice(stream, &deviceId) == hipSuccess && deviceId >= 0)
             {
@@ -89,7 +90,7 @@ protected:
     /// Test seam: lets a test model a runtime that reports success without an ordinal.
     virtual hipError_t queryStreamDevice(hipStream_t stream, int* deviceId) const
     {
-        return hipStreamGetDevice(stream, deviceId);
+        return hipdnn_plugin_sdk::getDeviceFromStream(stream, deviceId);
     }
 
     /// Test seam: lets a test pin the fallthrough ordinal without owning a device.
