@@ -466,7 +466,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsStringKnobForStringMetadata)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
@@ -477,8 +477,19 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     const TestGraph graph(makeGraphId(0x95));
     const auto knobs = builder.getCustomKnobs(0, graph);
 
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs.front().knob_id, BLOCK_SIZE);
+    // Both int (BLOCK_SIZE) and string (DTYPE) knobs are now reported.
+    // countingFloatKernels filters to FLOAT-only, so the DTYPE knob sees one value.
+    ASSERT_EQ(knobs.size(), 2U);
+    EXPECT_EQ(knobs[0].knob_id, BLOCK_SIZE);
+    ASSERT_TRUE(knobs[0].constraint.AsIntConstraint() != nullptr);
+    ASSERT_TRUE(knobs[0].default_value.AsIntValue() != nullptr);
+
+    EXPECT_EQ(knobs[1].knob_id, DTYPE);
+    ASSERT_TRUE(knobs[1].default_value.AsStringValue() != nullptr);
+    EXPECT_EQ(knobs[1].default_value.AsStringValue()->value, "FLOAT");
+    ASSERT_TRUE(knobs[1].constraint.AsStringConstraint() != nullptr);
+    const auto& stringConstraint = *knobs[1].constraint.AsStringConstraint();
+    EXPECT_THAT(stringConstraint.valid_values, ::testing::ElementsAre("FLOAT"));
 }
 
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
@@ -641,13 +652,15 @@ TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAFloatVal
         EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
         EXPECT_EQ(ex.getMessage(),
                   "engine '" + engine.name + "' knob '" + BLOCK_SIZE
-                      + "' must be set to an integer value");
+                      + "' must be set to an integer or string value");
     }
 }
 
-TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAStringValuedKnobSetting)
+TEST(TestIngestorGenericPlanBuilder, StringValuedSettingOnIntKnobIsAcceptedButFiltersOutAllKernels)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
@@ -658,18 +671,33 @@ TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAStringVa
     const TestGraph graph(makeGraphId(0x9C));
     KnobFilterSettings settings;
 
-    try
-    {
-        builder.initializeExecutionSettings(0, graph, engineConfig, settings);
-        FAIL() << "expected HipdnnPluginException";
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& ex)
-    {
-        EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
-        EXPECT_EQ(ex.getMessage(),
-                  "engine '" + engine.name + "' knob '" + BLOCK_SIZE
-                      + "' must be set to an integer value");
-    }
+    // readKnobFilter now accepts the string value without throwing...
+    EXPECT_NO_THROW(builder.initializeExecutionSettings(0, graph, engineConfig, settings));
+
+    // ...but no kernel has a string-valued block_size, so the filter is unsatisfiable.
+    EXPECT_THROW(builder.getMaxWorkspaceSize(0, graph, settings),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsAcceptsAStringValuedKnobSetting)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeStringKnobEngineConfig(fbb, DTYPE, "FLOAT");
+    const TestGraph graph(makeGraphId(0x9D));
+    KnobFilterSettings settings;
+
+    // String value accepted and stored in the filter without throwing.
+    EXPECT_NO_THROW(builder.initializeExecutionSettings(0, graph, engineConfig, settings));
+    ASSERT_EQ(settings.ingestorSettings.knobFilter.count(DTYPE), 1U);
+    const auto* stored = std::get_if<std::string>(&settings.ingestorSettings.knobFilter.at(DTYPE));
+    ASSERT_NE(stored, nullptr);
+    EXPECT_EQ(*stored, "FLOAT");
 }
 
 constexpr DeviceId DEVICE_FOR_HANDLE_A = 42;
