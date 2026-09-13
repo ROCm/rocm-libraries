@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "id": "8b61d0c9-24af-4d17-9e52-3a7c06b8f145",
-  "name": "ASM_SDPA_ENGINE throughput (gfx950, 68 graphs)",
+  "name": "ASM_SDPA_ENGINE throughput (gfx950, 106 graphs)",
   "adapter": "tree_data",
   "features_signature": [
     "$device.cu_count",

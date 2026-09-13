@@ -115,6 +115,28 @@ Every one of these was hit on a real run and cost between 20 minutes and two hou
 | `expected one UED for --engine 'X', found 0` | promoting an opaque engine's model as if it had a role map | current `uhd_gen` installs it by declared UUID; check the model's `id` equals the UUID in the provider header |
 | engine answers but `scored 0` predictions | the model's `trained_against.selector_revision` is not what the provider reports | all models in one bake-off must come from builds reporting the same revision |
 | job builds an unexpected commit | compute sites resolve `github.com` to mirrors that lag the login node | `git bundle create delta.bundle <base>..HEAD`, stage it, pass `UHD_BUNDLE=/exchange/delta.bundle` |
+| `Repository lacks these prerequisite commits` | a bundle applies relative to a base, and a `--depth 1` clone has no ancestors | clone `--depth 200` (all scripts here do) |
+| `held-out corpus has no evaluable candidate ranking` | every problem has one candidate, so there is no ordering to learn | the engine needs a knob its `kernel_match` does NOT pin; see the flyDSL catalog below |
+| `Ambiguous enrolled knob tuple for candidates X and Y` | two candidates differ only in something not declared as an int KMD field | declare the distinguishing knob; `generate.py` exposes every int field automatically |
+| `incoming UHD id … is already installed; refusing duplicate identity` | an opaque engine's model is bound BY its UUID, and the tree already ships one | intended: replace the shipped document, do not promote a second copy |
+| an engine answers but its predictions are unchanged after a retrain | the promotion above was refused, so the runtime is still using the shipped model | check the promote lines in the bake-off log before trusting a comparison |
+
+## Giving an engine a catalog worth ranking
+
+An engine whose `kernel_match` pins every distinguishing field has exactly one applicable
+kernel per graph, and L2 correctly refuses to train. The fix is not a bigger corpus; it is
+more kernels per functional tuple, differing only in things the match does not look at.
+
+flyDSL is the worked example (`flydsl_poc_scratch/flydsl_build/build_flydsl_variants.py`):
+its 21 shipped kernels became 240 by crossing `waves_per_eu` x `stagger` x `lazy_rescale`,
+each declared as an **int** metadata field so enumeration can address it. Two rules:
+
+1. **A knob must not change the ABI.** Verify every emitted binary still reports the same
+   kernarg size and entry point before collecting against it — a kernel with a different
+   signature is not ranked, it is launched with garbage. `num_kv_splits` fails this test.
+2. **Measure what the ranker is worth before believing it.** Compare the trained model's
+   top-1 regret against always taking the shipped default configuration. If the default
+   wins, the knobs are noise at this measurement precision and the honest answer is L1 only.
 
 ## Invariants — do not break these
 
