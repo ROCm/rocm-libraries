@@ -30,6 +30,20 @@ static RoundingMode
     return RoundingMode::RTNE;
 }
 
+// Selects the bf16-output conversion mode used for kernel lookup. FP8 forward
+// kernels are only shipped with the RTNA conversion (bf16_cvt=1 in the kernel
+// CSV), so fp8 must request RTNA; bf16 uses the default rounding.
+static RoundingMode
+    getBf16ConvertMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                       const std::string& dataTypeId)
+{
+    if(dataTypeId == "fp8bf16")
+    {
+        return RoundingMode::RTNA;
+    }
+    return getRoundingMode(attrs);
+}
+
 static BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
 {
     return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
@@ -84,13 +98,39 @@ static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::D
     {
         return "bf16";
     }
-    if(plan_utils::allDataTypesEqual(DataType::FP8_E4M3, {qType, kType, vType})
+    // gfx942/MI300 fp8 is the FNUZ variant (exp bias 8, NaN=0x80, no negative zero),
+    // which is the exact encoding the vendored AITER gfx942 fp8 forward kernels
+    // dequantize. OCP FP8_E4M3 / E4M3FN (bias 7, gfx950/MI350) is a different,
+    // non-bit-compatible encoding: the same byte decodes to a different value, so
+    // feeding OCP bytes to these kernels would silently produce wrong results. Only
+    // FP8_E4M3_FNUZ is accepted here; OCP fp8 is diagnosed and declined in
+    // isApplicable until the gfx950 OCP fp8 forward kernels land.
+    if(plan_utils::allDataTypesEqual(DataType::FP8_E4M3_FNUZ, {qType, kType, vType})
        && oType == DataType::BFLOAT16)
     {
         return "fp8bf16";
     }
 
     return "";
+}
+
+// A per-tensor (scalar) descale has a single element — dims collapse to [1,...,1].
+// The forward kernel-arg builder only wires scalar descales (all s_descale_* strides
+// are zero), so isApplicable must reject any non-scalar descale rather than silently
+// reading descale[0] for every batch/head.
+static bool isScalarTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    if(dims == nullptr)
+    {
+        return false;
+    }
+    int64_t elementCount = 1;
+    for(flatbuffers::uoffset_t i = 0; i < dims->size(); ++i)
+    {
+        elementCount *= dims->Get(i);
+    }
+    return elementCount == 1;
 }
 
 static bool isMi308Device(hipStream_t stream)
@@ -341,12 +381,59 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
 
+    // Targeted diagnostic for the FNUZ/OCP fp8 gotcha: OCP FP8_E4M3 (bias 7, the
+    // gfx950/MI350 encoding) is not bit-compatible with the FP8_E4M3_FNUZ (bias 8)
+    // the gfx942 fp8 forward kernels consume, so it is declined here with a specific
+    // message rather than the generic "unsupported datatype" one below. Inputs are
+    // proven same-type above, so checking q is sufficient. Remove once gfx950 OCP
+    // fp8 forward kernels are wired in.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        qTensor->data_type() == DataType::FP8_E4M3,
+        "gfx942 fp8 SDPA requires FP8_E4M3_FNUZ inputs; OCP FP8_E4M3 (gfx950/MI350) is a "
+        "non-bit-compatible encoding and is not yet supported by these kernels");
+
     HIP_KERNEL_RETURN_FALSE_IF(
         dataTypeId.empty(),
         "output tensor must have datatype BFLOAT16 (Actual type: "
             + EnumNameDataType(oTensor->data_type())
-            + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3 (Actual type: "
+            + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
+
+    // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). Without them
+    // the kernel would read garbage dequantization scales.
+    if(dataTypeId == "fp8bf16")
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(!attrs.descale_q_tensor_uid().has_value()
+                                       || !attrs.descale_k_tensor_uid().has_value()
+                                       || !attrs.descale_v_tensor_uid().has_value(),
+                                   "fp8 inputs require q, k, and v descale tensors");
+
+        // Only per-tensor (scalar) descales are supported: the kernel-arg builder
+        // wires all s_descale_*_Bs/Hs strides to zero, so a non-scalar descale (e.g.
+        // per-[B, H_kv]) would be silently mis-read as descale[0] for every batch and
+        // head. Decline it here rather than miscompute. Per-[B, H_kv] descales are a
+        // future extension (tracked with the gfx950 fp8 path).
+        const auto* qDescale = tensorMap.at(attrs.descale_q_tensor_uid().value());
+        const auto* kDescale = tensorMap.at(attrs.descale_k_tensor_uid().value());
+        const auto* vDescale = tensorMap.at(attrs.descale_v_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
+            "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
+            "supported");
+    }
+
+    // Softmax/output (de)quantization is not implemented by the v3 forward kernel
+    // (its argument struct exposes only q/k/v descales).
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_s_tensor_uid().has_value(),
+                               "descale_s tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid().has_value(),
+                               "scale_s tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_o_tensor_uid().has_value(),
+                               "scale_o tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid().has_value(),
+                               "amax_s tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_o_tensor_uid().has_value(),
+                               "amax_o tensor not supported");
 
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
@@ -366,7 +453,7 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 static_cast<int>(qTensor->dims()->Get(3)),
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
-                                getRoundingMode(attrs),
+                                getBf16ConvertMode(attrs, dataTypeId),
                                 getBatchMode(attrs),
                                 &cfg_fmha_fwd);
 
@@ -549,18 +636,30 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.archString = deviceString;
     params.maskType = plan_utils::getMaskType(sdpaAttrs);
 
+    const auto dataTypeId = getDataTypeIdentifier(
+        qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
+
+    // FP8 inputs are 1 byte; bf16 inputs are 2 bytes. Output stays 2-byte BF16.
+    params.inBytesPerElement = (dataTypeId == "fp8bf16") ? 1U : 2U;
+
+    // FP8 requires q/k/v descales (guaranteed present by isApplicable).
+    if(dataTypeId == "fp8bf16")
+    {
+        params.qDescaleUid = sdpaAttrs.descale_q_tensor_uid().value();
+        params.kDescaleUid = sdpaAttrs.descale_k_tensor_uid().value();
+        params.vDescaleUid = sdpaAttrs.descale_v_tensor_uid().value();
+    }
+
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    auto kernelKey = getKernelNameKey(
-        deviceString,
-        getDataTypeIdentifier(
-            qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type()),
-        static_cast<int>(headDimQk),
-        static_cast<int>(headDimV),
-        params.maskType,
-        getRoundingMode(sdpaAttrs),
-        getBatchMode(sdpaAttrs),
-        &cfg_fmha_fwd);
+    auto kernelKey = getKernelNameKey(deviceString,
+                                      dataTypeId,
+                                      static_cast<int>(headDimQk),
+                                      static_cast<int>(headDimV),
+                                      params.maskType,
+                                      getBf16ConvertMode(sdpaAttrs, dataTypeId),
+                                      getBatchMode(sdpaAttrs),
+                                      &cfg_fmha_fwd);
 
     if(kernelKey.empty())
     {
