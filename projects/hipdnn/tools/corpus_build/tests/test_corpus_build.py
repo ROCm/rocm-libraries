@@ -245,7 +245,7 @@ def test_a_filtered_corpus_carries_only_the_facets_it_was_asked_for(tmp_path, so
     assert {row["source"] for row in manifest["graphs"]} >= {"model", "sweep"}
     assert manifest["reports"]["filtered_out"]["model"] >= 1
     assert manifest["reports"]["filtered_out"]["kernel"] >= 1
-    assert manifest["reports"]["filter"] == {"dtypes": ["bf16"], "head_dims": [128]}
+    assert manifest["reports"]["filter"] == {"dtypes": ["bf16"], "head_dims": [128], "causal": []}
 
 
 def test_a_filtered_sweep_still_fills_the_count_it_was_given(tmp_path, sources):
@@ -518,3 +518,15 @@ def test_the_command_line_produces_a_corpus_offline(tmp_path, capsys):
     assert all(entry["sha256"] for entry in manifest["inputs"])
     printed = capsys.readouterr().out
     assert "regimes" in printed
+
+
+def test_a_corpus_can_be_restricted_to_one_mask(tmp_path, sources):
+    """An engine can live entirely on one side of causality: AITER's gfx950 forward table is
+    two kernels, both unmasked, so it declines every causal graph on that architecture. A
+    corpus drawn without the facet comes out ~80% causal, which is ~80% wasted measurement
+    when the corpus exists to train that engine."""
+    manifest, _ = _build(tmp_path, sources, count=60, keep=Filter(causal=(False,)))
+
+    assert manifest["emitted"] > 0
+    assert {row["causal"] for row in manifest["graphs"]} == {False}
+    assert manifest["reports"]["sweep"]["filtered"] > 0
