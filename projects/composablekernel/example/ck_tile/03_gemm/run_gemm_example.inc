@@ -6,6 +6,8 @@
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
+#include <type_traits>
+
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
 {
@@ -222,7 +224,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                   const BLayout b_layout                  = BLayout{},
                                   [[maybe_unused]] const CLayout c_layout = CLayout{})
 {
-    // Use GemmTypeConfig to get actual data types for tensor operations
+
     using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;
@@ -304,7 +306,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                 return ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
             }
         }();
-        // shuffled buffer B for device implementation
+
         if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
         {
             ck_tile::permute_vectors_i4x4_b(b_shuffle_host);
@@ -347,31 +349,94 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-    float ave_time = invoke_gemm<GemmConfig,
-                                 Invoker,
-                                 ADataTypeBuf,
-                                 BDataTypeBuf,
-                                 ck_tile::tuple<>,
-                                 AccDataType,
-                                 CDataType,
-                                 ALayout,
-                                 BLayout,
-                                 ck_tile::tuple<>,
-                                 CLayout>(a_m_k_dev_buf,
-                                          b_k_n_dev_buf,
-                                          c_m_n_dev_buf,
-                                          M,
-                                          N,
-                                          K,
-                                          stride_A,
-                                          stride_B,
-                                          stride_C,
-                                          kbatch,
-                                          n_warmup,
-                                          n_repeat,
-                                          persistent,
-                                          flush_cache,
-                                          rotating_count);
+    constexpr bool APacksK = std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool BPacksN = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    constexpr bool CPacksN = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+
+    constexpr bool k_pad_fallback_eligible =
+        GemmConfig::EnableKPadFallback && !GemmConfig::FixedVectorSize &&
+        std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
+        ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
+        ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1;
+
+    constexpr bool mn_pad_fallback_eligible =
+        GemmConfig::EnableMNPadFallback && !GemmConfig::FixedVectorSize &&
+        std::is_same_v<ADataTypeBuf, BDataTypeBuf> &&
+        ck_tile::numeric_traits<ADataTypeBuf>::PackedSize == 1 &&
+        ck_tile::numeric_traits<BDataTypeBuf>::PackedSize == 1 &&
+        ck_tile::numeric_traits<CDataType>::PackedSize == 1;
+
+    constexpr ck_tile::index_t ABVectorSize = 16 / sizeof(ADataTypeBuf);
+    constexpr ck_tile::index_t CVectorSize  = 16 / sizeof(CDataType);
+
+    const bool needsScalarAB =
+        k_pad_fallback_eligible && (((APacksK ? K : M) % ABVectorSize != 0) ||
+                                    ((BPacksN ? N : K) % ABVectorSize != 0));
+    const bool needsScalarC =
+        mn_pad_fallback_eligible && ((CPacksN ? N : M) % CVectorSize != 0);
+
+    auto invoke = [&]<typename Cfg>() {
+        return invoke_gemm<Cfg,
+                           Invoker,
+                           ADataTypeBuf,
+                           BDataTypeBuf,
+                           ck_tile::tuple<>,
+                           AccDataType,
+                           CDataType,
+                           ALayout,
+                           BLayout,
+                           ck_tile::tuple<>,
+                           CLayout>(a_m_k_dev_buf,
+                                    b_k_n_dev_buf,
+                                    c_m_n_dev_buf,
+                                    M,
+                                    N,
+                                    K,
+                                    stride_A,
+                                    stride_B,
+                                    stride_C,
+                                    kbatch,
+                                    n_warmup,
+                                    n_repeat,
+                                    persistent,
+                                    flush_cache,
+                                    rotating_count);
+    };
+
+    float ave_time;
+    if constexpr(k_pad_fallback_eligible && mn_pad_fallback_eligible)
+    {
+        if(needsScalarAB && needsScalarC)
+            ave_time = invoke.template operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, 1>>();
+        else if(needsScalarAB)
+            ave_time = invoke.template
+                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
+        else if(needsScalarC)
+            ave_time = invoke.template operator()<
+                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
+        else
+            ave_time = invoke.template operator()<GemmConfig>();
+    }
+    else if constexpr(k_pad_fallback_eligible)
+    {
+        if(needsScalarAB)
+            ave_time = invoke.template
+                operator()<GemmConfigFixedVectorSize<GemmConfig, 1, 1, CVectorSize>>();
+        else
+            ave_time = invoke.template operator()<GemmConfig>();
+    }
+    else if constexpr(mn_pad_fallback_eligible)
+    {
+        if(needsScalarC)
+            ave_time = invoke.template operator()<
+                GemmConfigFixedVectorSize<GemmConfig, ABVectorSize, ABVectorSize, 1>>();
+        else
+            ave_time = invoke.template operator()<GemmConfig>();
+    }
+    else
+    {
+        ave_time = invoke.template operator()<GemmConfig>();
+    }
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
