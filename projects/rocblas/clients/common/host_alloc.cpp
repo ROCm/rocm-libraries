@@ -103,13 +103,10 @@ ptrdiff_t host_bytes_available()
         return n_bytes;
     }
 
-    static const char* mem_token     = "MemFree";
-    static auto*       mem_free_type = getenv("ROCBLAS_CLIENT_ALLOC_AVAILABLE");
-    if(mem_free_type)
-    {
-        mem_token = "MemAvail"; // MemAvailable
-    }
-    int mem_token_len = strlen(mem_token);
+    // Resolved once: env var is read at first call, token and its length never change.
+    static const char* mem_token
+        = [] { return getenv("ROCBLAS_CLIENT_ALLOC_AVAILABLE") ? "MemAvail" : "MemFree"; }();
+    static const int mem_token_len = static_cast<int>(strlen(mem_token));
 
     while(fgets(buf, BUF_MAX, fp) != NULL)
     {
@@ -156,7 +153,7 @@ bool host_mem_safe(size_t n_bytes)
         {
             size_t mem_limit;
             client_ram_limit = sscanf(alloc_limit, "%zu", &mem_limit) == 1 ? mem_limit : 0;
-            client_ram_limit <<= 30; // B to GB
+            client_ram_limit <<= 30; // GB to B
         }
         return 0;
     }();
@@ -196,18 +193,13 @@ void* host_malloc(size_t size)
     {
         void* ptr = malloc(size);
 
-        static int value = -1;
-
-        static auto once = false;
-        if(!once)
-        {
+        static int            value = -1;
+        static std::once_flag once_flag;
+        std::call_once(once_flag, [] {
             auto* alloc_byte_str = getenv("ROCBLAS_CLIENT_ALLOC_FILL_HEX_BYTE");
             if(alloc_byte_str)
-            {
                 value = strtol(alloc_byte_str, nullptr, 16); // hex
-            }
-            once = true;
-        }
+        });
 
         if(value != -1 && ptr)
             memset(ptr, value, size);
