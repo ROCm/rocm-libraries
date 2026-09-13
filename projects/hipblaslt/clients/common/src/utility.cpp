@@ -45,15 +45,8 @@
 
 #include <Tensile/hip/HipHardware.hpp>
 
-#if __has_include(<filesystem>)
 #include <filesystem>
 namespace fs = std::filesystem;
-#elif __has_include(<experimental/filesystem>)
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#else
-#error no filesystem found
-#endif
 
 /* ============================================================================================ */
 // Return path of this executable
@@ -483,4 +476,3 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                       "condition to write to file"
                    << std::endl;
 }
-
