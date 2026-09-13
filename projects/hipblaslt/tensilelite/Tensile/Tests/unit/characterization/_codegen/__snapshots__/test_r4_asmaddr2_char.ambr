@@ -2,7 +2,7 @@
 # name: test_r4_asmaddr2_bf16_srvw_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16HdvZpgrG9fKYZxa1rRQMVCzs8bLCsln2pP2ZiDGSrZM=',
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16tIlUZM-YcRa_BpwAiPON8KKbe3T5_jT2eFQFhERe_Xg=',
       'err': 0,
     }),
   ])
@@ -10,7 +10,7 @@
 # name: test_r4_asmaddr2_fp32_golden
   list([
     dict({
-      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x256x16_MI16x16xy_QnD4KWxLPxyS60SFoxg_umqhAJG1Ivc4xhv9Fz-Ig=',
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x256x16_MI16x16xaHi6h1J7i3cxfwH4jzxjZaGY3rcKynU7p-zYrbdpzA4=',
       'err': 0,
     }),
   ])

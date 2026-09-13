@@ -89,6 +89,7 @@ def getRequiredParametersMin() -> set:
         'NonTemporalC',
         'NonTemporalD',
         'NonTemporalE',
+        'NonTemporalGate',
         'NonTemporalMetadata',
         'NonTemporalMXSA',
         'NonTemporalMXSB',
