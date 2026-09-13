@@ -130,26 +130,38 @@ void LeafNode::GetKernelPartialPassFactors()
     }
     case 1: // work along y will be split between x and z
     {
+        std::stringstream msg;
+        std::stringstream factors_msg;
+
+        msg << "work in the off-dimension = ";
+
+        factors_msg << "radix-(";
+        for(const auto factor : kernelFactorsPP)
+            factors_msg << factor << ",";
+        factors_msg.seekp(-1, std::ios_base::end);
+        factors_msg << ") pass(es)";
+
+        auto root_transform_type = GetRootPlanTransformType();
+
         if(scheme == CS_KERNEL_STOCKHAM_PP)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-            comments.push_back(msg.str());
+
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << "local data transposition + " << factors_msg.str() << ".";
+            else
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
         }
         if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         {
-            std::stringstream msg;
-            msg << "work in the off-dimension:" << std::endl;
-            msg << "\t     local data transposition + radix: [";
-            for(const auto factor : kernelFactorsPP)
-                msg << " " << factor;
-            msg << " ] pass(es). \n";
-            comments.push_back(msg.str());
+            if(root_transform_type == rocfft_transform_type_real_inverse)
+                msg << factors_msg.str() << " + Hadamard product with twiddle factors.";
+            else
+                msg << "local data transposition + " << factors_msg.str() << ".";
         }
+
+        msg << "\n";
+
+        comments.push_back(msg.str());
 
         break;
     }
