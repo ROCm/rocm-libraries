@@ -117,6 +117,7 @@ _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
 _ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);
 _ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);
 _ROCKE_VEC(int8_t, i8x, 4); _ROCKE_VEC(int8_t, i8x, 8); _ROCKE_VEC(int8_t, i8x, 16);
+_ROCKE_VEC(int8_t, i8x, 32); // <32 x fp8> operands of the 16x16x128 fp8 hero MFMA
 _ROCKE_VEC(bool, boolx, 2); _ROCKE_VEC(bool, boolx, 4); _ROCKE_VEC(bool, boolx, 8);
 _ROCKE_VEC(bool, boolx, 16);
 #undef _ROCKE_VEC
@@ -205,6 +206,61 @@ def _f32_literal(val: float) -> str:
     if math.isinf(val):
         return "((float)-INFINITY)" if val < 0 else "((float)INFINITY)"
     return f"{val}f"
+
+
+def _llvm_asm_template_to_hip(template: str) -> str:
+    """Translate an LLVM inline-asm template into GCC/clang extended-asm form.
+
+    LLVM IR and C/C++ extended asm share the same AMDGPU mnemonics but differ
+    in operand-reference / escape syntax:
+
+    * operand reference ``$0`` (LLVM) -> ``%0`` (C++)
+    * literal dollar ``$$`` (LLVM)    -> ``$`` (C++)
+    * literal percent ``%`` (C++)     must be doubled to ``%%``
+
+    Operand *modifiers* (``${0:v}``) have no portable C++ extended-asm spelling
+    and are rejected -- none of the rocke asm helpers emit them. The returned
+    string still contains real newline/tab characters; :func:`_c_str_escape`
+    turns it into a C++ string-literal body.
+    """
+    out: List[str] = []
+    i, n = 0, len(template)
+    while i < n:
+        c = template[i]
+        if c == "%":
+            out.append("%%")
+            i += 1
+        elif c == "$":
+            nxt = template[i + 1] if i + 1 < n else ""
+            if nxt == "$":
+                out.append("$")  # LLVM literal '$'
+                i += 2
+            elif nxt == "{":
+                raise NotImplementedError(
+                    "inline asm operand modifier '${...}' has no portable HIP "
+                    "extended-asm spelling"
+                )
+            elif nxt.isdigit():
+                out.append("%")  # operand reference -> %N
+                i += 1
+            else:
+                out.append("$")  # bare '$', emit literally
+                i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _c_str_escape(s: str) -> str:
+    """Escape a string for embedding as a C++ string literal body."""
+    return (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+    )
 
 
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
@@ -462,12 +518,14 @@ class _Lowerer:
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
-        vec = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = _vec_prefix(elem_name, "global_load_vN")
+        # Reinterpret to the result's real HIP vector type (i32xN / f32xN /
+        # i8xN / ...), not a hard-coded f16x default -- the elem-prefix guess
+        # mis-typed every non-f16/bf16 vector load (see smem_store_vN, which
+        # already carries the full map).
+        vec_ty = _type_to_hip(op.result.type)
         self._emit(
-            f"{prefix}{vec} {_name(op.result)} = "
-            f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
+            f"{vec_ty} {_name(op.result)} = "
+            f"*reinterpret_cast<const {vec_ty}*>({_name(ptr)} + {_name(idx)});"
         )
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
@@ -609,6 +667,35 @@ class _Lowerer:
         self._emit(
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12("
+            f"{_name(a)}, {_name(b)}, {_name(c)});"
+        )
+
+    # ---- WMMA bf16 (RDNA3/3.5 gfx11 + RDNA4 gfx12, wave32) ----
+    #
+    # The bf16 twin of the f16 WMMA handlers. Same fragment layout: A/B are
+    # per-lane ``bf16x16`` (gfx11) / ``bf16x8`` (gfx12) and the accumulator /
+    # result are ``f32x8``. The clang builtins accept true ``__bf16`` vectors
+    # directly (verified: passing ``bf16x16`` / ``bf16x8`` compiles and selects
+    # ``v_wmma_f32_16x16x16_bf16``), so -- unlike the LLVM path, which bitcasts
+    # ``<N x bfloat>`` to ``<N x i16>`` before the intrinsic -- we pass the
+    # operands as-is. Gated to RDNA targets via :meth:`_require_wmma_arch`; a
+    # CDNA/MFMA target has no WMMA instruction and must never emit it.
+    def _op_tile_wmma_f32_16x16x16_bf16(self, op: Op) -> None:
+        self._require_wmma_arch("wmma_f32_16x16x16_bf16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32("
+            f"{_name(a)}, {_name(b)}, {_name(c)});"
+        )
+
+    def _op_tile_wmma_gfx12_f32_16x16x16_bf16(self, op: Op) -> None:
+        # RDNA4 builtin: distinct ``_gfx12`` suffix, 8-wide bf16 operands.
+        self._require_wmma_arch("wmma_gfx12_f32_16x16x16_bf16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12("
             f"{_name(a)}, {_name(b)}, {_name(c)});"
         )
 
@@ -764,6 +851,23 @@ class _Lowerer:
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
         self._emit_fp8_mfma(
             op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8"
+        )
+
+    def _op_tile_mfma_f32_16x16x128_fp8(self, op: Op) -> None:
+        """Not implemented: use the combined f8f6f4 lowering instead.
+
+        This dense-fp8 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4
+        and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op.
+        """
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x128_fp8: dense fp8 MFMA has no dedicated HIP "
+            "lowering; the hardware exposes only the combined K=128 f8f6f4 form. "
+            "Use tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) "
+            "instead."
         )
 
     def _op_vector_bitcast(self, op: Op) -> None:
@@ -1054,6 +1158,84 @@ class _Lowerer:
             f"{_name(rsrc)}, "
             f"(__attribute__((address_space(3))) void*)({_name(lds_addr)}), "
             f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, 0);"
+        )
+
+    def _has_async_dma_counter(self) -> bool:
+        """Whether the target has gfx1250's dedicated async global->LDS DMA
+        engine + ``ASYNCcnt`` counter (drained by ``s_wait_asynccnt``).
+
+        Mirrors ``isa.backend.has_async_lds_counter`` (True only on gfx1250)
+        but keyed off the data-driven :class:`ArchTarget` memory flags rather
+        than an ISA backend the HIP path does not construct: gfx1250 is the
+        only target with the new async global->LDS DMA (``has_async_global_lds``)
+        yet without the older LDS-async path (``has_async_lds``); gfx942/gfx950
+        have both, RDNA gfx12 (gfx1201) has neither."""
+        m = self.arch.memory
+        return m.has_async_global_lds and not m.has_async_lds
+
+    def _op_tile_s_wait_asynccnt(self, op: Op) -> None:
+        # gfx1250 dedicated async-DMA counter. No-op on backends without it
+        # (they have no async global<->LDS instructions to track), matching
+        # ``lower_llvm._op_tile_s_wait_asynccnt``.
+        if not self._has_async_dma_counter():
+            return
+        n = int(op.attrs.get("n", 0))
+        self._emit(f"__builtin_amdgcn_s_wait_asynccnt({n});")
+
+    def _op_tile_global_load_lds(self, op: Op) -> None:
+        # Direct DRAM->LDS copy (``global_load_lds``), gfx942/gfx950/gfx1250.
+        # Unlike the buffer-resource ``raw_ptr_buffer_load_lds`` builtin (size
+        # restricted to {1,2,4}, hence the prologue shim), the plain
+        # ``global_load_lds`` builtin accepts the full {1,2,4,12,16} size set
+        # (verified against the installed clang), so we call it directly.
+        # The per-lane byte offset is folded into the source pointer (the
+        # intrinsic has no voffset operand); the i64 LDS address is cast to
+        # ``addrspace(3)``, as ``async_buffer_load_lds_addr`` does.
+        src_ptr, byte_off, lds_addr = op.operands
+        size_bytes = int(op.attrs["size_bytes"])
+        aux = int(op.attrs.get("aux", 0))
+        self._emit(
+            f"__builtin_amdgcn_global_load_lds("
+            f"(__attribute__((address_space(1))) void*)"
+            f"((const __attribute__((address_space(1))) char*){_name(src_ptr)} "
+            f"+ {_name(byte_off)}), "
+            f"(__attribute__((address_space(3))) void*)({_name(lds_addr)}), "
+            f"{size_bytes}, 0, {aux});"
+        )
+
+    def _op_tile_global_load_async_to_lds(self, op: Op) -> None:
+        # gfx1250 async DRAM->LDS DMA (``global_load_async_to_lds_b{8,32,64,128}``).
+        # The width-suffixed builtins take *typed* pointers (b8 -> char, b32 ->
+        # int, b64 -> i32x2, b128 -> i32x4), not void*, so we cast source
+        # (addrspace(1)) and LDS destination (addrspace(3)) to the matching
+        # typed pointer. Source address is an element GEP; LDS destination is a
+        # typed aggregate index into the ``__shared__`` array. Mirrors
+        # ``lower_llvm._op_tile_global_load_async_to_lds``.
+        src_ptr = op.operands[0]
+        src_index = op.operands[1]
+        lds_smem = op.operands[2]
+        lds_indices = op.operands[3:]
+        width = int(op.attrs["width_bytes"])
+        cpol = int(op.attrs.get("cpol", 0))
+        ioff = int(op.attrs.get("offset_bytes", 0))
+        # (suffix, element C++ type) per width.
+        suffix, elem_t = {
+            1: ("b8", "char"),
+            4: ("b32", "int"),
+            8: ("b64", "i32x2"),
+            16: ("b128", "i32x4"),
+        }[width]
+        storage = lds_smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("global_load_async_to_lds before smem_alloc was lowered")
+        idx_str = "][".join(_name(i) for i in lds_indices)
+        src_addr = f"(&{_name(src_ptr)}[{_name(src_index)}])"
+        dst_addr = f"(&{storage}[{idx_str}])"
+        as1 = f"(__attribute__((address_space(1))) {elem_t}*)"
+        as3 = f"(__attribute__((address_space(3))) {elem_t}*)"
+        self._emit(
+            f"__builtin_amdgcn_global_load_async_to_lds_{suffix}("
+            f"{as1}{src_addr}, {as3}{dst_addr}, {ioff}, {cpol});"
         )
 
     def _op_tile_sync(self, op: Op) -> None:
@@ -1483,6 +1665,73 @@ class _Lowerer:
         self._emit(f"{nice}[2] = {hi}.x;")
         self._emit(f"{nice}[3] = {hi}.y;")
 
+    def _op_arith_cvt_scalef32_pk_f32_fp8(self, op: Op) -> None:
+        """E8M0-scaled ``<4 x fp8e4m3> + f32 -> <4 x f32>`` via two
+        ``__builtin_amdgcn_cvt_scalef32_pk_f32_fp8`` calls.
+
+        Fused scale+dequant sibling of :meth:`_op_arith_cvt_pk_f32_fp8x4`:
+        the gfx950 ``v_cvt_scalef32_pk_f32_fp8`` does 2 fp8 -> 2 f32 with an
+        embedded **E8M0** scale multiply (only the f32 scale's exponent bits
+        are used; sign/mantissa are discarded by the hardware). Mirrors the
+        LLVM lowering's two-``cvt``-lo/hi + shuffle shape
+        (``lower_llvm._op_arith_cvt_scalef32_pk_f32_fp8``), but in HIP
+        builtin form so the debug source compiles with hipcc. The packed
+        i8x4 operand is memcpy'd into an ``unsigned int`` (the builtin's
+        packed-i32 argument), and the shared f32 scale is passed to both
+        calls (``false`` = low pair, ``true`` = high pair).
+        """
+        v, scale = op.operands
+        nice = _name(op.result)
+        packed = f"{nice}_p"
+        lo = f"{nice}_lo"
+        hi = f"{nice}_hi"
+        res_t = _type_to_hip(op.result.type)
+        pair_t = _type_to_hip(VectorType(op.result.type.elem, 2))
+        self._emit(
+            f"unsigned int {packed}; "
+            f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
+        )
+        self._emit(
+            f"{pair_t} {lo} = __builtin_amdgcn_cvt_scalef32_pk_f32_fp8("
+            f"{packed}, {_name(scale)}, false);"
+        )
+        self._emit(
+            f"{pair_t} {hi} = __builtin_amdgcn_cvt_scalef32_pk_f32_fp8("
+            f"{packed}, {_name(scale)}, true);"
+        )
+        self._emit(f"{res_t} {nice};")
+        self._emit(f"{nice}[0] = {lo}.x;")
+        self._emit(f"{nice}[1] = {lo}.y;")
+        self._emit(f"{nice}[2] = {hi}.x;")
+        self._emit(f"{nice}[3] = {hi}.y;")
+
+    def _op_arith_cvt_scalef32_pk_f32_bf8(self, op: Op) -> None:
+        """e5m2 sibling of :meth:`_op_arith_cvt_scalef32_pk_f32_fp8`."""
+        v, scale = op.operands
+        nice = _name(op.result)
+        packed = f"{nice}_p"
+        lo = f"{nice}_lo"
+        hi = f"{nice}_hi"
+        res_t = _type_to_hip(op.result.type)
+        pair_t = _type_to_hip(VectorType(op.result.type.elem, 2))
+        self._emit(
+            f"unsigned int {packed}; "
+            f"__builtin_memcpy(&{packed}, &{_name(v)}, sizeof({packed}));"
+        )
+        self._emit(
+            f"{pair_t} {lo} = __builtin_amdgcn_cvt_scalef32_pk_f32_bf8("
+            f"{packed}, {_name(scale)}, false);"
+        )
+        self._emit(
+            f"{pair_t} {hi} = __builtin_amdgcn_cvt_scalef32_pk_f32_bf8("
+            f"{packed}, {_name(scale)}, true);"
+        )
+        self._emit(f"{res_t} {nice};")
+        self._emit(f"{nice}[0] = {lo}.x;")
+        self._emit(f"{nice}[1] = {lo}.y;")
+        self._emit(f"{nice}[2] = {hi}.x;")
+        self._emit(f"{nice}[3] = {hi}.y;")
+
     def _op_arith_cvt_pk_fp8_f32x4(self, op: Op) -> None:
         """Packed <4 x f32> -> <4 x fp8e4m3> via two
         ``__builtin_amdgcn_cvt_pk_fp8_f32`` calls (mirrors the LLVM
@@ -1663,39 +1912,88 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
+        """Lower P15 MX MFMA scaled via the hipcc builtin.
 
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
+        ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` -- the same
+        builtin the unscaled fp8 hero
+        (:meth:`_op_tile_mfma_f32_16x16x128_fp8`) reuses with the scale
+        bytes pinned to 0 -- exposes the two in-instruction E8M0 scale
+        bytes as its 7th / 9th operands (verified: the 9-arg form
+        ``(a, b, c, 0, 0, 0, sa, 0, sb)`` assembles to
+        ``v_mfma_scale_f32_16x16x128_f8f6f4 ..., sa, sb``). Passing the
+        live ``a_scale`` / ``b_scale`` there mirrors the 11-arg LLVM
+        intrinsic form in
+        ``lower_llvm._op_tile_mfma_scale_f32_16x16x128_f8f6f4``
+        (cbsz / blgp / op_sel imms 0, scale bytes live).
+
+        A / B arrive as 32-byte mantissa vectors and are
+        ``__builtin_memcpy``'d into the builtin's ``i32x8`` operands so
+        the raw bits transfer without relying on aliasing. Output is
+        ``f32x4``.
         """
         a, b, c, a_scale, b_scale = op.operands
+        nice = _name(op.result)
+        a_pk = f"{nice}_a_pk"
+        b_pk = f"{nice}_b_pk"
         self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
+            f"i32x8 {a_pk}; __builtin_memcpy(&{a_pk}, &{_name(a)}, sizeof({a_pk}));"
+        )
+        self._emit(
+            f"i32x8 {b_pk}; __builtin_memcpy(&{b_pk}, &{_name(b)}, sizeof({b_pk}));"
+        )
+        self._emit(
+            f"f32x4 {nice} = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4("
+            f"{a_pk}, {b_pk}, {_name(c)}, 0, 0, 0, {_name(a_scale)}, 0, "
+            f"{_name(b_scale)});"
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp4 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
+        """Not implemented: use the combined f8f6f4 lowering instead.
+
+        This dense-fp4 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4
+        and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op.
+        """
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x128_fp4: dense fp4 MFMA has no dedicated HIP "
+            "lowering; the hardware exposes only the combined K=128 f8f6f4 form. "
+            "Use tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) "
+            "instead."
         )
 
     def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
+        """Not implemented: use the combined f8f6f4 lowering instead.
+
+        This dense-fp6 entry point is a placeholder that should be superseded by
+        ``_op_tile_mfma_f32_16x16x128_fp4fp6f8``. Type-specific wrappers for fp4,
+        fp6, and fp8 are intentionally omitted: the only underlying hardware
+        instruction is the combined ``f8f6f4`` form, so a single lowering keeps
+        the HIP path consistent with the existing
+        ``mfma_scale_f32_16x16x128_f8f6f4`` op. Note that the K=96 shape is not a
+        valid MFMA shape on gfx950 or gfx1250; fp6 is contracted through the
+        K=128 f8f6f4 form.
+        """
+        raise NotImplementedError(
+            "tile.mfma_f32_16x16x96_fp6: dense fp6 MFMA has no dedicated HIP "
+            "lowering, and the K=96 shape is not valid on gfx950 or gfx1250; the "
+            "hardware exposes only the combined K=128 f8f6f4 form. Use "
+            "tile.mfma_scale_f32_16x16x128_f8f6f4 (the fp4fp6f8 lowering) instead."
         )
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
-        """HIP debug shim for the P13 register permutation."""
+        """HIP debug shim for the P13 register permutation.
+
+        Casts the first 8 cells of the ``<16 x f32>`` QK-MFMA accumulator
+        to the ``<8 x dtype>`` PV A-vector, matching the ``fptrunc`` chain
+        in ``lower_llvm._op_tile_register_p_from_qk_c``. The scalar cast
+        must name the *HIP* scalar type (``fp16`` / ``bf16``), not the raw
+        IR dtype name (``f16`` has no C typedef in the prologue).
+        """
         (qk_c,) = op.operands
-        target = op.attrs["target_dtype"]
+        target = _HIP_TYPE[op.attrs["target_dtype"]]
         res_t = _type_to_hip(op.result.type)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
@@ -1756,11 +2054,11 @@ class _Lowerer:
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        n = int(op.attrs["vec"])
-        elem_name = op.attrs.get("elem_type", "f16")
-        prefix = _vec_prefix(elem_name, "global_store_vN")
+        # Reinterpret to the stored value's real HIP vector type, not a
+        # hard-coded f16x default (which mis-typed every non-f16/bf16 store).
+        vec_ty = _type_to_hip(val.type)
         self._emit(
-            f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
+            f"*reinterpret_cast<{vec_ty}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
         )
 
@@ -2050,6 +2348,37 @@ class _Lowerer:
         )
         self._emit(f"{vec_prefix}8 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 16);")
 
+    def _op_tile_ds_read_tr_b8(self, op: Op) -> None:
+        # ``ds_read_b64_tr_b8`` -- gfx950 transpose-read of an 8-bit LDS tile.
+        # ROCm 7.0's public intrinsic list exposes only the b16 transpose-read,
+        # so the LLVM path lowers this through inline asm; mirror that here with
+        # an ``asm volatile`` (see lower_llvm.py::_op_tile_ds_read_tr_b8). The
+        # instruction returns 64 bits as two VGPRs (``i32x2``); memcpy into the
+        # logical ``<8 x i8>`` (fp8/bf8/i8) result, matching the b64/b128 shims.
+        self._require_ds_read_tr("ds_read_tr_b8")
+        smem = op.operands[0]
+        indices = op.operands[1:]
+        storage = smem.op.attrs.get("_storage")
+        if storage is None:
+            raise RuntimeError("ds_read_tr_b8 before smem_alloc was lowered")
+        idx_str = "][".join(_name(i) for i in indices)
+        nice = _name(op.result)
+        raw_tmp = f"_trraw_{nice.lstrip('%')}"
+        addr_tmp = f"_traddr_{nice.lstrip('%')}"
+        res_ty = _type_to_hip(op.result.type)
+        # LDS byte offset (addrspace(3) pointers are 32-bit) -> VGPR vaddr,
+        # matching the LLVM path's ``ptrtoint ptr addrspace(3) ... to i32``.
+        self._emit(
+            f"unsigned {addr_tmp} = (unsigned)(__attribute__((address_space(3))) "
+            f"void*)&{storage}[{idx_str}];"
+        )
+        self._emit(f"i32x2 {raw_tmp};")
+        self._emit(
+            f'asm volatile("ds_read_b64_tr_b8 %0, %1" : '
+            f'"=v"({raw_tmp}) : "v"({addr_tmp}));'
+        )
+        self._emit(f"{res_ty} {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
+
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         a, b, c = op.operands
         self._emit(
@@ -2197,6 +2526,26 @@ class _Lowerer:
         for i in range(n):
             self._emit(
                 f"{nice}[{i}] = ((uint32_t){_name(a)}[{i}]) >> {_name(bb)}[{i}];"
+            )
+
+    def _op_vector_max(self, op: Op) -> None:
+        # Element-wise floating max. The LLVM lowering
+        # (``lower_llvm._op_vector_max``) has no intrinsic -- it emits a
+        # per-lane ``fcmp ogt`` + ``select`` (``a[i] > b[i] ? a[i] : b[i]``).
+        # The HIP source mirrors that exact ordered-greater-than select, so
+        # the debug path matches the production numerics lane for lane. Same
+        # shape as :meth:`_op_vector_smax`; kept as its own method because the
+        # neutral ``vector.max`` op (float) and ``vector.smax`` (signed int)
+        # dispatch to distinct names even though the emitted C is identical.
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(
+                f"{nice}[{i}] = ({_name(a)}[{i}] > {_name(bb)}[{i}]) ? "
+                f"{_name(a)}[{i}] : {_name(bb)}[{i}];"
             )
 
     def _op_vector_smax(self, op: Op) -> None:
