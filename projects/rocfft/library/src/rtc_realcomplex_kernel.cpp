@@ -39,9 +39,6 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
         return generator;
     }
 
-    if(node.GetKernelIndexType() != IndexType::U32)
-        throw std::runtime_error("RealComplex copy kernel does not yet support 64-bit indexing");
-
     // input_size is the innermost dimension
     unsigned int input_size = node.length[0];
     // hermitian size is used for hermitian->complex copy
@@ -55,7 +52,10 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
            1};
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexSpecs specs{node.scheme,
+    const KIntType itype = node.GetKIntType();
+
+    RealComplexSpecs specs{itype,
+                           node.scheme,
                            node.dimension,
                            node.length.size(),
                            node.precision,
@@ -75,7 +75,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplex(kernel_name, module, gridDim, blockDim));
+            new RTCKernelRealComplex(kernel_name, itype, module, gridDim, blockDim));
     };
     return generator;
 }
@@ -94,26 +94,26 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     std::copy(data.node->outStride.begin(), data.node->outStride.end(), kern_stride_out.begin());
     kern_stride_out[lensz] = data.node->oDist;
 
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
     if(data.node->scheme == CS_KERNEL_COPY_HERM_TO_CMPLX)
     {
         // dim_0 is the innermost dimension
         kern_lengths[0]       = data.node->outputLength[0];
         size_t hermitian_size = kern_lengths[0] / 2 + 1;
-        kargs.append_unsigned_int(hermitian_size);
+        kargs.append_kint(hermitian_size);
     }
-    kargs.append_unsigned_int(kern_lengths[0]);
-    kargs.append_unsigned_int(kern_lengths[1]);
-    kargs.append_unsigned_int(kern_lengths[2]);
-    kargs.append_unsigned_int(data.node->batch);
-    kargs.append_unsigned_int(kern_stride_in[0]);
-    kargs.append_unsigned_int(kern_stride_in[1]);
-    kargs.append_unsigned_int(kern_stride_in[2]);
-    kargs.append_unsigned_int(kern_stride_in[3]);
-    kargs.append_unsigned_int(kern_stride_out[0]);
-    kargs.append_unsigned_int(kern_stride_out[1]);
-    kargs.append_unsigned_int(kern_stride_out[2]);
-    kargs.append_unsigned_int(kern_stride_out[3]);
+    kargs.append_kint(kern_lengths[0]);
+    kargs.append_kint(kern_lengths[1]);
+    kargs.append_kint(kern_lengths[2]);
+    kargs.append_kint(data.node->batch);
+    kargs.append_kint(kern_stride_in[0]);
+    kargs.append_kint(kern_stride_in[1]);
+    kargs.append_kint(kern_stride_in[2]);
+    kargs.append_kint(kern_stride_in[3]);
+    kargs.append_kint(kern_stride_out[0]);
+    kargs.append_kint(kern_stride_out[1]);
+    kargs.append_kint(kern_stride_out[2]);
+    kargs.append_kint(kern_stride_out[3]);
 
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
@@ -125,7 +125,7 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
     append_load_store_args(kargs, *data.node);
@@ -143,9 +143,6 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
     {
         return generator;
     }
-
-    if(node.GetKernelIndexType() != IndexType::U32)
-        throw std::runtime_error("RealComplexEven kernel does not yet support 64-bit indexing");
 
     // Input_size is the innermost dimension
     size_t half_N;
@@ -171,7 +168,10 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
 
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
-    RealComplexEvenSpecs specs{{node.scheme,
+    const KIntType itype = node.GetKIntType();
+
+    RealComplexEvenSpecs specs{{itype,
+                                node.scheme,
                                 node.dimension,
                                 node.length.size(),
                                 node.precision,
@@ -192,37 +192,37 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplexEven(kernel_name, half_N, module, gridDim, blockDim));
+            new RTCKernelRealComplexEven(kernel_name, itype, half_N, module, gridDim, blockDim));
     };
     return generator;
 }
 
 RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
 
-    kargs.append_unsigned_int(half_N);
+    kargs.append_kint(half_N);
     // lengths + strides are exploded out into separate params
     for(unsigned int i = 1; i < data.node->length.size(); ++i)
     {
-        kargs.append_unsigned_int(data.node->inStride[i]);
-        kargs.append_unsigned_int(data.node->outStride[i]);
-        kargs.append_unsigned_int(data.node->length[i]);
+        kargs.append_kint(data.node->inStride[i]);
+        kargs.append_kint(data.node->outStride[i]);
+        kargs.append_kint(data.node->length[i]);
     }
-    kargs.append_unsigned_int(data.node->batch);
+    kargs.append_kint(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
-    kargs.append_unsigned_int(data.node->iDist);
+    kargs.append_kint(data.node->iDist);
     kargs.append_ptr(data.bufOut[0]);
     if(array_type_is_planar(data.node->outArrayType))
         kargs.append_ptr(data.bufOut[1]);
-    kargs.append_unsigned_int(data.node->oDist);
+    kargs.append_kint(data.node->oDist);
     kargs.append_ptr(data.node->twiddles);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
     append_load_store_args(kargs, *data.node);
@@ -296,7 +296,10 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     generator.blockDim = {tileX, tileY, 1};
 
-    RealComplexEvenTransposeSpecs specs{{node.scheme,
+    const KIntType itype = node.GetKIntType();
+
+    RealComplexEvenTransposeSpecs specs{{itype,
+                                         node.scheme,
                                          node.dimension,
                                          node.length.size(),
                                          node.precision,
@@ -318,7 +321,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelRealComplexEvenTranspose(kernel_name, module, gridDim, blockDim));
+            new RTCKernelRealComplexEvenTranspose(kernel_name, itype, module, gridDim, blockDim));
     };
 
     return generator;
@@ -326,25 +329,25 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
 RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
 
-    kargs.append_size_t(data.node->dimension);
+    kargs.append_kint(data.node->dimension, KIntType::U32);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
-    kargs.append_size_t(data.node->iDist);
+    kargs.append_kint(data.node->iDist);
     kargs.append_ptr(data.bufOut[0]);
     if(array_type_is_planar(data.node->outArrayType))
         kargs.append_ptr(data.bufOut[1]);
-    kargs.append_size_t(data.node->oDist);
+    kargs.append_kint(data.node->oDist);
     kargs.append_ptr(data.node->twiddles);
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
+    kargs.append_ptr(data.node->devKernArg.stride_in());
+    kargs.append_ptr(data.node->devKernArg.stride_out());
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -375,8 +378,8 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
         gridY = std::max<unsigned int>((((m - 1) / 2) + (tileY - 1)) / tileY, 1);
     }
 
-    kargs.append_unsigned_int(gridY);
-    kargs.append_unsigned_int(gridZ);
+    kargs.append_kint(gridY, KIntType::U32);
+    kargs.append_kint(gridZ, KIntType::U32);
 
     append_load_store_args(kargs, *data.node);
 

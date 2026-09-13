@@ -32,6 +32,7 @@
 
 struct RealComplexSpecs
 {
+    KIntType                itype;
     ComputeScheme           scheme;
     size_t                  dim;
     size_t                  lensz;

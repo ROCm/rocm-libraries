@@ -158,9 +158,9 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::LENGTH_N, precision);
-        RTCKernelArgs kargs;
-        kargs.append_size_t(length_limit);
-        kargs.append_size_t(N);
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
+        kargs.append_kint(length_limit);
+        kargs.append_kint(N);
         kargs.append_ptr(device_data_ptr);
 
         kernel.get()->launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
@@ -194,9 +194,9 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::RADICES, precision);
-        RTCKernelArgs kargs;
-        kargs.append_size_t(length_limit);
-        kargs.append_size_t(num_radices);
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
+        kargs.append_kint(length_limit);
+        kargs.append_kint(num_radices);
         kargs.append_struct(radices_device);
         kargs.append_struct(radices_prod_device);
         kargs.append_struct(radices_sum_prod_device);
@@ -211,8 +211,8 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::PARTIAL_PASS_N, precision);
-        RTCKernelArgs kargs;
-        kargs.append_size_t(N);
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
+        kargs.append_kint(N);
         kargs.append_ptr(output);
 
         auto numBlocks_N = DivRoundingUp<size_t>(N, blockSize);
@@ -231,9 +231,9 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::HALF_N, precision);
-        RTCKernelArgs kargs;
-        kargs.append_size_t(half_N);
-        kargs.append_size_t(N);
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
+        kargs.append_kint(half_N);
+        kargs.append_kint(N);
         kargs.append_ptr(output);
 
         auto numBlocks_halfN = DivRoundingUp<size_t>(half_N, blockSize);
@@ -403,11 +403,11 @@ public:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::LARGE, precision);
-        RTCKernelArgs kargs;
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
         kargs.append_double(phi);
-        kargs.append_size_t(largeTwdBase);
-        kargs.append_size_t(X);
-        kargs.append_size_t(Y);
+        kargs.append_kint(largeTwdBase);
+        kargs.append_kint(X);
+        kargs.append_kint(Y);
         kargs.append_ptr(output.data());
 
         kernel.get()->launch(
@@ -431,8 +431,8 @@ protected:
 
         auto kernel = RTCKernelTwiddle::generate(
             deviceProp.gcnArchName, TwiddleTableType::PARTIAL_PASS_N, precision);
-        RTCKernelArgs kargs;
-        kargs.append_size_t(N);
+        RTCKernelArgs kargs(RTCKernelTwiddle::default_itype);
+        kargs.append_kint(N);
         kargs.append_ptr(output);
 
         auto numBlocksX = DivRoundingUp<size_t>(N, blockSize);

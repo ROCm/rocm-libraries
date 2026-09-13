@@ -25,6 +25,7 @@
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "rtc_bluestein_gen.h"
+#include "rtc_kernel.h"
 #include "tree_node.h"
 
 RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafNode&    node,
@@ -53,7 +54,10 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     generator.gridDim        = {DivRoundingUp(batch_accum, bwd)};
     generator.blockDim       = config.workgroup_size;
 
-    BluesteinSingleSpecs specs{static_cast<unsigned int>(node.length[0]),
+    const KIntType itype = node.GetKIntType();
+
+    BluesteinSingleSpecs specs{itype,
+                               static_cast<unsigned int>(node.length[0]),
                                static_cast<unsigned int>(node.length.size()),
                                factors,
                                static_cast<unsigned int>(config.threads_per_transform[0])
@@ -78,7 +82,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(
-            new RTCKernelBluesteinSingle(kernel_name, module, gridDim, blockDim));
+            new RTCKernelBluesteinSingle(kernel_name, itype, module, gridDim, blockDim));
     };
 
     return generator;
@@ -86,16 +90,16 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
 
 RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
     kargs.append_ptr(data.bufTemp);
     kargs.append_ptr(data.node->twiddles);
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
+    kargs.append_ptr(data.node->devKernArg.stride_in());
     if(data.node->placement == rocfft_placement_notinplace)
     {
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.stride_out());
     }
-    kargs.append_size_t(data.node->batch);
+    kargs.append_kint(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
@@ -110,7 +114,7 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -166,7 +170,10 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
-    BluesteinMultiSpecs specs{scheme,
+    const KIntType itype = node.GetKIntType();
+
+    BluesteinMultiSpecs specs{itype,
+                              scheme,
                               node.precision,
                               node.inArrayType,
                               node.outArrayType,
@@ -184,7 +191,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
                                         dim3                                     gridDim,
                                         dim3                                     blockDim) {
         return std::unique_ptr<RTCKernel>(new RTCKernelBluesteinMulti(
-            kernel_name, scheme, N, M, numof, count, module, gridDim, blockDim));
+            kernel_name, itype, scheme, N, M, numof, count, module, gridDim, blockDim));
     };
 
     return generator;
@@ -192,7 +199,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
 
 RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
 
     if(scheme == CS_KERNEL_CHIRP)
     {
@@ -247,13 +254,13 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
         if(array_type_is_planar(data.node->outArrayType))
             kargs.append_ptr(bufOut1);
         kargs.append_size_t(data.node->length.size());
-        kargs.append_ptr(kargs_lengths(data.node->devKernArg));
-        kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.lengths());
+        kargs.append_ptr(data.node->devKernArg.stride_in());
+        kargs.append_ptr(data.node->devKernArg.stride_out());
         // callback params
         kargs.append_ptr(data.callbacks.load_cb_fn);
         kargs.append_ptr(data.callbacks.load_cb_data);
-        kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+        kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
         kargs.append_ptr(data.callbacks.store_cb_fn);
         kargs.append_ptr(data.callbacks.store_cb_data);
 
