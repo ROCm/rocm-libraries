@@ -28,17 +28,20 @@ Definitions:
     - { M: 131071, N:  63, lda:   131071, stride_a:  8257473 }
 
   - &skinny_m_matrix_size_range
-    # transA == N, short output and long reduction: the split applies for
-    # m <= 512 (m <= 256 for double-complex) with at least 2^20 elements.
-    # Boundary rows sit deliberately outside the gate so the unsplit path is
-    # covered by the same cases.
-    - { M:    40, N:  81920, lda:    40, stride_a:  3276800 }
-    - { M:    63, N: 131071, lda:    64, stride_a:  8388544 }
-    - { M:   256, N:   4096, lda:   256, stride_a:  1048576 } # zc crossover
-    - { M:   512, N:   2048, lda:   512, stride_a:  1048576 } # real/c crossover
-    - { M:   300, N:   4099, lda:   301, stride_a:  1233799 } # n not a multiple of the split chunk
-    - { M:   513, N:   2048, lda:   513, stride_a:  1050624 } # m above the real/c crossover
-    - { M:     7, N:  20480, lda:     7, stride_a:   143360 } # below the element floor
+    # transA == N, short output and long reduction.
+    # Gate: output_tiles(m) <= 8 AND n_split(n) >= 4 AND m*n >= 2^20.
+    # output_tiles = (m-1)/(DIM_X*4)+1 for real/c-float, (m-1)/DIM_X+1 for zc,
+    # DIM_X = 32. So the tile boundary sits at m=1024 for real/c-float and at
+    # m=256 for double-complex. n_split = ceil(n / 4096), capped at 256.
+    # Shapes that sit outside the gate exercise the unmodified single-stage path.
+    - { M:    40, N:  81920, lda:    40, stride_a:   3276800 } # in gate: tiny m, all types
+    - { M:    63, N: 131071, lda:    64, stride_a:   8388544 } # in gate, lda > M, short final slice
+    - { M:  1024, N: 131072, lda:  1024, stride_a: 134217728 } # in gate at real/c-float tile boundary (tiles=8, splits=32)
+    - { M:   256, N:  65536, lda:   256, stride_a:  16777216 } # in gate at double-complex tile boundary (zc tiles=8)
+    - { M:   300, N:  12289, lda:   301, stride_a:   3698989 } # in gate at split floor (splits=4), short final slice
+    - { M:  1024, N:   2048, lda:  1024, stride_a:   2097152 } # outside gate: splits=1 < 4 (the boundary regression case)
+    - { M:  1025, N: 131072, lda:  1025, stride_a: 134348800 } # outside gate: real tiles=9 > 8
+    - { M:     7, N:  20480, lda:     7, stride_a:    143360 } # outside gate: m*n < 2^20
 
   - &double_buffered_loads_size_range
     # (n <= 3000 && n >= m) || (n %128 == 0 && m==n)
