@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <set>
@@ -195,6 +196,15 @@ namespace TensileLite
 
             if(pAMDGPU && pAMDGPU->analyticalHardware)
             {
+                origami::hardware_t ranking_hardware = *(pAMDGPU->analyticalHardware);
+                if(pAMDGPU->skMaxCUs > 0)
+                {
+                    ranking_hardware.N_CU
+                        = std::min({ranking_hardware.N_CU,
+                                    static_cast<size_t>(pAMDGPU->skMaxCUs),
+                                    static_cast<size_t>(pAMDGPU->computeUnitCount)});
+                }
+
                 auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
                 if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
@@ -216,7 +226,7 @@ namespace TensileLite
                 };
 
                 auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                    origami_problem, ranking_hardware, origami_config_list);
 
                 for(const auto& r : prediction_result)
                 {
