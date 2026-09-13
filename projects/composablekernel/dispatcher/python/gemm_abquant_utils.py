@@ -81,7 +81,7 @@ _DEFAULT_HIPCC = "hipcc"
 # Architectures the ABQuant bridge supports. NEVER default to gfx942 silently:
 # the arch must be detected (get_arch) or explicitly supplied, and unknown archs
 # raise (Python) / return an error (C++ runtime check in the ctypes lib).
-_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1250")
 
 
 def _validate_arch(arch: str) -> str:
@@ -869,12 +869,36 @@ def expand_abquant_sweep(
 # =============================================================================
 
 
+def _is_gfx1250(gfx_arch: Optional[str]) -> bool:
+    """EXACT gfx1250 match, tolerant of feature suffixes (``gfx1250:xnack-``).
+
+    Deliberately exact, NOT a ``"gfx12" in gfx_arch`` family test.  Two distinct
+    kinds of gfx12 predicate exist across the block-scale quant bridges and must
+    never be "tidied" into each other:
+
+      * OCP fp8 encoding / ``-DCK_TILE_USE_OCP_FP8`` compile defines: family-wide
+        ``"gfx12" in ...`` is CORRECT -- every gfx12xx part uses OCP e4m3/e5m2.
+      * 8-bit ``warp_tile_k`` selection (this helper): family-wide is a BUG.
+        gfx1200/gfx1201 expose only a 16x16x16 8-bit WMMA fragment, so the K=128
+        warp tile below does not exist on them; the kernel would still compile
+        and silently return garbage.
+
+    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
+    private helper should collapse onto it once that PR lands.
+    """
+    return (gfx_arch or "").split(":")[0] == "gfx1250"
+
+
 def _warp_tile_k_for(variant_key: str, gfx_arch: str, is_flat_mm: bool = False) -> int:
     """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16, IsFlatMM>().
 
     (tile_gemm_shape.hpp:104-136, M_Warp_Tile=16, non-WMMA path)
       gfx950 (CK_GFX950_SUPPORT): fp8/bf8 -> 128, non-8bit-float (fp4) -> 32
                                   (IsFlatMM does NOT change the gfx950 result)
+      gfx1250 (WMMA)            : same shape as gfx950 -- fp8/bf8 -> 128, fp4 -> 32,
+                                  IsFlatMM likewise ignored.  The gfx1250 test is
+                                  EXACT (see _is_gfx1250); gfx1200/gfx1201 have no
+                                  16x16x128 8-bit fragment and must not take it.
       gfx942/other              : IsFlatMM==false -> 32 ; IsFlatMM==true -> 64
                                   (sizeof(PrecType)==2 i.e. 16-bit is the only 32-case
                                    under IsFlatMM, and abquant has no 16-bit variant)
@@ -888,7 +912,7 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str, is_flat_mm: bool = False) 
     IsFlatMM=false -> 32 on gfx942, so they must NOT pass is_flat_mm=True.
     """
     is_8bit_float = variant_key in ("fp8", "bf8")
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or _is_gfx1250(gfx_arch):
         # CK_GFX950_SUPPORT branch: is_8bit_float ? 128 : 32.  IsFlatMM is IGNORED here
         # (the gfx950 M_Warp_Tile==16 else-branch does not depend on IsFlatMM), so fp4
         # preshuffleb stays 32 on gfx950 -- do NOT bump it to 64.

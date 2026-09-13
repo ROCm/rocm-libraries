@@ -164,7 +164,14 @@ endforeach()
 # anywhere. The *_gpu_correctness suites arch-gate to gfx942/gfx950 and skip
 # cleanly without a GPU or hipcc, so they cost nothing on a CPU-only runner.
 # =============================================================================
+#
+# test_blockscale_quant_arch_gates pins the gfx12 arch gates of the five
+# non-grouped block-scale quant bridges: warp_tile_k must match gfx1250 EXACTLY
+# (gfx1200/gfx1201 have no 16x16x128 8-bit WMMA fragment and would silently
+# compute wrong results), while the OCP fp8 predicates must stay family-wide.
+# =============================================================================
 foreach(_quant_test
+        test_blockscale_quant_arch_gates
         test_grouped_gemm_rowcolquant_utils
         test_grouped_gemm_tensorquant_utils)
     add_test(
