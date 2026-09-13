@@ -321,7 +321,7 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
             n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
             atom_n_off = rocke_b_add(b, n_inner, n_const);
 
-            for(i = 0; i < op->c_frag_len; ++i)
+            for(i = 0; i < op->dst.frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;

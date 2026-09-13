@@ -135,11 +135,11 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag)
 {
     if(a_frag)
-        *a_frag = op->a_frag_len;
+        *a_frag = op->srcs[0].frag_len;
     if(b_frag)
-        *b_frag = op->b_frag_len;
+        *b_frag = op->srcs[1].frag_len;
     if(c_frag)
-        *c_frag = op->c_frag_len;
+        *c_frag = op->dst.frag_len;
 }
 
 /* ====================================================================== *
@@ -163,7 +163,7 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
  * ====================================================================== */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
 {
-    return rocke_b_zero_vec_f32(b, op->c_frag_len);
+    return rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
 }
 
 /* ====================================================================== *

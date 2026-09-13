@@ -589,7 +589,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->c_frag_len;
+                c_per_lane = epi->mma_op->dst.frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }
@@ -858,7 +858,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->c_frag_len;
+                c_per_lane = epi->mma_op->dst.frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }

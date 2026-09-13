@@ -348,23 +348,26 @@ static const int WMMA_INT_SPECS_N = (int)(sizeof(WMMA_INT_SPECS) / sizeof(WMMA_I
 static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_int_spec_t* spec)
 {
     const rocke_value_t *a, *b, *c;
+    const char *src2_ty, *dst_ty;
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
+    src2_ty = rocke_ll_llvm_type(L, c->type);
+    dst_ty = rocke_ll_llvm_type(L, op->results[0]->type);
     rocke_ll_need(L, spec->decl_key);
     rocke_ll_emitf(L,
-                   "  %s = call <%d x i32> @%s("
+                   "  %s = call %s @%s("
                    "i1 1, <%d x i32> %s, "
                    "i1 1, <%d x i32> %s, "
-                   "<%d x i32> %s, i1 0)",
+                   "%s %s, i1 0)",
                    mma_result_name(L, op),
-                   spec->acc_vec,
+                   dst_ty,
                    spec->intrinsic,
                    spec->op_vec,
                    rocke_ll_operand(L, a),
                    spec->op_vec,
                    rocke_ll_operand(L, b),
-                   spec->acc_vec,
+                   src2_ty,
                    rocke_ll_operand(L, c));
 }
 
@@ -372,7 +375,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
 {
     const _wmma_spec_t* spec = NULL;
     const rocke_value_t *a, *b, *c;
-    const char *a_arg, *b_arg;
+    const char *a_arg, *b_arg, *src2_ty, *dst_ty;
     int w, i;
 
     if(!rocke_ll_live(L))
@@ -420,6 +423,8 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
+    src2_ty = rocke_ll_llvm_type(L, c->type);
+    dst_ty = rocke_ll_llvm_type(L, op->results[0]->type);
     w = spec->frag_width;
 
     rocke_ll_need(L, spec->decl_key);
@@ -458,12 +463,13 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
          * i1 reuseA, i1 reuseB). The negate / format / reuse immediates are
          * pinned to the plain unscaled MMA. */
         rocke_ll_emitf(L,
-                       "  %s = call <8 x float> @%s("
+                       "  %s = call %s @%s("
                        "i1 false, <%d x %s> %s, "
                        "i1 false, <%d x %s> %s, "
-                       "i16 0, <8 x float> %s, "
+                       "i16 0, %s %s, "
                        "i1 false, i1 false)",
                        mma_result_name(L, op),
+                       dst_ty,
                        spec->intrinsic,
                        w,
                        spec->call_elt,
@@ -471,6 +477,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                        w,
                        spec->call_elt,
                        b_arg,
+                       src2_ty,
                        rocke_ll_operand(L, c));
         return;
     }
@@ -479,11 +486,12 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
         /* gfx1250 K=64 6-operand form: (A, B, i16 fmt, C, i1, i1), format and
          * reuse immediates pinned to 0 (plain unscaled MMA). */
         rocke_ll_emitf(L,
-                       "  %s = call <8 x float> @%s("
+                       "  %s = call %s @%s("
                        "<%d x %s> %s, <%d x %s> %s, "
-                       "i16 0, <8 x float> %s, "
+                       "i16 0, %s %s, "
                        "i1 false, i1 false)",
                        mma_result_name(L, op),
+                       dst_ty,
                        spec->intrinsic,
                        w,
                        spec->call_elt,
@@ -491,13 +499,15 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                        w,
                        spec->call_elt,
                        b_arg,
+                       src2_ty,
                        rocke_ll_operand(L, c));
         return;
     }
     rocke_ll_emitf(L,
-                   "  %s = call <8 x float> @%s("
-                   "<%d x %s> %s, <%d x %s> %s, <8 x float> %s)",
+                   "  %s = call %s @%s("
+                   "<%d x %s> %s, <%d x %s> %s, %s %s)",
                    mma_result_name(L, op),
+                   dst_ty,
                    spec->intrinsic,
                    w,
                    spec->call_elt,
@@ -505,6 +515,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
                    w,
                    spec->call_elt,
                    b_arg,
+                   src2_ty,
                    rocke_ll_operand(L, c));
 }
 
@@ -516,16 +527,17 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
  * guards (live + exactly 3 operands), tracks one intrinsic decl key, optionally
  * prepends a fixed two-line operand bitcast (the bf16 `_1k` atoms widen
  * <4 x bfloat> -> <4 x i16>), then emits a single MFMA call. They differ only
- * by four literal strings (decl key, intrinsic, A/B element-vector spelling,
- * accumulator/result vector spelling) plus the optional bitcast target. This
+ * by five literal strings (decl key, intrinsic, src0/src1 element-vector
+ * spelling, src2 spelling, dst spelling) plus the optional bitcast target. This
  * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
 typedef struct _mfma_spec
 {
     const char* op_id; /* the tile.mma op_id (no "tile." prefix)         */
     const char* decl_key; /* _need() key                                    */
     const char* intrinsic; /* fully-mangled @llvm.amdgcn.mfma....            */
-    const char* ab_ty; /* A/B SSA operand type spelling                  */
-    const char* acc_ty; /* accumulator/result vector spelling             */
+    const char* src01_ty; /* src0/src1 SSA operand type spelling            */
+    const char* src2_ty; /* src2 vector spelling                           */
+    const char* dst_ty; /* dst vector spelling                            */
     const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
 } _mfma_spec_t;
 
@@ -535,11 +547,13 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.16x16x16f16",
      "<4 x half>",
      "<4 x float>",
+     "<4 x float>",
      NULL},
     {"mfma_f32_16x16x32_f16",
      "mfma.f32.16x16x32.f16",
      "llvm.amdgcn.mfma.f32.16x16x32.f16",
      "<8 x half>",
+     "<4 x float>",
      "<4 x float>",
      NULL},
     /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> before the call. */
@@ -548,17 +562,20 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
      "<4 x bfloat>",
      "<4 x float>",
+     "<4 x float>",
      "<4 x i16>"},
     {"mfma_f32_16x16x32_bf16",
      "mfma.f32.16x16x32.bf16",
      "llvm.amdgcn.mfma.f32.16x16x32.bf16",
      "<8 x bfloat>",
      "<4 x float>",
+     "<4 x float>",
      NULL},
     {"mfma_f32_32x32x8_f16",
      "mfma.f32.32x32x8f16",
      "llvm.amdgcn.mfma.f32.32x32x8f16",
      "<4 x half>",
+     "<16 x float>",
      "<16 x float>",
      NULL},
     /* bf16 `_1k`: bitcast <4 x bfloat> -> <4 x i16> exactly like 16x16x16. */
@@ -567,6 +584,7 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
      "<4 x bfloat>",
      "<16 x float>",
+     "<16 x float>",
      "<4 x i16>"},
     /* fp32 (TF32-class) scalar atoms: A/B are single floats per lane. */
     {"mfma_f32_16x16x4_f32",
@@ -574,11 +592,13 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.16x16x4f32",
      "float",
      "<4 x float>",
+     "<4 x float>",
      NULL},
     {"mfma_f32_32x32x2_f32",
      "mfma.f32.32x32x2f32",
      "llvm.amdgcn.mfma.f32.32x32x2f32",
      "float",
+     "<16 x float>",
      "<16 x float>",
      NULL},
     {"mfma_f32_32x32x16_f16",
@@ -586,17 +606,20 @@ static const _mfma_spec_t MFMA_SPECS[] = {
      "llvm.amdgcn.mfma.f32.32x32x16.f16",
      "<8 x half>",
      "<16 x float>",
+     "<16 x float>",
      NULL},
     {"mfma_f32_32x32x16_bf16",
      "mfma.f32.32x32x16.bf16",
      "llvm.amdgcn.mfma.f32.32x32x16.bf16",
      "<8 x bfloat>",
      "<16 x float>",
+     "<16 x float>",
      NULL},
     {"mfma_f32_4x4x4_f16",
      "mfma.f32.4x4x4f16",
      "llvm.amdgcn.mfma.f32.4x4x4f16",
      "<4 x half>",
+     "<4 x float>",
      "<4 x float>",
      NULL},
 };
@@ -636,13 +659,13 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
         rocke_ll_emitf(L,
                        "  %s = bitcast %s %s to %s",
                        a_cast,
-                       spec->ab_ty,
+                       spec->src01_ty,
                        rocke_ll_operand(L, a),
                        spec->bitcast_to);
         rocke_ll_emitf(L,
                        "  %s = bitcast %s %s to %s",
                        b_cast,
-                       spec->ab_ty,
+                       spec->src01_ty,
                        rocke_ll_operand(L, b),
                        spec->bitcast_to);
         a_arg = a_cast;
@@ -653,20 +676,20 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
     {
         a_arg = rocke_ll_operand(L, a);
         b_arg = rocke_ll_operand(L, b);
-        call_ty = spec->ab_ty;
+        call_ty = spec->src01_ty;
     }
 
     rocke_ll_emitf(L,
                    "  %s = call %s @%s("
                    "%s %s, %s %s, %s %s, i32 0, i32 0, i32 0)",
                    mma_result_name(L, op),
-                   spec->acc_ty,
+                   spec->dst_ty,
                    spec->intrinsic,
                    call_ty,
                    a_arg,
                    call_ty,
                    b_arg,
-                   spec->acc_ty,
+                   spec->src2_ty,
                    rocke_ll_operand(L, c));
 }
 
