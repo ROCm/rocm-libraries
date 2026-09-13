@@ -10,6 +10,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -183,10 +184,17 @@ public:
         // Coverage and orderability are checked against the knob-filtered candidates
         // here, independent of the same check against the full catalog in
         // sortedCatalog(): one can fail while the other passes.
-        const WinnerKey winnerKey{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
-            DeviceKey{context.deviceProperties}};
-        const auto record = _stateManager.winnerFor(winnerKey);
+        std::optional<WinnerKey> winnerKey;
+        std::optional<WinnerRecord> record;
+        if(settings.benchmarkingEnabled
+           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            winnerKey
+                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+                            DeviceKey{context.deviceProperties}};
+            record = _stateManager.winnerFor(*winnerKey);
+        }
+
         if(record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
@@ -325,13 +333,13 @@ public:
         // append rather than adopt.
         const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
                                               : WinnerWriteCause::FRESH_MISS;
-        executionContext.setPlan(
-            makeBenchmarkPlan(std::move(candidates),
-                              handle,
-                              [&stateManager = _stateManager, winnerKey, cause](
-                                  const std::vector<RankedEntry>& ranking) {
-                                  stateManager.recordWinner(winnerKey, ranking, cause);
-                              }));
+        executionContext.setPlan(makeBenchmarkPlan(
+            std::move(candidates),
+            handle,
+            [&stateManager = _stateManager, winnerKey = std::move(*winnerKey), cause](
+                const std::vector<RankedEntry>& ranking) {
+                stateManager.recordWinner(winnerKey, ranking, cause);
+            }));
     }
     /// One knob per KMD field the engine exposes; default is the top-ranked value.
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>

@@ -433,6 +433,33 @@ TEST(TestIngestorWinnerCacheStateManager, ACoveringRecordOrdersTheCatalogWithout
         << "a covering record must decide the order, not the heuristic";
 }
 
+/// A resolved device that names no arch cannot be told apart from another one: folding
+/// two of them into one winner-cache key would serve a measurement taken elsewhere.
+/// `GenericPlanBuilder::contextFor` throws on this, so the guard here defends callers
+/// that build a MatchContext directly.
+TEST(TestIngestorWinnerCacheStateManager, AnEmptyArchNameYieldsAnEmptyCatalog)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xE9));
+
+    auto properties = testDeviceProperties();
+    ASSERT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "this test needs a catalog that is non-empty when the arch is named";
+
+    properties.gcnArchName.clear();
+
+    EXPECT_TRUE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "an unidentified device must match no kernel";
+
+    // The catalog cache is keyed on (graph, device ordinal), not arch: an empty-arch
+    // lookup that wrote its rejected, empty catalog under that key would permanently
+    // hide this device's real catalog once the arch is known again.
+    properties.gcnArchName = testDeviceProperties().gcnArchName;
+    EXPECT_FALSE(manager->sortedDefinitions(MatchContext{graph, 0, properties}).empty())
+        << "an unresolved-arch lookup must not poison this device's cached catalog";
+}
+
 /// The production sequence, on ONE manager: sort (heuristic, memoized), then record,
 /// then sort again. A benchmark sweep always writes after buildPlan already sorted and
 /// cached the catalog, so a memoized heuristic order must yield to a later measurement.
@@ -498,8 +525,8 @@ TEST(TestIngestorWinnerCacheStateManager, APartialRecordLeavesTheHeuristicOrderI
         << "an uncovering record must not reorder anything";
 }
 
-/// The cache sits under its own mutex. Concurrent readers and writers must neither race
-/// nor lose entries; this is the guard for someone removing the lock as "unneeded".
+/// Stress concurrent readers and writers. These assertions check entry survival and
+/// whole-record reads; they do not prove race freedom without ThreadSanitizer.
 TEST(TestIngestorWinnerCacheStateManager, ConcurrentWritersAndReadersKeepEveryEntry)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

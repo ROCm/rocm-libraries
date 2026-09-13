@@ -210,7 +210,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 ```
 
 **Notes:**
-- With benchmarking on, the first `execute()` of a plan samples every knob-filtered candidate kernel before caching the winner for the plan's life, so it is slower than subsequent calls.
+- With benchmarking on and no matching ranking cached, the first `execute()` of a plan samples every knob-filtered candidate kernel, so it is slower than subsequent calls. The ingestor memoizes the ranking per (graph content, device); it survives the plan and persists across processes when disk caching is enabled.
 - The variable is process-wide, with no per-provider or per-engine granularity: a leaked value from one test or shell changes an unrelated run.
 - `HIPDNN_FORCE_BENCHMARKING=0` also defeats `Graph::autotune()` in EXHAUSTIVE mode, which otherwise sets `global.benchmarking=1` on its priming plans.
 - Sampling executes each candidate against the buffers you passed in, so benchmarking assumes idempotent execution or separate input and output buffers -- the same assumption `autotune()` documents. A graph whose output tensor is also one of its inputs is recomputed in place once per sample. The winner runs last, so the final contents are correct, but the buffer is written many times before that.
