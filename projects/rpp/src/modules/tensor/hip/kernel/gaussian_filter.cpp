@@ -2171,7 +2171,8 @@ RppStatus hip_exec_gaussian_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* 
                                           RpptDescPtr dstDescPtr, Rpp32f* stdDevTensor,
                                           Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                                           RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
@@ -2331,7 +2332,8 @@ RppStatus hip_exec_gaussian_filter_single_image(T* srcPtr, RpptDescPtr srcDescPt
                                                 RpptDescPtr dstDescPtr, Rpp32f* stdDevTensor,
                                                 Rpp32u kernelSize, RpptROIPtr roiTensorPtrSrc,
                                                 RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
