@@ -277,18 +277,19 @@ endif()
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocprim INTERFACE
     -w
-    -fprofile-instr-generate
-    -fcoverage-mapping
+    # Note: use SHELL here to prevent cmake from removing what it thinks is duplicate -Xarch_host options.
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping"
   )
   target_link_options(rocprim INTERFACE
-    -fprofile-instr-generate
+    "SHELL:-Xarch_host -fprofile-instr-generate"
   )
 endif()
 
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
-if(BUILD_CODE_COVERAGE)
+if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
   add_custom_target(
     coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
