@@ -5,7 +5,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import cli, store
@@ -162,6 +162,43 @@ class TestOccupancyCmd(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["occupancy"], 12)
 
+    def test_occupancy_warns_on_binary_arch_mismatch(self):
+        fake = {"target_arch": "gfx1201", "vgpr": 111, "occupancy": 12}
+        orig = cli_mod._occupancy.resources
+        cli_mod._occupancy.resources = lambda data, arch: fake
+        err = io.StringIO()
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
+                f.write(b"\x7fELF fake")
+                f.flush()
+                with redirect_stderr(err):
+                    code, out = _run(
+                        ["--json", "occupancy", f.name, "--arch", "gfx950"]
+                    )
+        finally:
+            cli_mod._occupancy.resources = orig
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["occupancy"], 12)
+        self.assertIn("built for gfx1201, not --arch gfx950", err.getvalue())
+
+    def test_occupancy_arch_feature_suffix_is_not_a_mismatch(self):
+        fake = {"target_arch": "gfx942", "vgpr": 64, "occupancy": 8}
+        orig = cli_mod._occupancy.resources
+        cli_mod._occupancy.resources = lambda data, arch: fake
+        err = io.StringIO()
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
+                f.write(b"\x7fELF fake")
+                f.flush()
+                with redirect_stderr(err):
+                    code, _ = _run(
+                        ["--json", "occupancy", f.name, "--arch", "gfx942:xnack-"]
+                    )
+        finally:
+            cli_mod._occupancy.resources = orig
+        self.assertEqual(code, 0)
+        self.assertEqual(err.getvalue(), "")
+
     def test_occupancy_empty_errors(self):
         orig = cli_mod._occupancy.resources
         cli_mod._occupancy.resources = lambda data, arch: {}
@@ -302,6 +339,29 @@ class TestProfileCmd(unittest.TestCase):
                 ]
             )
         self.assertEqual(store.load(cache=self.cache), [])
+
+    def test_profile_reports_incompatible_repeat_sources_cleanly(self):
+        original = cli_mod._aggregate.aggregate
+
+        def fail_aggregate(records):
+            raise ValueError("records span multiple timing sources")
+
+        cli_mod._aggregate.aggregate = fail_aggregate
+        try:
+            with self.assertRaisesRegex(SystemExit, "multiple timing sources"):
+                _run(
+                    [
+                        "--cache",
+                        self.cache,
+                        "profile",
+                        "--arch",
+                        "gfx950",
+                        "--",
+                        "prog",
+                    ]
+                )
+        finally:
+            cli_mod._aggregate.aggregate = original
 
 
 class TestParser(unittest.TestCase):

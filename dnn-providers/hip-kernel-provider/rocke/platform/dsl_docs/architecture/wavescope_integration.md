@@ -318,6 +318,10 @@ Capture, then work top-down. The temptation is to open the Source tab first; the
 wave-state breakdown is the better starting point because it tells you what kind
 of problem you have before you go looking for a line to blame.
 
+Use WaveScope together with the operator-agnostic
+[before/after verification workflow](../optimization/optimization_runbook.md#repeatable-beforeafter-verification):
+the perf tool establishes whether a change helped, while this trace explains why.
+
 1. **Capture.** `capture_wavescope_trace.py -- python3 bench.py`. The default
    iteration range traces dispatches 2–3, skipping warmup, so you are not
    measuring first-call compilation.
@@ -337,8 +341,9 @@ of problem you have before you go looking for a line to blame.
    this": on the GEMM, it separates the A-tile and B-tile loads that `self` mode
    collapses onto the same helper line. Source coverage went from 26 lines to 51
    on `gemm_universal.py` once the chain was available.
-6. **Change one thing, recapture, compare.** Regenerate the sidecar if you rebuilt
-   the kernel — a stale one silently attributes to the previous layout.
+6. **Change one thing and verify it.** Repeat the same perf command to determine
+   whether the change cleared the noise floor. Recapture in WaveScope to confirm
+   that the expected stalls moved, regenerating the sidecar when the kernel changed.
 
 An agent-assisted variant of this loop exists: the viewer reads `annotations.json`
 from the trace folder on open, and writes `notes.json` back into it, so an analysis
@@ -351,7 +356,7 @@ pass can mark up a trace and a human can reply in place.
   than the kernel's wall-clock, which is the usual sign of this mistake.
 - ATT traces **one CU**. It is the right instrument for instruction-level
   behavior and the wrong one for whole-GPU throughput or occupancy-limited
-  effects; use the stage1/stage5 benchmark tooling for those.
+  effects; use the generic before/after workflow for those.
 - The Source tab reads the `source_*` snapshots rocprofv3 copied into the folder,
   not your working tree. A trace stays readable after you edit the kernel — and
   keeps showing the old source, which is a feature when comparing two captures and

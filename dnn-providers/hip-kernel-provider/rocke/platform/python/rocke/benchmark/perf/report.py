@@ -56,7 +56,22 @@ def _spread_pct(record: Mapping[str, Any], which: str) -> Optional[float]:
     if which == _schema.FALLBACK_METRIC:
         # aggregate stores this both places; prefer the wall field.
         return (record.get("wall") or {}).get("ms_spread_pct", spread.get("ms_pct"))
+    if which == _schema.PROFILED_METRIC:
+        return (record.get("profiled") or {}).get("ms_spread_pct")
     return None
+
+
+def _profiled_source(record: Mapping[str, Any]) -> str:
+    """Comparable source for `profiled.ms_median`, including pre-v1 records."""
+    source = str(record.get("timing_source") or "")
+    if source:
+        return source
+    # Before timing_source existed, a record with both profiled and wall timing came
+    # from the launcher's PerfJSON line. Profiled-only legacy records are unknown and
+    # may only compare against each other.
+    if (record.get("wall") or {}).get(_schema.FALLBACK_METRIC) is not None:
+        return "perfjson"
+    return "legacy_unknown"
 
 
 def format_record(record: Mapping[str, Any]) -> str:
@@ -88,20 +103,30 @@ def format_record(record: Mapping[str, Any]) -> str:
 def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
     """Structured comparison of two records (advisory - no pass/fail).
 
-    Uses cycles when both records captured them, otherwise wall time when both have
-    it. Both metrics are lower-is-better, so `slower` = current exceeds baseline.
-    `metric_mismatch` is set only when the records have no metric in common.
+    Uses cycles when both records captured them, else wall time when both have it,
+    else the profiled-run duration when both have the same timing source. Every
+    metric is lower-is-better, so `slower` = current exceeds baseline. A metric or
+    timing-source mismatch is never compared.
     """
     b_cycles = (baseline.get("counters") or {}).get(_schema.PRIMARY_METRIC)
     c_cycles = (current.get("counters") or {}).get(_schema.PRIMARY_METRIC)
     b_wall = (baseline.get("wall") or {}).get(_schema.FALLBACK_METRIC)
     c_wall = (current.get("wall") or {}).get(_schema.FALLBACK_METRIC)
+    b_prof = (baseline.get("profiled") or {}).get("ms_median")
+    c_prof = (current.get("profiled") or {}).get("ms_median")
+    b_prof_source = _profiled_source(baseline)
+    c_prof_source = _profiled_source(current)
     if b_cycles is not None and c_cycles is not None:
         b_val, c_val = float(b_cycles), float(c_cycles)
         b_which = c_which = _schema.PRIMARY_METRIC
     elif b_wall is not None and c_wall is not None:
         b_val, c_val = float(b_wall), float(c_wall)
         b_which = c_which = _schema.FALLBACK_METRIC
+    elif b_prof is not None and c_prof is not None and b_prof_source == c_prof_source:
+        # Wall timing is unavailable in one or both records, but both profiled
+        # measurements carry the same class of profiler overhead and are comparable.
+        b_val, c_val = float(b_prof), float(c_prof)
+        b_which = c_which = _schema.PROFILED_METRIC
     else:
         b_val, b_which = _schema.metric(baseline)
         c_val, c_which = _schema.metric(current)
@@ -115,7 +140,13 @@ def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
         "metric": c_which,
         "baseline": b_val,
         "current": c_val,
-        "metric_mismatch": bool(b_which and c_which and b_which != c_which),
+        "metric_mismatch": bool(
+            (b_which and c_which and b_which != c_which)
+            or (
+                b_which == c_which == _schema.PROFILED_METRIC
+                and b_prof_source != c_prof_source
+            )
+        ),
         "baseline_spread_pct": _spread_pct(baseline, b_which),
         "current_spread_pct": _spread_pct(current, c_which),
     }

@@ -16,6 +16,11 @@ Apply pipeline-based prefetch to overlap async data loads with compute in CK DSL
 GPU kernels. Unlike FlyDSL's manual loop-carried values, CK DSL uses **pipeline
 configuration parameters** to control prefetch depth and staging.
 
+The worked knobs focus on CDNA/gfx950. The verification commands are
+architecture-generic: set `ARCH` to the GPU being profiled (`gfx942`, `gfx950`,
+`gfx1201`, etc.). On RDNA, interpret MFMA-specific diagnosis as the corresponding
+WMMA behavior and expect reduced PMU counter coverage.
+
 ## Core Principle
 
 GPU global memory loads are asynchronous — the load instruction returns
@@ -213,14 +218,15 @@ vgpr_prefetch = vgpr_per_tile * prefetch_stages
 
 **How to check current VGPR usage:**
 ```bash
-# Extract kernel metadata from compiled .so
+: "${ARCH:?set ARCH to the GPU/HSACO target (for example gfx950 or gfx1201)}"
+# vgpr / agpr / sgpr / lds_bytes / occupancy from the HSACO's ELF notes.
+# No GPU, no profiler, no disassembly.
+python -m rocke.benchmark.perf.tool occupancy my_kernel.hsaco --arch "$ARCH"
+
+# Only if you need the full disassembly context (e.g. reading the spill code):
 roc-obj-ls libdispatcher_*.so
 roc-obj-extract libdispatcher_*.so
-llvm-objdump -d --mcpu=gfx950 *.co | grep -A5 '.amdhsa_kernel'
-# Look for: .vgpr_count, .agpr_count
-
-# Or from rocprof trace CSV:
-grep 'arch_vgpr\|accum_vgpr' rocprof_kernel_stats.csv
+llvm-objdump -d --mcpu="$ARCH" *.co | grep -A5 '.amdhsa_kernel'
 ```
 
 ## Worked Example: Grouped Conv Optimization
@@ -345,26 +351,23 @@ This optimization applies when you see these signals in profiling:
 
 ## Verification
 
-After applying prefetch optimization:
+After applying a prefetch optimization:
 
-1. **Correctness**: Run `run_manifest(verify=True)` to check against reference
-2. **Performance**: Profile with `rocprofv3 --kernel-trace --stats`:
-   - Check MFMA utilization increased
-   - Check VMEM stall cycles decreased
-   - Check overall kernel duration decreased
-3. **Register pressure**: Verify `arch_vgpr <= 256` (no spills)
-4. **Occupancy**: Verify `waves_per_simd >= 1` (minimum acceptable)
+1. **Correctness**: Run `run_manifest(verify=True)` against the reference.
+2. **Performance**: Follow the operator-agnostic
+   [before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification)
+   with the workload's actual operation, shape, kernel identity, and launch
+   command. Do not use `OP=gemm` unless the workload is a GEMM.
+3. **Register pressure**: Verify `vgpr <= 256` and no spills with
+   `rocke.benchmark.perf.tool occupancy`.
+4. **Occupancy**: Verify the same command reports at least one wave/SIMD.
+5. **Diagnosis**: Recapture in WaveScope and confirm MFMA/WMMA utilization rises
+   or VMEM stalls fall as predicted; these signals are not in the perf tool's
+   counter set.
 
-```bash
-# Profile before/after
-rocprofv3 --stats --kernel-trace -o before -- python run_kernel.py
-# (Apply prefetch optimization)
-rocprofv3 --stats --kernel-trace -o after -- python run_kernel.py
-
-# Compare metrics
-python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py \
-  before_kernel_stats.csv after_kernel_stats.csv
-```
+Do not compare raw TF/s or milliseconds across runs: both move with GPU clock.
+`compare_rocprof_stats.py` serves a different comparison—two distinct kernels
+(for example, rocKE and CK Tile), not one kernel against its stored baseline.
 
 ## When NOT To Use
 
