@@ -72,6 +72,9 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
+option(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS
+       "Build and install StinkyTofu's CPU-only native host test payload."
+       OFF)
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -113,6 +116,7 @@ mark_as_advanced(HIPBLASLT_ENABLE_FETCH)
 mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
 mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
 mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+mark_as_advanced(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS)
 mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
 mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
@@ -815,6 +819,64 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             COMPONENT tests
         )
     endif()
+endif()
+
+# Install a relocatable StinkyTofu host-test payload. The generated CTest files
+# cannot be packaged because they contain source/build-tree absolute paths, so
+# TheRock drives these binaries and inputs directly from bin/stinkytofu/.
+if(HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS AND NOT WIN32)
+    set(_stinkytofu_test_dest "${CMAKE_INSTALL_BINDIR}/stinkytofu")
+    set(_stinkytofu_src "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/stinkytofu")
+    set(_stinkytofu_test_targets
+        unit_tests
+        test_gen_instructions
+        stinkytofu-check
+        stinkytofu-opt
+    )
+    foreach(_target IN LISTS _stinkytofu_test_targets)
+        if(NOT TARGET ${_target})
+            message(FATAL_ERROR
+                "HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS requires target ${_target}")
+        endif()
+    endforeach()
+    if(NOT TARGET intrinsics_compiled)
+        message(FATAL_ERROR
+            "HIPBLASLT_INSTALL_STINKYTOFU_TEST_ARTIFACTS requires target intrinsics_compiled")
+    endif()
+
+    # StinkyTofu is added EXCLUDE_FROM_ALL by rocisa. This explicit ALL target
+    # makes the native payload part of the hipBLASLt build before installation.
+    add_custom_target(hipblaslt-stinkytofu-host-tests ALL
+        DEPENDS ${_stinkytofu_test_targets} intrinsics_compiled)
+    install(TARGETS ${_stinkytofu_test_targets}
+        RUNTIME DESTINATION "${_stinkytofu_test_dest}"
+        COMPONENT tests)
+
+    get_target_property(_stinkytofu_test_archs test_gen_instructions
+        STINKYTOFU_TEST_ARCHITECTURES)
+    if(NOT _stinkytofu_test_archs)
+        message(FATAL_ERROR "StinkyTofu test architecture metadata is missing")
+    endif()
+    string(REPLACE ";" "\n" _stinkytofu_test_arch_lines "${_stinkytofu_test_archs}")
+    file(GENERATE
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu-test-architectures.txt"
+        CONTENT "${_stinkytofu_test_arch_lines}\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu-test-architectures.txt"
+        DESTINATION "${_stinkytofu_test_dest}"
+        RENAME architectures.txt
+        COMPONENT tests)
+    install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+        DESTINATION "${_stinkytofu_test_dest}"
+        COMPONENT tests)
+
+    install(DIRECTORY "${_stinkytofu_src}/tests/filecheck/"
+        DESTINATION "${_stinkytofu_test_dest}/filecheck"
+        COMPONENT tests
+        FILES_MATCHING PATTERN "*.stir" PATTERN "*.s")
+    install(DIRECTORY "${_stinkytofu_src}/hardware/src/gfx/"
+        DESTINATION "${_stinkytofu_test_dest}/source/hardware/src/gfx"
+        COMPONENT tests
+        FILES_MATCHING PATTERN "*.def")
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

@@ -122,6 +122,7 @@ rocm_install(TARGETS rocalution-test COMPONENT tests)
 #   quick / ffm-quick / ffm-full  -> ROCALUTION_EMULATION_SMOKE=1
 #   standard                      -> ROCALUTION_EMULATION_REGRESSION=1
 #   comprehensive                 -> ROCALUTION_EMULATION_EXTENDED=1
+#   host-asan                     -> ROCALUTION_HOST_ONLY=1
 #   full                          -> (no env var — full parameter sweep)
 # ---------------------------------------------------------------------------
 set(ROCALUTION_CTEST_INSTALL_FILE "")
@@ -192,6 +193,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
       if(ROCALUTION_CTEST_INSTALL_FILE)
         file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
           "set_tests_properties(rocalution-test_comprehensive_suite PROPERTIES ENVIRONMENT \"ROCALUTION_EMULATION_EXTENDED=1\")\n"
+        )
+      endif()
+    endif()
+
+    if(TEST rocalution-test_host-asan_suite)
+      set_tests_properties(rocalution-test_host-asan_suite PROPERTIES
+        ENVIRONMENT "ROCALUTION_HOST_ONLY=1"
+      )
+      if(ROCALUTION_CTEST_INSTALL_FILE)
+        file(APPEND "${ROCALUTION_CTEST_INSTALL_FILE}"
+          "set_tests_properties(rocalution-test_host-asan_suite PROPERTIES ENVIRONMENT \"ROCALUTION_HOST_ONLY=1\")\n"
         )
       endif()
     endif()
