@@ -50,6 +50,7 @@ Sizes:
 # OPTIONAL FIELDS — defaults depend on ARCH (see CONFIG_DEFAULTS_BY_ARCH)
 # ============================================================
 
+# MX: False                # Microscaling mode (block-scaled MX FP4/FP8); auto-detected from workload logs
 # StreamK: True            # True=StreamK (default), False=DataParallel
 # backend: ductile         # "ductile" or "tensile" (default: ductile; CLI --backend overrides)
 # search_space:            # "heuristic" or "generic" (default: auto from backend)

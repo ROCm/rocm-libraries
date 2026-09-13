@@ -288,8 +288,6 @@ MAX_MT0 = 1024
 MIN_MT1 = 4
 MAX_MT1 = 1024
 
-MAX_MT_AREA = 1024 * 1024 # Used by setupMTTuning.py. TODO - This should not be here.
-
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
 # tip: lowering this number keeps more MI in the config 
@@ -328,6 +326,7 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # User YAML overrides via ``setdefault`` in ``load_input_config._prepare_config``.
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
+    "MX": False,
     "StreamK": True,
     "search_space": None,
     "MACROTILE_OPT": False,
@@ -349,7 +348,7 @@ ENV_UPDATABLE_KEYS = {
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
-_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False}
+_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
 
 CONFIG_DEFAULTS_BY_ARCH = {
     "gfx950": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX950},

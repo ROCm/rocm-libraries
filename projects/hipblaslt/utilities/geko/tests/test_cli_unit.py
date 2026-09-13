@@ -229,6 +229,7 @@ def test_dispatch_bench_workflow_calls_run_bench(monkeypatch: pytest.MonkeyPatch
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     rc = cli.dispatch(args, anchor=str(tmp_path))
@@ -327,6 +328,7 @@ def test_dispatch_search_uses_generated_workload_from_list(
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     rc = cli.dispatch(args, anchor=str(tmp_path))
@@ -420,6 +422,7 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     rc = cli.dispatch(args, anchor=str(tmp_path))
@@ -466,6 +469,7 @@ def test_dispatch_list_loader_error_returns_one(monkeypatch: pytest.MonkeyPatch,
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     assert cli.dispatch(args, anchor=str(tmp_path)) == 1
@@ -498,6 +502,7 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     assert cli.dispatch(args, anchor=str(tmp_path)) == 1
@@ -529,6 +534,7 @@ def test_dispatch_returns_one_for_missing_workload_source(monkeypatch: pytest.Mo
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     assert cli.dispatch(args, anchor=str(tmp_path)) == 1
@@ -563,6 +569,7 @@ def test_dispatch_raises_when_mode_is_missing(monkeypatch: pytest.MonkeyPatch, t
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        mx=False,
     )
 
     with pytest.raises(NotImplementedError, match="Expected --tune"):

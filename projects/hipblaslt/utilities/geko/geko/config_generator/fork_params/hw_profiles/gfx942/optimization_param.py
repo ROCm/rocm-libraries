@@ -422,6 +422,10 @@ class GFX942GAParams(BaseOptimizationParams):
         return self._make_param("StoreSyncOpt", [0, 1, 4])
 
     @param
+    def store_vector_width(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("StoreVectorWidth", [-1, 1, 2, 4, 8])
+
+    @param
     def work_group_mapping(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param(
             "WorkGroupMapping",
@@ -444,9 +448,9 @@ class GFX942GAParams(BaseOptimizationParams):
     def transpose_lds(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("TransposeLDS", [-1, 0, 1, 2])
 
-    @param
-    def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("AdaptiveGemm", [0, 1])
+    # @param
+    # def adaptive_gemm(self, ctx: SizeContext) -> ForkParameter:
+    #     return self._make_param("AdaptiveGemm", [0, 1])
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:
