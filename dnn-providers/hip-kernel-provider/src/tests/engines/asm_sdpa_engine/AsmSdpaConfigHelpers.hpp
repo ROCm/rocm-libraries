@@ -13,6 +13,7 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -109,11 +110,22 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
 /**
+ * @brief An SDPA forward graph together with its STATS output attribute.
+ */
+struct SdpaFwdGraph
+{
+    std::shared_ptr<hipdnn_frontend::graph::Graph> graph;
+    /// The log-sum-exp output, or null when the test case does not enable stats.
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> stats;
+};
+
+/**
  * @brief Builds the SDPA forward graph topology described by a GraphTestCase.
  *
- * Uses testCase.withStats to determine whether to enable stats output.
+ * Uses testCase.withStats to determine whether to enable stats output, and returns that
+ * output's attribute alongside the graph so callers can address it by identity.
  */
-std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase);
+SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
 
 /**
  * @brief Generates compatible graph test case descriptors for all configs.

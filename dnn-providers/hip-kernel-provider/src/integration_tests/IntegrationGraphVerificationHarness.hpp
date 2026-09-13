@@ -45,6 +45,9 @@ private:
         float absoluteTolerance = 0.0f;
         float relativeTolerance = 0.0f;
         hipdnn_frontend::DataType validatorType = hipdnn_frontend::DataType::NOT_SET;
+        /// A caller-supplied validator owns its own comparison rules and is never rebuilt from
+        /// the tolerances below.
+        bool suppliedByCaller = false;
         std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
     };
 
@@ -159,6 +162,21 @@ protected:
         });
     }
 
+    void assertOutputBelongsToGraph(
+        GraphVerificationContext& context,
+        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr)
+    {
+        ASSERT_NE(attr, nullptr);
+        bool belongsToGraph = false;
+        context._graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& output : node.getNodeOutputTensorAttributes())
+            {
+                belongsToGraph = belongsToGraph || output == attr;
+            }
+        });
+        ASSERT_TRUE(belongsToGraph) << "Validator output does not belong to the context's graph";
+    }
+
     void registerValidator(GraphVerificationContext& context,
                            const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr,
                            float tolerance)
@@ -171,15 +189,7 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        ASSERT_NE(attr, nullptr);
-        bool belongsToGraph = false;
-        context._graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& output : node.getNodeOutputTensorAttributes())
-            {
-                belongsToGraph = belongsToGraph || output == attr;
-            }
-        });
-        ASSERT_TRUE(belongsToGraph) << "Validator output does not belong to the context's graph";
+        ASSERT_NO_FATAL_FAILURE(assertOutputBelongsToGraph(context, attr));
 
         auto& registration = context._registrations[attr];
         if(registration.absoluteTolerance != absoluteTolerance
@@ -189,6 +199,21 @@ protected:
         }
         registration.absoluteTolerance = absoluteTolerance;
         registration.relativeTolerance = relativeTolerance;
+    }
+
+    /// Registers a caller-built comparator for one output, for the outputs whose correct values
+    /// the tolerance-based default validator cannot express.
+    void registerValidator(
+        GraphVerificationContext& context,
+        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr,
+        std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator)
+    {
+        ASSERT_NE(validator, nullptr);
+        ASSERT_NO_FATAL_FAILURE(assertOutputBelongsToGraph(context, attr));
+
+        auto& registration = context._registrations[attr];
+        registration.validator = std::move(validator);
+        registration.suppliedByCaller = true;
     }
 
     struct OutputTensor
@@ -216,6 +241,10 @@ protected:
                 << "Output data type changed after bundle creation";
 
             auto& registration = it->second;
+            if(registration.suppliedByCaller)
+            {
+                continue;
+            }
             if(!registration.validator || registration.validatorType != output.dataType)
             {
                 registration.validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
