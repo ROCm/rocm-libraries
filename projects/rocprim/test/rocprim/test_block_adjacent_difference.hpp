@@ -34,7 +34,7 @@ constexpr auto shared_mem
 
 test_suite_type_def(suite_name, name_suffix)
 
-typed_test_suite_def(RocprimBlockAdjacentDifference, name_suffix, warp_params);
+typed_test_suite_def(RocprimBlockAdjacentDifference, name_suffix, warp_params, block_params_name_generator);
 
 typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractLeft)
 {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 
 test_suite_type_def(suite_name, name_suffix)
 
-typed_test_suite_def(suite_name, name_suffix, warp_params);
+typed_test_suite_def(suite_name, name_suffix, warp_params, block_params_name_generator);
 
 typed_test_def(suite_name, name_suffix, SortKeys)
 {

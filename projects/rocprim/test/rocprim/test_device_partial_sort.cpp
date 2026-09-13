@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_comparator.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_radix_rank.hpp>
@@ -179,7 +180,34 @@ void inline compare_partial_sort(InputVector     input,
     compare_partial_sort_cpp_17(input, output, middle, compare_op);
 }
 
-TYPED_TEST_SUITE(RocprimDevicePartialSortTests, RocprimDevicePartialSortTestsParams);
+struct RocprimDevicePartialSortTestsNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_custom()
+    {
+        using U = std::remove_cv_t<T>;
+        if constexpr(std::is_same_v<U, test_utils::custom_float_type>) return "CustomFloatType";
+        else if constexpr(std::is_same_v<U, test_utils::custom_test_array_type<int, 4>>)
+            return "ArrayInt32x4";
+        else return type_tag<U>();
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_custom<typename Params::key_type>();
+        if constexpr(!std::is_same_v<typename Params::config, ::rocprim::default_config>) n += "_Cfg";
+        if constexpr(!std::is_same_v<typename Params::decomposer, ::rocprim::identity_decomposer>)
+            n += "_Decomp";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::use_indirect_iterator) n += "_Indirect";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDevicePartialSortTests,
+                 RocprimDevicePartialSortTestsParams,
+                 RocprimDevicePartialSortTestsNameGenerator);
 
 TYPED_TEST(RocprimDevicePartialSortTests, PartialSort)
 {

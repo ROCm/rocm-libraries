@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required common headers
 #include "../../common/utils_device_ptr.hpp"
@@ -92,7 +93,22 @@ using Params = ::testing::Types<
     params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2>>,
     params<int, int, size_t, rocprim::less<>, rocprim::default_config, true>>;
 
-TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
+struct RocprimDeviceBinarySearchNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::haystack_type>() + "_"
+                        + type_tag<typename Params::needle_type>();
+        if constexpr(std::is_same_v<typename Params::config, use_custom_config>)
+            n += "_Cfg";
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params, RocprimDeviceBinarySearchNameGenerator);
 
 TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 {
