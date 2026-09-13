@@ -214,6 +214,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # TDMFuse/TDMCross=0 is the arrangement every shipped kernel already has, so
+  # naming it would rename all of them and shift dedup without asserting a
+  # difference.
+  for key in ("TDMFuse", "TDMCross"):
+    if state.get(key, 0):
+      requiredParametersTemp.add(key)
+    else:
+      requiredParametersTemp.discard(key)
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue

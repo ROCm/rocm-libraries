@@ -1199,6 +1199,43 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
+    # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
+    # not two heterogeneous regions in one instruction.
+    #
+    #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
+    #      when NumWaves>1). Hidden from the kernel name.
+    #   1  {MXSA,A} + {MXSB,B}, crossed parity. NumWaves>1.
+    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3. NumWaves==4.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same
+    # integers: a value listed here but unmapped there would build a kernel
+    # named for a grouping it does not have.
+    #
+    # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
+    "TDMFuse": [0, 1, 2, 3],
+    # TDMCross -- which wave issues which member of a TDM descriptor group.
+    # Orthogonal to TDMFuse: that picks the grouping, this rearranges the waves
+    # over it.
+    #
+    #   0  Default. The shipped arrangement, member order as the grouping table
+    #      writes it. Hidden from the kernel name, like TDMFuse=0.
+    #   1  Crossed. Reverses the wave order of every partitioned group after the
+    #      first, so each wave is handed one large item and one small one
+    #      instead of two of a kind, rather than one wave issuing only scales
+    #      and then waiting at the barrier.
+    #
+    # An int rather than a bool so a grouping with more than two partitioned
+    # groups can name further arrangements without renaming existing solutions.
+    # Only these two are implemented: _arrangedGroups treats any nonzero as 1,
+    # so a third value needs that function taught to dispatch, not just a wider
+    # list here. Rejected wherever there are fewer than two groups to cross --
+    # see tdmCrossRejectReason, which derives that from group structure rather
+    # than from a TDMFuse value.
+    "TDMCross": [0, 1],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

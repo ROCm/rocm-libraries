@@ -42,6 +42,14 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
+from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
+                                       decoupledOneBlockBoth, decouplePGRBlocks, \
+                                       equalPairDegeneratesToScalar, \
+                                       divergentPairUnsupportedReason, \
+                                       resolvePrefetchGlobalReadSpecialValues
+from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
+                                       tdmGroupingName, tdmPapRejectReason
+from Tensile.Components.TDMCross import tdmCrossRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -2933,6 +2941,136 @@ class Solution(collections.abc.Mapping):
         return
       if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
         state["TDMLoadWaveSync"] = False
+    # TDMFuse pins which tensors share a TDM descriptor set; see ValidParameters.py.
+    #
+    # 0 derives nothing. Nonzero values must match what the writer emits or the
+    # kernel name would lie about the grouping.
+    #
+    # Reject anywhere the pinned grouping cannot be produced.
+    tdmFuse: int = state.get("TDMFuse", 0)
+    if tdmFuse:
+      if not tdmBothTensors(state):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d describes how TDM transfers share descriptors, so it needs the TDM on "
+               "both tensors (TDMInst=3); got TDMInst=%d" % (tdmFuse, state["TDMInst"]))
+        return
+      if tdmFuse in (2, 3):
+        # {A,MXSA,MXSB} + {B} at 2, and its mirror {B,MXSA,MXSB} + {A} at 3:
+        # one block with the two names exchanged, so the preconditions cannot
+        # drift apart.
+        owner = "A" if tdmFuse == 2 else "B"
+        other = "B" if tdmFuse == 2 else "A"
+        if state["NumWaves"] != 4:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d dispatches its shared descriptor three ways -- two waves on %s, one on "
+                 "MXSA, one on MXSB -- and all remaining waves on %s, which names four waves "
+                 "explicitly; 4 does not divide by 3, so the 2/1/1 split is a remainder policy "
+                 "rather than an even partition and does not generalise, got NumWaves=%d"
+                 % (tdmFuse, owner, other, state["NumWaves"]))
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d is not available with UseSubtileImpl=1, which gives each tensor its "
+                 "own descriptor and so has no shared set to dispatch" % tdmFuse)
+          return
+        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d names MXSA and MXSB as the two single-wave members of its shared "
+                 "group, so it requires MX scales on both tensors; without them the group is "
+                 "just {%s}" % (tdmFuse, owner))
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d does not describe the sparse metadata tensor, which the TDM moves on "
+                 "a descriptor (tdmMetadataGroup0) that no value of this parameter names" % tdmFuse)
+          return
+        # Compares block counts only: LdsOffsetBlkA/B are assigned later.
+        decoupled, blkA, blkB = decouplePGRBlocks(state)
+        if decoupled and blkA != blkB:
+          reject(state, printRejectionReason,
+                 "TDMFuse=%d requires an equal decoupled pair (got PGRA=%d, PGRB=%d -> %d and %d LDS blocks); "
+                 "MXSB shares %s's descriptor set and cannot follow a divergent cadence"
+                 % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
+                    blkA, blkB, owner))
+          return
+      if tdmFuse == 1:
+        # {MXSA,A} + {MXSB,B} on a crossed parity dispatch.
+        if state["NumWaves"] <= 1:
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 splits each of its two descriptor sets by wave parity, which needs "
+                 "wave-separated TDM (NumWaves > 1); at NumWaves=%d every tensor keeps its own "
+                 "descriptor and nothing is fused" % state["NumWaves"])
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 is not available with UseSubtileImpl=1, which gives each tensor its "
+                 "own descriptor and so has no shared set to dispatch")
+          return
+        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 requires MX scales on both tensors; without them each set "
+                 "holds one tensor and nothing is fused")
+          return
+        # Unreachable while TDMSplit has a blanket reject above.
+        # Kept so this fuse mode has its own reason when TDMSplit is re-enabled.
+        if state.get("TDMSplit"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 is not available with TDMSplit, whose multi-wave increment recomputes "
+                 "one parity-selected split stride for one shared descriptor; this grouping has "
+                 "two shared descriptors and no arithmetic that names the second")
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 does not describe the sparse metadata tensor, which the TDM moves on "
+                 "a descriptor (tdmMetadataGroup0) that no value of this parameter names")
+          return
+        # Compares block counts only: LdsOffsetBlkA/B are assigned later.
+        decoupled, blkA, blkB = decouplePGRBlocks(state)
+        if state["HalfPLR"] and decoupled and blkA != blkB:
+          # _dcpScheduleSingleBufferedFillLate relocates one set's fill with its advance.
+          # HalfPLR's end-of-loop mask lives in that same module, so the other set
+          # would advance one step too many on the final iteration.
+          reject(state, printRejectionReason,
+                 "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair "
+                 "(HalfPLR=%d, PGRA=%d, PGRB=%d -> %d and %d LDS blocks)"
+                 % (state["HalfPLR"], state["PrefetchGlobalReadA"],
+                    state["PrefetchGlobalReadB"], blkA, blkB))
+          return
+      # Runs for every nonzero value, not inside a per-integer arm, so an
+      # integer added to TDM_FUSE_GROUPING without its own arm is still guarded
+      # rather than named for a grouping the writer would decline.
+      if not tdmGroupingAccepted(state):
+        reject(state, printRejectionReason,
+               "TDMFuse=%d passed its solution-level guards but the %s grouping was declined, "
+               "so the writer would emit a different grouping than the name claims"
+               % (tdmFuse, tdmGroupingName(state)))
+        return
+
+    # PAP's persistent-tile handoff addresses the TDM descriptor sets as the
+    # pairs (A,B) and (MXSA,MXSB) and offsets each pair exactly once, which only
+    # holds while the scales own a register range of their own. Asked of the
+    # resolved grouping rather than of TDMFuse, and placed after TDMFuse's own
+    # guards so a grouping that cannot be built reports its own reason first.
+    if state.get("PrefetchAcrossPersistent", 0) and state["enableTDMA"] and state["enableTDMB"]:
+      papGroupingReason = tdmPapRejectReason(state)
+      if papGroupingReason:
+        reject(state, printRejectionReason, papGroupingReason)
+        return
+
+    # TDMCross rearranges which wave issues which member of a group that
+    # TDMFuse already chose. Every reject above therefore has precedence: an
+    # arrangement of a grouping that cannot be built is not a separate defect,
+    # and reporting "nothing to cross" for a solution whose real problem is a
+    # divergent pair under TDMFuse=2 would send the reader to the wrong knob.
+    #
+    # The reason itself is derived from the group structure rather than from a
+    # TDMFuse value, so it covers scale-less types (whose {MXSA,MXSB} group has
+    # no live member left, leaving one group and nothing to cross) and any
+    # grouping added to the table later, with no branch per value.
+    tdmCrossReason = tdmCrossRejectReason(state)
+    if tdmCrossReason:
+      reject(state, printRejectionReason, tdmCrossReason)
+      return
 
     # DepthU == -1?
     if state["DepthU"] == -1:

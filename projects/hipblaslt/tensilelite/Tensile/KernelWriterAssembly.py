@@ -368,7 +368,141 @@ class KernelWriterAssembly(KernelWriter):
     return sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
 
   def isTdmWaveSeparated(self, kernel) -> bool:
-    return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
+    """True when the TDM moves both tensors and there is more than one wave."""
+    return tdmWaveSeparated(kernel)
+
+  def tdmEmitWaveCompId(self, dstSgprIdx, compShift, waveIdxSgpr, comment):
+    """Materialise a tensor's TDM wave-component id from WaveIdx.
+
+    compShift comes from tdmWaveComponents: a shift amount, 0 when the
+    component id is the wave index itself, or None when one wave carries the
+    whole tensor and the id is a constant zero.
+    """
+    if compShift is None:
+      return SMovB32(sgpr(dstSgprIdx), 0, comment)
+    if compShift == 0:
+      return SMovB32(sgpr(dstSgprIdx), sgpr(waveIdxSgpr), comment)
+    return SLShiftRightB32(sgpr(dstSgprIdx), compShift, sgpr(waveIdxSgpr), comment)
+
+
+  def tdmFusePaired(self, kernel) -> bool:
+    """True when {MXSA,A} and {MXSB,B} each own a descriptor set, parity crossed."""
+    return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
+
+
+  def tdmSeparateABDescriptors(self, kernel) -> bool:
+    """True when A's and B's TDM descriptors are distinct register sets."""
+    return tdmSeparateABDescriptors(kernel)
+
+  def tdmDescriptorSetOwner(self, kernel, tc: str) -> str:
+    """The tensor whose name programs the descriptor set that carries `tc`.
+
+    Per-set mutations -- the LDS buffer swap above all -- must be applied under
+    the owner only: applied under an alias too, the even count cancels silently
+    instead of failing to build.
+
+    Three preconditions the grouping table does not carry: a single wave gives
+    every tensor its own descriptor; subtile allocates per-tensor descriptors,
+    so nothing is aliased; and a TDM moving only one of A and B has no wave
+    partition to lay a grouping onto. defineTdmSgprs allocates from this
+    function, so every caller must reach the same answer it did.
+    """
+    if tc not in ("A", "B", "MXSA", "MXSB"):
+      return tc
+    if kernel["NumWaves"] == 1 or kernel.get("UseSubtileImpl"):
+      return tc
+    if not self.isTdmWaveSeparated(kernel):
+      return "A" if tc in ("A", "B") else "MXSA"
+    return tdmSetOwner(kernel, tc)
+
+  def _tdmPairedParityOrder(self, kernel, tPA, tPB):
+    """(even, odd) member of the descriptor set this (tPA,tPB) call programs.
+
+    The wave-separated helpers are called once per (A,B) and once per
+    (MXSA,MXSB) pair, and each call programs one descriptor set on the even
+    waves and one on the odd. TDMFuse=1 crosses those pairs, so the scale call
+    programs the set B rides and its even member is MXSB. Every other grouping
+    answers with the pair's own order.
+
+    Parity follows the tensor, never the argument position: the tail loop hands
+    its pair over in issue order, which SwapGlobalReadOrder/DTV/DTL can reverse,
+    and the prologue that built the descriptors always put the A side on the
+    even waves. Identify the A side by name so a reversed call still programs
+    each set on the waves that read it.
+
+    Which member is even is read off the wave assignment rather than tested
+    against TDMFuse=1, so TDMCross reaches every parity site through the
+    one function that decides it.
+    """
+    if not tPA["tensorChar"].endswith("A"):
+      tPA, tPB = tPB, tPA
+    # The three-way dispatch has no "even member" to name, and its own helpers
+    # (_applyStaggerTdmFuseAMx, _hoistTdmFuseAMxWrapUSel) intercept before here.
+    # Asked of the grouping's structure, so the mirror row bypasses it too.
+    if tdmSharedScaleSetActive(kernel) or not self.isTdmWaveSeparated(kernel):
+      return tPA, tPB
+    if 0 in tdmWavePartition(kernel, tPA["tensorChar"])[1]:
+      return tPA, tPB
+    return tPB, tPA
+
+  def _tdmSetMembersByParity(self, kernel, tP1, tP2):
+    """(evenTc, oddTc) actually carried by the descriptor set this call programs.
+
+    _tdmPairedParityOrder answers within the call's own argument pair, which is
+    the right answer for the *group name* but not for the *wrap value*: under
+    TDMFuse=1 each descriptor set is {tensor, its own scale}, so the set the
+    (A,B) call programs is {A even, MXSA odd} and the set the (MXSA,MXSB) call
+    programs is {MXSB even, B odd}. Selecting a wrap from the argument pair
+    would hand each set the other set's odd-wave wrap value. Every other
+    grouping keeps both members of a set inside one argument pair, so this
+    returns the parity order unchanged for them.
+
+    The odd member is the even member's partner inside its descriptor group,
+    read from the grouping table. That is the same answer the hard-coded
+    {A<->MXSA, B<->MXSB} map gave for TDMFuse=1, and it stays inert for the
+    groupings whose sets already match the argument pair.
+    """
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tP1, tP2)
+    tcEven = tPEven["tensorChar"]
+    if not self.isTdmWaveSeparated(kernel):
+      return tcEven, tPOdd["tensorChar"]
+    return tcEven, tdmGroupPartner(kernel, tcEven, tPOdd["tensorChar"])
+
+  def _tdmSecondMemberIsOdd(self, kernel, tP1, tP2):
+    sideA, sideB = (tP1, tP2) if tP1["tensorChar"].endswith("A") else (tP2, tP1)
+    _, odd = self._tdmPairedParityOrder(kernel, sideA, sideB)
+    return odd["tensorChar"] == tP2["tensorChar"]
+
+  def _emitTdmCompId(self, mod, kernel, tc, dstIdx, waveIdxSgpr="WaveIdx"):
+    """Leave tensor `tc`'s TDM component id in SGPR `dstIdx`."""
+    numComp, compShift = tdmWaveComponents(kernel, tc)
+    _, compWaves = tdmWavePartition(kernel, tc)
+    if compShift is None:
+      comment = f"wId=0 (wave {compWaves[0]} alone carries {tc})"
+    elif compShift == 0:
+      comment = f"wId=WaveIdx ({tc} divided over {numComp} waves)"
+    else:
+      comment = "wId=WaveIdx // 2 (each component covers 2 waves)"
+    mod.add(self.tdmEmitWaveCompId(dstIdx, compShift, waveIdxSgpr, comment))
+    return mod
+
+  def tdmWaveIdxReadAfterPrologue(self, kernel) -> bool:
+    """True when a loop-body reader still needs WaveIdx once the prologue is done.
+
+    Stagger is deliberately not a reason here: its parity read is the prologue's
+    last one, so a site placed after it must not consult this.
+    """
+    if kernel["ClusterBarrier"]:
+      return True
+    # De-aliased A/B guard each fill on wave parity every iteration, so one SGPR
+    # held here saves recomputing it from vgpr("Serial") twice per iteration.
+    # The three-way dispatch compares the whole wave index, not just bit 0.
+    if self.tdmSeparateABDescriptors(kernel):
+      return True
+    # Divergent block counts route the LDS swap through
+    # _tdmSwapLdsOffsetDecoupled, whose parity read is the one in-loop reader
+    # with no vgpr("Serial") fallback.
+    return self._dcpDivergent(kernel)
 
   def isTdmWaveIdxLive(self, kernel) -> bool:
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
@@ -21284,8 +21418,18 @@ class KernelWriterAssembly(KernelWriter):
                           sgpr("GlobalReadIncsMXSB")))
       return mod
     #TODO: should not directly use GRIA and GRIB
-    incA = self.globalReadIncsOperand(tcA, self.states.unrollIdx)
-    incB = self.globalReadIncsOperand(tcB, self.states.unrollIdx)
+    # Which member rides which parity is a property of the arrangement, not of
+    # the argument order. TDMCross reverses the second partitioned group, so the
+    # (MXSA, MXSB) call programs a descriptor whose even member is MXSB while the
+    # argument order still reads MXSA first. Selecting the operands by argument
+    # position then hands each wave the other member's increment, and since the
+    # descriptor init does follow the arrangement, the pointer drifts by the
+    # difference on every unroll iteration until it leaves the tensor. This is
+    # the same source the stagger wrap select above already reads, and it is
+    # inert at TDMCross=0, where arrangement and argument order agree.
+    tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tpA, tpB)
+    srcOdd = self.globalReadIncsOperand(tcOdd, self.states.unrollIdx)
+    srcEven = self.globalReadIncsOperand(tcEven, self.states.unrollIdx)
     # s_cselect_b32 accepts at most one literal, so when both increments are
     # compile-time constants stage the even-wave one in the destination first.
     if not isinstance(srcOdd, RegisterContainer) and not isinstance(srcEven, RegisterContainer):
