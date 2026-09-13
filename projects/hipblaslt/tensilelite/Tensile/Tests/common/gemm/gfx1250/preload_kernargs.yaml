@@ -1,0 +1,72 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: PreloadKernArgs feature validation
+# Tests preloading up to 32 SGPRs of kernel arguments
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Test PreloadKernArgs: True with batched + bias + activation
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      Activation: True
+      BiasDataTypeList: ['s']
+      ActivationType: hipblaslt_all
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - PreloadKernArgs: [True, False]  # Explicit test
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [32, 32, 8, 32]     # Small with many batches
+          - Exact: [64, 64, 2, 64]     # Batched
+          - Exact: [128, 128, 4, 128]  # More batches
+          - Exact: [256, 256, 2, 256]  # Large batched
+          - Exact: [63, 65, 3, 67]     # Odd with prime batch
+          - Exact: [97, 97, 5, 97]     # Prime
+          - Exact: [64, 256, 4, 128]   # Non-square batched
+          # === RANGE SIZES ===
+          - Range: [ [32, 32, 128], [32, 32, 128], [2], [64] ]
+          - Range: [ [64], [64], [1, 2, 8], [64] ]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: gelu]
