@@ -57,12 +57,19 @@ namespace rocsparse
         __shared__ T shared_B[BSR_BLOCK_DIM * (BLK_SIZE_Y * UNROLL_SIZE_Y)];
         __shared__ T shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
 
+        // Loop over column panels: grid.y is capped at 65535, so each grid sweep
+        // covers hipGridDim_y * BLK_SIZE_Y * UNROLL_SIZE_Y columns. Advance by that
+        // stride to cover dense column counts that exceed the launch limit.
+        for(rocsparse_int col_offset = 0; col_offset < N;
+            col_offset += hipGridDim_y * (BLK_SIZE_Y * UNROLL_SIZE_Y))
+        {
         T             sum[UNROLL_SIZE_Y]{};
         bool          col_valid[UNROLL_SIZE_Y]{};
         rocsparse_int cols[UNROLL_SIZE_Y]{};
         for(rocsparse_int l = 0; l < UNROLL_SIZE_Y; ++l)
         {
-            cols[l]      = (tidy + BLK_SIZE_Y * l) + hipBlockIdx_y * (BLK_SIZE_Y * UNROLL_SIZE_Y);
+            cols[l] = (tidy + BLK_SIZE_Y * l) + hipBlockIdx_y * (BLK_SIZE_Y * UNROLL_SIZE_Y)
+                      + col_offset;
             col_valid[l] = (cols[l] < N);
         }
 
@@ -168,6 +175,7 @@ namespace rocsparse
                     }
                 }
             }
+        }
         }
     }
 }

@@ -137,7 +137,7 @@ namespace rocsparse
                               "This function is designed for col_block_dim <= 32.");
 
 #define LAUNCH_LARGE_KERNEL(M_, N_, K_)                                                            \
-    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / (N_ * K_) + 1);                                \
+    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, rocsparse::min((n - 1) / (N_ * K_) + 1, 65535));         \
     dim3 gebsrmm_threads(M_, N_);                                                                  \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gebsrmm_large_blockdim_kernel_ext<M_, N_, K_>), \
                                        gebsrmm_blocks,                                             \
