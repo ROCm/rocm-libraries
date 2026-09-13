@@ -44,6 +44,9 @@ from contraction_multi_abd_utils import (  # noqa: E402
     ContractionMultiABDProblem,
     ContractionMultiABDDispatcherLib,
     ContractionMultiABDRunner,
+    default_warp_tile_for_arch,
+    _SUPPORTED_ARCHS,
+    _validate_arch,
 )
 from unified_contraction_multi_abd_codegen import (  # noqa: E402
     SUPPORTED_EPILOGUES,
@@ -539,6 +542,42 @@ class TestShippedConfigs(unittest.TestCase):
                                  f"smoke_ci: {key}.values should have 1 entry")
             elif isinstance(val, list):
                 self.assertEqual(len(val), 1, f"smoke_ci: {key} list should have 1 entry")
+
+
+class TestArchSupport(unittest.TestCase):
+    """gfx1250 (MI400) enablement: arch allow-list and its WMMA warp tile."""
+
+    def test_gfx1250_is_supported(self):
+        self.assertIn("gfx1250", _SUPPORTED_ARCHS)
+        self.assertEqual(_validate_arch("gfx1250"), "gfx1250")
+
+    def test_unknown_arch_still_rejected(self):
+        with self.assertRaises(ValueError):
+            _validate_arch("gfx999")
+
+    def test_default_warp_tile_is_wmma_on_gfx1250(self):
+        # gfx1250 is wave32 with RDNA-style WMMA: 16-bit inputs only have
+        # 16x16x32. The gfx9 MFMA 32x32x16 tile does not exist there.
+        self.assertEqual(default_warp_tile_for_arch("gfx1250"), (16, 16, 32))
+
+    def test_default_warp_tile_is_mfma_on_gfx9(self):
+        for arch in ("gfx90a", "gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                self.assertEqual(default_warp_tile_for_arch(arch), (32, 32, 16))
+
+    def test_every_supported_arch_has_a_default_warp_tile(self):
+        for arch in _SUPPORTED_ARCHS:
+            with self.subTest(arch=arch):
+                self.assertIsNotNone(default_warp_tile_for_arch(arch))
+
+    def test_gfx1250_smoke_config_uses_wmma_warp_tile(self):
+        path = _CONFIG_DIR / "smoke_ci_config_gfx1250.json"
+        self.assertTrue(path.is_file(), f"missing gfx1250 config: {path}")
+        with open(path) as f:
+            tc = json.load(f)["tile_config"]
+        self.assertEqual(tc["warp_tile_m"]["values"], [16])
+        self.assertEqual(tc["warp_tile_n"]["values"], [16])
+        self.assertEqual(tc["warp_tile_k"]["values"], [32])
 
 
 class TestExpandNestedConfig(unittest.TestCase):

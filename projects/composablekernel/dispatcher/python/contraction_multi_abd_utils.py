@@ -67,7 +67,21 @@ _DEFAULT_HIPCC = "hipcc"
 
 # Archs this bridge is known to build for. Mirrors batched_contraction_utils;
 # there is deliberately no default -- see _detect_gpu_arch().
-_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950", "gfx1250")
+
+# Per-arch default warp tile for fp16/bf16. gfx9 (CDNA) is wave64/MFMA and takes
+# 32x32x16; gfx12 (gfx1250 / MI400) is wave32 with RDNA-style WMMA and only has
+# 16x16x32 for 16-bit inputs -- an MFMA tile does not exist there, so a config
+# carrying 32x32x16 either fails to build or fails to launch on gfx1250.
+# Nothing else in this bridge is arch-aware: the codegen sweep filters only
+# (pipeline, scheduler) and TileConfig.is_valid(), neither of which knows the
+# target arch, so the warp tile has to be chosen by the caller.
+_DEFAULT_WARP_TILE_BY_ARCH = {
+    "gfx90a": (32, 32, 16),
+    "gfx942": (32, 32, 16),
+    "gfx950": (32, 32, 16),
+    "gfx1250": (16, 16, 32),
+}
 
 _HIPCC_BASE_FLAGS = [
     "-std=c++17",
@@ -636,6 +650,16 @@ def _validate_arch(arch: str) -> str:
             f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHS)}"
         )
     return arch
+
+
+def default_warp_tile_for_arch(arch: str) -> Tuple[int, int, int]:
+    """Return the default fp16/bf16 (warp_tile_m, warp_tile_n, warp_tile_k).
+
+    Callers build ContractionMultiABDKernelConfig by hand (this operator has no
+    arch-aware sweep expansion), so without this they hard-code a gfx9 MFMA tile
+    and it silently follows them onto gfx1250, where that tile does not exist.
+    """
+    return _DEFAULT_WARP_TILE_BY_ARCH[_validate_arch(arch)]
 
 
 def _detect_gpu_arch() -> str:
