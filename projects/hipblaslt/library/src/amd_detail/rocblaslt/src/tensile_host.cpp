@@ -58,6 +58,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -4763,11 +4764,26 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         }
     }
 
-    heuristicResults.resize(solutions.size());
+    // `solutions` is a std::set of shared_ptr, so it is ordered by raw pointer value --
+    // i.e. by heap address, which ASLR randomizes per run. Callers that consume this list
+    // positionally (rocblaslt_matmul_algo_get_heuristic's fallback takes the first entries
+    // that pass isSolutionSupported) would then pick a different kernel run to run for the
+    // same input. Order by the library-assigned solution index, which is deserialized from
+    // the library data and is therefore stable across runs.
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> orderedSolutions(
+        solutions.begin(), solutions.end());
+    std::stable_sort(orderedSolutions.begin(),
+                     orderedSolutions.end(),
+                     [](const std::shared_ptr<TensileLite::ContractionSolution>& lhs,
+                        const std::shared_ptr<TensileLite::ContractionSolution>& rhs) {
+                         return lhs->index < rhs->index;
+                     });
+
+    heuristicResults.resize(orderedSolutions.size());
 
     int i                 = 0;
     int duplicated_counts = 0;
-    for(auto solution : solutions)
+    for(auto solution : orderedSolutions)
     {
         // Custom kernels don't support general batched mode (pointer arrays)
         // Only check for ContractionProblemGemm (grouped gemm doesn't use batchMode)
