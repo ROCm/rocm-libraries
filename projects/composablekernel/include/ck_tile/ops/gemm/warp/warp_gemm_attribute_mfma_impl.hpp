@@ -171,7 +171,7 @@ struct WarpGemmAttributeMfmaImplF64F64F64M16N16K4
         DISPATCH_MFMA_CTRL_("v_mfma_f64_16x16x4f64", Ctrl)
         else
         {
-#if defined(__gfx90a__) || defined (__gfx942__) || defined (__gfx950__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
             c_vec = __builtin_amdgcn_mfma_f64_16x16x4f64(a_vec[0], b_vec[0], c_vec, 0, 0, 0);
 #else
             ck_tile::ignore = c_vec;

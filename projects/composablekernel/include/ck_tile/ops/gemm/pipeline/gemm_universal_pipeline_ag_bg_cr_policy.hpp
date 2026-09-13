@@ -231,11 +231,11 @@ struct UniversalGemmBasePolicy
                 constexpr auto K0PerThreadRead  = AK0 / KThreadRead;
 
                 // check if we exceed all LDS banks
-                constexpr auto LdsBanksWidth = get_n_lds_banks() * get_n_dwords_per_128b();
+                constexpr auto LdsBanksWidth     = get_n_lds_banks() * get_n_dwords_per_128b();
                 constexpr auto a_lds_bank_stride = AK1 * M0 * sizeof(ADataType);
-                constexpr auto kfold         = (a_lds_bank_stride == 0 || a_lds_bank_stride > LdsBanksWidth)
-                                                   ? 1
-                                                   : LdsBanksWidth / (a_lds_bank_stride);
+                constexpr auto kfold = (a_lds_bank_stride == 0 || a_lds_bank_stride > LdsBanksWidth)
+                                           ? 1
+                                           : LdsBanksWidth / (a_lds_bank_stride);
                 constexpr auto KThreadReadPerm =
                     (kfold * K0PerThreadWrite / K0PerThreadRead) > 1
                         ? KThreadRead / (kfold * K0PerThreadWrite / K0PerThreadRead)
@@ -507,11 +507,11 @@ struct UniversalGemmBasePolicy
                 constexpr auto K0PerThreadRead  = BK0 / KThreadRead;
 
                 // check if we exceed all LDS banks
-                constexpr auto LdsBanksWidth = get_n_lds_banks() * get_n_dwords_per_128b();
+                constexpr auto LdsBanksWidth     = get_n_lds_banks() * get_n_dwords_per_128b();
                 constexpr auto b_lds_bank_stride = BK1 * N0 * sizeof(BDataType);
-                constexpr auto kfold         = (b_lds_bank_stride == 0 || b_lds_bank_stride > LdsBanksWidth)
-                                                   ? 1
-                                                   : LdsBanksWidth / b_lds_bank_stride;
+                constexpr auto kfold = (b_lds_bank_stride == 0 || b_lds_bank_stride > LdsBanksWidth)
+                                           ? 1
+                                           : LdsBanksWidth / b_lds_bank_stride;
                 constexpr auto KThreadReadPerm =
                     (kfold * K0PerThreadWrite / K0PerThreadRead) > 1
                         ? KThreadRead / (kfold * K0PerThreadWrite / K0PerThreadRead)
