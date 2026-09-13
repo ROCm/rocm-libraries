@@ -116,6 +116,25 @@ Every one of these was hit on a real run and cost between 20 minutes and two hou
 | engine answers but `scored 0` predictions | the model's `trained_against.selector_revision` is not what the provider reports | all models in one bake-off must come from builds reporting the same revision |
 | job builds an unexpected commit | compute sites resolve `github.com` to mirrors that lag the login node | `git bundle create delta.bundle <base>..HEAD`, stage it, pass `UHD_BUNDLE=/exchange/delta.bundle` |
 
+## Train an engine on what it can serve
+
+The corpus that trains an engine and the corpus that compares engines are not the same
+corpus, and confusing them is expensive. AITER's gfx950 kernels are unmasked, while a
+general SDPA corpus is roughly 90% causal, so a 900-graph draw yielded 106 usable
+measurements -- a model with a -285.7 TFLOPS bias that lost contests it should have won.
+
+Built with `--dtype bf16 --head-dim 128 --causal 0`, 1687 graphs were admitted out of 1687,
+and the same engine's median relative error fell from 0.366 to 0.040 with no bias left. The
+selector built on it went from 78.9% to 94.2% correct on an unchanged comparison corpus.
+
+Two rules follow:
+
+1. **Filter the training corpus to the engine's own facets.** Read its kernel table first
+   (Step 0); every draw outside it is a decline, not a data point.
+2. **Hold the comparison graphs out by construction.** Remove them from the training corpus
+   before collecting -- `benchmark` ids are content-derived, so the check is a set
+   difference -- rather than trusting a random split to keep them apart.
+
 ## Invariants — do not break these
 
 1. **An opaque engine's model `id` IS its binding.** AITER and MIOpen own no descriptor
