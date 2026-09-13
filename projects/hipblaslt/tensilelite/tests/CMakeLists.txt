@@ -173,6 +173,53 @@ endif()
 enable_testing()
 
 #################################################
+#    Batch pointer regression test (GPU)        #
+#################################################
+
+set(CLIENT_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../client/src")
+
+add_executable(batch-pointer-test
+    "${CMAKE_CURRENT_SOURCE_DIR}/BatchPointerReset_test.cpp"
+    "${CLIENT_SRC_DIR}/ClientProblemFactory.cpp"
+    "${CLIENT_SRC_DIR}/DataInitialization.cpp"
+    "${CLIENT_SRC_DIR}/ProgramOptions.cpp"
+    "${CLIENT_SRC_DIR}/Reference.cpp"
+    "${CLIENT_SRC_DIR}/TypedId.cpp"
+    "${CLIENT_SRC_DIR}/Rotating.cpp"
+    "${CLIENT_SRC_DIR}/TimingEvents.cpp"
+)
+
+target_include_directories(batch-pointer-test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../client/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_link_libraries(batch-pointer-test
+    PUBLIC
+        GTest::gtest
+        GTest::gtest_main
+        tensilelite::tensilelite-host
+    PRIVATE
+        hip::device
+        hip::host
+        rocisa::rocisa-cpp
+)
+
+if(HIPBLASLT_ENABLE_OPENMP)
+    target_link_libraries(batch-pointer-test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+target_compile_definitions(batch-pointer-test PRIVATE TENSILE_DEFAULT_SERIALIZATION)
+
+set_target_properties(batch-pointer-test PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+gtest_discover_tests(batch-pointer-test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)
+
+#################################################
 #        Tests for cpu-gemm-driver              #
 #################################################
 
