@@ -38,6 +38,7 @@
 #include <variant>
 
 #include "origami/math.hpp"
+#include "origami/nn/types.hpp"
 #include "origami/origami_export.h"
 
 namespace origami {
@@ -724,6 +725,47 @@ struct staggerU_t {
 
   /// StaggerUStrideShift size.
   std::size_t staggerUStrideShift = 0;
+};
+
+/**
+ * @brief How rank_configs chooses between analytical and ML inference.
+ */
+enum class inference_mode_t : std::uint8_t {
+  analytical,   ///< Roofline latency model (default)
+  nn,           ///< ML only; error if no model resolved
+  nn_fallback,  ///< ML if model available; else analytical
+};
+
+/**
+ * @brief Which ML backend rank_configs uses when inference != analytical.
+ */
+enum class nn_backend_t : std::uint8_t {
+  auto_select,          ///< Resolve from handle, library_models, session default, env
+  tilewright,           ///< Force tilewright_v1
+  embedding_similarity, ///< Force embedding_similarity_v1
+};
+
+/**
+ * @brief Options for origami::rank_configs.
+ */
+struct rank_options_t {
+  /// Analytical model when inference == analytical, or on nn_fallback miss.
+  model_t analytical_model = model_t::gemm;
+
+  /// Inference backend selection (analytical vs ML).
+  inference_mode_t inference = inference_mode_t::analytical;
+
+  /// ML backend selection (tilewright vs ES). Ignored when inference == analytical.
+  nn_backend_t nn_backend = nn_backend_t::auto_select;
+
+  /// Per-call NN model override. invalid_handle → resolve via library_models / default.
+  nn::model_handle_t nn_model = nn::invalid_handle;
+
+  /// Per-library dual-model binding for nn_backend resolution.
+  const nn::library_models_t* library_models = nullptr;
+
+  /// Backend-specific knobs (tilewright min_scored, force_cell, etc.).
+  nn::inference_options_t nn = {};
 };
 
 /**
