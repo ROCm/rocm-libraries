@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 
 #include <algorithm>
@@ -28,6 +9,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -154,6 +137,19 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // which keeps every existing report byte-identical.
     for (const AllocationRule& rule : rules.all()) {
         text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
+    }
+    // The live-ins left unpinned. Named because moving them rests on nothing
+    // having defined them, which holds only while lifting saw every definition.
+    // Silent when there are none, like the rules above.
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    if (!undefined.empty()) {
+        text += " undefinedLiveIn[";
+        for (size_t i = 0; i < undefined.size(); ++i) {
+            text += (i > 0 ? " %" : "%") + std::to_string(undefined[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        text += "]";
     }
     return text;
 }

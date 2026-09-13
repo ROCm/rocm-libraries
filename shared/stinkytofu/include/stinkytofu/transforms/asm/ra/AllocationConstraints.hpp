@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 // Shared, policy-independent legality view of attached SSA.
@@ -98,6 +79,16 @@ class AllocationConstraints {
     /// code rather than a slower kernel.
     bool isPinned(SSAValueID id) const;
 
+    /// Scalar live-ins left unpinned: read before anything defines them, but
+    /// above where the dispatch stops writing, so they arrive holding nothing.
+    ///
+    /// Exposed rather than merely acted on, because "nothing defines it" and "it
+    /// is undefined" differ by whether lifting saw every definition, so a run
+    /// that moves one should be able to say which.
+    std::span<const SSAValueID> undefinedLiveIns() const {
+        return undefinedLiveIns_;
+    }
+
     std::span<const TupleRun> tupleRuns() const {
         return tupleRuns_;
     }
@@ -113,6 +104,7 @@ class AllocationConstraints {
     std::vector<RegType> classByValue_;
     std::vector<std::optional<RegKey>> hintByValue_;
     std::vector<bool> pinnedByValue_;
+    std::vector<SSAValueID> undefinedLiveIns_;
     std::vector<TupleRun> tupleRuns_;
     std::vector<AffinitySet> affinitySets_;
 };

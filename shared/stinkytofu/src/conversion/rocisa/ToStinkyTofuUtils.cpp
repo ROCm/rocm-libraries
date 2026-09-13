@@ -1506,6 +1506,15 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
         }
 
+        /// SGPRs the descriptor declares, as `.amdhsa_next_free_sgpr`.
+        ///
+        /// The producer's estimate before emitAssembly(), which lowers it to what
+        /// the emitted code actually uses. Ask afterwards to find out whether a
+        /// re-allocated kernel fits its budget.
+        int getDeclaredSgprCount() const {
+            return signature_ ? signature_->kernelDescriptor.getNextFreeSgpr() : 0;
+        }
+
         // Plugin data forwarding
         void setPluginDataI64(const std::string& key, int64_t value) {
             module_->setPluginDataI64(key, value);
@@ -1546,6 +1555,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
+        .def("getDeclaredSgprCount", &StinkyAsmModuleWithSignature::getDeclaredSgprCount,
+             "SGPRs the descriptor declares (.amdhsa_next_free_sgpr). Ask after emitAssembly() "
+             "for the count the emitted code uses rather than the producer's estimate")
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
              "Set full kernel name for output files (e.g. cost file); should match .o basename")
@@ -1623,6 +1635,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             stinkyModule->getFunction().setMetaData(
                 kSigTotalVgprsMetaKey,
                 static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
+
+            // And where the dispatch stops filling scalars, which tells a live-in
+            // the hardware wrote from one merely read early. Absent when the
+            // descriptor does not settle the line, which keeps every live-in
+            // pinned.
+            if (const std::optional<uint32_t> dispatchFilled =
+                    stinkytofu::settledDispatchFilledSgprCount(
+                        stinkySig->kernelDescriptor.numSgprPreload,
+                        stinkySig->kernelDescriptor.sgprWorkGroup)) {
+                stinkyModule->getFunction().setMetaData(kSigDispatchFilledSgprsMetaKey,
+                                                        static_cast<uint64_t>(*dispatchFilled));
+            }
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
