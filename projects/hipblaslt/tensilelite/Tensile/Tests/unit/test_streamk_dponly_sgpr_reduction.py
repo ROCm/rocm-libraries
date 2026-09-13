@@ -103,6 +103,9 @@ class _SKWriter:
     def __init__(self):
         self.labels = _StubLabels()
         self.sgprPool = _SimpleSgprPool()
+        # Hands out indices and records them, which is all a vgpr pool has to do
+        # for these methods, so the same stub serves both files.
+        self.vgprPool = _SimpleSgprPool()
         self.states = SimpleNamespace(
             unrollIdx=0,
             indexChars=["I", "J", "K", "L", "M"],
@@ -543,3 +546,42 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
     src = _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only=False)
     for symbol in _DEAD_SGPR_SYMBOLS:
         assert symbol in src, "non-DP-only asm unexpectedly missing %s" % symbol
+
+
+# ---------------------------------------------------------------------------
+# 10. rapTileBatch: the batch of the tile at StreamKIter, with none of the
+#     side effects that would make it unsafe where ReuseAcrossPersistent
+#     needs it.
+# ---------------------------------------------------------------------------
+def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
+    """RAP asks for this before it knows whether it will run the tile here.
+
+    The reuse copy can only serve tiles in the batch its resident A was filled
+    from, so it opens by comparing the pending tile's batch against that one and
+    branching to the fill copy when they differ. The comparison therefore runs at
+    a point that may still jump away, and the two emitters that already compute
+    this batch cannot: ``skTileIndex`` resets the local-read offsets and
+    ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
+
+    So rapTileBatch repeats their arithmetic and writes only its destination. A
+    later edit that reaches for skIndexToWG instead would leave WorkGroup* set
+    for a tile the fill copy then re-derives, which no build failure would catch.
+    """
+    writer = _SKWriter()
+    kernel = _sk_common_kernel(dp_only=True)
+    kernel["StreamK"] = 3
+    kernel["WavefrontSize"] = 32
+
+    rendered = str(_sk().rapTileBatch(writer, kernel, "RAPResidentBatch"))
+
+    # StreamKIter still names the pending tile here; graWorkGroup advances it.
+    assert "s[sgprStreamKIter]" in rendered
+    # Tiles per batch, the divisor that turns a tile index into a batch.
+    assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
+    assert "s[sgprRAPResidentBatch]" in rendered
+
+    for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
+        assert claimed not in rendered, (
+            "rapTileBatch claimed %s for a tile it may hand back to the fill copy"
+            % claimed
+        )

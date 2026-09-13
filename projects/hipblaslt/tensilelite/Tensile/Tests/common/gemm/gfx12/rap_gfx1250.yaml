@@ -1,0 +1,309 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 1
+  NumWarmups: 0
+  KernelTime: true
+  Architecture: gfx1250
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  # Alpha and Beta both 2: at 1 a dropped or mis-applied scale is invisible.
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
+  PrintLevel: 2
+
+# Two things to know before reading a green run here.
+#
+# MX says nothing about batch handling. The client routes MX tensors through
+# mxDataGenerator, whose batch loop advances the pointer but calls generateMXInput
+# with identical arguments every time, so every batch gets byte-identical data
+# (PrintTensorA: 0/16384 elements differ between batch 0 and 1, against 13984 for
+# the F8/F8 problem). A kernel that reuses batch 0's A for the whole grid is
+# therefore indistinguishable from a correct one in groups 1 and 2. Only group 3
+# can fail on it. DataInitTypeA does not help -- SerialIdx is mapped away too.
+#
+# A rejected size looks like a pass. Sizes are a union across the MacroTiles in a
+# group, so each tile rejects the ones that miss its RAP predicates (M == MT0,
+# N % MT1 == 0, K a whole number of resident k-tiles). Those come back as
+# DID_NOT_SATISFY_ASSERTS, which leaves clientExit at 0 -- and so does a build
+# that silently produced no kernel. Check the per-size verdicts, not the exit
+# code. A full run is 252 rows: 202 PASSED, 50 rejected, 0 FAILED, about 33
+# minutes. No size is dead: every one of them runs on some tile.
+
+BenchmarkProblems:
+
+  ########################################################################
+  # 1. A=F8 B=F4 (MX) -- MacroTile sweep.
+  #    Prefetch axes pinned so the only thing moving is the tile shape.
+  #    kTiles: 64x256 -> 8, 64x512 -> 3, 128x128 -> 4.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256
+          - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0,1]
+        - ReuseAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 256]    # one k-tile: the K floor
+          - Exact: [64, 12288, 4, 512]
+          - Exact: [64, 12288, 4, 768]    # ceiling for 64x512
+          - Exact: [64, 12288, 2, 1024]
+          - Exact: [64, 12288, 1, 2048]   # ceiling for 64x256
+          - Exact: [128, 12288, 4, 256]
+          - Exact: [128, 12288, 4, 768]
+          - Exact: [128, 12288, 2, 1024]  # ceiling for 128x128
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 2. A=F8 B=F4 (MX) -- prefetch and persistence sweep at MT 64x256.
+  #    PrefetchGlobalRead 1 and 2 change how many trailing k-tiles RAP has to
+  #    silence, and PrefetchAcrossPersistent 0 and 1 are independent of RAP but
+  #    share its persistent loop, so all four pairings are exercised.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 8
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ExpandPointerSwap: [False]
+        - PrefetchAcrossPersistent: [0,1]
+        - PrefetchGlobalRead: [1,2]
+        - ReuseAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 256]    # K floor, many tiles per workgroup
+          - Exact: [64, 12288, 4, 1280]
+          - Exact: [64, 12288, 4, 2048]   # K ceiling
+          - Exact: [64, 12288, 1, 1024]   # batch 1
+          - Exact: [64, 12288, 2, 1536]   # batch 2
+          # Few enough tiles that a workgroup gets one: exercises the fill copy
+          # alone, with the reuse copy never entered.
+          - Exact: [64, 2048, 1, 512]
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 3. A=F8 B=F8 -- the only group here with real batch coverage.
+  #    Groups 1 and 2 cannot see a batch bug at all (see the note at the top),
+  #    so this group is what exposed RAP reusing a stale A across a batch
+  #    boundary, and it is what has to stay green after any change to the
+  #    resident-A logic.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  8,  2, 2] # MT 64x256, kTiles 9
+          - [16, 16, 128, 1,  1,  4,  4,  2, 2] # MT 128x128, kTiles 4
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [1,2]
+        - ReuseAcrossPersistent: [0,1]
+        - PrefetchAcrossPersistent: [0,1]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 12288, 4, 256]    # K floor
+          - Exact: [64, 12288, 4, 512]
+          - Exact: [64, 12288, 2, 1536]
+          - Exact: [64, 12288, 1, 2304]   # ceiling for 64x256
+          - Exact: [128, 12288, 4, 256]
+          - Exact: [128, 12288, 2, 1024]  # ceiling for 128x128
+        - ActivationArgs:
+          - [Enum: none]
+
+  ########################################################################
+  # 4. A=F8 B=F8 at MT 64x512 -- the passing half of that tile.
+  #    Split out of group 3 because PAP 1 fails here at batch > 1, at RAP 0 as
+  #    well as RAP 1, which is a PAP/batch defect older than RAP. Keeping PAP 0
+  #    holds on to the RAP coverage this tile does give: kTiles is 3, the
+  #    smallest resident block of any tile in this file, so it is the one that
+  #    exercises the k-tile floor and ceiling closest together.
+  ########################################################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F8
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 16,  2, 2] # MT 64x512, kTiles 3
+        # Required by RAP.
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - DepthU: [256]
+        - AssertSummationElementMultiple: [256]
+        - ExpandPointerSwap: [False]
+        - PrefetchGlobalRead: [1,2]
+        - ReuseAcrossPersistent: [0,1]
+        - PrefetchAcrossPersistent: [0]
+        # Rest of the audited configuration.
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # kTiles 3 caps K at 768, so these are the floor, the middle and the
+          # ceiling of everything this tile can run.
+          - Exact: [64, 12288, 4, 256]    # K floor
+          - Exact: [64, 12288, 4, 512]
+          - Exact: [64, 12288, 4, 768]    # K ceiling
+        - ActivationArgs:
+          - [Enum: none]

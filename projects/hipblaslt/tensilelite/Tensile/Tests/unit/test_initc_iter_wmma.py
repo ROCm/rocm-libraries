@@ -34,18 +34,20 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _endCounter(pgr, suppress=False, halfPLR=False):
-    # unrollLoopEntryEndCounter reads only kernel[...] (not self), so a dummy
-    # self (None) and a plain dict kernel are sufficient. Import lazily to keep
-    # module import light.
+def _endCounter(pgr, suppress=False, halfPLR=False, rap=False):
+    # unrollLoopEntryEndCounter reads nothing but kernel[...], so a plain dict and
+    # a bare stub self are sufficient. Import lazily to keep module import light.
+    from types import SimpleNamespace
+
     from Tensile.KernelWriterAssembly import KernelWriterAssembly
 
     kernel = {
         "PrefetchGlobalRead": pgr,
         "SuppressNoLoadLoop": suppress,
         "HalfPLR": halfPLR,
+        "ReuseAcrossPersistent": rap,
     }
-    return KernelWriterAssembly.unrollLoopEntryEndCounter(None, kernel)
+    return KernelWriterAssembly.unrollLoopEntryEndCounter(SimpleNamespace(), kernel)
 
 
 def test_pgr1_threshold():
@@ -69,3 +71,16 @@ def test_pgr3plus_threshold():
 
 def test_pgr0_threshold():
     assert _endCounter(0) == 0
+
+
+def test_rap_threshold_is_zero_whatever_the_prefetch_depth():
+    """ReuseAcrossPersistent emits one body copy per resident k-tile and no drain.
+
+    The loop therefore has to keep going until every k-tile has run, rather than
+    stopping PrefetchGlobalRead short of the end and handing the rest to sections
+    that no longer exist. The threshold has to agree with rapUnrolledLoopCopies, or
+    the shell would close before the last copies or spin past them.
+    """
+    for pgr in (1, 2, 3):
+        assert _endCounter(pgr, rap=True) == 0
+        assert _endCounter(pgr, suppress=True, rap=True) == 0
