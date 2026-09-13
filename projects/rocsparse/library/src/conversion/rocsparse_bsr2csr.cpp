@@ -33,7 +33,7 @@
 #define launch_bsr2csr_block_per_row_2_7_kernel(block_size, bsr_block_dim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
         (rocsparse::bsr2csr_block_per_row_2_7_kernel<block_size, bsr_block_dim>), \
-        dim3(mb),                                                                 \
+        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),               \
         dim3(block_size),                                                         \
         0,                                                                        \
         stream,                                                                   \
@@ -53,7 +53,7 @@
 #define launch_bsr2csr_block_per_row_8_32_kernel(block_size, bsr_block_dim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
         (rocsparse::bsr2csr_block_per_row_8_32_kernel<block_size, bsr_block_dim>), \
-        dim3(mb),                                                                  \
+        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),                \
         dim3(block_size),                                                          \
         0,                                                                         \
         stream,                                                                    \
@@ -74,7 +74,7 @@
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
         (rocsparse::                                                                         \
              bsr2csr_block_per_row_33_256_kernel<block_size, bsr_block_dim, sub_block_dim>), \
-        dim3(mb),                                                                            \
+        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),                     \
         dim3(block_size),                                                                    \
         0,                                                                                   \
         stream,                                                                              \

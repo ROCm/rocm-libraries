@@ -45,7 +45,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % BLOCKDIM == 0, "WFSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -56,10 +55,16 @@ namespace rocsparse
         int c = lid & (WFSIZE / BLOCKDIM - 1);
         int r = lid / (WFSIZE / BLOCKDIM);
 
-        J row = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
-
         __shared__ bool found[BLOCKSIZE / WFSIZE];
         __shared__ J    nnzb_per_row[BLOCKSIZE / WFSIZE];
+
+        // Grid-stride loop over block rows so the grid can be clamped below the
+        // number of block rows (which can exceed the 32-bit grid limit). The loop
+        // trip count is uniform across the block, so the __syncthreads() below
+        // stays convergent.
+        for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
+        {
+        J row = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
 
         nnzb_per_row[wid] = 0;
 
@@ -128,6 +133,7 @@ namespace rocsparse
                 bsr_row_ptr[(BLOCKSIZE / WFSIZE) * bid + wid + 1] = nnzb_per_row[wid];
             }
         }
+        }
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename I, typename J>
@@ -146,7 +152,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -154,11 +159,17 @@ namespace rocsparse
         // Wavefront id
         int wid = tid / (BLOCKSIZE / BLOCKDIM);
 
-        J row = block_dim * bid + wid;
-
         __shared__ bool found;
         __shared__ J    nnzb_per_row;
         __shared__ J    shared[BLOCKSIZE];
+
+        // Grid-stride loop over block rows so the grid can be clamped below the
+        // number of block rows (which can exceed the 32-bit grid limit). The loop
+        // trip count is uniform across the block, so the __syncthreads() below
+        // stay convergent.
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
+        {
+        J row = block_dim * bid + wid;
 
         nnzb_per_row = 0;
         __syncthreads();
@@ -225,6 +236,7 @@ namespace rocsparse
             bsr_row_ptr[0]       = bsr_base;
             bsr_row_ptr[bid + 1] = nnzb_per_row;
         }
+        }
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename J>
@@ -244,17 +256,21 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J block_id = hipBlockIdx_x;
-        J lane_id  = hipThreadIdx_x;
+        J lane_id = hipThreadIdx_x;
 
+        // temp array used as global scratch pad; partitioned by the physical block
+        // index so the grid can be clamped below the number of block rows.
+        J  phys = hipBlockIdx_x;
+        I* row_start
+            = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys)
+                     + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
+
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
+        for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
+        {
         J block_col    = 0;
         J nnzb_per_row = 0;
-
-        // temp array used as global scratch pad
-        I* row_start
-            = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
-        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id)
-                     + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
 
         for(J j = 0; j < rows_per_segment; j++)
         {
@@ -316,6 +332,7 @@ namespace rocsparse
         {
             bsr_row_ptr[0]            = bsr_base;
             bsr_row_ptr[block_id + 1] = nnzb_per_row;
+        }
         }
     }
 
