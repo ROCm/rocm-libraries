@@ -20,4 +20,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from .utils import TypeInfo, TYPE_CONFIGS, Parser
+from .utils import TypeInfo, TYPE_CONFIGS, Parser, BASE_DIR

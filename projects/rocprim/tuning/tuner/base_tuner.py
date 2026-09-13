@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
-from utils import TYPE_CONFIGS, Parser
+from utils import TYPE_CONFIGS, Parser, BASE_DIR
 from hip import hip  # type: ignore (pyright doesn't detect hip-python correctly)
 import warnings
 from dataclasses import dataclass
@@ -181,7 +181,7 @@ class BaseTuner(ABC):
 
         if not self.exclude_default_config:
             with open(
-                f"../../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
+                f"{BASE_DIR}/../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
             ) as f:
                 self.existing_config = confgen.parse.parse_lines(f.readlines())
         else:
@@ -363,7 +363,7 @@ class BaseTuner(ABC):
         value_type: Optional[str] = None,
     ) -> str:
         """Generate wrapper code using Jinja2 template inheritance."""
-        template_dir = pathlib.Path("templates")
+        template_dir = pathlib.Path(f"{BASE_DIR}/tuner/templates")
         env = Environment(
             loader=FileSystemLoader(template_dir), trim_blocks=True, lstrip_blocks=True
         )
@@ -442,11 +442,16 @@ class BaseTuner(ABC):
     def _get_cache_file_path(self, key_type: str, value_type: str | None = None):
         "Return the path of the cache file"
         return self.output_dir / self._get_cache_file_name(key_type, value_type)
-
     def _get_key_type_name(self) -> str:
         return "key_type"
 
     def _get_value_type_name(self) -> str:
+        return "value_type"
+
+    def _get_key_type(self) -> str:
+        return "key_type"
+
+    def _get_value_type(self) -> str:
         return "value_type"
 
     def _save_output(
@@ -489,7 +494,7 @@ class BaseTuner(ABC):
 
     def _get_compiler_options(self) -> List[str]:
         """Returns a list with all compiler options to pass to Kernel Tuner"""
-        monorepo_dir = pathlib.Path("../../../..").resolve()
+        monorepo_dir = (pathlib.Path(BASE_DIR) / "../../..").resolve()
         rocprim_dir = monorepo_dir / "projects/rocprim"
         return [
             "-fPIC",
