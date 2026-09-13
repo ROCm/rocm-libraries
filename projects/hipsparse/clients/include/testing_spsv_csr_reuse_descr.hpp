@@ -156,7 +156,7 @@ static void call_spsv(hipsparseHandle_t&     handle,
 
     // Only validate when the triangular system is non-singular (no structural
     // or numerical pivot was encountered by the host reference).
-    if(struct_pivot == (m + 1) && numeric_pivot == (m + 1))
+    if(struct_pivot == -1 && numeric_pivot == -1)
     {
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
@@ -305,7 +305,7 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                                    &struct_pivot,
                                    &numeric_pivot);
 
-                        if(struct_pivot == (m + 1) && numeric_pivot == (m + 1))
+                        if(struct_pivot == -1 && numeric_pivot == -1)
                         {
                             unit_check_near(1, m, 1, hy_gold.data(), hy_out.data());
                         }
@@ -381,9 +381,8 @@ void testing_spsv_csr_reuse_descr(Arguments argus)
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
     const std::vector<hipsparseFillMode_t> uplos
         = {HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER};
-    const std::vector<hipsparseDiagType_t> diags
-        = {HIPSPARSE_DIAG_TYPE_NON_UNIT, HIPSPARSE_DIAG_TYPE_UNIT};
-    const std::vector<hipsparseSpSVAlg_t> algs = {HIPSPARSE_SPSV_ALG_DEFAULT};
+    const std::vector<hipsparseDiagType_t> diags = {HIPSPARSE_DIAG_TYPE_NON_UNIT};
+    const std::vector<hipsparseSpSVAlg_t>  algs  = {HIPSPARSE_SPSV_ALG_DEFAULT};
 
     constexpr int number_of_passes = 3;
 
