@@ -10,12 +10,13 @@
 namespace stinkytofu {
 namespace {
 
-// The models are defined here, out of line, rather than as inline objects in the
-// header. STINKYTOFU_EXPORT is empty for consumers on Linux (see Export.hpp), so a
-// header-inline object would get a distinct address in libstinkytofu.so and in each
-// consumer (stinkytofu-opt, the Python module). PassContext caches a *pointer* to
-// the model, which makes address identity load-bearing. One definition in one TU,
-// reached through an exported function, keeps that sound.
+// The models are defined here, out of line, rather than as inline objects in
+// the header. STINKYTOFU_EXPORT is empty for consumers on Linux (see
+// Export.hpp), so a header-inline object would get a distinct address in
+// libstinkytofu.so and in each consumer (stinkytofu-opt, the Python module).
+// PassContext caches a *pointer* to the model, which makes address identity
+// load-bearing. One definition in one TU, reached through an exported function,
+// keeps that sound.
 
 constexpr HWModel kGfx1250Model = {
     .lds =
@@ -25,6 +26,21 @@ constexpr HWModel kGfx1250Model = {
             // matching ds_read count and the latest ds_read's own latency.
             .readDrainLatency = 0,
             .readThrottleLatency = 72,
+            // DS load overflow throughput, per WGP. B128 is half the default.
+            .dsLoadThroughput =
+                {
+                    .defaultValue = 4,
+                    .b128 = 2,  // half of default => larger overflow drain
+                },
+            // Experimentally measured maximum drain latency, in cycles.
+            .dsLoadMaxDrainLatency =
+                {
+                    .b32 = 120,
+                    .b64 = 131,
+                    .b128 = 255,
+                    .tr8B64 = 135,
+                    .tr16B128 = 255,
+                },
         },
     .barrier =
         {
@@ -62,26 +78,57 @@ constexpr HWModel kGfx1250v0Model = kGfx1250Model;
 
 }  // namespace
 
-int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int rawNumWaves) {
+int computeDynamicDrainLatency(const HWModel& hw, DsReadKind kind, int matchingDsLoadCount,
+                               int targetDSLoadLatency, int rawNumWaves) {
     // Keep these local: they only define this function's modeled input range.
     constexpr int kMinModeledWaves = 1;
     constexpr int kMaxModeledWaves = 4;
     const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
     const int queueDepth = hw.lds.readQueueDepth;
-    // A zero queue depth means the arch has no modeled LDS return queue (the other
-    // consumers of lds.* already treat it as inert), and a lone load has nothing
-    // queued behind it. Either way only the load's own latency applies.
-    if (queueDepth <= 0 || matchingDsLoadCount <= 1) return targetDSLoadLatency;
+    const auto& maxDrain = hw.lds.dsLoadMaxDrainLatency;
+    // Unclassified DS read types use the B32 timing model.
+    int maxDrainLatency = maxDrain.b32;
+    switch (kind) {
+        case DsReadKind::B32:
+            maxDrainLatency = maxDrain.b32;
+            break;
+        case DsReadKind::B64:
+            maxDrainLatency = maxDrain.b64;
+            break;
+        case DsReadKind::B128:
+            maxDrainLatency = maxDrain.b128;
+            break;
+        case DsReadKind::Tr8B64:
+            maxDrainLatency = maxDrain.tr8B64;
+            break;
+        case DsReadKind::Tr16B128:
+            maxDrainLatency = maxDrain.tr16B128;
+            break;
+        case DsReadKind::Unknown:
+            break;
+    }
+    const auto capDrainLatency = [maxDrainLatency](int latency) {
+        return maxDrainLatency > 0 ? std::min(latency, maxDrainLatency) : latency;
+    };
 
-    // Up to the queue depth every load is in flight at once, so the burst costs one
-    // load's latency plus the per-wave issue spacing of the loads ahead of it.
+    // A zero queue depth means the arch has no modeled LDS return queue (the
+    // other consumers of lds.* already treat it as inert), and a lone load has
+    // nothing queued behind it. Either way only the load's own latency applies.
+    if (queueDepth <= 0 || matchingDsLoadCount <= 1) return capDrainLatency(targetDSLoadLatency);
+
+    // Up to the queue depth every load is in flight at once, so the burst costs
+    // one load's latency plus the per-wave issue spacing of the loads ahead of
+    // it.
     if (matchingDsLoadCount <= queueDepth)
-        return targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves;
+        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves);
 
-    // Past the depth the queue is full, so the overflow issues at half rate.
-    return targetDSLoadLatency + (queueDepth - 1) * numWaves +
-           (matchingDsLoadCount - queueDepth) * numWaves / 2;
+    const int dsLoadThroughput = kind == DsReadKind::B128 ? hw.lds.dsLoadThroughput.b128
+                                                          : hw.lds.dsLoadThroughput.defaultValue;
+    // Past the depth the queue is full. Divide by throughput so B128 (half of
+    // the default rate) pays a larger overflow term than other DS read kinds.
+    return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * numWaves +
+                           (matchingDsLoadCount - queueDepth) * numWaves /
+                               std::max(1, dsLoadThroughput));
 }
 
 const HWModel& hwModelForArch(const std::array<int, 3>& arch) {

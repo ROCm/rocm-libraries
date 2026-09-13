@@ -64,11 +64,11 @@
 namespace {
 using namespace stinkytofu;
 
-/// Extra cycles a load must already have been back for before it counts as finished.
-/// Padding every modeled drain latency by this much keeps the estimate on the safe
-/// side: under-counting finished loads just leaves a wait as the insertion pass
-/// emitted it, while over-counting would tighten one past what the hardware has
-/// actually retired.
+/// Extra cycles a load must already have been back for before it counts as
+/// finished. Padding every modeled drain latency by this much keeps the
+/// estimate on the safe side: under-counting finished loads just leaves a wait
+/// as the insertion pass emitted it, while over-counting would tighten one past
+/// what the hardware has actually retired.
 constexpr int kDsProximityThreshold = 512;
 
 /// An outstanding LDS read: the cycle it was issued at, its modeled return
@@ -76,6 +76,7 @@ constexpr int kDsProximityThreshold = 512;
 struct DsLoadEntry {
     int cycle = 0;
     int latency = 0;
+    DsReadKind kind = DsReadKind::Unknown;
     std::vector<StinkyRegister> dests;
 };
 
@@ -97,7 +98,8 @@ struct ScanState {
     // ds_load destination is seen.
     bool waitCheckActive = false;
 
-    // The keep value of the last dscnt wait that remains in IR. -1 means none yet.
+    // The keep value of the last dscnt wait that remains in IR. -1 means none
+    // yet.
     int prevKeptDscnt = -1;
 
     // Number of ds_load instructions seen since the last kept dscnt wait.
@@ -106,10 +108,12 @@ struct ScanState {
     // Number of DS ops accumulated for pre-activation dscnt tightening.
     int numDsLoadsBeforeActivation = 0;
 
-    // Return latency of the last ds_read scanBlock walked over. scanBlockHead runs
-    // after it and only counts its loads rather than walking them, so this is the
-    // one real measurement it has to work from. 0 means no ds_read was seen.
+    // Return latency of the last ds_read scanBlock walked over. scanBlockHead
+    // runs after it and only counts its loads rather than walking them, so this
+    // is the one real measurement it has to work from. 0 means no ds_read was
+    // seen.
     int lastDsLoadLatency = 0;
+    DsReadKind lastDsLoadKind = DsReadKind::Unknown;
 };
 
 /// VALU co-issue profile for an in-flight WMMA/matrix instruction.
@@ -177,7 +181,8 @@ bool canCoExecAtCurrentCycle(int cycles, int activeWmmaStartCycle, int& activeWm
 
 /// Cycles the front end needs to issue `numDsLoads` LDS ops, scaled by 3.
 ///
-/// Empirical model from experiment data. With A = numDsLoads and B = issue time:
+/// Empirical model from experiment data. With A = numDsLoads and B = issue
+/// time:
 ///            { A,                                A <= 16
 /// B(A) =     { 16 + (A - 16) * 7 / 3,       16 < A <= 43
 ///            { 16 + 27 * 7 / 3 + (A - 43) * 4,   A > 43
@@ -187,7 +192,8 @@ bool canCoExecAtCurrentCycle(int cycles, int activeWmmaStartCycle, int& activeWm
 /// - branch2: B*3 = 48 + 7*(A-16)
 /// - branch3: B*3 = 12*A - 279
 int computeDsIssueTimeTimes3(size_t numDsLoads) {
-    // conservative constant is 20, which is the expirimental result from the experiment.
+    // conservative constant is 20, which is the expirimental result from the
+    // experiment.
     const int conservativeConstant = 20;
     const int n = static_cast<int>(numDsLoads) + conservativeConstant;
     if (n <= 16) return 3 * n;
@@ -325,8 +331,9 @@ class RemoveDscntPass : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // This pass is scheduled inside the region-scoped pipeline for the
-        // {"loopWithPrefetch", "noLoadLoopBody"} regions, so shouldProcessBasicBlock
-        // already restricts us to the loop blocks of interest.
+        // {"loopWithPrefetch", "noLoadLoopBody"} regions, so
+        // shouldProcessBasicBlock already restricts us to the loop blocks of
+        // interest.
         //
         // The processed blocks are scanned as one continuous stream: `state` is
         // carried across block boundaries so cycle counting and the in-flight
@@ -345,7 +352,7 @@ class RemoveDscntPass : public StinkyInstPass {
             if (std::string_view(bb.getLabel()).starts_with("label_LoopBeginL")) {
                 // No need to remove the blocks after the loop begin label,
                 scanBlockHead(bb, state.cycles, state.numDsLoadsBeforeActivation,
-                              state.lastDsLoadLatency);
+                              state.lastDsLoadLatency, state.lastDsLoadKind);
                 return PreservedAnalyses::none();
             }
             const int recomputedPrefetchInFlightDsLoads =
@@ -358,20 +365,23 @@ class RemoveDscntPass : public StinkyInstPass {
     }
 
    private:
-    // Safety margin added to every modeled drain latency; see kDsProximityThreshold.
+    // Safety margin added to every modeled drain latency; see
+    // kDsProximityThreshold.
     int dsProximityThreshold_ = kDsProximityThreshold;
 
-    // Hardware facts and occupancy for the function being scanned, captured in run().
+    // Hardware facts and occupancy for the function being scanned, captured in
+    // run().
     const HWModel* hw_ = nullptr;
     int numWaves_ = 0;
 
-    /// How many of `numDsLoads` back-to-back LDS reads have returned by the time the
-    /// last of them has been issued. Used for the pre-activation run of loads, where
-    /// there is no scanned cycle count to measure against: the issue-time model stands
-    /// in for the clock, and a load counts as finished when its issue time, its drain
-    /// latency and the dsProximityThreshold_ margin still fit inside the run's total
-    /// issue time.
-    int computeNumDsFinished(size_t numDsLoads, int targetDsLoadLatency, int numWaves) const {
+    /// How many of `numDsLoads` back-to-back LDS reads have returned by the time
+    /// the last of them has been issued. Used for the pre-activation run of
+    /// loads, where there is no scanned cycle count to measure against: the
+    /// issue-time model stands in for the clock, and a load counts as finished
+    /// when its issue time, its drain latency and the dsProximityThreshold_
+    /// margin still fit inside the run's total issue time.
+    int computeNumDsFinished(size_t numDsLoads, DsReadKind targetDsLoadKind,
+                             int targetDsLoadLatency, int numWaves) const {
         if (!hw_) return 0;
 
         const int totalIssueTime = computeDsIssueTime(numDsLoads);
@@ -380,7 +390,8 @@ class RemoveDscntPass : public StinkyInstPass {
         for (int count = 1; count <= static_cast<int>(numDsLoads); ++count) {
             const int issueTime = computeDsIssueTime(count);
             const int landsAt =
-                issueTime + computeDynamicDrainLatency(*hw_, count, targetDsLoadLatency, numWaves);
+                issueTime + computeDynamicDrainLatency(*hw_, targetDsLoadKind, count,
+                                                       targetDsLoadLatency, numWaves);
             if (landsAt + dsProximityThreshold_ > totalIssueTime) break;
             drained = count;
         }
@@ -395,10 +406,11 @@ class RemoveDscntPass : public StinkyInstPass {
     /// `cycles`. Does not touch the FIFO.
     ///
     /// computeDynamicDrainLatency() answers, for a burst of N loads, how many
-    /// cycles pass between the burst's first issue and the N-th load landing. Both that
-    /// curve and the FIFO's issue cycles grow with N, so the loads that have come back
-    /// are the prefix whose drain latency, plus the dsProximityThreshold_ margin, still
-    /// fits in the time since each one issued.
+    /// cycles pass between the burst's first issue and the N-th load landing.
+    /// Both that curve and the FIFO's issue cycles grow with N, so the loads that
+    /// have come back are the prefix whose drain latency, plus the
+    /// dsProximityThreshold_ margin, still fits in the time since each one
+    /// issued.
     int estimateDrainedDsLoads(const std::deque<DsLoadEntry>& inFlight, int cycles) const {
         if (!hw_ || inFlight.empty()) return 0;
 
@@ -417,8 +429,8 @@ class RemoveDscntPass : public StinkyInstPass {
         for (int count = 1; count <= static_cast<int>(inFlight.size()); ++count) {
             const int elapsedForCount = cycles - inFlight[count - 1].cycle;
             const int landedCyclesAgo =
-                elapsedForCount -
-                computeDynamicDrainLatency(*hw_, count, targetDsLoadLatency, numWaves_);
+                elapsedForCount - computeDynamicDrainLatency(*hw_, oldest.kind, count,
+                                                             targetDsLoadLatency, numWaves_);
             if (landedCyclesAgo < dsProximityThreshold_) break;
             drained = count;
         }
@@ -426,7 +438,7 @@ class RemoveDscntPass : public StinkyInstPass {
     }
 
     void scanBlockHead(BasicBlock& bb, int cycles, int& numDsLoadsBeforeActivation,
-                       int lastDsLoadLatency) {
+                       int lastDsLoadLatency, DsReadKind lastDsLoadKind) {
         // Second pass: handle dscnt before waitCheckActive becomes true.
         bool seenFirstDscntBeforeActivation = false;
         // Log carried pre-activation DS-op count at the beginning of scanBlockHead
@@ -443,7 +455,7 @@ class RemoveDscntPass : public StinkyInstPass {
             lastDsLoadLatency > 0 ? lastDsLoadLatency : hw_->lds.readDrainLatency;
         const int numDsFinished =
             computeNumDsFinished(static_cast<size_t>(std::max(0, numDsLoadsBeforeActivation)),
-                                 targetDsLoadLatency, numWaves_);
+                                 lastDsLoadKind, targetDsLoadLatency, numWaves_);
         PASS_DEBUG(std::cerr << "[RemoveDscnt] pre-activation numDsFinished=" << numDsFinished
                              << " from numDsLoads=" << numDsLoadsBeforeActivation << "\n");
         for (auto it = bb.begin(); it != bb.end();) {
@@ -523,6 +535,7 @@ class RemoveDscntPass : public StinkyInstPass {
         int& prevKeptDscnt = state.prevKeptDscnt;
         int& dsLoadsSinceLastKeptDscnt = state.dsLoadsSinceLastKeptDscnt;
         int& lastDsLoadLatency = state.lastDsLoadLatency;
+        DsReadKind& lastDsLoadKind = state.lastDsLoadKind;
 
         for (auto it = bb.begin(); it != bb.end();) {
             IRBase& node = *it.getNodePtr();
@@ -577,12 +590,17 @@ class RemoveDscntPass : public StinkyInstPass {
                 if (isDSRead(*inst)) {
                     inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
                                                           .latency = inst->latencyCycles,
+                                                          .kind = getDsReadKind(*inst),
                                                           .dests = inst->getDestRegs()});
                     lastDsLoadLatency = inst->latencyCycles;
+                    lastDsLoadKind = getDsReadKind(*inst);
                 } else {
-                    // DS writes contribute to dscnt accounting but have no produced VGPR dest.
-                    inFlightDsLoads.push_back(
-                        DsLoadEntry{.cycle = cycles, .latency = inst->latencyCycles, .dests = {}});
+                    // DS writes contribute to dscnt accounting but have no produced VGPR
+                    // dest.
+                    inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
+                                                          .latency = inst->latencyCycles,
+                                                          .kind = DsReadKind::Unknown,
+                                                          .dests = {}});
                 }
                 ++dsLoadsSinceLastKeptDscnt;
             } else if (std::optional<int> keep =

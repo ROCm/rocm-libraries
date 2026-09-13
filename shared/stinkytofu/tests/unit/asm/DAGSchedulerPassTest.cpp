@@ -187,7 +187,8 @@ class DAGSchedulerPassTest : public ::testing::Test {
     // timing).
     void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
                                    int drainLatency = -1, double transitionFactor = 0.5,
-                                   int transitionEntries = -1) {
+                                   int transitionEntries = -1,
+                                   bool enableWmmaHideBudgetPrescan = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
@@ -199,6 +200,7 @@ class DAGSchedulerPassTest : public ::testing::Test {
         if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
         pfc.dagFeatures.dsReadPerWmma = perWmma;
+        pfc.dagFeatures.enableWmmaHideBudgetPrescan = enableWmmaHideBudgetPrescan;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -1658,6 +1660,122 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_UsesIndependentWmmaSchedulingBudget) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
+    for (int i = 0; i < 2; ++i)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
+                            /*ldsToken=*/i + 1);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
+                              /*perWmma=*/100);
+
+    EXPECT_EQ(maxConsecutiveDsReads(mnemonicSequence(*body)), 2)
+        << "throttle cost that fits the independent DS budget may be packed "
+           "into the active WMMA";
+}
+
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_HideBudgetPrioritizesEligibleDs) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
+    StinkyInstruction* freeValu =
+        createVAddInBlock(body, arch, /*destReg=*/100, /*src0Reg=*/101, /*src1Reg=*/102);
+    StinkyInstruction* budgetedDs =
+        createMovableDsLoad(/*destReg=*/4, /*addrReg=*/304, /*ldsToken=*/2);
+    createWmmaScaleF8_in(body, /*destStart=*/240, /*src0Start=*/260);
+
+    runPassWithDsReadThrottle(
+        /*queueDepth=*/1, /*throttleLatency=*/8, /*perWmma=*/1,
+        /*drainLatency=*/80, /*transitionFactor=*/0.5,
+        /*transitionEntries=*/-1, /*enableWmmaHideBudgetPrescan=*/true);
+
+    EXPECT_LT(positionOf(*body, budgetedDs), positionOf(*body, freeValu))
+        << "while the cumulative WMMA hide budget is pending, an eligible DS "
+           "must take priority even when throttle pacing is active and the "
+           "per-WMMA DS cap has been reached";
+}
+
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_BudgetedDsBeatsRealStallWhenNoFreeWork) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
+
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* saluProducer = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    saluProducer->addDestReg(StinkyRegister("s", 100, 1));
+    saluProducer->addSrcReg(StinkyRegister("s", 0, 1));
+    saluProducer->addSrcReg(StinkyRegister("s", 1, 1));
+    saluProducer->issueCycles = 1;
+    saluProducer->latencyCycles = 2;
+
+    StinkyInstruction* stalledSalu = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+    stalledSalu->addDestReg(StinkyRegister("s", 101, 1));
+    stalledSalu->addSrcReg(StinkyRegister("s", 100, 1));
+    stalledSalu->addSrcReg(StinkyRegister("s", 1, 1));
+
+    StinkyInstruction* budgetedDs =
+        createMovableDsLoad(/*destReg=*/4, /*addrReg=*/304, /*ldsToken=*/2);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
+                              /*perWmma=*/100);
+
+    EXPECT_LT(positionOf(*body, saluProducer), positionOf(*body, budgetedDs));
+    EXPECT_LT(positionOf(*body, budgetedDs), positionOf(*body, stalledSalu))
+        << "when no instruction is immediately issuable, a throttled DS whose "
+           "cost fits the active WMMA budget must issue before work requiring "
+           "a real RAW/hazard stall";
+}
+
+// A throttle delay is a density gate, not synthetic elapsed time inside the
+// active WMMA window. With no filler available, move to the next WMMA instead
+// of paying the delay and issuing two adjacent DS reads.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_WaitDoesNotAdvanceActiveWmmaWindow) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/220, /*src0Start=*/224);
+    for (int i = 0; i < 2; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
+                            /*ldsToken=*/i + 1);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/16,
+                              /*perWmma=*/100);
+
+    const std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 1)
+        << "a throttled DS read must wait for real intervening work";
+}
+
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_PhaseGFallbackUsesOnlyThrottleClock) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 2; ++i)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4,
+                            /*ldsToken=*/i + 1);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8,
+                              /*perWmma=*/100, /*drainLatency=*/80);
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string trace = captured.str();
+    const std::string marker = "kind=1 wait=0 throttleWait=";
+    const size_t markerPos = trace.find(marker);
+    ASSERT_NE(markerPos, std::string::npos)
+        << "expected a DS Phase G fallback with no real elapsed wait; trace:\n"
+        << trace;
+    EXPECT_GT(std::stoi(trace.substr(markerPos + marker.size())), 0)
+        << "Phase G must pay the remaining DS pacing debt on the throttle clock";
 }
 
 // Queue-full ds_read pacing is controlled by dsReadThrottleLatency. In a

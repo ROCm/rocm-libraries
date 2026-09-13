@@ -80,9 +80,10 @@ StinkyInstruction* makeWorkgroupBarrierWait(BasicBlock& bb, int ldsToken) {
     return inst;
 }
 
-// Synthetic stuck state: SCC def already issued (chain open) but its reader never
-// reached the ready queue, while handshake barriers are ready. That should be
-// unreachable when applyClusterBarrierSccRule + pickOne invariants hold.
+// Synthetic stuck state: SCC def already issued (chain open) but its reader
+// never reached the ready queue, while handshake barriers are ready. That
+// should be unreachable when applyClusterBarrierSccRule + pickOne invariants
+// hold.
 void pickWithOpenChainAndOnlyBarriersReady(CDNA5ReadyQueue& queue, BasicBlock& bb) {
     StinkyInstruction* sccDef = makeSCmpDef(bb);
     StinkyInstruction* barrierSignal = makeWorkgroupBarrierSignal(bb, /*ldsToken=*/1);
@@ -126,4 +127,56 @@ TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
             pickWithOpenChainAndOnlyBarriersReady(queue, *bb);
         },
         "open SCC chain but only barriers are ready");
+}
+
+TEST_F(CDNA5ReadyQueueTest, ClassifiesDsReadTimingKinds) {
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    const auto make = [&](GFX opcode) {
+        return builder.create(getMCIDByUOp(opcode, GfxArchID::Gfx1250));
+    };
+
+    EXPECT_EQ(getDsReadKind(*make(GFX::ds_load_b32)), DsReadKind::B32);
+    EXPECT_EQ(getDsReadKind(*make(GFX::ds_load_b64)), DsReadKind::B64);
+    EXPECT_EQ(getDsReadKind(*make(GFX::ds_load_b128)), DsReadKind::B128);
+    EXPECT_EQ(getDsReadKind(*make(GFX::ds_load_tr8_b64)), DsReadKind::Tr8B64);
+    EXPECT_EQ(getDsReadKind(*make(GFX::ds_load_tr16_b128)), DsReadKind::Tr16B128);
+    EXPECT_EQ(getDsReadKind(*make(GFX::v_add_f32)), DsReadKind::Unknown);
+}
+
+TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesTypeSpecificThroughput) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    constexpr int kFirstOverflowLoad = 17;
+    constexpr int kLoadLatency = 56;
+    constexpr int kNumWaves = 4;
+
+    // Base = 56 + 15*4 = 116. Overflow term = 1*4 / throughput.
+    // B128 throughput 2 => +2 = 118; default throughput 4 => +1 = 117.
+    EXPECT_EQ(computeDynamicDrainLatency(hw, DsReadKind::B128, kFirstOverflowLoad, kLoadLatency,
+                                         kNumWaves),
+              118);
+    EXPECT_EQ(computeDynamicDrainLatency(hw, DsReadKind::B64, kFirstOverflowLoad, kLoadLatency,
+                                         kNumWaves),
+              117);
+    EXPECT_EQ(computeDynamicDrainLatency(hw, DsReadKind::Tr16B128, kFirstOverflowLoad, kLoadLatency,
+                                         kNumWaves),
+              117);
+}
+
+TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    constexpr int kLoadsBeyondMaximum = 100;
+    constexpr int kLoadLatency = 56;
+    constexpr int kNumWaves = 4;
+
+    const auto drain = [&](DsReadKind kind) {
+        return computeDynamicDrainLatency(hw, kind, kLoadsBeyondMaximum, kLoadLatency, kNumWaves);
+    };
+
+    EXPECT_EQ(drain(DsReadKind::B32), 120);
+    EXPECT_EQ(drain(DsReadKind::B64), 131);
+    EXPECT_EQ(drain(DsReadKind::B128), 255);
+    EXPECT_EQ(drain(DsReadKind::Tr8B64), 135);
+    // Default throughput keeps the uncapped result under the Tr16 max.
+    EXPECT_EQ(drain(DsReadKind::Tr16B128), 200);
+    EXPECT_EQ(drain(DsReadKind::Unknown), 120);
 }
