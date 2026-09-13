@@ -179,11 +179,12 @@ struct Arguments
     float                     activation_arg1; // threshold when activation type is relu
     float                     activation_arg2; // upperbound when activation type is relu
 
-    hipDataType              bias_type;
-    hipDataType              aux_type;
-    hipblaslt_bias_source    bias_source;
-    bool                     bias_vector;
-    int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
+    hipDataType           bias_type;
+    hipDataType           aux_type;
+    hipblaslt_bias_source bias_source;
+    bool                  bias_vector;
+    int32_t
+        bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
     bool                     scaleC;
@@ -426,7 +427,7 @@ private:
         }
         else if constexpr(std::is_same_v<T, std::complex<double>>)
         {
-            auto test = std::complex<double>(r, i); 
+            auto test = std::complex<double>(r, i);
             return std::complex<double>(r, i);
         }
         else if constexpr(std::is_same_v<T, hipblasLtHalf>)
@@ -519,9 +520,9 @@ inline void set_alpha_type(computeTypeInterface& h_alpha,
 }
 
 inline void set_beta_type(computeTypeInterface& h_beta,
-                           const Arguments&      arg,
-                           hipDataType           typeCompute,
-                           hipDataType           typeA)
+                          const Arguments&      arg,
+                          hipDataType           typeCompute,
+                          hipDataType           typeA)
 {
     if(typeA == HIP_C_32F)
     {
@@ -553,123 +554,60 @@ inline void set_beta_type(computeTypeInterface& h_beta,
     }
 }
 
-inline void set_computeInterface(computeTypeInterface& src, void* ptr, hipDataType typeCompute, hipDataType typeA)
+inline void set_compute_type_value_from_double(computeTypeInterface& destination,
+                                               double                value,
+                                               hipDataType           computeType,
+                                               hipDataType           inputType)
 {
-     if(typeA == HIP_C_32F)
+    if(inputType == HIP_C_32F)
     {
-        src.cf = *(std::complex<float>*)ptr;
+        destination.cf = static_cast<std::complex<float>>(value);
         return;
     }
-    else if(typeA == HIP_C_64F)
+    else if(inputType == HIP_C_64F)
     {
-         src.cd = *(std::complex<double>*)ptr;
+        destination.cd = static_cast<std::complex<double>>(value);
         return;
     }
-    switch(typeCompute)
+
+    switch(computeType)
     {
     case HIP_R_32F:
-        src.f32 = *(float*)ptr;
+        destination.f32 = static_cast<float>(value);
         return;
     case HIP_R_64F:
-        src.f64 = *(double*)ptr;
+        destination.f64 = static_cast<double>(value);
         return;
     case HIP_R_16F:
-        src.f16 = *(hipblasLtHalf*)ptr;
+        destination.f16 = static_cast<hipblasLtHalf>(value);
         return;
     case HIP_R_32I:
-        src.i32 = *(int32_t*)ptr;
+        destination.i32 = static_cast<int32_t>(value);
         return;
     default:
-        hipblaslt_cerr << "Error type in set_computeInterface()" << std::endl;
+        hipblaslt_cerr << "Error type in set_compute_type_value_from_double()" << std::endl;
         return;
     }
 }
 
-inline void set_computeInterface(computeTypeInterface& src, double value, hipDataType typeCompute, hipDataType typeA)
-{
-    if(typeA == HIP_C_32F)
-    {
-        src.cf = static_cast<std::complex<float>>(value);
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        src.cd = static_cast<std::complex<double>>(value);
-        return;
-    }
-
-
-    switch(typeCompute)
-    {
-    case HIP_R_32F:
-        src.f32 = static_cast<float>(value);
-        return;
-    case HIP_R_64F:
-        src.f64 = static_cast<double>(value);
-        return;
-    case HIP_R_16F:
-        src.f16 = static_cast<hipblasLtHalf>(value);
-        return;
-    case HIP_R_32I:
-        src.i32 = static_cast<int32_t>(value);
-        return;
-    default:
-        hipblaslt_cerr << "Error type in set_computeInterface()" << std::endl;
-        return;
-    }
-}
-
-inline void
-    mul_computeInterface(computeTypeInterface& dst, computeTypeInterface& src, hipDataType typeCompute , hipDataType typeA)
-{
-        if(typeA == HIP_C_32F)
-    {
-        dst.cf *= src.f32;
-        return;
-    }
-    else if(typeA == HIP_C_64F)
-    {
-        dst.cd *= src.f64;
-        return;
-    }
-    switch(typeCompute)
-    { 
-    case HIP_R_32F:
-        dst.f32 *= src.f32;
-        return;
-    case HIP_R_64F:
-        dst.f64 *= src.f64;
-        return;
-    case HIP_R_16F:
-        dst.f16 *= src.f16;
-        return;
-    case HIP_R_32I:
-        dst.i32 *= src.i32;
-        return;
-    default:
-        hipblaslt_cerr << "Error type in mul_computeInterface()" << std::endl;
-        return;
-    }
-}
-
-inline double get_computeInterface(const computeTypeInterface src, hipDataType type)
+inline double compute_type_value_as_double(const computeTypeInterface value, hipDataType type)
 {
     switch(type)
     {
     case HIP_R_32F:
-        return (double)src.f32;
+        return (double)value.f32;
     case HIP_R_64F:
-        return (double)src.f64;
+        return (double)value.f64;
     case HIP_C_32F:
-        return (double)std::abs(src.cf);
+        return (double)std::abs(value.cf);
     case HIP_C_64F:
-        return (double)std::abs(src.cd);
+        return (double)std::abs(value.cd);
     case HIP_R_16F:
-        return (double)src.f16;
+        return (double)value.f16;
     case HIP_R_32I:
-        return (double)src.i32;
+        return (double)value.i32;
     default:
-        hipblaslt_cerr << "Error type in get_computeInterface()" << std::endl;
+        hipblaslt_cerr << "Error type in compute_type_value_as_double()" << std::endl;
         return 0;
     }
 }

@@ -23,42 +23,83 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "TensorDataManipulation.hpp"
-#include <array>
 #include <cstddef>
 #include <iostream>
+#include <roc/host_numerics/tensor.hpp>
+#include <span>
+#include <vector>
+
+namespace
+{
+    template <typename T>
+    void printTensor(std::ostream& os, const roc::host_numerics::Tensor& tensor)
+    {
+        std::vector<size_t> indices(tensor.shape().rank(), 0);
+        os << '[';
+
+        auto printDimension = [&](auto&& self, size_t dimension) -> void {
+            os << '[';
+            for(size_t index = 0; index < tensor.shape()[dimension]; ++index)
+            {
+                indices[dimension] = index;
+                if(dimension + 1 == tensor.shape().rank())
+                {
+                    os << static_cast<float>(tensor.loadAs<T>(std::span<const size_t>(indices)))
+                       << ", ";
+                }
+                else
+                {
+                    self(self, dimension + 1);
+                }
+            }
+            os << "], ";
+            if(dimension + 1 == tensor.shape().rank())
+                os << '\n';
+        };
+
+        printDimension(printDimension, 0);
+        os << "]\n";
+    }
+}
 
 int main(int argc, char** argv)
 {
     constexpr size_t m{18};
     constexpr size_t k{34};
-    auto             weight = Tensor::Manipulation::Tensor::create<int>({m, k});
+    std::vector<int> weightStorage(m * k);
 
     for(size_t i = 0; i < m; ++i)
     {
         for(size_t j = 0; j < k; ++j)
         {
-            weight.setValue<int>({i, j}, i * k + j);
+            weightStorage[i * k + j] = i * k + j;
         }
     }
 
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+    const Tensor weight
+        = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(Shape{m, k}), std::span<const int>(weightStorage));
+
     std::cout << "Original weight:\n";
-    Tensor::Manipulation::printTensorDataMultiDims<int>(std::cout, weight);
-    constexpr size_t            MiM       = 16;
-    constexpr size_t            MiK       = 16;
-    constexpr size_t            MiKv      = 4;
-    constexpr size_t            PackK     = 2;
-    constexpr auto              MultipleM = MiM;
-    constexpr auto              MultipleK = MiK * PackK;
-    const auto                  paddedM   = (m / MultipleM + !!(m % MultipleM)) * MultipleM;
-    const auto                  paddedK   = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
-    Tensor::Manipulation::Shape paddedShape{paddedM, paddedK};
-    auto                        paddedWeight = ::Tensor::Manipulation::pad(weight, paddedShape, 0);
+    printTensor<int>(std::cout, weight);
+    constexpr size_t MiM          = 16;
+    constexpr size_t MiK          = 16;
+    constexpr size_t MiKv         = 4;
+    constexpr size_t PackK        = 2;
+    constexpr auto   MultipleM    = MiM;
+    constexpr auto   MultipleK    = MiK * PackK;
+    const auto       paddedM      = (m / MultipleM + !!(m % MultipleM)) * MultipleM;
+    const auto       paddedK      = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
+    const Tensor     paddedWeight = weight.copyWithZeroPadding(Shape{paddedM, paddedK});
     std::cout << "Padded weight:\n";
-    Tensor::Manipulation::printTensorDataMultiDims<int>(std::cout, paddedWeight);
-    paddedWeight.reshape({paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor::Manipulation::Tensor permuted = permute(paddedWeight, {0, 2, 3, 1, 4});
+    printTensor<int>(std::cout, paddedWeight);
+    const Tensor permuted
+        = paddedWeight
+              .reshapeSharingStorage(Shape{paddedM / MiM, MiM, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
     std::cout << "Swizzle weight:\n";
-    Tensor::Manipulation::printTensorDataMultiDims<int>(std::cout, permuted);
+    printTensor<int>(std::cout, permuted);
     return 0;
 }

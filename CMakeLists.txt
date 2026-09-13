@@ -4,16 +4,6 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(rocm-libraries LANGUAGES C CXX ASM)
 
-include(CheckLanguage)
-check_language(Fortran)
-if(CMAKE_Fortran_COMPILER)
-    enable_language(Fortran)
-    set(ROCM_LIBS_HAVE_FORTRAN TRUE)
-else()
-    set(ROCM_LIBS_HAVE_FORTRAN FALSE)
-    message(STATUS "Fortran compiler not found - Fortran support disabled")
-endif()
-
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
 endif()
@@ -38,7 +28,7 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 
 set(DEFAULT_COMPONENTS
     # shared
-    mxdatagenerator
+    host-numerics
     rocroller
     origami
     # projects
@@ -141,11 +131,11 @@ endif()
 unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
-if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+if("host-numerics" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
-        COMPONENT mxdatagenerator
+        COMPONENT host-numerics
         PREFIX_PATH shared
-        EXPECT_TARGET roc::mxDataGenerator
+        EXPECT_TARGET roc::host-numerics
     )
 endif()
 
@@ -177,7 +167,6 @@ if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    set(HIPBLASLT_ENABLE_BLIS OFF)
     add_subdirectory_with_message(
         COMPONENT hipblaslt
         PREFIX_PATH projects

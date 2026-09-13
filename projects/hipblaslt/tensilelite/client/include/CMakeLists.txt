@@ -4,16 +4,12 @@
 target_sources(tensilelite-client-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/DataInitializationHelpers.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataManipulation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter_fwd.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LogReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RunListener.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.hpp"
@@ -28,7 +24,6 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TimingEvents.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Reference.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.hpp"
 )

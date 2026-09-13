@@ -24,20 +24,24 @@
  *
  *******************************************************************************/
 
+#include "utility.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_arguments.hpp>
-#include <hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
+#include <roc/host_numerics/validation.hpp>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
-#include "utility.hpp"
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
@@ -99,112 +103,23 @@ inline const char* ToString(ActivationType act)
     }
 }
 
-auto _relu = [](auto in) -> decltype(in) {
-    return static_cast<decltype(in)>(std::max(static_cast<decltype(in)>(0), in));
-};
-
-auto _gelu = [](auto in) -> decltype(in) {
-    using Tc = float;
-
-    constexpr auto k0    = static_cast<Tc>(0.7978845608028654);
-    constexpr auto k1    = static_cast<Tc>(0.044715);
-    Tc             in_Tc = static_cast<Tc>(in);
-
-    return static_cast<decltype(in)>(
-        0.5f * (in_Tc * (1.f + std::tanh(k0 * (in_Tc * (1.f + k1 * (in_Tc * in_Tc)))))));
-};
-
-// swish with beta=1
-auto _silu = [](auto in) -> decltype(in) {
-    using Tc = float;
-    Tc in_Tc = static_cast<Tc>(in);
-    return static_cast<decltype(in)>(in_Tc / (1.f + exp(-in_Tc)));
-};
-
-// clamp with -1, 1
-auto _clamp = [](auto in) -> decltype(in) {
-    using Tc = float;
-    Tc in_Tc = static_cast<Tc>(in);
-    return static_cast<decltype(in)>(std::max(-1.f, std::min(in_Tc, 1.f)));
-};
-
-template <typename T>
-inline bool AlmostEqual(T a, T b)
+roc::host_numerics::ActivationFunction toHostNumericsActivation(ActivationType activation)
 {
-    T absA = (a > 0) ? a : -a;
-    T absB = (b > 0) ? b : -b;
-    // this avoids NaN when inf is compared against inf in the alternative code
-    // path
-    if(static_cast<float>(absA) == std::numeric_limits<float>::infinity()
-       || // numeric_limits is yet to
-       // support _Float16 type
-       // properly;
-       static_cast<float>(absB)
-           == std::numeric_limits<float>::infinity()) // however promoting it to
-    // float works just as fine
+    switch(activation)
     {
-        return a == b;
+    case ActivationType::NONE:
+        return roc::host_numerics::IdentityActivation{};
+    case ActivationType::RELU:
+        return roc::host_numerics::ReluActivation{};
+    case ActivationType::GELU:
+        return roc::host_numerics::GeluActivation{};
+    case ActivationType::SWISH:
+        return roc::host_numerics::SwishActivation{1.0};
+    case ActivationType::CLAMP:
+        return roc::host_numerics::ClampActivation{-1.0, 1.0};
     }
-    T absDiff = (a - b > 0) ? a - b : b - a;
-    return absDiff / (absA + absB + 1) < 0.001;
-}
 
-template <typename Ti, typename To, typename Tc>
-void mat_mul_bias_activation(Tc             alpha,
-                             Tc             beta,
-                             int            M,
-                             int            N,
-                             int            K,
-                             int            batch_count,
-                             const Ti*      A,
-                             int            As1,
-                             int            As2,
-                             int            As3,
-                             const Ti*      B,
-                             int            Bs1,
-                             int            Bs2,
-                             int            Bs3,
-                             const To*      C,
-                             int            Cs1,
-                             int            Cs2,
-                             int            Cs3,
-                             To*            D,
-                             int            Ds1,
-                             int            Ds2,
-                             int            Ds3,
-                             Tc*            bias,
-                             ActivationType actType)
-{
-    std::function<Tc(Tc)> actFunc;
-    if(actType == ActivationType::RELU)
-        actFunc = _relu;
-    else if(actType == ActivationType::GELU)
-        actFunc = _gelu;
-    else if(actType == ActivationType::SWISH)
-        actFunc = _silu;
-    else if(actType == ActivationType::CLAMP)
-        actFunc = _clamp;
-
-    for(int batch = 0; batch < batch_count; batch++)
-    {
-        for(int i1 = 0; i1 < M; i1++)
-        {
-            for(int i2 = 0; i2 < N; i2++)
-            {
-                Tc t = static_cast<Tc>(0);
-                for(int i3 = 0; i3 < K; i3++)
-                {
-                    t += static_cast<Tc>(A[i1 * As1 + i3 * As2 + batch * As3])
-                         * static_cast<Tc>(B[i3 * Bs1 + i2 * Bs2 + batch * Bs3]);
-                }
-                t = beta * static_cast<Tc>(C[i1 * Cs1 + i2 * Cs2 + batch * Cs3]) + alpha * t
-                    + (bias == nullptr ? 0 : bias[i1]);
-                if(actType != ActivationType::NONE)
-                    t = actFunc(t);
-                D[i1 * Ds1 + i2 * Ds2 + batch * Ds3] = static_cast<To>(t);
-            }
-        }
-    }
+    throw std::invalid_argument("Unsupported grouped GEMM activation.");
 }
 
 // cppcheck-suppress constParameter
@@ -568,80 +483,13 @@ bool bad_argument(hipblasOperation_t trans_a,
         argument_error = true;
         std::cerr << "ERROR: bad argument stride_c = " << stride_d << " < " << n * ldd << std::endl;
     }
-    if(batch_count == 0)
+    if(batch_count < 0)
     {
         argument_error = true;
-        std::cerr << "ERROR: bad argument batch_count = " << batch_count << std::endl;
+        std::cerr << "ERROR: bad argument batch_count < 0" << std::endl;
     }
 
     return argument_error;
-}
-
-template <typename TiA, typename TiB, typename Tout>
-void initialize_a_b_c_bias(std::vector<TiA>&        ha,
-                           int64_t                  size_a,
-                           std::vector<TiB>&        hb,
-                           int64_t                  size_b,
-                           std::vector<Tout>&       hc,
-                           int64_t                  size_c,
-                           std::vector<float>&      h_bias,
-                           int64_t                  size_bias,
-                           hipblaslt_initialization initialization)
-{
-    if(initialization == hipblaslt_initialization::rand_int)
-    {
-        hipblaslt_init<TiA>(ha, size_a);
-        hipblaslt_init_alternating_sign<TiB>(hb, size_b);
-        hipblaslt_init<Tout>(hc, size_c);
-        hipblaslt_init<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::trig_float)
-    {
-        hipblaslt_init_sin<TiA>(ha, size_a);
-        hipblaslt_init_cos<TiB>(hb, size_b);
-        hipblaslt_init_sin<Tout>(hc, size_c);
-        hipblaslt_init_sin<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::hpl)
-    {
-        hipblaslt_init_hpl<TiA>(ha, size_a);
-        hipblaslt_init_hpl<TiB>(hb, size_b);
-        hipblaslt_init_hpl<Tout>(hc, size_c);
-        hipblaslt_init_hpl<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::uniform_low_precision)
-    {
-        hipblaslt_init_low_precision<TiA>(ha, size_a);
-        hipblaslt_init_low_precision<TiB>(hb, size_b);
-        hipblaslt_init_low_precision<Tout>(hc, size_c);
-        hipblaslt_init_low_precision<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::special)
-    {
-        hipblaslt_init_alt_impl_big<TiA>(ha, size_a);
-        hipblaslt_init_alt_impl_small<TiB>(hb, size_b);
-        hipblaslt_init_hpl<Tout>(hc, size_c);
-        hipblaslt_init_hpl<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::zero)
-    {
-        hipblaslt_init_zero<TiA>(ha, size_a);
-        hipblaslt_init_zero<TiB>(hb, size_b);
-        hipblaslt_init_zero<Tout>(hc, size_c);
-        hipblaslt_init_zero<float>(h_bias, size_bias);
-    }
-    else if(initialization == hipblaslt_initialization::norm_dist
-            || initialization == hipblaslt_initialization::uniform_01
-            || initialization == hipblaslt_initialization::integer_exact
-            || initialization == hipblaslt_initialization::fp16_accumulator_probe)
-    {
-        // These modes use matmul-specific layouts on the device path; this host initializer cannot
-        // reproduce them. Zero-fill so we do not copy uninitialized memory to the GPU.
-        hipblaslt_init_zero<TiA>(ha, size_a);
-        hipblaslt_init_zero<TiB>(hb, size_b);
-        hipblaslt_init_zero<Tout>(hc, size_c);
-        hipblaslt_init_zero<float>(h_bias, size_bias);
-    }
 }
 
 __global__ void kernelUpdateN(uint32_t gemm_count, void* userArgs, int32_t* sizes_n)
@@ -693,9 +541,13 @@ int test_hipblaslt(hipDataType                 in_datatype,
         size_bias(gemm_count);
     std::vector<void*> da(gemm_count), db(gemm_count), dc(gemm_count), dd(gemm_count),
         d_bias(gemm_count);
-    std::vector<std::vector<Tin>>   ha(gemm_count), hb(gemm_count);
-    std::vector<std::vector<Tout>>  hc(gemm_count), hd(gemm_count), hd_gold(gemm_count);
-    std::vector<std::vector<float>> h_bias(gemm_count);
+    std::vector<roc::host_numerics::Tensor> ha, hb, hc, hd, hd_gold, h_bias;
+    ha.reserve(gemm_count);
+    hb.reserve(gemm_count);
+    hc.reserve(gemm_count);
+    hd.reserve(gemm_count);
+    hd_gold.reserve(gemm_count);
+    h_bias.reserve(gemm_count);
 
     hipblasLtHandle_t handle;
     CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
@@ -757,48 +609,110 @@ int test_hipblaslt(hipDataType                 in_datatype,
             size_b1[i]    = ldb[i] * k[i];
         }
 
-        size_a[i]    = size_a1[i] + stride_a[i] * (batch_count[i] - 1);
-        size_b[i]    = size_b1[i] + stride_b[i] * (batch_count[i] - 1);
-        size_c[i]    = size_c1[i] + stride_c[i] * (batch_count[i] - 1);
-        size_d[i]    = size_d1[i] + stride_d[i] * (batch_count[i] - 1);
+        size_a[i]    = batch_count[i] == 0 ? 0 : size_a1[i] + stride_a[i] * (batch_count[i] - 1);
+        size_b[i]    = batch_count[i] == 0 ? 0 : size_b1[i] + stride_b[i] * (batch_count[i] - 1);
+        size_c[i]    = batch_count[i] == 0 ? 0 : size_c1[i] + stride_c[i] * (batch_count[i] - 1);
+        size_d[i]    = batch_count[i] == 0 ? 0 : size_d1[i] + stride_d[i] * (batch_count[i] - 1);
         size_bias[i] = enable_bias[i] ? m[i] : 0;
 
         // Naming: da is in GPU (device) memory. ha is in CPU (host) memory
-        ha[i].resize(size_a[i]);
-        hb[i].resize(size_b[i]);
-        hc[i].resize(size_c[i]);
-        hd[i].resize(size_d[i]);
-        hd_gold[i].resize(size_d[i]);
-        h_bias[i].resize(size_bias[i]);
+        using hipblaslt::host_numerics::groupedGemmInitializationRecipe;
+        using hipblaslt::host_numerics::scalarType;
+        using roc::host_numerics::Layout;
+        using roc::host_numerics::ScalarType;
+        using roc::host_numerics::Shape;
+        using roc::host_numerics::Tensor;
+        using roc::host_numerics::generate;
+        const auto allocatedTensor = [](ScalarType type, size_t elements, Layout layout) {
+            return Tensor(type, Shape{elements}).shareStorageWithLayout(std::move(layout));
+        };
+        ha.emplace_back(allocatedTensor(scalarType<Tin>(),
+                                        size_a[i],
+                                        Layout(Shape{static_cast<size_t>(m[i]),
+                                                     static_cast<size_t>(k[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {a_stride_1[i], a_stride_2[i], stride_a[i]})));
+        hb.emplace_back(allocatedTensor(scalarType<Tin>(),
+                                        size_b[i],
+                                        Layout(Shape{static_cast<size_t>(k[i]),
+                                                     static_cast<size_t>(n[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {b_stride_1[i], b_stride_2[i], stride_b[i]})));
+        hc.emplace_back(allocatedTensor(scalarType<Tout>(),
+                                        size_c[i],
+                                        Layout(Shape{static_cast<size_t>(m[i]),
+                                                     static_cast<size_t>(n[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {1, ldc[i], stride_c[i]})));
+        hd.emplace_back(allocatedTensor(scalarType<Tout>(),
+                                        size_d[i],
+                                        Layout(Shape{static_cast<size_t>(m[i]),
+                                                     static_cast<size_t>(n[i]),
+                                                     static_cast<size_t>(batch_count[i])},
+                                               {1, ldd[i], stride_d[i]})));
+        hd_gold.emplace_back(allocatedTensor(scalarType<Tout>(),
+                                             size_d[i],
+                                             Layout(Shape{static_cast<size_t>(m[i]),
+                                                          static_cast<size_t>(n[i]),
+                                                          static_cast<size_t>(batch_count[i])},
+                                                    {1, ldd[i], stride_d[i]})));
+        h_bias.emplace_back(ScalarType::Float32, Shape{static_cast<size_t>(size_bias[i])});
 
-        // initial data on host
-        initialize_a_b_c_bias(ha[i],
-                              size_a[i],
-                              hb[i],
-                              size_b[i],
-                              hc[i],
-                              size_c[i],
-                              h_bias[i],
-                              size_bias[i],
-                              initialization);
+        // Reserve one consecutive seed per operand role for every grouped
+        // problem. This makes A, B, C, and bias independent while keeping a
+        // problem's data stable if an optional operand is disabled.
+        const uint64_t seed = hipblaslt::host_numerics::defaultInitializationSeed
+                              + static_cast<uint64_t>(i)
+                                    * static_cast<uint64_t>(
+                                        hipblaslt::host_numerics::initialization::OperandSequence::Count);
+        const auto recipe
+            = [&](ScalarType type,
+                  hipblaslt::host_numerics::initialization::OperandSequence sequence) {
+            const uint64_t operandSeed
+                = hipblaslt::host_numerics::initialization::seedForSequence(seed, sequence);
+            return groupedGemmInitializationRecipe(type, initialization, sequence, operandSeed);
+        };
+        generate(ha.back(),
+                 recipe(ha.back().type(),
+                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixA));
+        generate(hb.back(),
+                 recipe(hb.back().type(),
+                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixB));
+        generate(hc.back(),
+                 recipe(hc.back().type(),
+                        hipblaslt::host_numerics::initialization::OperandSequence::MatrixC));
+        generate(h_bias.back(),
+                 recipe(h_bias.back().type(),
+                        hipblaslt::host_numerics::initialization::OperandSequence::Bias));
 
-        CHECK_HIP_ERROR(hipMalloc(&da[i], size_a[i] * sizeof(Tin)));
-        CHECK_HIP_ERROR(hipMalloc(&db[i], size_b[i] * sizeof(Tin)));
-        CHECK_HIP_ERROR(hipMalloc(&dc[i], size_c[i] * sizeof(Tout)));
-        CHECK_HIP_ERROR(hipMalloc(&dd[i], size_d[i] * sizeof(Tout)));
+        CHECK_HIP_ERROR(hipMalloc(&da[i], std::max<size_t>(1, size_a[i] * sizeof(Tin))));
+        CHECK_HIP_ERROR(hipMalloc(&db[i], std::max<size_t>(1, size_b[i] * sizeof(Tin))));
+        CHECK_HIP_ERROR(hipMalloc(&dc[i], std::max<size_t>(1, size_c[i] * sizeof(Tout))));
+        CHECK_HIP_ERROR(hipMalloc(&dd[i], std::max<size_t>(1, size_d[i] * sizeof(Tout))));
         if(enable_bias[i])
-            CHECK_HIP_ERROR(hipMalloc(&d_bias[i], size_bias[i] * sizeof(float)));
+            CHECK_HIP_ERROR(hipMalloc(&d_bias[i], std::max<size_t>(1, size_bias[i] * sizeof(float))));
 
         // copy matrices from host to device
-        CHECK_HIP_ERROR(
-            hipMemcpy(da[i], ha[i].data(), sizeof(Tin) * size_a[i], hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy(db[i], hb[i].data(), sizeof(Tin) * size_b[i], hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy(dc[i], hc[i].data(), sizeof(Tout) * size_c[i], hipMemcpyHostToDevice));
-        if(enable_bias[i])
-            CHECK_HIP_ERROR(hipMemcpy(
-                d_bias[i], h_bias[i].data(), sizeof(float) * size_bias[i], hipMemcpyHostToDevice));
+        if(!ha[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(da[i],
+                                      ha[i].rawEncodedBackingStorage().data(),
+                                      ha[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(!hb[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(db[i],
+                                      hb[i].rawEncodedBackingStorage().data(),
+                                      hb[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(!hc[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(dc[i],
+                                      hc[i].rawEncodedBackingStorage().data(),
+                                      hc[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
+        if(enable_bias[i] && !h_bias[i].rawEncodedBackingStorage().empty())
+            CHECK_HIP_ERROR(hipMemcpy(d_bias[i],
+                                      h_bias[i].rawEncodedBackingStorage().data(),
+                                      h_bias[i].rawEncodedBackingStorage().size(),
+                                      hipMemcpyHostToDevice));
     }
 
     // Set User Preference attributes
@@ -1023,61 +937,75 @@ int test_hipblaslt(hipDataType                 in_datatype,
             {
                 std::cout << "GEMM " << i;
                 // copy output from device to CPU
-                CHECK_HIP_ERROR(hipMemcpy(
-                    hd[i].data(), dd[i], sizeof(Tout) * size_c[i], hipMemcpyDeviceToHost));
-                auto*  a_ptr = &ha[i][0];
-                auto*  b_ptr = &hb[i][0];
-                auto*  c_ptr = &hc[i][0];
-                auto*  d_ptr = &hd_gold[i][0];
-                float* bias_ptr;
-                if(enable_bias[i])
-                    bias_ptr = &h_bias[i][0];
-                else
-                    bias_ptr = nullptr;
-                mat_mul_bias_activation<Tin, Tout, float>(alpha[i],
-                                                          beta[i],
-                                                          m[i],
-                                                          n[i],
-                                                          k[i],
-                                                          batch_count[i],
-                                                          a_ptr,
-                                                          a_stride_1[i],
-                                                          a_stride_2[i],
-                                                          stride_a[i],
-                                                          b_ptr,
-                                                          b_stride_1[i],
-                                                          b_stride_2[i],
-                                                          stride_b[i],
-                                                          c_ptr,
-                                                          1,
-                                                          ldc[i],
-                                                          stride_c[i],
-                                                          d_ptr,
-                                                          1,
-                                                          ldd[i],
-                                                          stride_d[i],
-                                                          bias_ptr,
-                                                          actType[i]);
+                if(!hd[i].rawEncodedBackingStorage().empty())
+                    CHECK_HIP_ERROR(hipMemcpy(hd[i].rawEncodedBackingStorage().data(),
+                                              dd[i],
+                                              hd[i].rawEncodedBackingStorage().size(),
+                                              hipMemcpyDeviceToHost));
 
                 bool passed = true;
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
                 {
-                    for(int i2 = 0; i2 < n[i]; i2++)
+                    using roc::host_numerics::ComparisonOptions;
+                    using roc::host_numerics::EpilogueOptions;
+                    using roc::host_numerics::IndexOrder;
+                    using roc::host_numerics::Layout;
+                    using roc::host_numerics::OutputSelection;
+                    using roc::host_numerics::ScalarType;
+                    using roc::host_numerics::Shape;
+                    using roc::host_numerics::Tensor;
+                    using roc::host_numerics::matmul;
+                    using roc::host_numerics::referenceEpilogueInto;
+
+                    auto referenceOutput = hd_gold[i].shareStorageWithLayout(
+                        Layout(Shape{size_t(m[i]), size_t(n[i])},
+                               {1, ldd[i]},
+                               i3 * stride_d[i]));
+                    Tensor a = ha[i].shareStorageWithLayout(
+                        Layout(Shape{size_t(m[i]), size_t(k[i])},
+                               {a_stride_1[i], a_stride_2[i]},
+                               i3 * stride_a[i]));
+                    Tensor b = hb[i].shareStorageWithLayout(
+                        Layout(Shape{size_t(k[i]), size_t(n[i])},
+                               {b_stride_1[i], b_stride_2[i]},
+                               i3 * stride_b[i]));
+                    Tensor c = hc[i].shareStorageWithLayout(
+                        Layout(Shape{size_t(m[i]), size_t(n[i])},
+                               {1, ldc[i]},
+                               i3 * stride_c[i]));
+                    const Tensor product = matmul(a, b, ScalarType::Float32);
+                    const Tensor combined
+                        = product * static_cast<float>(alpha[i])
+                          + c.copyConvertedTo(ScalarType::Float32) * static_cast<float>(beta[i]);
+
+                    EpilogueOptions options;
+                    options.activation = toHostNumericsActivation(actType[i]);
+                    if(enable_bias[i])
+                        options.bias = h_bias[i].expandDims(1);
+                    referenceEpilogueInto(combined, {.output = referenceOutput}, options);
+
+                    // Use the greatest representable double below 0.001 so a
+                    // difference that rounds to exactly 0.001 is rejected.
+                    const double tolerance = std::nextafter(0.001, 0.0);
+                    ComparisonOptions comparisonOptions{.absoluteTolerance = tolerance,
+                                                        .relativeTolerance = 2.0 * tolerance,
+                                                        .maxReportedMismatches = 10};
+                    comparisonOptions.selection
+                        = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+                    const Layout comparisonLayout(Shape{size_t(m[i]), size_t(n[i])},
+                                                  {1, ldd[i]},
+                                                  i3 * stride_d[i]);
+                    const auto comparison = roc::host_numerics::compare(
+                        hd[i].shareStorageWithLayout(comparisonLayout),
+                        hd_gold[i].shareStorageWithLayout(comparisonLayout),
+                        comparisonOptions);
+                    passed = passed && comparison.passed();
+                    for(const auto& mismatch : comparison.reportedMismatches)
                     {
-                        for(int i1 = 0; i1 < m[i]; i1++)
-                        {
-                            if(!AlmostEqual(hd_gold[i][i1 + i2 * ldd[i] + i3 * stride_d[i]],
-                                            hd[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]))
-                            {
-                                printf(
-                                    "Err: Index %ld: %f vs %f\n",
-                                    i1 + i2 * ldd[i] + i3 * stride_d[i],
-                                    static_cast<float>(
-                                        hd_gold[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]),
-                                    static_cast<float>(hd[i][i1 + i2 * ldd[i] + i3 * stride_d[i]]));
-                                passed = false;
-                            }
-                        }
+                        printf("Err: Index %ld: %f vs %f\n",
+                               static_cast<long>(mismatch.index + i3 * stride_d[i]),
+                               mismatch.expected,
+                               mismatch.observed);
                     }
                 }
                 if(!passed)

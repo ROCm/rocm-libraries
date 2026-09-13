@@ -16,17 +16,14 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Reference.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgressListener.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Rotating.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
 
-# Profiler sources only target tensilelite-client (cpu-gemm-driver does not
-# expose ROCprofiler counters).
+# Profiler sources only target tensilelite-client.
 if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_sources(tensilelite-client
         PRIVATE
