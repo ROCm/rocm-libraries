@@ -523,9 +523,11 @@ namespace TensileLite
                     throw std::runtime_error("Unrecognized output tensor.");
                 }
 
+                TensorDescriptor const* validationTensor = &tensor;
+
                 if(Debug::Instance().printTensorInfo())
-                    std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
-                              << refPtr << ", gpu pointer " << resPtr
+                    std::cout << "Validating tensor " << validationTensor->getName()
+                              << ", cpu pointer " << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
 
                 // Check if we should skip this tensor due to null pointers or zero elements
@@ -547,8 +549,13 @@ namespace TensileLite
                     throw std::runtime_error(ss.str());
                 }
 
-                rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
+                rv &= checkResults(*validationTensor,
+                    refPtr,
+                    resPtr,
+                    result.maxElements[i],
+                    result.gpu,
+                    validationStride,
+                    threshold);
             }
             return rv;
         }
