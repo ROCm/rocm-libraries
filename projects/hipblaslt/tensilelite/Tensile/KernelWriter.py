@@ -53,7 +53,8 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered
-from .Components.TDMFuse import tdmWaveIssueOrder
+from .Components.TDMFuse import tdmWaveIssueOrder, decoupledThickGateRelaxation, \
+     dcpThickGateCountOverridden, dcpThickGateUncoveredSites, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -868,6 +869,101 @@ class KernelWriter(metaclass=abc.ABCMeta):
         changed += 1
     assert changed, "decoupled PGR: producer clone carries no tensor_load_to_lds"
 
+  def _dcpClampTensorcnt(self, asm, target):
+    """Clamp every s_wait_tensorcnt above `target` down to it.
+
+    Gate-pricing experiment support only. Reached only for a divergent pair on
+    the token path, whose only non-zero tensorcnt waits are the two relaxed
+    gates, so this touches the gate and nothing else. Downward by construction:
+    the substitution fires only where the emitted count exceeds the target.
+    """
+    def clamp(m):
+      return m.group(1) + str(target) if int(m.group(2)) > target else m.group(0)
+    return re.sub(r"^(\s*s_wait_tensorcnt\s+)(\d+)", clamp, asm, flags=re.M)
+
+  def _dcpApplyThickWait1(self, kernel, asm):
+    # decoupledThickGateRelaxation owns which mechanism relaxes this pair's thick
+    # gate and to what count; this pass runs only for the groupings it names.
+    # DCP_THICK_GATE_TOKENS needs nothing from here -- the wait-count insertion
+    # pass has already emitted that gate relaxed from the disjoint A/B tensor
+    # tokens memTokenLdsDcp assigns -- and None means the pair earns no
+    # relaxation at all.
+    #
+    # Text could not do the token job in any case. s_wait_tensorcnt N is an
+    # age-ordered drain on one counter, not a per-tensor mask, so which tensor a
+    # count bypasses follows from issue order alone; and the label the paired
+    # fill emits sits after the fill body, so scanning forward from it leaves
+    # the group entirely and the first wait found belongs to unrelated code.
+    gate = decoupledThickGateRelaxation(kernel)
+    if gate is None:
+      return asm
+    if gate.mechanism != DCP_THICK_GATE_TEXT:
+      # DCP_THICK_GATE_TOKENS needs nothing from this pass: the wait-count
+      # insertion pass has already emitted that gate relaxed from the disjoint
+      # A/B tensor tokens memTokenLdsDcp assigns. Its count is derived there
+      # rather than read from gate.tensorcnt, so pricing that count is the one
+      # thing text has to do for it -- off unless the gate-pricing hook is set,
+      # so the default path stays byte-identical.
+      if not dcpThickGateCountOverridden(gate.mechanism):
+        return asm
+      return self._dcpClampTensorcnt(asm, gate.tensorcnt)
+
+    lines = asm.splitlines(keepends=True)
+    _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
+    # PGR=2 -> 2 LDS blocks. Hero is B-thick (1,2); mirror is A-thick (2,1).
+    # thickTc names the double-buffered tensor because that is the only tensor
+    # _dcpScheduleSingleBufferedFillLate labels, so it is the key that finds
+    # that label rather than a choice of which tensor to relax. The thin one
+    # is not relaxable at any transfer size: its refill lands in the single
+    # block it is about to be read from.
+    thickTc = "A" if numLdsBlkA == 2 else "B"
+    marker = "DcpEarlyFill%s" % thickTc
+    relaxed = gate.tensorcnt
+
+    changed = 0
+    retagged = set()
+    for i, line in enumerate(lines):
+      if marker not in line or not line.rstrip().endswith(":"):
+        continue
+      for j in range(i + 1, len(lines)):
+        candidate = lines[j]
+        if (("DcpEarlyFill" in candidate or "DcpLateFill" in candidate)
+            and candidate.rstrip().endswith(":")):
+          break
+        if not re.match(r"^s_wait_tensorcnt\s+\d+(?:\s|$)", candidate):
+          continue
+        # The first tensorcnt wait past the thick fill gates the thick tensor's
+        # own LDS block and is the only one this pass may touch. Stop at it
+        # whatever it reads: walking on reaches the thin tensor's gate, and
+        # relaxing that would start its reads before its refill had landed.
+        if re.match(r"^s_wait_tensorcnt\s+0(?:\s|$)", candidate):
+          lines[j] = re.sub(r"^(s_wait_tensorcnt\s+)0(\s|$)",
+                            r"\g<1>%u\2" % relaxed, candidate, count=1)
+          retagged.add(j)
+          changed += 1
+        break
+
+    # Whether the emitted text carries the gate belongs to the owner that
+    # priced it, so ask it rather than counting retags against InitCIterWmma:
+    # that parameter says a second fill exists, not that the schedule kept a
+    # second wait for it. A schedule free to merge the two would read as a
+    # shortfall, and one retag can cover both sites.
+    uncovered = dcpThickGateUncoveredSites(lines, marker, relaxed, retagged)
+    if uncovered:
+      raise RuntimeError(
+          "decoupled PGR cannot honour its divergent thick-wait: retagged %u "
+          "s_wait_tensorcnt %u on thick %s (%d/%d LDS blocks), leaving %u of "
+          "%u %s site(s) uncovered -- %s"
+          % (changed, relaxed, thickTc, numLdsBlkA, numLdsBlkB, len(uncovered),
+             sum(1 for l in lines if marker in l and l.rstrip().endswith(":")),
+             marker,
+             "; ".join("line %d %s" % (i, why) for i, why in uncovered)))
+    return "".join(lines)
+
+  ##############################################################################
+  # packItemsConditional: pack src items into dst items until numPack or searchString is found
+  # returns number of items packed
+  ##############################################################################
   def _packItemsConditional(self, numPack, srcPackItems, dstPackItems, searchStrings):
     numPacked = 0
     final = False
@@ -7151,6 +7247,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if stModule is not None:
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
+      st_asm = self._dcpApplyThickWait1(kernel, st_asm)
       t2_end = time.perf_counter()
       print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
 
@@ -7710,6 +7807,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         % (half1Tokens, sorted(reserved), splitBase)
       self.states.memTokenLdsSplit = \
         [[blk, half1Tokens[blk]] for blk in range(self.states.numLDSBlk)]
+    # Disjoint per-tensor tokens are how the DCP_THICK_GATE_TOKENS grouping gets
+    # its relaxed thick gate: with A and B on separate tensor tokens the
+    # wait-count insertion pass can age-order the drain instead of emitting a
+    # full one. decoupledThickGateRelaxation is the single reader of that choice.
+    _dcpGate = decoupledThickGateRelaxation(kernel)
+    if _dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS:
+      _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
+      self.states.memTokenLdsDcp = {
+        "A": [0, 1 if numLdsBlkA > 1 else 0],
+        "B": [2, 3 if numLdsBlkB > 1 else 2],
+      }
+      self.states.ldsReadTokenIdxA = self.states.memTokenLdsDcp["A"][0]
+      self.states.ldsReadTokenIdxB = self.states.memTokenLdsDcp["B"][0]
+      self.states.ldsTensorTokenIdxA = self.states.memTokenLdsDcp["A"][0]
+      self.states.ldsTensorTokenIdxB = self.states.memTokenLdsDcp["B"][0]
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0
