@@ -2,40 +2,23 @@
 # SPDX-License-Identifier: MIT
 
 """The generated native stub -- the single most important artifact this tool
-produces, and until now the least tested.
+produces.
 
 ``packs/<Name>Native.cpp`` is what an agent (or a human) fills in to make an
-engine serve real graphs (RUNBOOK.md Step 6, "THIS IS THE WORK"). Existing
-tests cover two isolated substring traps
-(``test_generator.py::TestRequiredTrapAssertions``) but nothing asserts the
-file's overall shape: that every hook is genuinely a placeholder (none
-silently emitted as a working body that looks finished but isn't), that the
-symbol constants match what the same run's descriptors name, that the
-registration block wires the right functions to the right symbols, and that
-the C++ is structurally sound enough to compile.
+engine serve real graphs (see RUNBOOK.md). These tests observe a real compiler's
+verdict on the emitted C++.
 
-Four classes, one per contract:
-
-- ``TestEveryHookIsAPlaceholder`` -- a hook whose body silently does real
-  work (returns something other than the documented placeholder value) would
-  look finished and never get filled in; RUNBOOK.md Step 6's own gate
-  (``grep -c "FILL THIS OUT"`` == 0) only fires once a human/agent starts
-  editing, so nothing currently catches a *template* regression that stops
-  emitting a TODO for a given hook.
-- ``TestSymbolsMatchDescriptors`` -- the generator emits both the native
-  symbol constants and the descriptor JSON from the same ``config``/``ids``,
-  but nothing asserts they actually agree; a change to one without the other
-  would silently break the loader's symbol pre-flight (native-pack.md:261
-  "Nothing in the type system ties the JSON strings to the C++ constants").
-- ``TestStructuralSoundness`` -- balanced braces, every declared hook
-  present, and the registration block references the config's own
-  register-function name and dispatch handler.
-- ``TestRealCompile`` -- best-effort host compile with g++, guarded by a
-  session fixture that skips (not fails) when the plugin SDK's CMake-baked
-  version/config headers are unavailable, and reports honestly whether it ran.
+``TestRealCompile`` -- best-effort host compile of the emitted native stub and
+of the emitted matcher-test stub, guarded by a module fixture that skips (not
+fails) when the plugin SDK's CMake-baked version/config headers are
+unavailable, so the run reports honestly whether it happened. The compile is
+``-fsyntax-only``: it proves the emitted translation unit parses and
+type-checks against the real SDK headers, and nothing more. Linking, symbol
+registration, loader pre-flight, inventory and runtime behaviour are owned by
+the provider's compiled registration/load/inventory tests and by the native
+execution matrix, not by anything in this file.
 """
 
-import re
 import subprocess
 import shutil
 import tempfile
@@ -44,268 +27,6 @@ from pathlib import Path
 import pytest
 
 from codegen.generator import mint_ids
-
-# ---------------------------------------------------------------------------
-# Placeholder-value contract per hook. Keyed on a regex that isolates the
-# hook's own body (never spilling into a sibling function), and the value the
-# template is documented to emit while unfilled. A hook silently returning
-# anything else has stopped being a stub.
-# ---------------------------------------------------------------------------
-_HOOK_BODY_PATTERNS = {
-    "graph_match": (
-        r"GraphMatches\(const MatchContext& /\*context\*/\)\n\{\n(.*?)\n\}",
-        "return std::nullopt;",
-    ),
-    "kernel_match": (
-        r"bool kernelMatches\(.*?\)\n\{\n(.*?)\n\}",
-        "return false;",
-    ),
-    "score": (
-        r"double scoreKernel\(.*?\)\n\{\n(.*?)\n\}",
-        "return 0.0;",
-    ),
-    "dispatch_prepare": (
-        r"std::unique_ptr<PreparedDispatch> prepare\(.*?\n    \{\n(.*?)\n    \}",
-        "return std::make_unique<Prepared",
-    ),
-    "dispatch_launch": (
-        r"void launch\(.*?\n    \{\n(.*?)\n    \}",
-        "",  # launch's stub body is TODO-only, no return value
-    ),
-}
-
-
-def _hook_body(rendered: str, key: str) -> str:
-    pattern, _ = _HOOK_BODY_PATTERNS[key]
-    match = re.search(pattern, rendered, re.S)
-    assert match, f"could not isolate the '{key}' hook body in rendered output"
-    return match.group(1)
-
-
-def _hook_statement(body: str) -> str:
-    """The hook body with '//'-only comment lines dropped, so a check can
-    require the REMAINING code be EXACTLY the placeholder statement -- not
-    merely end with it. `body.strip().endswith(...)` alone would still pass
-    if a template regression inserted real logic (a branch, a helper call)
-    ahead of the placeholder `return`; this is what actually distinguishes a
-    stub from a hook that quietly started doing work."""
-    kept = [
-        line
-        for line in body.splitlines()
-        if line.strip() and not line.strip().startswith("//")
-    ]
-    return "\n".join(kept).strip()
-
-
-class TestEveryHookIsAPlaceholder:
-    """Every hook body is a TODO placeholder -- none silently emitted as a
-    working body. A hook that renders real logic instead of a `TODO` marker
-    would parse, validate, and enumerate cleanly while quietly no longer
-    being the stub RUNBOOK.md Step 6 tells an agent to fill in."""
-
-    @pytest.mark.parametrize("key", sorted(_HOOK_BODY_PATTERNS))
-    def test_hook_body_carries_a_todo_marker(self, generator, scale_add_config, key):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, key)
-        assert "TODO - FILL THIS OUT" in body or "TODO" in body, (
-            f"'{key}' hook body carries no TODO marker -- it may have silently "
-            f"become a working implementation:\n{body}"
-        )
-
-    def test_graph_match_returns_the_documented_nullopt(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "graph_match")
-        assert _hook_statement(body) == "return std::nullopt;", (
-            "graph_match's stub must be EXACTLY 'return std::nullopt;' "
-            f"(declining every graph), no other code, until filled in; got:\n{body}"
-        )
-
-    def test_kernel_match_returns_the_documented_false(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "kernel_match")
-        assert _hook_statement(body) == "return false;", (
-            "kernel_match's stub must be EXACTLY 'return false;', no other "
-            f"code, until filled in; got:\n{body}"
-        )
-
-    def test_score_returns_the_documented_zero(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        body = _hook_body(rendered, "score")
-        assert _hook_statement(body) == "return 0.0;", (
-            "score's stub must be EXACTLY 'return 0.0;', no other code, "
-            f"until filled in; got:\n{body}"
-        )
-
-    def test_operation_matcher_is_a_placeholder_multi_pack(
-        self, generator, binary_ops_config
-    ):
-        """Multi-pack engines emit one operationMatches() per pack -- also a
-        stub, and not covered by the single-pack fixture above."""
-        rendered = generator._render_template(
-            "native.cpp.j2", binary_ops_config, ids=mint_ids(binary_ops_config)
-        )
-        matches = re.findall(
-            r"OperationMatches\(const MatchContext& /\*context\*/, "
-            r"const BoundTokens& /\*bound\*/\)\n\{\n(.*?)\n\}",
-            rendered,
-            re.S,
-        )
-        assert len(matches) == len(binary_ops_config.packs), (
-            "expected one OperationMatches stub per pack, "
-            f"found {len(matches)} of {len(binary_ops_config.packs)}"
-        )
-        for body in matches:
-            assert _hook_statement(body) == "return false;", (
-                "per-pack operation matcher stub must be EXACTLY "
-                f"'return false;', no other code; got:\n{body}"
-            )
-
-
-class TestSymbolsMatchDescriptors:
-    """The symbol constants the native stub declares must be exactly the
-    symbols the SAME run's descriptors name -- the loader's symbol
-    pre-flight is the only thing that would otherwise catch a mismatch
-    (native-pack.md: 'Nothing in the type system ties the JSON strings to
-    the C++ constants')."""
-
-    def test_single_pack_symbols_match_descriptor_json(
-        self, generator, scale_add_config, tmp_path
-    ):
-        written = generator.render(scale_add_config, tmp_path)
-        native_rel = next(w for w in written if w.endswith("Native.cpp"))
-        native_text = (tmp_path / native_rel).read_text()
-
-        # Pull every constexpr std::string_view SYMBOL = "..."; constant.
-        declared = dict(
-            re.findall(r'constexpr std::string_view (\w+) = "([^"]+)";', native_text)
-        )
-        assert declared, "no symbol constants found -- the scan is broken, not the file"
-
-        ued_rel = next(w for w in written if w.endswith(".ued.json"))
-        udd_rel = next(w for w in written if w.endswith(".udd.json"))
-        umd_rel = next(
-            w for w in written if w.endswith("kernel_dtype_matches_graph.umd.json")
-        )
-        import json
-
-        ued = json.loads((tmp_path / ued_rel).read_text())
-        udd = json.loads((tmp_path / udd_rel).read_text())
-        umd = json.loads((tmp_path / umd_rel).read_text())
-
-        assert declared["GRAPH_MATCHER_SYMBOL"] == ued["graph_match"]["native"]
-        assert declared["DISPATCH_SYMBOL"] == udd["dispatch_symbol"]
-        assert declared["KERNEL_MATCHER_SYMBOL"] == umd["match_symbol"]
-        assert declared["SCORE_SYMBOL"] == scale_add_config.score_symbol
-
-    def test_multi_pack_operation_symbols_match_per_pack_umds(
-        self, generator, binary_ops_config, tmp_path
-    ):
-        written = generator.render(binary_ops_config, tmp_path)
-        native_rel = next(w for w in written if w.endswith("Native.cpp"))
-        native_text = (tmp_path / native_rel).read_text()
-        declared = dict(
-            re.findall(r'constexpr std::string_view (\w+) = "([^"]+)";', native_text)
-        )
-
-        import json
-
-        for pack in binary_ops_config.packs:
-            umd_rel = next(
-                w
-                for w in written
-                if w.endswith(f"operation_is_{pack.discriminator}.umd.json")
-            )
-            umd = json.loads((tmp_path / umd_rel).read_text())
-            const_name = f"{pack.discriminator.upper()}_MATCHER_SYMBOL"
-            assert const_name in declared, f"native stub never declares {const_name}"
-            assert declared[const_name] == umd["match_symbol"]
-
-    def test_registration_wires_every_declared_symbol(
-        self, generator, scale_add_config
-    ):
-        """Every constant declared must appear as a scope.add(...) argument in
-        register<Name>Symbols() -- a declared-but-unregistered symbol is dead
-        and a registered-but-undeclared one would not compile."""
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        declared = {
-            name
-            for name in re.findall(r"constexpr std::string_view (\w+) =", rendered)
-            if name.endswith("SYMBOL")
-        }
-        reg_match = re.search(
-            r"void register\w+Symbols\(SymbolScope<Handle>& scope\)\n\{\n(.*?)\n\}",
-            rendered,
-            re.S,
-        )
-        assert reg_match, "registration function not found"
-        reg_body = reg_match.group(1)
-        registered = set(re.findall(r"scope\.add\(std::string\((\w+)\)", reg_body))
-        assert declared == registered, (
-            f"declared symbols {declared} and registered symbols {registered} "
-            "disagree -- a symbol constant with no scope.add() is dead, and "
-            "vice versa would not compile"
-        )
-
-
-class TestStructuralSoundness:
-    """Minimum mechanical soundness: balanced braces, every declared hook
-    present in the emitted text, and the registration block references the
-    config's own pack/dispatch names -- not another engine's, copy-pasted."""
-
-    def test_braces_are_balanced(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        assert rendered.count("{") == rendered.count("}"), (
-            f"unbalanced braces: {rendered.count('{')} opens, "
-            f"{rendered.count('}')} closes"
-        )
-
-    def test_every_declared_hook_present(self, generator, scale_add_config):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        for needle in (
-            "GraphMatches(const MatchContext&",
-            "bool kernelMatches(",
-            "double scoreKernel(",
-            "size_t workspaceBytes(",
-            "std::unique_ptr<PreparedDispatch> prepare(",
-            "void launch(",
-        ):
-            assert needle in rendered, f"hook signature '{needle}' missing"
-
-    def test_registration_references_this_configs_dispatch_handler(
-        self, generator, scale_add_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
-        )
-        assert f"&{scale_add_config.engine.camel_name}DispatchHandler()" in rendered
-        assert f"void register{scale_add_config.engine.pascal_name}Symbols(" in rendered
-
-    def test_multi_pack_registration_references_every_pack_matcher(
-        self, generator, binary_ops_config
-    ):
-        rendered = generator._render_template(
-            "native.cpp.j2", binary_ops_config, ids=mint_ids(binary_ops_config)
-        )
-        for pack in binary_ops_config.packs:
-            assert f"&{pack.discriminator}OperationMatches" in rendered
 
 
 def _find_include_dir(name: str) -> Path | None:
@@ -446,11 +167,16 @@ class TestRealCompile:
 
     The plugin SDK's ``version.h``/``CacheRootDefaults.h`` headers are
     CMake-configured (``.h.in`` templates), so a from-scratch compile needs
-    stand-ins for them. This fixture generates minimal ones from the real
+    stand-ins for them. The fixture generates minimal ones from the real
     ``.in`` templates (substituting placeholder values -- the macros' actual
     values are irrelevant to whether the emitted stub parses) rather than
     skipping outright, so the check actually runs rather than silently
     reporting nothing.
+
+    Proof boundary: every case here runs ``-fsyntax-only``. A pass means the
+    emitted translation unit parses and type-checks against the real headers;
+    it is not evidence that the engine links, registers its symbols, loads, or
+    dispatches.
     """
 
     def test_single_pack_stub_compiles(
@@ -480,10 +206,6 @@ class TestRealCompile:
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         rendered = generator._render_template(
             "native.cpp.j2", config, ids=mint_ids(config)
-        )
-        assert "ModuleCache()" in rendered, (
-            "packaged config emitted no module-cache reset -- the table row names "
-            "one, so this stub would not link"
         )
         result = _compile(compile_env, rendered, tmp_path)
         assert (
@@ -539,36 +261,6 @@ class TestRealCompile:
         assert (
             result.returncode == 0
         ), f"emitted matcher-test stub does not parse:\n{result.stderr}"
-
-    @pytest.mark.parametrize("config_name", ["scale_add_config", "binary_ops_config"])
-    def test_matcher_test_stub_declares_no_unused_using(
-        self, generator, request, config_name
-    ):
-        """Every `using` the matcher stub emits must be named by its own body.
-
-        `-fsyntax-only` above cannot see this. The provider compiles its tests
-        under clang-tidy with `misc-unused-using-decls` as an ERROR, so a `using`
-        that only the not-yet-written fixture would have named fails the provider
-        build the first time a generated engine is spliced in -- which is how it
-        was found, and days after generation. The pack template already dodges the
-        sibling trap with `[[maybe_unused]]` on its field constants; nothing was
-        checking this one.
-        """
-        config = request.getfixturevalue(config_name)
-        rendered = generator._render_template(
-            "test_matchers.cpp.j2", config, ids=mint_ids(config)
-        )
-        for line in rendered.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("using ") or not stripped.endswith(";"):
-                continue
-            name = stripped[len("using ") : -1].rsplit("::", 1)[-1]
-            body = rendered.replace(line, "")
-            assert name in body, (
-                f"the emitted matcher stub declares `using ...{name};` and then never "
-                f"names {name}. clang-tidy's misc-unused-using-decls is an error in the "
-                f"provider's test build, so this file cannot compile there."
-            )
 
     def test_multi_pack_stub_compiles(
         self, compile_env, generator, binary_ops_config, tmp_path

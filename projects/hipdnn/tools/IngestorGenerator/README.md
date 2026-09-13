@@ -117,12 +117,36 @@ pack/kernel identities, counts, SDK version and runtime source kind derive from 
 actual output, after normalization and deduplication. Packaged runtime source kind
 is KPACK, not its authored builder kind.
 
-Host census selection uses explicit `HIPDNN_TEST_EXPECTED_ARCH` from the configured
-packaging architectures, not the loaded descriptors or detected GPU. Each selected
-architecture needs its corresponding descriptor shard and a nonempty exact test
-selection. Missing/unknown selection, wrong-arch data and missing/extra identities
-fail. Use the provider's registered host invocation for the integrated template;
-host loading does not prove graph dispatch.
+For packaged engines, append the literal `Test<Name>Packs` suite from
+`cmake_test_sources.txt` to `HKP_CENSUS_TEST_SUITES`. CMake registers a separate
+`hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` for every configured packaging
+architecture. Each runs `hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*`
+directly, without a Python launcher, with:
+
+- `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
+- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (configured, not detected or read from descriptors)
+- `HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`
+
+Run the registered obligation from the build-tree provider CTest directory:
+
+```bash
+ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
+  --no-tests=error -V -R '^hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs$'
+```
+
+Nonempty `HIPDNN_TEST_CENSUS_SUITE` enables the native strict guard. It requires an
+existing explicit descriptor root and a nonempty expected arch before default-root
+setup. Every registered case in the exact, nonempty suite must execute and pass
+without skipping in **every** iteration, including cases excluded by filters,
+disable flags or sharding. Listing only, zero iterations, partial repeated runs and
+missing suites fail; complete repeated iterations pass. Wrong-arch data and
+missing/extra identities fail in the generated inventory checks.
+
+Direct-load engines retain ordinary host suites; do not add them to the packaged
+census list. Supply their expected arch and direct-load descriptor root explicitly.
+Normal invocations without the census-suite variable keep ordinary GoogleTest
+filtering and skip behavior. Host registration/loading does not prove graph dispatch
+or numerical device correctness.
 
 ## The five CMake/registration splice points
 
@@ -431,32 +455,26 @@ with a generic "no implementation yet".
 .venv/bin/python -m pytest
 ```
 
-`pyproject.toml` sets `fail_under = 80` for `coverage`. Content/substring assertions on
-rendered output plus CLI subprocess exit-code tests -- not golden-file diffing, per
-`DescriptorGenerator`'s own test shape. Two assertions are load-bearing and
-non-negotiable (`tests/test_generator.py::TestRequiredTrapAssertions`): that the
-emitted `graph_match` stub's doc comment literally contains the whole-catalog
-blast-radius warning, and that the emitted `Test<Name>Matchers.cpp` constructs
-`DeviceProperties` by value.
+`pyproject.toml` sets `fail_under = 80` for `coverage`. The suite exercises
+descriptor identities, declaration carriage, semantic deduplication, emitted
+inventory and CLI outcomes. Source spellings and comment wording do not prove
+native registration, loading or runtime correctness; those require the compiled
+provider and create/extend execution gates.
 
-### The native stub's own shape (`tests/test_native_stub.py`)
+### Native-stub compilation (`tests/test_native_stub.py`)
 
 ```bash
 .venv/bin/python -m pytest tests/test_native_stub.py
 ```
 
-Covers what the two required trap assertions above do not: that every hook body is
-genuinely a `TODO` placeholder (none silently emitted as working logic), that the
-symbol constants the stub declares match what the SAME run's descriptor JSON names,
-that the registration block wires every declared symbol and none more, and basic
-structural soundness (balanced braces, every hook present). `TestRealCompile` also
-host-compiles the emitted stub with `g++`/`clang++` when one is on `PATH` and the
-plugin/data/flatbuffers SDK sources are found beside this checkout (walking up from
-`tools/IngestorGenerator`) plus a vendored `flatbuffers/array.h` (checked at
-`/opt/rocm/include`) -- it generates minimal stand-ins for the CMake-configured
-`version.h`/`CacheRootDefaults.h` headers from their real `.h.in` templates rather
-than skipping outright. Skips (never fails) when any prerequisite is absent, so a
-box without those trees still runs the rest of the suite.
+`TestRealCompile` host-compiles emitted single-pack, multi-pack, packaged-dialect
+and matcher-test stubs with `g++`/`clang++`, including an intentionally broken
+source control. Its `-fsyntax-only` result proves parsing and type-checking, not
+linking, registration, loading, inventory or dispatch. The fixture uses the
+plugin/data/flatbuffers SDK and provider sources beside this checkout, plus
+`flatbuffers/array.h` under `/opt/rocm/include`. It generates minimal stand-ins
+for CMake-configured `version.h`/`CacheRootDefaults.h` headers from their real
+templates. Missing prerequisites produce an explicit skip, not compiler proof.
 
 ### Fragment/struct arity (`tests/test_fragment_struct_arity.py`)
 

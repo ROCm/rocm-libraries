@@ -275,6 +275,26 @@ protected:
     hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
         "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 
+    /// Offsets the seed by UID to distinguish this fixture's binary operands.
+    ///
+    /// `a + b` and `a + a` agree elementwise when both operands carry the same data, so a
+    /// pointwise comparison cannot tell an add that reads both inputs from one that reads
+    /// one twice. The base seeds every tensor alike, which is right for suites whose
+    /// reference is insensitive to it; this engine's whole catalog is elementwise binary
+    /// ops, so it is not right here.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
+        }
+    }
+
     static int64_t engineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
@@ -453,11 +473,12 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
     auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph);
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
 
     for(int iteration = 0; iteration < testCase.iterations; ++iteration)
     {
-        verifyBuiltGraph(*graph, static_cast<unsigned int>(iteration));
+        verifyBuiltGraph(context, static_cast<unsigned int>(iteration));
     }
 }
 
@@ -497,8 +518,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     // The first execute() samples every candidate; the second reuses the cached winner.
     // Both must produce the correct result, and verifyBuiltGraph() re-randomizes and
     // re-checks each time.
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graph, /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
         << "the sampling sweep did not resolve a winner. Captured logs:\n"
@@ -509,8 +531,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
         << "expected exactly one selection sweep. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graph, /*seed=*/1);
+    verifyBuiltGraph(context, /*seed=*/1);
 
     // The winner is resolved once for the plan's life: a second execute() must reuse it
     // rather than re-sample.
@@ -526,13 +547,15 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
 {
     auto graphA = buildPointwiseAddGraph();
     buildAndCompile(*graphA);
-    registerValidatorsForOutputs(*graphA, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graphA, 0);
+    GraphVerificationContext contextA(*graphA);
+    registerValidatorsForOutputs(contextA, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(contextA, 0);
 
     auto graphB = buildPointwiseAddGraph();
     buildAndCompile(*graphB);
-    registerValidatorsForOutputs(*graphB, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graphB, 1);
+    GraphVerificationContext contextB(*graphB);
+    registerValidatorsForOutputs(contextB, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(contextB, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -574,8 +597,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
     auto graph = buildPointwiseSubGraph();
     buildAndCompile(*graph, engineId());
 
-    registerValidatorsForOutputs(*graph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*graph, 0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, 0);
 }
 
 // Numeric, not just routing: a+b and a*b are both plausible for the same operands, so
@@ -584,19 +608,20 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
 {
     auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
-    registerValidatorsForOutputs(*addGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*addGraph, 0);
+    GraphVerificationContext addContext(*addGraph);
+    registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(addContext, 0);
 
     // Same engine id: the pack is chosen by the operation matcher, not by the caller.
     auto mulGraph = buildPointwiseMulGraph();
     buildAndCompile(*mulGraph, engineId());
-    registerValidatorsForOutputs(*mulGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*mulGraph, 1);
+    GraphVerificationContext mulContext(*mulGraph);
+    registerValidatorsForOutputs(mulContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(mulContext, 1);
 
     // The engine's catalog is keyed per graph, so the add graph still answers after a
     // second pack of the same engine has run and cached its own.
-    registerValidatorsForOutputs(*addGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*addGraph, 2);
+    verifyBuiltGraph(addContext, 2);
 }
 
 // Catalogs are cached under (graph, device) keys in the engine's state manager; running
@@ -606,17 +631,18 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
 {
     auto addGraph = buildPointwiseAddGraph();
     buildAndCompile(*addGraph, engineId());
-    registerValidatorsForOutputs(*addGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*addGraph, 0);
+    GraphVerificationContext addContext(*addGraph);
+    registerValidatorsForOutputs(addContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(addContext, 0);
 
     auto subGraph = buildPointwiseSubGraph();
     buildAndCompile(*subGraph, engineId());
-    registerValidatorsForOutputs(*subGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*subGraph, 1);
+    GraphVerificationContext subContext(*subGraph);
+    registerValidatorsForOutputs(subContext, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(subContext, 1);
 
     // Confirms the add graph still answers correctly after the sub graph ran.
-    registerValidatorsForOutputs(*addGraph, POINTWISE_TOLERANCE_EPSILONS);
-    verifyBuiltGraph(*addGraph, 2);
+    verifyBuiltGraph(addContext, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -632,8 +658,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
 
     // C*R*S = 2*3*3: every output element is an 18-term sum. GPU and CPU accumulate in
     // different orders, so it is held to 18 epsilons rather than the elementwise one.
-    registerValidatorsForOutputs(*graph, /*epsilonMultiple=*/2 * 3 * 3);
-    verifyBuiltGraph(*graph, 0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, /*epsilonMultiple=*/2 * 3 * 3);
+    verifyBuiltGraph(context, 0);
 }
 
 // The claim the graph-node-type split exists to make: the two engines don't overlap.

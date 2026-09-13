@@ -508,7 +508,7 @@ flatbuffers::FlatBufferBuilder
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd",
-                                     DataType::BFLOAT16,
+                                     DataType::FLOAT,
                                      NodeAttributes::SdpaAttributes,
                                      sdpaAttributes.Union()));
 

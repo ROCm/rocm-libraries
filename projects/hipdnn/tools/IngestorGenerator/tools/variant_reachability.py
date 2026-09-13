@@ -71,11 +71,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from verify_variant_sets import (  # noqa: E402
-    GateError,
-    Index,
-    resolve_bundles,
-)
+# Import solely for the shared descriptor package's path bootstrap.
+import verify_variant_sets  # noqa: E402, F401
+
+from hkp_pack import descriptor_context  # noqa: E402
 
 
 class ReachabilityError(RuntimeError):
@@ -109,9 +108,9 @@ def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict
     descriptor under `tree` (the KDP's own directory unless one is given). Binding to
     a same-stem sibling instead answers "which schema governs this bundle" with a
     filename, so a bundle wired to one KMD is scored against another and every
-    reachability verdict below is about the wrong defaults. The resolution is shared
-    with `verify_variant_sets.py` rather than restated, so the two tools cannot
-    disagree about which schema a bundle has.
+    reachability verdict below is about the wrong defaults. The shared
+    `hkp_pack.descriptor_context` resolves the references for all offline readers,
+    so they cannot disagree about which schema a bundle has.
 
     The KMD is read for its defaults, not its schema in the abstract: the loader
     substitutes `default_value` for any field a descriptor's metadata omits, and
@@ -125,8 +124,10 @@ def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict
         raise ReachabilityError(f"{kdp} does not look like a *.kdp.json")
     root = Path(tree) if tree else kdp.parent
     try:
-        bundles = resolve_bundles(Index(str(root)))
-    except GateError as exc:
+        bundles = descriptor_context.resolve_bundles(
+            descriptor_context.Index(str(root))
+        )
+    except descriptor_context.DescriptorContextError as exc:
         raise ReachabilityError(str(exc))
     matching = [b for b in bundles if Path(b.kdp_path).resolve() == kdp.resolve()]
     if not matching:
