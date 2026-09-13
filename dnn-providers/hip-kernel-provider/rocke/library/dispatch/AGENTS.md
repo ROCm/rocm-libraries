@@ -24,9 +24,16 @@ are consumed only by their own builder and never enter the C++ parity identity. 
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
 be resolved from the kernel's own policy function**, not pinned here — `gfx942.py`
 calls `kernels.gfx942.attention_dense._tuned_waves_per_eu` for exactly that reason.
-A number pinned in the factory drifts away from the policy, the name tag and the
-compiled binary then disagree, and the name-keyed launcher cache serves the wrong
-HSACO.
+A number pinned in the factory drifts away from the policy: the name tag comes from
+the spec while the body is built from the policy's value, so the symbol advertises a
+knob the binary does not have. In-process that is a misleading symbol plus redundant
+cache entries; under AOT packaging, where the symbol *is* the identity, it serves the
+wrong HSACO.
+
+The launcher cache itself is keyed by `attention_dense_cache_key`, not by the symbol
+name, so the name is not a backstop for this — on the gfx950 runtime-shape path the
+symbol carries no `sq`/`sk` tokens at all (batch and the seqlens are runtime kernel
+params). Correctness rests entirely on the key.
 
 ## Candidate registry — priority table
 

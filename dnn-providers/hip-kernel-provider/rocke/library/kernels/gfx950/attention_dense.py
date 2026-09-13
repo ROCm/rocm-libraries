@@ -83,6 +83,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_spec_preflight,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
@@ -206,6 +207,36 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 return "gqa_pair_2phase"
         return super().resolved_persist_decode
 
+    @property
+    def runtime_shape(self) -> bool:
+        """Aligned dense path emits batch/seqlen_q/seqlen_kv as runtime kernel
+        params so ONE compiled kernel serves every shape -- this is what collapses
+        the AOT batch x seqlen instance explosion. Sub-modes that still bake seqlen
+        into the body (ragged / varlen / paged / persistent / sliding_window) keep
+        per-shape identity and are byte-identical to before."""
+        return not (
+            self.persistent
+            or self.ragged
+            or self.varlen
+            or self.paged
+            or self.sliding_window > 0
+        )
+
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The three shape fields this body emits as kernel params when
+        ``runtime_shape`` holds -- see ``build_attention_dense``, which appends
+        ``batch`` / ``seqlen_q`` / ``seqlen_kv`` to the signature and reads them
+        for the K/V buffer bound and the k-tile trip count.
+
+        Kept in sync with that signature by hand. A future per-batch
+        specialization would narrow this (bake ``batch``, keep the seqlens
+        runtime) -- the cache key follows automatically, but the body's
+        ``runtime_shape`` branches and the symbol name would have to derive from
+        this tuple first. Neither does today.
+        """
+        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+
     def _layout_name_parts(self) -> tuple[str, ...]:
         if (
             self.head_size == 128
@@ -213,6 +244,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         ):
             return (f"vpad{self.lds_v_row_pad}",)
         return ()
+
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._shape_name_parts()
 
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
@@ -244,15 +278,18 @@ def supports_attention_dense(
             "gfx950 attention_dense requires Gfx950AttentionDenseSpec, got "
             f"{type(spec).__name__}"
         )
-    try:
-        Gfx950AttentionDenseSpec(
-            **{
-                f.name: getattr(spec, f.name)
-                for f in _dataclass_fields(Gfx950AttentionDenseSpec)
-            }
-        )
-    except ValueError as e:
-        return False, str(e)
+    # Shared preflight: dataclass re-validation (which reconstructs THIS subclass, so
+    # the gfx950-private knob validators run too), positive extents, block_n dividing
+    # the query tile, and the 32-bit extent bounds. All four are base-spec properties
+    # with the same verdict for every dense body, so they live in kernels.common
+    # rather than being replicated here and in gfx942. The 32-bit check is what the
+    # runtime-shape path leans on: the extent is a device-side mul of two kernargs
+    # there, and batch/seqlen no longer split the launcher-cache key, so this is the
+    # only place an oversized launch can be caught -- and it runs per launch, since
+    # run_attention_dense calls supports() before the cache lookup.
+    ok, why = check_dense_spec_preflight(spec)
+    if not ok:
+        return False, why
     supported_block_m = {
         int(geometry["block_m"]) for geometry in DENSE_TILE_GEOMETRIES.values()
     }
@@ -260,11 +297,6 @@ def supports_attention_dense(
         return False, (
             f"gfx950 block_m must be one of {sorted(supported_block_m)}, "
             f"got {spec.block_m}"
-        )
-    if spec.block_m % spec.block_n != 0:
-        return False, (
-            f"block_n={spec.block_n} must divide block_m={spec.block_m} "
-            "for the causal KV partition"
         )
     if spec.block_n % spec.num_waves != 0:
         return False, (
@@ -339,6 +371,17 @@ def build_attention_dense(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    # Runtime problem shape: on the aligned dense path batch/seqlen_q/seqlen_kv are
+    # kernel params so ONE compiled kernel serves every shape. Declared right after
+    # scale to fix their ABI position (mirrored in attention_dense_signature). The
+    # baked sub-modes leave these None and keep their compile-time consts, so their
+    # emitted IR is unchanged.
+    if spec.runtime_shape:
+        batch_p = b.param("batch", I32)
+        seqlen_q_p = b.param("seqlen_q", I32)
+        seqlen_kv_p = b.param("seqlen_kv", I32)
+    else:
+        batch_p = seqlen_q_p = seqlen_kv_p = None
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -403,11 +446,17 @@ def build_attention_dense(
         )
     else:
         q_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if seqlen_q_p is not None else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(
+                b.mul(bt, seqlen_kv_p if seqlen_kv_p is not None else b.const_i32(Skv)),
+                b.const_i32(stride_k_tok),
+            ),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -491,11 +540,27 @@ def build_attention_dense(
     # emits two consts here, so sharing one silently breaks paged=False byte-identity
     # (the attention_dense representative-IR golden). ``_kv_cache_elems`` is a plain
     # Python int; paged widens the bound to the whole cache, contiguous keeps B*Skv.
-    _kv_cache_elems = (
-        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv) * Hkv * D * 2
-    )
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    if spec.runtime_shape:
+        # One kernel serves every seqlen, so the buffer num_records must track THIS
+        # launch's real K/V extent -- a baked bound would drop valid reads for a
+        # larger seqlen. batch * seqlen_kv * (Hkv*D*2) bytes; a separate product per
+        # rsrc mirrors the two-node note above.
+        _kv_elem_bytes = Hkv * D * 2
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+    else:
+        _kv_cache_elems = (
+            (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv)
+            * Hkv
+            * D
+            * 2
+        )
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
         # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
@@ -777,9 +842,12 @@ def build_attention_dense(
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         return out, p_vals, l_tile
 
-    n_ktiles_val = (
-        b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
-    )
+    if varlen:
+        n_ktiles_val = b.div(seqlen_kv_b, b.const_i32(BN))
+    elif spec.runtime_shape:
+        n_ktiles_val = b.div(seqlen_kv_p, b.const_i32(BN))
+    else:
+        n_ktiles_val = b.const_i32(n_ktiles)
     if causal:
         n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
@@ -974,7 +1042,10 @@ def build_attention_dense(
         )
     else:
         o_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if seqlen_q_p is not None else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
@@ -1994,6 +2065,14 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.runtime_shape:
+        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
+        # build_attention_dense (aligned dense path is shape-generic).
+        sig = (
+            sig.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
     if spec.use_sinks:
         sig = sig.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -2165,8 +2244,10 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    # The concrete frozen spec is the cache identity. New IR-live fields cannot
-    # silently collide merely because kernel_name() forgot to append a token.
+    # Cache identity is the spec minus the fields it declares in
+    # runtime_param_fields, so every shape on the runtime path shares one
+    # compiled binary. Every field the body still bakes participates, whether or
+    # not kernel_name() remembered to append a token for it.
     key = attention_dense_cache_key(spec, arch=arch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
@@ -2183,6 +2264,10 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.runtime_shape:
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
