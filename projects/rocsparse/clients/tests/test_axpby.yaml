@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -128,3 +128,13 @@ Tests:
   betai: [0.3]
   baseA: [rocsparse_index_base_zero]
   graph_test: true
+
+# Regression test for AISPARSE-650: axpby with a 64-bit index type and nnz just
+# past 2^32 exercises the block-index overflow that was fixed in the axpyi
+# device kernel. Needs a large-memory device (~52 GB of index/value data);
+# skipped elsewhere.
+- name: axpby_extra
+  category: nightly
+  function: axpby_extra
+  host_memory_gb: 1
+  device_memory_gb: 55

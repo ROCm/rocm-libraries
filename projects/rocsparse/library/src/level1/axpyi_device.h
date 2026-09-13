@@ -33,14 +33,17 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void axpyi_device(
         I nnz, T alpha, const X* x_val, const I* x_ind, Y* y, rocsparse_index_base idx_base)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // Cast to the (possibly 64-bit) index type before the multiply so the
+        // computation does not overflow a 32-bit unsigned int when nnz is large.
+        I gid    = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
 
-        if(idx >= nnz)
+        // Grid-stride loop so the full vector is processed even when the number
+        // of required blocks exceeds the grid size.
+        for(I idx = gid; idx < nnz; idx += stride)
         {
-            return;
+            I i  = x_ind[idx] - idx_base;
+            y[i] = rocsparse::fma<T>(alpha, x_val[idx], y[i]);
         }
-
-        I i  = x_ind[idx] - idx_base;
-        y[i] = rocsparse::fma<T>(alpha, x_val[idx], y[i]);
     }
 }
