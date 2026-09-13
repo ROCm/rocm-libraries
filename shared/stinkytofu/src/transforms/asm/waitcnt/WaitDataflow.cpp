@@ -434,15 +434,30 @@ struct CounterEmitState {
     }
 };
 
+// Drop the `n` oldest entries from a queue, keeping carriedIn aligned with the
+// entries it describes.
+void dropOldest(PerPredQueue& q, size_t n) {
+    q.ops.erase(q.ops.begin(), q.ops.begin() + n);
+    q.carriedIn -= std::min(q.carriedIn, n);
+}
+
 // Trim every per-pred queue in a counter to keep at most `keep` tail ops.
 void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
     for (auto& q : qs) {
         q.saturatedOps.clear();
         if (keep <= 0) {
-            q.ops.clear();
+            dropOldest(q, q.ops.size());
         } else if (static_cast<int>(q.ops.size()) > keep) {
-            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
+            dropOldest(q, q.ops.size() - static_cast<size_t>(keep));
         }
+    }
+}
+
+// Mark everything currently in flight as arriving from an earlier trip. Called
+// once per block walk, before the first local op is appended.
+void markCarriedIn(DataflowState& state) {
+    for (auto& qs : state.queues) {
+        for (auto& q : qs) q.carriedIn = q.ops.size();
     }
 }
 
@@ -646,9 +661,9 @@ void trimPredQueues(std::vector<PerPredQueue>& qs, BasicBlock* pred, int keep) {
         if (q.pred != pred) continue;
         q.saturatedOps.clear();
         if (keep <= 0) {
-            q.ops.clear();
+            dropOldest(q, q.ops.size());
         } else if (static_cast<int>(q.ops.size()) > keep) {
-            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
+            dropOldest(q, q.ops.size() - static_cast<size_t>(keep));
         }
     }
 }
@@ -794,11 +809,15 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     //
     // Conservative fallbacks live below: if either side lacks
     // MemTokenData we cannot prove disjointness and force wait 0.
+    //
+    // carriedInOnly restricts the scan to ops that reached this block over a CFG
+    // edge, i.e. a previous trip's. Only the loop-carried case wants that.
     auto scanDsAntiDeps = [&](const StinkyInstruction& anchor, const std::vector<int>& anchorTokens,
-                              bool barrierMode) {
+                              bool barrierMode, bool carriedInOnly = false) {
         for (const auto& q : state.queues[CK_DS]) {
             const int qsize = static_cast<int>(q.ops.size());
-            for (int idx = 0; idx < qsize; ++idx) {
+            const int end = carriedInOnly ? static_cast<int>(q.carriedIn) : qsize;
+            for (int idx = 0; idx < end; ++idx) {
                 StinkyInstruction* op = q.ops[idx];
                 if (op == inst) continue;
                 // Barrier guards every DS op on a matching token; LDS
@@ -821,6 +840,18 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     if (isBarrier(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
+    }
+
+    // Loop-carried WAR. Under a rotating ring the aliasing reads carry a different
+    // tag than the write this anchor guards, so the scans above find no overlap;
+    // LoopCarriedWarData supplies that tag. Only previous trips match -- this
+    // trip's reads name a different buffer, and draining them would cost exactly
+    // the overlap the extra buffer buys.
+    //
+    // `distance` does not select a trip: the carried-in prefix is every previous
+    // trip at once. Exact at distance 1, conservative beyond it.
+    if (const auto* war = inst->getModifier<LoopCarriedWarData>()) {
+        scanDsAntiDeps(*inst, war->tokens, /*barrierMode=*/false, /*carriedInOnly=*/true);
     }
 
     // Tensor-side conservative scan: any tensor_load_to_lds in flight
@@ -931,6 +962,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
     auto& plan = emitPlan[&bb];
     plan.clear();
 
+    markCarriedIn(state);
     CounterEmitState emit[CK_Count];
 
     for (IRBase& ir : bb) {
@@ -1125,6 +1157,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                     restoreTensorState(state, eit->second, keepLiveTensorState);
             }
             finalEntry[bb] = state;
+            markCarriedIn(state);
             CounterEmitState emit[CK_Count];
 
             for (IRBase& ir : *bb) {

@@ -1,0 +1,68 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Loop-carried WAR named by mod.loopcarriedwar, on a rotating triple-buffer ring.
+#
+# Reduced from the gfx1250 TDM+LDS main loop. Each trip reads the buffer RP
+# points at and fills the buffer WP points at, both pointers advancing one step
+# per trip. Trip k writes blk(k+2)%3, which is blk(k-1)%3 -- the buffer trip k-1
+# was reading. That is a distance-1 WAR, and it is invisible to the ordinary
+# token-overlap scan: trip k-1 tagged its reads [0] and trip k tags its write
+# [2], because a memtoken names a physical buffer only for the trip it was
+# emitted from.
+#
+# The barrier guarding the fill carries the relation TensileLite already knows
+# from _ldsTokenBackEdgeMap:
+#
+#   mod.loopcarriedwar = { tokens = [0], distance = 1 }
+#
+# read: "reads tagged [0] one trip ago alias the write I guard". The barrier
+# supplies cross-wave ordering; the s_wait_dscnt derived from this drains this
+# wave's own reads still in flight from the previous trip.
+#
+# Steady state at the barrier, oldest first:
+#
+#   [ R2(trip k-1), R1(trip k), R2(trip k) ]
+#
+# Only R2(trip k-1) is carried in over the back edge, and only it aliases. It
+# sits 3 from the tail, so the wait is 2 -- draining the previous trip's read
+# while leaving BOTH of this trip's reads outstanding. A wait of 0 here would
+# drain the pipeline the third buffer exists to fill.
+#
+# R1 is consumed by the wmma each trip; R2 deliberately is not, so it survives
+# to the back edge and gives the next trip something to find. See
+# waitcnt_insertion_loop_carried_war_already_drained.stir for the same loop when
+# it does not.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_war_annotated
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# The annotated drain: previous trip's read only.
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 2
+# CHECK-NEXT: s_barrier_signal{{.*}}tokens = [2]
+# CHECK-NEXT: s_barrier_wait{{.*}}tokens = [2]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 1
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_loop_carried_war_annotated() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  # trip k on entry: WP=blk(k+1)%3  RP=blk(k)%3
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  # ROTATE WP / RP are plain address arithmetic; elided. The tags below are
+  # already post-rotate, which is why the fill says [2] and the reads say [0].
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] } }
+  # consumes the first read only; the second stays in flight across the back edge
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

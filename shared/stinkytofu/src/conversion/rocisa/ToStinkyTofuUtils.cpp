@@ -1174,6 +1174,12 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
 
         if (auto memToken = inst->getMemToken()) {
             stinkyInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
+            // One rocisa payload, two modifiers: keeps the memtoken shape every
+            // existing pass matches on untouched.
+            if (memToken->warDistance > 0 && !memToken->warTokens.empty()) {
+                stinkyInst->addModifier<LoopCarriedWarData>(
+                    LoopCarriedWarData{memToken->warTokens, memToken->warDistance});
+            }
         }
 
         Legalized legalizedInsts =

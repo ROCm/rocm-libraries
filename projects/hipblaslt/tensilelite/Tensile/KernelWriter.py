@@ -974,7 +974,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] >= 2: 
+        if kernel["PrefetchGlobalRead"] >= 2:
           iterCode.add(globalReadCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
@@ -4333,7 +4333,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      
+
 
     if not kernel["NoLdsWriteCode"]:
       self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
@@ -4822,10 +4822,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
              kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
+            # The barrier orders the waves; naming the loop-carried WAR also lets
+            # StinkyTofu drain this wave's own reads of the buffer about to be
+            # refilled. Those reads carry the tag one back-edge step away, since a
+            # memtoken names a physical buffer only for its own trip. No rotation
+            # means an empty map and nothing to name.
+            warToken = self._ldsTokenBackEdgeMap().get(self.states.ldsWriteTokenIdx)
             pointerLWCode.add(self._syncThreads(
               kernel,
               "Waiting current LR finish for next GR(TDM), sync LDS%d"%self.states.ldsWriteTokenIdx,
-              memoryToken=[self.states.ldsWriteTokenIdx]))
+              memoryToken=[self.states.ldsWriteTokenIdx],
+              warTokens=[] if warToken is None else [warToken],
+              warDistance=0 if warToken is None else 1))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -6840,6 +6848,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+                               # Per-pass wall-time report on stderr once the pipeline has run.
+                               # Forced on while profiling kernel-generation time; restore
+                               #"TimePasses": bool(globalParameters.get("StinkyTofuTimePasses") or True),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
@@ -7165,7 +7176,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
-    
+
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
       tluA = kernel["ProblemType"]["TLUA"]
@@ -9266,7 +9277,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += 1
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
-  
+
       if kernel["PrefetchGL2"]:
         vgprIdx = int((vgprIdx + 1) / 2) * 2
         self.states.a.startVgprGL2PrefetchAddr = vgprIdx
@@ -9278,7 +9289,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
+          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
         if kernel["enableTDMMetadata"]:
           tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
           self.states.m.startVgprGL2PrefetchAddr = vgprIdx
@@ -9296,7 +9307,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       agprLimit = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
       if self.states.totalAgprs > agprLimit:
         raise RuntimeError("Generating asm kernel error: total agpr: %u not in [0, %u].\n" % (self.states.totalAgprs, agprLimit) )
-  
+
       # VGPR alloc marker
 
 
@@ -10354,8 +10365,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-  
-    self.states.numStoreSgprToLoad = storeSgprLoad      
+
+    self.states.numStoreSgprToLoad = storeSgprLoad
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
     if self.db["InitVgpr"] : print ("\n***WARNING: InitVgpr enabled, may impact performance\n")
@@ -11071,9 +11082,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # SyncThreads
   ##############################################################################
-  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None):
+  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None,
+                   warTokens=None, warDistance=0):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken,
+                         warTokens=warTokens, warDistance=warDistance)
     return Module("SyncThreads (Empty)")
 
   def _tailLoopBarrierTokens(self, kernel):
@@ -11245,6 +11258,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # wrong buffer and misses every loop-carried hazard.
     ldsTokenBackEdgeMap = self._ldsTokenBackEdgeMap()
     loopEntryOverride = {}
+    # token -> the token whose tail phase the back edge carried in. Differs from
+    # the token itself only under rotation, and that difference is the whole
+    # loop-carried WAR: the aliasing reads ran on the previous trip under the
+    # other tag.
+    loopEntryCarriedFrom = {}
     loopPendingTokens = set()
     loopHeadInfo = _detectLoopHeadInfo() \
       if kernel["PrefetchGlobalRead"] < 2 or ldsTokenBackEdgeMap else {}
@@ -11279,6 +11297,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               carriedState = tailStates.get(carriedToken, "standby")
               preState = tokenState.get(token, "standby")
               loopEntryOverride[token] = carriedState
+              loopEntryCarriedFrom[token] = carriedToken
               loopPendingTokens.add(token)
               if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
                 prologueBarrierTokens.append(token)
@@ -11307,6 +11326,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if branchLabelName in loopHeadInfo:
           # Reached the loop back-branch: drop any stale loop-entry overrides.
           loopEntryOverride.clear()
+          loopEntryCarriedFrom.clear()
           loopPendingTokens.clear()
 
         access = _classifyTokenAccess(item)
@@ -11318,22 +11338,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
           continue
 
         barrierTokens = []
+        warTokens = []
         for token in tokens:
+          carriedFrom = None
           if token in loopPendingTokens:
             # First access of this token inside the loop body: evaluate it
             # against the back-edge (loop-tail) state.
             state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+            carriedFrom = loopEntryCarriedFrom.get(token)
             loopPendingTokens.discard(token)
           else:
             state = tokenState.get(token, "standby")
-          if _conflicts(access, state):
-            barrierTokens.append(token)
+          if not _conflicts(access, state):
+            continue
+          barrierTokens.append(token)
+          # A read->write conflict resolved against the BACK EDGE is a
+          # loop-carried WAR, and under rotation the reads it names ran under
+          # `carriedFrom`. Naming it lets StinkyTofu drain this wave's own
+          # outstanding reads; the barrier alone only orders the waves.
+          if access == "write" and carriedFrom is not None and carriedFrom != token:
+            warTokens.append(carriedFrom)
 
         if barrierTokens:
           uniqueTokens = sorted(set(barrierTokens))
+          uniqueWarTokens = sorted(set(warTokens))
           syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
+          if uniqueWarTokens:
+            syncComments += ", WAR d=1 on " + ", ".join([f"LDS{t}" for t in uniqueWarTokens])
           barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
-          barrier.setMemToken(MemTokenData(uniqueTokens))
+          barrier.setMemToken(MemTokenData(uniqueTokens, uniqueWarTokens,
+                                           1 if uniqueWarTokens else 0))
           rewrittenItems.append(barrier)
           insertedCount += 1
 
@@ -11529,19 +11563,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
-  
+
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""
