@@ -489,9 +489,11 @@ RppStatus normalize_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr srcGe
     }
 
     if (!computeMeanStddev) {
-        for (Rpp32u i = 0; i < maxSize; i++)
+        // Both mean and stddev are caller-supplied, one parameter block per sample. Convert the
+        // supplied stddev to the (scale / stddev) multiplier form across the whole batch and keep
+        // the per-sample stride (do not zero maxSize) so each sample reads its own parameters.
+        for (Rpp32u i = 0; i < maxSize * batchSize; i++)
             stdDevTensorPtr[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
-        maxSize = 0;
     }
 
     std::atomic<RppStatus> axisMaskStatus{RPP_SUCCESS};
@@ -743,9 +745,11 @@ RppStatus normalize_generic_host_tensor(T1* srcPtr, RpptGenericDescPtr srcGeneri
         maxSize = std::max(maxSize, size);
     }
     if (!computeMeanStddev) {
-        for (Rpp32u i = 0; i < maxSize; i++)
+        // Both mean and stddev are caller-supplied, one parameter block per sample. Convert the
+        // supplied stddev to the (scale / stddev) multiplier form across the whole batch and keep
+        // the per-sample stride (do not zero maxSize) so each sample reads its own parameters.
+        for (Rpp32u i = 0; i < maxSize * batchSize; i++)
             stdDevTensorPtr[i] = (!stdDevTensorPtr[i]) ? 1.0f : scale / stdDevTensorPtr[i];
-        maxSize = 0;
     }
 
     omp_set_dynamic(0);
