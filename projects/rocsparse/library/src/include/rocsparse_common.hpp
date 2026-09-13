@@ -218,17 +218,33 @@ namespace rocsparse
                                         __shfl_down(std::imag(var), src_lane, width));
     }
 
+    // __builtin_amdgcn_readfirstlane is a 32-bit op. Wider types must be
+    // broadcast one 32-bit half at a time; floating-point types go through
+    // their bit pattern so they are not rounded to int.
+    __device__ __forceinline__ uint32_t read_first_lane_b32(uint32_t var)
+    {
+        return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int32_t>(var)));
+    }
+    __device__ __forceinline__ uint64_t read_first_lane_b64(uint64_t var)
+    {
+        const uint32_t lo = read_first_lane_b32(static_cast<uint32_t>(var));
+        const uint32_t hi = read_first_lane_b32(static_cast<uint32_t>(var >> 32));
+        return (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo);
+    }
+
     __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        const uint32_t bits
+            = read_first_lane_b32(static_cast<uint32_t>(__builtin_bit_cast(uint16_t, var)));
+        return __builtin_bit_cast(_Float16, static_cast<uint16_t>(bits));
     }
     __device__ __forceinline__ float read_first_lane(float var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(float, read_first_lane_b32(__builtin_bit_cast(uint32_t, var)));
     }
     __device__ __forceinline__ double read_first_lane(double var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return __builtin_bit_cast(double, read_first_lane_b64(__builtin_bit_cast(uint64_t, var)));
     }
     __device__ __forceinline__ int8_t read_first_lane(int8_t var)
     {
@@ -240,7 +256,7 @@ namespace rocsparse
     }
     __device__ __forceinline__ int64_t read_first_lane(int64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return static_cast<int64_t>(read_first_lane_b64(static_cast<uint64_t>(var)));
     }
     __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
     {
@@ -248,11 +264,11 @@ namespace rocsparse
     }
     __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b32(var);
     }
     __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
     {
-        return __builtin_amdgcn_readfirstlane(var);
+        return read_first_lane_b64(var);
     }
 
     __device__ __forceinline__ int any(int predicate)
