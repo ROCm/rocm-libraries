@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN clang-tidy"
+  short_description: "Run clang-tidy on changed hipDNN files"
+  default_prompt: "Use $hipdnn-tidy to run clang-tidy over the hipDNN translation units affected by my changed files."
