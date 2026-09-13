@@ -64,6 +64,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                         help="keep only shapes of this head dimension (repeatable; "
                              "default all). AITER's gfx942 forward table carries "
                              "hdim_v=128 exclusively")
+    parser.add_argument("--causal", action="append", default=[], type=int, choices=[0, 1],
+                        dest="causal",
+                        help="keep only shapes with this mask setting (repeatable; default "
+                             "both). AITER's gfx950 forward table has no causal kernel, so a "
+                             "corpus built to train it asks for `--causal 0`")
     for source, share in assemble.DEFAULT_SHARES.items():
         parser.add_argument(f"--{source}-share", type=float, default=share,
                             dest=f"{source}_share",
@@ -84,11 +89,12 @@ def report(manifest: dict) -> None:
     for regime, total in manifest["regimes"].items():
         print(f"  {regime:<26} {total:5d}")
     applied = manifest["reports"]["filter"]
-    if applied["dtypes"] or applied["head_dims"]:
+    if applied["dtypes"] or applied["head_dims"] or applied.get("causal"):
         excluded = manifest["reports"]["filtered_out"]
         dropped = manifest["reports"]["sweep"].get("filtered", 0)
         print(f"filter                  dtypes={applied['dtypes'] or 'any'} "
-              f"head_dims={applied['head_dims'] or 'any'}")
+              f"head_dims={applied['head_dims'] or 'any'} "
+              f"causal={applied.get('causal') or 'any'}")
         for source, total in sorted(excluded.items()):
             print(f"  {source:<10} {total:5d} excluded")
         print(f"  {'sweep':<10} {dropped:5d} draws rejected")
@@ -105,7 +111,8 @@ def main(argv=None) -> int:
         arch=args.arch, batches=tuple(args.model_batches),
         declaration=args.declaration, min_candidates=args.min_candidates,
         max_bytes=args.max_bytes,
-        keep=Filter(dtypes=tuple(args.dtypes), head_dims=tuple(args.head_dims)),
+        keep=Filter(dtypes=tuple(args.dtypes), head_dims=tuple(args.head_dims),
+                    causal=tuple(bool(value) for value in args.causal)),
         shares={source: getattr(args, f"{source}_share")
                 for source in assemble.DEFAULT_SHARES})
     report(manifest)
