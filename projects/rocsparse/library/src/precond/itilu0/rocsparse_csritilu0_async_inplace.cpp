@@ -965,7 +965,7 @@ namespace rocsparse
                                                  hipStream_t stream_,
                                                  P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::ceil_div(target_size_, BLOCKSIZE));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1023,7 +1023,7 @@ namespace rocsparse
     static void
         kernel_compute_coo_dispatch(J target_size_, int wavefront_size, hipStream_t stream_, P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::ceil_div(target_size_, BLOCKSIZE));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1083,7 +1083,7 @@ namespace rocsparse
                                                     hipStream_t stream_,
                                                     P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::ceil_div(target_size_, BLOCKSIZE));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
@@ -1168,7 +1168,7 @@ namespace rocsparse
                                              hipStream_t stream_,
                                              P... p)
     {
-        dim3 blocks((target_size_ + BLOCKSIZE - 1) / BLOCKSIZE);
+        dim3 blocks(rocsparse::ceil_div(target_size_, BLOCKSIZE));
         dim3 threads(BLOCKSIZE);
         if(wavefront_size == 32)
         {
