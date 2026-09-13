@@ -65,7 +65,10 @@ void expect_count(const std::string& ir, const char* needle, size_t want, int li
 
 /* Build a single-intrinsic kernel and return its lowered LLVM IR text. */
 template <typename BuildFn>
-std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx950")
+std::string lower_one(const char* name,
+                      BuildFn build,
+                      const char* arch = "gfx950",
+                      rocke_llvm_flavor_t flavor = ROCKE_LLVM_FLAVOR_AUTO)
 {
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
@@ -80,7 +83,7 @@ std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx95
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-        rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, arch, &ll, err, sizeof(err));
+        rocke_ir_builder_kernel(&b), flavor, arch, &ll, err, sizeof(err));
     std::string ir;
     if(st != ROCKE_OK || ll == nullptr)
     {
@@ -93,6 +96,54 @@ std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx95
     std::free(ll);
     rocke_ir_builder_free(&b);
     return ir;
+}
+
+rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem);
+
+void case_gfx1250_standalone_bridge()
+{
+    const std::string ir = lower_one(
+        "gfx1250_bridge",
+        [](rocke_ir_builder_t* b) {
+            const int shape[] = {1};
+            rocke_value_t* dst = global_ptr_param(b, "dst", rocke_i16());
+            rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "barrier");
+            rocke_value_t* local = rocke_b_smem_addr_of(b, smem);
+            rocke_value_t* members = rocke_b_const_i32(b, 2);
+            rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+            rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
+
+            rocke_b_s_wait_tensorcnt(b, 3);
+            rocke_b_s_barrier_signal(b, 1);
+            rocke_b_s_barrier_wait(b, 2);
+            rocke_b_s_barrier_init(b, local, members);
+            rocke_b_s_barrier_signal_var(b, local, members);
+            rocke_b_s_barrier_join(b, local);
+            rocke_b_s_wakeup_barrier(b, local);
+            rocke_b_s_barrier_leave(b, 4);
+            rocke_b_s_delay_alu(b, 0x1234);
+            rocke_b_s_wait_alu(b, 0x2345);
+            rocke_b_s_clause(b, 0x3456);
+            rocke_b_s_wait_xcnt(b, 0x4567);
+            rocke_b_global_store_async_from_lds(b, dst, local, 16, -4, 31);
+            rocke_b_global_load_tr16_b128(b, dst, rocke_i16());
+            rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
+            rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
+        },
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
+
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(3)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(3)");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.leave(i16 4)");
+    EXPECT_IR(ir, "call void asm sideeffect \"s_delay_alu 4660\", \"\"()");
+    EXPECT_IR(ir, "call void asm sideeffect \"s_wait_xcnt 17767\", \"\"()");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.global.store.async.from.lds.b128(");
+    EXPECT_IR(ir, "call <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.load.to.lds(");
+    EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
 }
 
 rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
@@ -497,9 +548,21 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_WAIT_ASYNCMARK, "tile.wait_asyncmark"},
         {ROCKE_OP_TILE_S_WAIT_EVENT, "tile.s_wait_event"},
         {ROCKE_OP_TILE_S_WAIT_ASYNCCNT, "tile.s_wait_asynccnt"},
+        {ROCKE_OP_TILE_S_WAIT_TENSORCNT, "tile.s_wait_tensorcnt"},
+        {ROCKE_OP_TILE_S_BARRIER_SIGNAL, "tile.s_barrier_signal"},
+        {ROCKE_OP_TILE_S_BARRIER_WAIT, "tile.s_barrier_wait"},
+        {ROCKE_OP_TILE_S_BARRIER_INIT, "tile.s_barrier_init"},
+        {ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR, "tile.s_barrier_signal_var"},
+        {ROCKE_OP_TILE_S_BARRIER_JOIN, "tile.s_barrier_join"},
+        {ROCKE_OP_TILE_S_WAKEUP_BARRIER, "tile.s_wakeup_barrier"},
+        {ROCKE_OP_TILE_S_BARRIER_LEAVE, "tile.s_barrier_leave"},
         {ROCKE_OP_TILE_S_PREFETCH_INST, "tile.s_prefetch_inst"},
         {ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, "tile.buffer_load_lds_async"},
         {ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, "tile.global_load_async_to_lds"},
+        {ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS, "tile.global_store_async_from_lds"},
+        {ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128, "tile.global_load_tr16_b128"},
+        {ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS, "tile.tensor_load_to_lds"},
+        {ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS, "tile.tensor_store_from_lds"},
         {ROCKE_OP_CF_RETURN, "cf.return"},
     };
     for(const auto& e : k_expect)
@@ -551,6 +614,7 @@ const TestCase k_cases[] = {
     {"s_prefetch_inst", case_s_prefetch_inst},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
+    {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
 };
 

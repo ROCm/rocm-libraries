@@ -324,6 +324,10 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
     ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC,
     ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS,
+    ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128,
+    ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS,
+    ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS,
     ROCKE_OP_TILE_BUFFER_RSRC,
     ROCKE_OP_TILE_BUFFER_LOAD_F16,
     ROCKE_OP_TILE_BUFFER_LOAD_VN_F16,
@@ -382,6 +386,14 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_S_BARRIER_BARE,
     ROCKE_OP_TILE_S_WAITCNT,
     ROCKE_OP_TILE_S_WAIT_ASYNCCNT,
+    ROCKE_OP_TILE_S_WAIT_TENSORCNT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL,
+    ROCKE_OP_TILE_S_BARRIER_WAIT,
+    ROCKE_OP_TILE_S_BARRIER_INIT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR,
+    ROCKE_OP_TILE_S_BARRIER_JOIN,
+    ROCKE_OP_TILE_S_WAKEUP_BARRIER,
+    ROCKE_OP_TILE_S_BARRIER_LEAVE,
     ROCKE_OP_TILE_ASYNCMARK,
     ROCKE_OP_TILE_WAIT_ASYNCMARK,
     ROCKE_OP_TILE_S_WAIT_EVENT,
@@ -953,6 +965,10 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const rocke_type_t* const* result_types,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts);
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm);
 
 /* ----- cross-lane / vector pack-extract ----- */
 rocke_value_t* rocke_b_readfirstlane(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -1195,6 +1211,29 @@ void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
                                       int width_bytes,
                                       int coherency,
                                       int offset_bytes);
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
+                                         int cachepolicy);
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
+                                             const rocke_type_t* dtype);
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
+                                int cachepolicy);
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
+                                   int cachepolicy);
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -1307,6 +1346,18 @@ void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
 void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type);
+void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type);
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
+                            rocke_value_t* member_count);
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
+                                  rocke_value_t* member_count);
+void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_barrier_leave(rocke_ir_builder_t* b, int barrier_type);
 void rocke_b_asyncmark(rocke_ir_builder_t* b);
 void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
