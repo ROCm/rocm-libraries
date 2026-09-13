@@ -1,0 +1,64 @@
+# RPP Test Categories Configuration
+# Time-based test organization for CI/CD pipeline efficiency
+# This file defines test categories by execution time and criticality
+
+test_categories:
+  quick:
+    description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    test_patterns:
+      # Minimal sanity tests for HOST and HIP backends
+      - "rpp_sanity_test_brightness_host_f32"
+      - "rpp_sanity_test_brightness_hip_f32"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Core functionality - Run on every PR (target: < 30 min)"
+    test_patterns:
+      # Sanity tests
+      - "rpp_sanity_test_brightness_host_f32"
+      - "rpp_sanity_test_brightness_hip_f32"
+      # Misc QA tests (ROCm stack only - no extra deps)
+      - "rpp_qa_tests_tensor_misc_host_all"
+      - "rpp_qa_tests_tensor_misc_hip_all"
+    labels:
+      - "standard"
+      - "pr"
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: < 2 hours)"
+    test_patterns:
+      # All QA tests (qa_mode 1)
+      - "rpp_sanity_test_.*"
+      - "rpp_qa_tests_tensor_image_host_all"
+      #- "rpp_qa_tests_tensor_image_hip_all"
+      - "rpp_qa_tests_tensor_voxel_host_all"
+      - "rpp_qa_tests_tensor_voxel_hip_all"
+      - "rpp_qa_tests_tensor_audio_host_all"
+      - "rpp_qa_tests_tensor_audio_hip_all"
+      - "rpp_qa_tests_tensor_misc_host_all"
+      #- "rpp_qa_tests_tensor_misc_hip_all"
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+  full:
+    description: "Complete test suite - (target: hours+)"
+    test_patterns:
+      # All RPP tests including qa_mode 0 and performance (test_type 1)
+      - "rpp_.*"
+    labels:
+      - "full"
+      - "weekly"
+      - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours
