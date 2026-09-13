@@ -27,7 +27,7 @@ using PaddingConfig = GemmConfigVectorSizeFallback<GemmConfigComputeV3_WMMA<Prec
 template <typename Tuple>
 class TestGemmUnalignedMNK : public ::testing::Test
 {
-protected:
+    protected:
     using ADataType   = std::tuple_element_t<0, Tuple>;
     using BDataType   = std::tuple_element_t<1, Tuple>;
     using AccDataType = std::tuple_element_t<2, Tuple>;

@@ -12,7 +12,6 @@
 // padding
 namespace ck_tile_example {
 
-
 template <typename GemmConfig,
           ck_tile::index_t VectorSizeA_,
           ck_tile::index_t VectorSizeB_,
@@ -46,7 +45,8 @@ float invoke_with_best_ab_vector_size(ck_tile::index_t a_extent,
     if constexpr(Max >= 16)
     {
         if(a_extent % 16 == 0 && b_extent % 16 == 0)
-            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, 16, 16, VC>>();
+            return invoke
+                .template operator()<GemmConfigVectorSizeFallback<GemmConfig, 16, 16, VC>>();
     }
     if constexpr(Max >= 8)
     {
@@ -76,22 +76,26 @@ float invoke_with_best_c_vector_size(ck_tile::index_t c_extent, InvokeFn&& invok
     if constexpr(Max >= 16)
     {
         if(c_extent % 16 == 0)
-            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 16>>();
+            return invoke
+                .template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 16>>();
     }
     if constexpr(Max >= 8)
     {
         if(c_extent % 8 == 0)
-            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 8>>();
+            return invoke
+                .template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 8>>();
     }
     if constexpr(Max >= 4)
     {
         if(c_extent % 4 == 0)
-            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 4>>();
+            return invoke
+                .template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 4>>();
     }
     if constexpr(Max >= 2)
     {
         if(c_extent % 2 == 0)
-            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 2>>();
+            return invoke
+                .template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 2>>();
     }
     return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig, VA, VB, 1>>();
 }
@@ -156,13 +160,13 @@ float dispatch_vector_size_fallback(ck_tile::index_t M,
     constexpr bool b_is_row_major = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
     constexpr bool c_is_row_major = std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
 
-    // Fallback is only enabled if the GemmConfig allows smaller vector loads, the vector size is not fixed,
-    // and A and B have a packed size of 1.
-    constexpr bool fallback_enabled =
-        GemmConfig::EnableSmallerVectorLoadFallback && !GemmConfig::FixedVectorSize &&
-        std::is_same_v<ADataType, BDataType> &&
-        ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
-        ck_tile::numeric_traits<BDataType>::PackedSize == 1;
+    // Fallback is only enabled if the GemmConfig allows smaller vector loads, the vector size is
+    // not fixed, and A and B have a packed size of 1.
+    constexpr bool fallback_enabled = GemmConfig::EnableSmallerVectorLoadFallback &&
+                                      !GemmConfig::FixedVectorSize &&
+                                      std::is_same_v<ADataType, BDataType> &&
+                                      ck_tile::numeric_traits<ADataType>::PackedSize == 1 &&
+                                      ck_tile::numeric_traits<BDataType>::PackedSize == 1;
 
     // C additionally needs its own check
     constexpr bool ab_reducible = fallback_enabled;
@@ -182,19 +186,18 @@ float dispatch_vector_size_fallback(ck_tile::index_t M,
     // odd stride (or batch stride, for batched GEMM) can make a load misaligned even when the
     // extent itself divides evenly.
     const bool needsScalarAB =
-        ab_reducible && ((a_contiguous_extent % ABVectorSize != 0) ||
-                        (b_contiguous_extent % ABVectorSize != 0) ||
-                        (stride_A % ABVectorSize != 0) || (stride_B % ABVectorSize != 0) ||
-                        (batch_stride_A % ABVectorSize != 0) ||
-                        (batch_stride_B % ABVectorSize != 0));
+        ab_reducible &&
+        ((a_contiguous_extent % ABVectorSize != 0) || (b_contiguous_extent % ABVectorSize != 0) ||
+         (stride_A % ABVectorSize != 0) || (stride_B % ABVectorSize != 0) ||
+         (batch_stride_A % ABVectorSize != 0) || (batch_stride_B % ABVectorSize != 0));
     const bool needsScalarC =
-        c_reducible && ((c_contiguous_extent % CVectorSize != 0) ||
-                       (stride_C % CVectorSize != 0) || (batch_stride_C % CVectorSize != 0));
+        c_reducible && ((c_contiguous_extent % CVectorSize != 0) || (stride_C % CVectorSize != 0) ||
+                        (batch_stride_C % CVectorSize != 0));
 
     // Tile-size alignment is a separate, coarser boundary than the vector-size one above: a
     // shape can be vector-aligned yet still not be a multiple of the tile size. K's alignment
     // only matters when AB can fall back; M/N's only when C can.
-    const bool needsPadK  = ab_reducible && (K % (GemmConfig::K_Tile * kbatch) != 0);
+    const bool needsPadK = ab_reducible && (K % (GemmConfig::K_Tile * kbatch) != 0);
     const bool needsPadMN =
         c_reducible && ((M % GemmConfig::M_Tile != 0) || (N % GemmConfig::N_Tile != 0));
     const bool needsPad = needsPadK || needsPadMN;
@@ -230,17 +233,20 @@ float dispatch_vector_size_fallback(ck_tile::index_t M,
     if constexpr(c_reducible)
     {
         if(needsScalarC)
-            return invoke_with_best_c_vector_size<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>(
-                c_contiguous_extent, invoke);
+            return invoke_with_best_c_vector_size<GemmConfig,
+                                                  ABVectorSize,
+                                                  ABVectorSize,
+                                                  CVectorSize>(c_contiguous_extent, invoke);
     }
     if constexpr(ab_reducible)
     {
         if(needsPad)
-            return invoke.template operator()<
-                GemmConfigVectorSizeFallback<GemmConfig, ABVectorSize, ABVectorSize, CVectorSize>>();
+            return invoke.template operator()<GemmConfigVectorSizeFallback<GemmConfig,
+                                                                           ABVectorSize,
+                                                                           ABVectorSize,
+                                                                           CVectorSize>>();
     }
     return invoke.template operator()<GemmConfig>();
 }
 
 } // namespace ck_tile_example
-

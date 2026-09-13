@@ -202,24 +202,23 @@ int run_batched_gemm_example_with_layouts(int argc,
                                             n_repeat);
     };
 
-    float ave_time =
-        ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
-                                                        ADataType,
-                                                        BDataType,
-                                                        CDataType,
-                                                        ALayout,
-                                                        BLayout,
-                                                        CLayout>(M,
-                                                                 N,
-                                                                 K,
-                                                                 stride_A,
-                                                                 stride_B,
-                                                                 stride_C,
-                                                                 kbatch,
-                                                                 invoke,
-                                                                 batch_stride_A,
-                                                                 batch_stride_B,
-                                                                 batch_stride_C);
+    float ave_time = ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
+                                                                    ADataType,
+                                                                    BDataType,
+                                                                    CDataType,
+                                                                    ALayout,
+                                                                    BLayout,
+                                                                    CLayout>(M,
+                                                                             N,
+                                                                             K,
+                                                                             stride_A,
+                                                                             stride_B,
+                                                                             stride_C,
+                                                                             kbatch,
+                                                                             invoke,
+                                                                             batch_stride_A,
+                                                                             batch_stride_B,
+                                                                             batch_stride_C);
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 

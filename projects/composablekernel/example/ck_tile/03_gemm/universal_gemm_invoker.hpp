@@ -326,7 +326,7 @@ struct UniversalInvoker
                                              GemmConfig::NumWaveGroups,
                                              GemmConfig::FixedVectorSize,
                                              GemmConfig::VectorSizeC,
-                                             1,     /*BlockedXDLN_PerWarp_*/
+                                             1, /*BlockedXDLN_PerWarp_*/
                                              GemmConfig::DoubleSmemBuffer,
                                              AComputeDataType,
                                              BComputeDataType>>;

@@ -376,15 +376,14 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                     rotating_count);
     };
 
-    float ave_time =
-        ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
-                                                        ADataTypeBuf,
-                                                        BDataTypeBuf,
-                                                        CDataType,
-                                                        ALayout,
-                                                        BLayout,
-                                                        CLayout>(
-            M, N, K, stride_A, stride_B, stride_C, kbatch, invoke);
+    float ave_time = ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
+                                                                    ADataTypeBuf,
+                                                                    BDataTypeBuf,
+                                                                    CDataType,
+                                                                    ALayout,
+                                                                    BLayout,
+                                                                    CLayout>(
+        M, N, K, stride_A, stride_B, stride_C, kbatch, invoke);
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
