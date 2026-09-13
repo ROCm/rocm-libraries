@@ -36,15 +36,15 @@ inline void compute_generic_bilinear_srclocs_and_interpolate(T* srcPtrChannel,
     Rpp32f weightParams[4], bilinearCoeffs[4];
     Rpp32s srcLoc[4];
     srcLT.y = (Rpp32s)srcY;  // Bilinear LT point y value
-    srcLT.y = std::min(srcLT.y, roiLTRB->ltrbROI.rb.y - 1);
-    srcRB.y = std::min(srcLT.y + 1, roiLTRB->ltrbROI.rb.y - 1);  // Bilinear RB point y value
-    srcLT.x = (Rpp32s)srcX;                                      // Bilinear LT point x value
-    srcLT.x = std::min(srcLT.x, roiLTRB->ltrbROI.rb.x - 1);
-    srcRB.x = std::min(srcLT.x + 1, roiLTRB->ltrbROI.rb.x - 1);  // Bilinear RB point x value
-    weightParams[0] = srcY - srcLT.y;                            // weightedHeight
-    weightParams[1] = 1 - weightParams[0];                       // 1 - weightedHeight
-    weightParams[2] = srcX - srcLT.x;                            // weightedWidth
-    weightParams[3] = 1 - weightParams[2];                       // 1 - weightedWidth
+    srcLT.y = std::min(srcLT.y, roiLTRB->ltrbROI.rb.y);
+    srcRB.y = std::min(srcLT.y + 1, roiLTRB->ltrbROI.rb.y);  // Bilinear RB point y value
+    srcLT.x = (Rpp32s)srcX;                                  // Bilinear LT point x value
+    srcLT.x = std::min(srcLT.x, roiLTRB->ltrbROI.rb.x);
+    srcRB.x = std::min(srcLT.x + 1, roiLTRB->ltrbROI.rb.x);  // Bilinear RB point x value
+    weightParams[0] = srcY - srcLT.y;                        // weightedHeight
+    weightParams[1] = 1 - weightParams[0];                   // 1 - weightedHeight
+    weightParams[2] = srcX - srcLT.x;                        // weightedWidth
+    weightParams[3] = 1 - weightParams[2];                   // 1 - weightedWidth
     bilinearCoeffs[0] =
         weightParams[1] * weightParams[3];  // (1 - weightedHeight) * (1 - weightedWidth)
     bilinearCoeffs[1] = weightParams[1] * weightParams[2];  // (1 - weightedHeight) * weightedWidth
@@ -104,16 +104,14 @@ inline void compute_generic_bilinear_srclocs_1c_avx(__m256& pSrcY, __m256& pSrcX
         _mm256_mul_ps(pWeightParams[0], pWeightParams[3]);  // weightedHeight * (1 - weightedWidth)
     pBilinearCoeffs[3] =
         _mm256_mul_ps(pWeightParams[0], pWeightParams[2]);  // weightedHeight * weightedWidth
-    pSrcBilinearLTyx[0] = _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[0], pRoiLTRB[1]),
-                                        _mm256_sub_ps(pRoiLTRB[3], avx_p1));
-    pSrcBilinearLTyx[1] = _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[1], pRoiLTRB[0]),
-                                        _mm256_sub_ps(pRoiLTRB[2], avx_p1));
-    pSrcBilinearLTyx[2] =
-        _mm256_min_ps(_mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[0], avx_p1), pRoiLTRB[1]),
-                      _mm256_sub_ps(pRoiLTRB[3], avx_p1));
-    pSrcBilinearLTyx[3] =
-        _mm256_min_ps(_mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[1], avx_p1), pRoiLTRB[0]),
-                      _mm256_sub_ps(pRoiLTRB[2], avx_p1));
+    pSrcBilinearLTyx[0] =
+        _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[0], pRoiLTRB[1]), pRoiLTRB[3]);
+    pSrcBilinearLTyx[1] =
+        _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[1], pRoiLTRB[0]), pRoiLTRB[2]);
+    pSrcBilinearLTyx[2] = _mm256_min_ps(
+        _mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[0], avx_p1), pRoiLTRB[1]), pRoiLTRB[3]);
+    pSrcBilinearLTyx[3] = _mm256_min_ps(
+        _mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[1], avx_p1), pRoiLTRB[0]), pRoiLTRB[2]);
     __m256i pxSrcLocsTL = _mm256_cvtps_epi32(
         _mm256_fmadd_ps(pSrcBilinearLTyx[0], pSrcStrideH,
                         pSrcBilinearLTyx[1]));  // 8 Top-Left memory locations = 8 Top-Left srcYs *
@@ -164,16 +162,14 @@ inline void compute_generic_bilinear_srclocs_3c_avx(__m256& pSrcY, __m256& pSrcX
         _mm256_mul_ps(pWeightParams[0], pWeightParams[3]);  // weightedHeight * (1 - weightedWidth)
     pBilinearCoeffs[3] =
         _mm256_mul_ps(pWeightParams[0], pWeightParams[2]);  // weightedHeight * weightedWidth
-    pSrcBilinearLTyx[0] = _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[0], pRoiLTRB[1]),
-                                        _mm256_sub_ps(pRoiLTRB[3], avx_p1));
-    pSrcBilinearLTyx[1] = _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[1], pRoiLTRB[0]),
-                                        _mm256_sub_ps(pRoiLTRB[2], avx_p1));
-    pSrcBilinearLTyx[2] =
-        _mm256_min_ps(_mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[0], avx_p1), pRoiLTRB[1]),
-                      _mm256_sub_ps(pRoiLTRB[3], avx_p1));
-    pSrcBilinearLTyx[3] =
-        _mm256_min_ps(_mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[1], avx_p1), pRoiLTRB[0]),
-                      _mm256_sub_ps(pRoiLTRB[2], avx_p1));
+    pSrcBilinearLTyx[0] =
+        _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[0], pRoiLTRB[1]), pRoiLTRB[3]);
+    pSrcBilinearLTyx[1] =
+        _mm256_min_ps(_mm256_max_ps(pSrcBilinearLTyx[1], pRoiLTRB[0]), pRoiLTRB[2]);
+    pSrcBilinearLTyx[2] = _mm256_min_ps(
+        _mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[0], avx_p1), pRoiLTRB[1]), pRoiLTRB[3]);
+    pSrcBilinearLTyx[3] = _mm256_min_ps(
+        _mm256_max_ps(_mm256_add_ps(pSrcBilinearLTyx[1], avx_p1), pRoiLTRB[0]), pRoiLTRB[2]);
     if (isSrcPKD3) {
         pSrcBilinearLTyx[1] = _mm256_mul_ps(
             pSrcBilinearLTyx[1], avx_p3);  // if pkd3, multiply Left-Top column location by 3
