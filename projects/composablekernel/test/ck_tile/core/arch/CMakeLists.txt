@@ -14,3 +14,8 @@ if(GPU_TARGETS MATCHES "gfx9|amdgcnspirv")
 else()
     message(DEBUG "Skipping test_arch tests for current target")
 endif()
+
+# Ungated: the assertions are compile-time only and never instantiate the gfx1250-only
+# device entry points, whose non-gfx125 branch is a hard static_assert. Still compiled as
+# HIP for every SUPPORTED_GPU_TARGETS, so keep device-side instantiations out of this file.
+add_gtest_executable(test_barrier test_barrier.cpp)
