@@ -291,7 +291,10 @@ namespace
 // find it already started and report correct behaviour as a regression. Each iteration
 // runs the lifecycle in a fresh process instead: threadsafe death-test style re-execs
 // this binary, and the child's exit status carries its verdict back.
-TEST(TestBackendLibraryResolutionDeathTest, SetterIsRefusedOnceResolutionHasRun)
+// The suite name ends in Death rather than DeathTest because hipDNN's test-name
+// validator reserves "Test" for the leading keyword. Ordering protection comes from
+// the threadsafe style set below, which re-execs instead of forking this process.
+TEST(TestBackendLibraryResolutionDeath, SetterIsRefusedOnceResolutionHasRun)
 {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
