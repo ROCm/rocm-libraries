@@ -13,7 +13,7 @@ inline-frame utilities import no rocKE. From `platform/`, these tools live in
 - `emit_inline_frames.py` — write the inline-frames sidecar for a trace you
   already decoded.
 - `capture_wavescope_pmc.py` — capture hardware-counter CSVs for WaveScope and
-  versioned measurement JSON for future JSON import, through the perf primitives.
+  versioned measurement JSON, through the perf primitives.
 
 ## What WaveScope shows
 
@@ -118,19 +118,22 @@ gemm-pmc-before/
   samples/0001/...
 ```
 
-For **WaveScope today**, open the ATT dispatch, select **Bottlenecks**, and upload
-one of the printed CSV paths. Each repeat stays separate. A replay pass may hold
-only part of the counter set; keep all relevant pass files from one repeat when
-colocating them with a trace, without overwriting identically named files. Do not
-combine multiple repeats into one CSV import. The raw files retain warmup and
-other-kernel dispatches, while JSON medians select the target and exclude warmup.
+To import counters into **WaveScope**, open the ATT dispatch, select
+**Bottlenecks**, and upload one of the printed CSV paths. Each repeat stays
+separate. A replay pass may hold only part of the counter set; keep all relevant
+pass files from one repeat when colocating them with a trace, without overwriting
+identically named files. Do not combine multiple repeats into one CSV import. The
+raw files retain warmup and other-kernel dispatches, while JSON medians select the
+target and exclude warmup.
 
-For **future JSON import**, retain the entire bundle and read `manifest.json`.
-It uses `rocke.bench.artifacts/v1`; measurements use `rocke.bench.measurement/v1`.
-See the [artifact contract](../../../../../python/rocke/benchmark/perf/README.md#portable-artifacts-csv-now-measurement-json-for-future-consumers)
+To consume the **JSON contract**, retain the entire bundle and read
+`manifest.json`. It uses `rocke.bench.artifacts/v1`; measurements use
+`rocke.bench.measurement/v1`.
+See the [artifact contract](../../../../../python/rocke/benchmark/perf/README.md#portable-artifacts-counter-csvs-and-measurement-json)
 for selection, repeat identity, SHA-256 inventory and timing-source semantics.
-WaveScope can implement this reader later without another producer change.
-There is no format switch or WaveScope-version detection in the utility.
+Every capture writes both formats, so a bundle already satisfies a JSON consumer
+the moment one exists. The utility emits one fixed layout and each consumer reads
+the part it understands.
 
 The utility defaults to **export-only** (no history writes). Add `--store-history`
 to compare later captures against stored baselines; `--cache`, `--threshold`,

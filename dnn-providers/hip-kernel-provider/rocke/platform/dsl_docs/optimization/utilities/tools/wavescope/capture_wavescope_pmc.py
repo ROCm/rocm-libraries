@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Capture PMC artifacts for WaveScope using rocKE's perf primitives.
 
-Always saves original profiler CSVs AND versioned measurement JSON. Upload a
-CSV in WaveScope's Bottlenecks tab today; the manifest and JSON are the contract
-for a future JSON reader. No WaveScope installation or ATT decoder is required.
+Every capture writes both formats: the original profiler CSVs, which WaveScope's
+Bottlenecks tab imports, and versioned measurement JSON entered through
+`manifest.json`. Each consumer reads the format it understands and ignores the
+rest, so the same bundle serves them all. Capture runs standalone: neither a
+WaveScope installation nor an ATT decoder is involved.
 
 Run from any directory; the adjacent platform/python package is selected for
 both the perf subprocess and its launcher. The launcher's working directory and
@@ -124,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     print(
-        "ATT association: UNBOUND. Verify the workload, GPU and binary. JSON is always exported; current WaveScope CSV import does not read it.",
+        "ATT association: UNBOUND. Verify the workload, GPU and binary. Both formats are exported; upload a CSV for WaveScope's Bottlenecks tab.",
         file=sys.stderr,
     )
     return result.returncode
