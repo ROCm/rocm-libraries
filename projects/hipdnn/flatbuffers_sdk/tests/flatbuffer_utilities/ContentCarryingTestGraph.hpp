@@ -38,6 +38,9 @@ public:
         std::vector<int64_t> dims{4, 8};
         std::vector<int64_t> strides{8, 1};
         std::optional<int64_t> raggedOffsetTensorUid = std::nullopt;
+        /// A required (non-optional) `value: TensorValue` union, so tests can prove the
+        /// scalar Float memcmp site folds every byte, not just presence/absence.
+        std::optional<float> value = std::nullopt;
     };
     struct NodeSpec
     {
@@ -49,6 +52,8 @@ public:
         int64_t in0TensorUid = 1;
         int64_t out0TensorUid = 2;
         std::optional<int64_t> in1TensorUid = std::nullopt;
+        /// A real float knob, so tests can prove float fields key on their bytes.
+        std::optional<float> reluLowerClip = std::nullopt;
     };
 
     /// Describes one valid two-tensor, one-node graph by default.
@@ -144,13 +149,19 @@ private:
     void build()
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
-
         std::vector<flatbuffers::Offset<TensorAttributes>> tensorOffsets;
         tensorOffsets.reserve(_spec.tensors.size());
+
         for(const auto& tensor : _spec.tensors)
         {
             auto dims = _builder.CreateVector(tensor.dims);
             auto strides = _builder.CreateVector(tensor.strides);
+            flatbuffers::Offset<void> value = 0;
+            if(tensor.value.has_value())
+            {
+                const Float32Value floatValue(*tensor.value);
+                value = _builder.CreateStruct(floatValue).Union();
+            }
             TensorAttributesBuilder tensorBuilder(_builder);
             tensorBuilder.add_uid(tensor.uid);
             tensorBuilder.add_data_type(tensor.dataType);
@@ -159,6 +170,11 @@ private:
             if(tensor.raggedOffsetTensorUid.has_value())
             {
                 tensorBuilder.add_ragged_offset_tensor_uid(*tensor.raggedOffsetTensorUid);
+            }
+            if(tensor.value.has_value())
+            {
+                tensorBuilder.add_value_type(TensorValue::Float32Value);
+                tensorBuilder.add_value(value);
             }
             tensorOffsets.push_back(tensorBuilder.Finish());
         }
@@ -174,6 +190,10 @@ private:
             if(node.in1TensorUid.has_value())
             {
                 attributesBuilder.add_in_1_tensor_uid(*node.in1TensorUid);
+            }
+            if(node.reluLowerClip.has_value())
+            {
+                attributesBuilder.add_relu_lower_clip(*node.reluLowerClip);
             }
             const auto attributes = attributesBuilder.Finish();
 

@@ -60,6 +60,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -81,9 +82,14 @@
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocatorRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
 
@@ -252,6 +258,16 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createWaitAwareScheduleRepairPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
+    EXPECT_NE(createStinkyUnreachableBlockElimPass(), nullptr);
+    EXPECT_NE(createLiftAsmRegistersToSSAPass(), nullptr);
+    EXPECT_NE(createRemoveDefUseAnalysisPass(), nullptr);
+    EXPECT_NE(createRegisterAllocationPass(), nullptr);
+    AllocatorRegistry::registerAllAllocators();
+    EXPECT_NE(AllocatorRegistry::createAllocator("legacy"), nullptr);
+    AllocationRulesRegistry::registerAll();
+    // Returned by value, so there is no null to check. A registered triple may
+    // declare rows; with capabilities unset they are listed but inert.
+    EXPECT_FALSE(AllocationRulesRegistry::forArch(kArch, AsmCapsConfig{}).empty());
     EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
     EXPECT_NE(createPeepholeOptimizationPass(), nullptr);
     EXPECT_NE(createDeadCodeEliminationPass(), nullptr);

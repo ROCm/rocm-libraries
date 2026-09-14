@@ -1,8 +1,6 @@
 name: TheRock CI Nightly
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       projects:
@@ -54,7 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ inputs.therock_ref_override || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
+          ref: ${{ inputs.therock_ref_override || 'df3d451a3c054e14705ddf94e58498e1208df8d5' }}
 
       - name: Log locked TheRock ref
         run: |

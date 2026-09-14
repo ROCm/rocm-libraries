@@ -671,7 +671,13 @@ def build(
     if codecoverage:
         cmake_opts.append("-DHIPBLASLT_ENABLE_COVERAGE=ON")
     if static:
-        cmake_opts.append("-DHIPBLASLT_BUILD_SHARED_LIBS=OFF")
+        cmake_opts.extend(
+            [
+                "-DHIPBLASLT_BUILD_SHARED_LIBS=OFF",
+                "-DTENSILELITE_BUILD_SHARED_LIBS=OFF",
+                "-DORIGAMI_BUILD_SHARED_LIBS=OFF",
+            ]
+        )
     if gprof:
         cmake_opts += ["-DCMAKE_CXX_FLAGS=-pg", "-DCMAKE_C_FLAGS=-pg"]
     if not use_rocroller:

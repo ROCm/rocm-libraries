@@ -8,6 +8,7 @@
 #include <fstream>
 #include <string>
 
+#include "ScratchDirectory.hpp"
 #include "harness/TestSettings.hpp"
 
 using hipdnn_integration_tests::TestSettings;
@@ -18,21 +19,22 @@ namespace
 {
 
 // Helper to create a temporary TOML file that is auto-deleted on destruction.
+//
+// The name is drawn from the shared scratch directory rather than std::rand(): an
+// unseeded std::rand() yields the same sequence in every process, so two concurrent
+// runs of this binary both draw the same first value and race on one file.
 class TempTomlFile
 {
 public:
     explicit TempTomlFile(const std::string& content)
-        : _path(std::filesystem::temp_directory_path()
-                / ("test_settings_" + std::to_string(std::rand()) + ".toml"))
+        : _dir(hipdnn_integration_tests::scratch::makeDir("test_settings_"))
+        , _path(_dir.path() / "settings.toml")
     {
         std::ofstream ofs(_path);
         ofs << content;
     }
 
-    ~TempTomlFile()
-    {
-        std::filesystem::remove(_path);
-    }
+    ~TempTomlFile() = default;
 
     TempTomlFile(const TempTomlFile&) = delete;
     TempTomlFile& operator=(const TempTomlFile&) = delete;
@@ -45,6 +47,7 @@ public:
     }
 
 private:
+    hipdnn_test_sdk::utilities::ScopedDirectory _dir;
     std::filesystem::path _path;
 };
 

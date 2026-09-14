@@ -37,6 +37,44 @@ def _parse_args(argv):
         prog="hkp_pack",
         description="Compile authored hip and rocKE UKDs, prune per arch, and "
         "pack a per-arch kpack release tree for the hip-kernel-provider.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "environment:\n"
+            "  HKP_PACK_JOBS  Worker processes used to compile distinct "
+            "variants within one\n"
+            "                 arch. Defaults to min(32, cpus available to this "
+            "process),\n"
+            "                 which respects a cgroup or affinity limit rather "
+            "than the\n"
+            "                 host core count. The cap is per-worker startup, "
+            "not memory:\n"
+            "                 a worker costs about 250 ms to load rocke+comgr, "
+            "so too many\n"
+            "                 workers make a pack slower. The best count grows "
+            "with the\n"
+            "                 variant count, and 32 is a compromise -- measured "
+            "on gfx942,\n"
+            "                 a 1672-variant pack is fastest near 48 workers "
+            "while a\n"
+            "                 200-variant pack is 2.5x faster on 12 than on 32, "
+            "so set this\n"
+            "                 explicitly when packing a small arch. Arches are "
+            "always\n"
+            "                 packed one at a time.\n"
+            "                 Set HKP_PACK_JOBS=1 to force serial execution -- "
+            "a compile\n"
+            "                 failure then raises from the walk itself, with a "
+            "single clean\n"
+            "                 traceback and nothing else in flight. Anything "
+            "that is not an\n"
+            "                 integer of 1 or more -- including 0 -- is an "
+            "error, not a\n"
+            "                 fallback to the default. On any worker count "
+            "the first\n"
+            "                 variant that fails to compile stops the pack and "
+            "the queued\n"
+            "                 variants are cancelled."
+        ),
     )
     p.add_argument(
         "--source-root",
@@ -66,9 +104,11 @@ def _parse_args(argv):
     )
     p.add_argument(
         "--inter-root",
-        default=None,
-        help="Build-only intermediate root (never shipped). Defaults beside "
-        "out-root.",
+        required=True,
+        help="Build-only intermediate root (never shipped). Required: the caller "
+        "owns where compile scratch lands. Deriving it from --out-root would put "
+        "scratch inside whatever tree the output is written to, which is now a "
+        "staged, installable directory.",
     )
     p.add_argument(
         "--kpack-python-dir",
@@ -84,6 +124,13 @@ def _parse_args(argv):
         "descriptor tree MUST NOT share a group -- otherwise the second "
         "overwrites the first and its descriptors name an archive that no "
         "longer holds their kernels. Defaults to the shipped group.",
+    )
+    p.add_argument(
+        "--source-label",
+        required=True,
+        help="The name of the build rule that packs this root. Recorded in "
+        "each pass-through descriptor's provenance, so a reader of the staged "
+        "tree can find the invocation that wrote the folder.",
     )
     p.add_argument(
         "--rocke-wheel-stamp",
@@ -104,9 +151,10 @@ def main(argv=None):
         out_root=Path(args.out_root),
         hipcc=args.hipcc,
         rocm_kpack_dir=args.kpack_python_dir,
-        inter_root=Path(args.inter_root) if args.inter_root else None,
+        inter_root=Path(args.inter_root),
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
+        source_label=args.source_label,
     )
     return 0
 

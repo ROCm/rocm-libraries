@@ -30,6 +30,8 @@
 #ifndef HIPCUB_UTIL_ALLOCATOR_HPP_
 #define HIPCUB_UTIL_ALLOCATOR_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "backend/rocprim/util_allocator.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

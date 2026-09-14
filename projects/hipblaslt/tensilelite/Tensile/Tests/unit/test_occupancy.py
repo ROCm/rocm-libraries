@@ -210,7 +210,7 @@ def test_gfx11_1024_vgpr_parts(isa):
 )
 def test_lds_limited_occupancy_gfx950(lds_bytes, expected_occ):
     """getLdsLimitedOccupancy on gfx950 with 163840-byte device LDS."""
-    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes)
+    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes, 256)
     assert occ == expected_occ, (
         f"LDS={lds_bytes} B: expected {expected_occ} blocks/CU, got {occ}"
     )
@@ -339,7 +339,7 @@ def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
     2 — matching HIP — but the code-gen VGPR pool over-estimate produces stored occ=1.
     """
     device_lds = 163840  # gfx950 160 KB
-    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS)
+    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS, 256)
 
     if staticLDS > device_lds // 2:
         # LDS-limited: the LDS formula alone reproduces the HIP result.

@@ -12,9 +12,9 @@ Welcome to the ROCm Libraries super-repo. This repository consolidates multiple 
 
 ### TheRock CI Status
 
-TheRock CI performs multi-component testing on top of builds leveraging [TheRock](https://github.com/ROCm/TheRock) build system.
+TheRock CI performs multi-component testing on top of builds leveraging the [TheRock](https://github.com/ROCm/TheRock) build system.
 
-[![TheRock CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci.yml?query=branch%3Adevelop+event%3Apush) [![TheRock CI Nightly](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-ci-nightly.yml?query=branch%3Adevelop)
+[![TheRock Multi-Arch CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci.yml?query=branch%3Adevelop+event%3Apush) [![TheRock Multi-Arch Nightly CI](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-libraries/actions/workflows/therock-multi-arch-ci-nightly.yml?query=branch%3Adevelop)
 
 ### Component Migration and Legacy CI Status
 
@@ -51,6 +51,7 @@ This table provides the current status of the migration of specific components a
 | `tensile`           | Completed   | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/tensile/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/tensile/job/develop/lastBuild/) |
 | `rocwmma`           | Completed   | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocwmma/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocwmma/job/develop/lastBuild/) |
 | `hiptensor`           | Completed  | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/hiptensor/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/hiptensor/job/develop/lastBuild/) |
+| `rpp`                 | Completed  | [![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin-cv-nightly-therock/rpp/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin-cv-nightly-therock/job/rpp/job/develop/lastBuild/) |
 
 ## Nomenclature
 
@@ -83,6 +84,7 @@ projects/
   rocsparse/
   rocthrust/
   rocwmma/
+  rpp/
 shared/
   rocroller/
   tensile/

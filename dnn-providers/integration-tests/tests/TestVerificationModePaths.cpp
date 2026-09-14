@@ -6,18 +6,20 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
-#include <cstring>
+#include <algorithm>
+#include <cstddef>
 #include <filesystem>
-#include <fstream>
-#include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include "BundleFixtureFiles.hpp"
+#include "HarnessTestSupport.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
@@ -29,238 +31,101 @@ using namespace hipdnn_integration_tests::bundle;
 namespace
 {
 
-using EngineStub = std::function<void(std::unordered_map<int64_t, void*>&)>;
-using RefStub = std::function<void(ReferenceExecutorType, std::unordered_map<int64_t, void*>&)>;
-
-class ModeTestableHarness : public IntegrationBundleVerificationHarness
-{
-public:
-    ModeTestableHarness(VerificationMode mode, EngineStub engineStub, RefStub refStub)
-        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
-        , _mode(mode)
-        , _engineStub(std::move(engineStub))
-        , _refStub(std::move(refStub))
-    {
-    }
-
-    using IntegrationBundleVerificationHarness::SetUp;
-    using IntegrationBundleVerificationHarness::TestBody;
-
-protected:
-    VerificationMode getVerificationMode() const override
-    {
-        return _mode;
-    }
-
-    void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
-    {
-        _engineStub(variantPack);
-    }
-
-    void runReferenceExecutor(ReferenceExecutorType type,
-                              std::unordered_map<int64_t, void*>& variantPack) override
-    {
-        _refStub(type, variantPack);
-    }
-
-    std::unique_ptr<IReferenceGraphExecutor>
-        makeReferenceExecutor(ReferenceExecutorType /*type*/) override
-    {
-        return nullptr;
-    }
-
-    bool isEnforcingSupportClaims() const override
-    {
-        return false;
-    }
-
-    void applyMetadataGuards() const override {}
-
-    // Record the routing decision instead of running it. The real implementation
-    // calls getSharedHandle(), which this deviceless harness must not reach.
-    // skipUnverifiable() is how the real enforceAtLevel() exits when it cannot
-    // verify; using it here keeps TestBody()'s "verified nothing" guard satisfied,
-    // which a bare GTEST_SKIP() would not once the reporter intercepts the skip.
-    // Assertions read enforcedLevel(), so they prove routing specifically.
-    void enforceAtLevel(EnforcementLevel level) override
-    {
-        _enforcedLevel = level;
-        skipUnverifiable("enforceAtLevel stubbed (deviceless)");
-    }
-
-public:
-    std::optional<EnforcementLevel> enforcedLevel() const
-    {
-        return _enforcedLevel;
-    }
-
-private:
-    VerificationMode _mode;
-    EngineStub _engineStub;
-    RefStub _refStub;
-    std::optional<EnforcementLevel> _enforcedLevel;
-};
-
 class TestVerificationModePathsFixture : public ::testing::Test
 {
 protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
+    testing_support::HarnessMocks _mocks;
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("vmode_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        testing_support::ensureTestConfigInitialized();
+        _scopedDir.emplace(scratch::makeDir("vmode_test_"));
         _tempDir = _scopedDir->path();
-    }
-
-    static constexpr float K_OUTPUT_VALUE = 3.5f;
-    static constexpr int64_t K_OUTPUT_UID = 5;
-    static constexpr size_t K_OUTPUT_ELEMS = 120;
-
-    static void writeBundleFiles(const std::filesystem::path& dir,
-                                 const std::string& name,
-                                 bool includeGoldenOutput)
-    {
-        std::filesystem::create_directories(dir);
-        std::ofstream(dir / (name + ".json"))
-            << R"({"nodes": [{"inputs": {"x_tensor_uid": 0, "mean_tensor_uid": 1, )"
-               R"("inv_variance_tensor_uid": 2, "scale_tensor_uid": 3, "bias_tensor_uid": 4}, )"
-               R"("outputs": {"y_tensor_uid": 5}, "type": "BatchnormInferenceAttributes", )"
-               R"("compute_data_type": "float", "name": ""}], "tensors": [)"
-               R"({"name": "", "uid": 0, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 1, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 2, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 3, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 4, "strides": [3, 1, 1, 1], "dims": [1, 3, 1, 1], )"
-               R"("data_type": "float", "virtual": false}, )"
-               R"({"name": "", "uid": 5, "strides": [60, 20, 5, 1], "dims": [2, 3, 4, 5], )"
-               R"("data_type": "float", "virtual": false}], "io_data_type": "float", )"
-               R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
-
-        std::ofstream(dir / (name + ".meta.json"))
-            << R"({"format_version": 1, "operation": "BatchnormInference"})";
-
-        const auto basePath = (dir / name).string();
-        const auto writeFloatBin = [&](int64_t uid, size_t elems, float value) {
-            const std::vector<float> data(elems, value);
-            std::ofstream out(basePath + ".tensor" + std::to_string(uid) + ".bin",
-                              std::ios::binary);
-            out.write(reinterpret_cast<const char*>(data.data()),
-                      static_cast<std::streamsize>(data.size() * sizeof(float)));
-        };
-
-        writeFloatBin(0, 120, 0.0f);
-        writeFloatBin(1, 3, 0.0f);
-        writeFloatBin(2, 3, 0.0f);
-        writeFloatBin(3, 3, 0.0f);
-        writeFloatBin(4, 3, 0.0f);
-
-        if(includeGoldenOutput)
-        {
-            writeFloatBin(K_OUTPUT_UID, K_OUTPUT_ELEMS, K_OUTPUT_VALUE);
-        }
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const std::string& name,
                                                       bool includeGoldenOutput) const
     {
-        const auto dir = _tempDir / name;
-        writeBundleFiles(dir, name, includeGoldenOutput);
-        auto result = loadIntegrationTestBundle(dir / (name + ".json"));
-        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
-        return std::make_shared<IntegrationTestBundle>(
-            std::move(std::get<IntegrationTestBundle>(result)));
+        return fixtures::loadBundle(_tempDir, name, includeGoldenOutput);
     }
 
-    static void writeOutput(std::unordered_map<int64_t, void*>& variantPack, float value)
+    /// Builds a real harness wired to this fixture's mocks and drives it through
+    /// SetUp()/TestBody(), capturing whatever gtest part results that run produces.
+    void runCapturing(std::shared_ptr<IntegrationTestBundle> bundle,
+                      VerificationMode mode,
+                      ::testing::TestPartResultArray* results)
     {
-        auto* ptr = static_cast<float*>(variantPack.at(K_OUTPUT_UID));
-        std::fill(ptr, ptr + K_OUTPUT_ELEMS, value);
-    }
-
-    static void runCapturing(std::shared_ptr<IntegrationTestBundle> bundle,
-                             VerificationMode mode,
-                             EngineStub engineStub,
-                             RefStub refStub,
-                             ::testing::TestPartResultArray* results)
-    {
-        ModeTestableHarness harness(mode, std::move(engineStub), std::move(refStub));
+        IntegrationBundleVerificationHarness harness(
+            _mocks.dependencies(testing_support::hostPolicy(mode)));
         harness.setBundle(std::move(bundle), "vmode-test-bundle");
-
-        const ::testing::ScopedFakeTestPartResultReporter reporter(
-            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, results);
-        harness.SetUp();
-        harness.TestBody();
+        testing_support::driveHarness(harness, results);
     }
 
-    static bool anySkipped(const ::testing::TestPartResultArray& results)
+    void useMatchingEngine()
     {
-        for(int i = 0; i < results.size(); ++i)
-        {
-            if(results.GetTestPartResult(i).skipped())
-            {
-                return true;
-            }
-        }
-        return false;
+        testing_support::engineWrites(
+            _mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE);
     }
 
-    static bool anyFailed(const ::testing::TestPartResultArray& results)
+    void useMismatchingEngine()
     {
-        for(int i = 0; i < results.size(); ++i)
-        {
-            if(results.GetTestPartResult(i).failed())
-            {
-                return true;
-            }
-        }
-        return false;
+        testing_support::engineWrites(
+            _mocks.engineRunner, &fixtures::writeOutput, fixtures::K_OUTPUT_VALUE + 100.0f);
     }
 
-    static EngineStub matchingEngine()
+    static void writeReferenceOutput(::testing::NiceMock<MockReferenceGraphExecutor>& executor,
+                                     float value)
     {
-        return [](std::unordered_map<int64_t, void*>& vp) { writeOutput(vp, K_OUTPUT_VALUE); };
+        using ::testing::_;
+        ON_CALL(executor, execute(_, _, _))
+            .WillByDefault([value](void*, size_t, const VariantPack& variantPack) {
+                auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+                std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, value);
+            });
     }
 
-    static EngineStub mismatchingEngine()
+    /// Both reference executors answer with the golden value: whichever one the
+    /// dispatch picks (GPU for explicit `gpu`/`auto`'s first try, CPU for explicit
+    /// `cpu`/`auto`'s fallback) matches the engine.
+    void useMatchingReference()
     {
-        return [](std::unordered_map<int64_t, void*>& vp) {
-            writeOutput(vp, K_OUTPUT_VALUE + 100.0f);
-        };
+        writeReferenceOutput(_mocks.cpuReference, fixtures::K_OUTPUT_VALUE);
+        writeReferenceOutput(_mocks.gpuReference, fixtures::K_OUTPUT_VALUE);
     }
 
-    static RefStub matchingRef()
+    /// Neither reference executor can run this op.
+    void useCapabilityMissReference()
     {
-        return [](ReferenceExecutorType, std::unordered_map<int64_t, void*>& vp) {
-            writeOutput(vp, K_OUTPUT_VALUE);
-        };
+        using ::testing::_;
+        using ::testing::Throw;
+        ON_CALL(_mocks.cpuReference, execute(_, _, _))
+            .WillByDefault(Throw(ReferenceCapabilityError("stub: unsupported op")));
+        ON_CALL(_mocks.gpuReference, execute(_, _, _))
+            .WillByDefault(Throw(ReferenceCapabilityError("stub: unsupported op")));
     }
 
-    static RefStub capabilityMissRef()
+    /// GPU cannot run this op; CPU matches. Exercises AUTO's fallthrough.
+    void useGpuMissCpuMatchReference()
     {
-        return [](ReferenceExecutorType, std::unordered_map<int64_t, void*>&) {
-            throw ReferenceCapabilityError("stub: unsupported op");
-        };
+        using ::testing::_;
+        using ::testing::Throw;
+        ON_CALL(_mocks.gpuReference, execute(_, _, _))
+            .WillByDefault(Throw(ReferenceCapabilityError("stub: no GPU ref plan")));
+        writeReferenceOutput(_mocks.cpuReference, fixtures::K_OUTPUT_VALUE);
     }
 
-    static RefStub gpuMissCpuMatchRef()
+    /// GPU throws a real error (not a capability miss); CPU matches. Exercises
+    /// AUTO's RUNTIME_ERROR branch, which is distinct from a capability miss: it
+    /// must publish a reference error before falling through to CPU.
+    void useGpuErrorCpuMatchReference()
     {
-        return [](ReferenceExecutorType type, std::unordered_map<int64_t, void*>& vp) {
-            if(type == ReferenceExecutorType::GPU)
-            {
-                throw ReferenceCapabilityError("stub: no GPU ref plan");
-            }
-            writeOutput(vp, K_OUTPUT_VALUE);
-        };
+        using ::testing::_;
+        using ::testing::Throw;
+        ON_CALL(_mocks.gpuReference, execute(_, _, _))
+            .WillByDefault(Throw(std::runtime_error("stub: GPU ref crashed")));
+        writeReferenceOutput(_mocks.cpuReference, fixtures::K_OUTPUT_VALUE);
     }
 };
 
@@ -270,97 +135,164 @@ protected:
 
 TEST_F(TestVerificationModePathsFixture, AutoWithGoldenUsesGoldenAndPasses)
 {
-    ::testing::TestPartResultArray results;
-    bool refCalled = false;
-    runCapturing(
-        loadBundle("auto_golden", /*includeGoldenOutput=*/true),
-        VerificationMode::AUTO,
-        matchingEngine(),
-        [&](ReferenceExecutorType, std::unordered_map<int64_t, void*>&) { refCalled = true; },
-        &results);
+    using ::testing::_;
+    useMatchingEngine();
+    EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
-    EXPECT_FALSE(refCalled) << "Reference executor should NOT run when golden data is present";
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("auto_golden", /*includeGoldenOutput=*/true), VerificationMode::AUTO, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoWithGoldenMismatchFails)
 {
+    useMismatchingEngine();
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_golden_mm", /*includeGoldenOutput=*/true),
                  VerificationMode::AUTO,
-                 mismatchingEngine(),
-                 matchingRef(),
                  &results);
 
-    EXPECT_TRUE(anyFailed(results));
+    EXPECT_TRUE(testing_support::anyFailed(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefSucceedsPasses)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("auto_gpu", /*includeGoldenOutput=*/false),
-                 VerificationMode::AUTO,
-                 matchingEngine(),
-                 matchingRef(),
-                 &results);
+    using ::testing::ReturnRef;
+    useMatchingEngine();
+    useMatchingReference();
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
+    // AUTO tries GPU first when there is no golden data; both stubs return the
+    // golden value, so only pinning the dispatch itself catches a swapped order.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.gpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("auto_gpu", /*includeGoldenOutput=*/false), VerificationMode::AUTO, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefMissFallsThroughToCpu)
 {
+    using ::testing::ReturnRef;
+    useMatchingEngine();
+    useGpuMissCpuMatchReference();
+
+    // GPU must be consulted before CPU is tried. The "GPU miss" stub throws a
+    // capability error either way, so only the call sequence — not the pass/fail
+    // outcome — can catch a swapped dispatch order.
+    {
+        const ::testing::InSequence seq;
+        EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+            .WillOnce(ReturnRef(_mocks.gpuReference));
+        EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
+            .WillOnce(ReturnRef(_mocks.cpuReference));
+    }
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_fallthrough", /*includeGoldenOutput=*/false),
                  VerificationMode::AUTO,
-                 matchingEngine(),
-                 gpuMissCpuMatchRef(),
                  &results);
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, AutoNoGoldenBothRefsMissSkips)
 {
+    useMatchingEngine();
+    useCapabilityMissReference();
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("auto_both_miss", /*includeGoldenOutput=*/false),
                  VerificationMode::AUTO,
-                 matchingEngine(),
-                 capabilityMissRef(),
                  &results);
 
-    EXPECT_TRUE(anySkipped(results));
-    EXPECT_FALSE(anyFailed(results));
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
+}
+
+// The other GPU miss form: a real runtime error, not a capability miss. AUTO
+// still falls through to CPU and passes, but unlike a plain capability miss it
+// must be loud about it — a reference error naming the GPU failure is published
+// before CPU ever runs.
+TEST_F(TestVerificationModePathsFixture, AutoNoGoldenRefRuntimeErrorFallsThroughToCpu)
+{
+    useMatchingEngine();
+    useGpuErrorCpuMatchReference();
+
+    std::vector<std::string> refErrors;
+    testing_support::captureReferenceErrors(_mocks.reporter, refErrors);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("auto_ref_runtime_error", /*includeGoldenOutput=*/false),
+                 VerificationMode::AUTO,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    ASSERT_EQ(refErrors.size(), 1U);
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("GPU reference errored"));
+    EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: GPU ref crashed"));
 }
 
 // ── GOLDEN mode ─────────────────────────────────────────────────────────────
 
 TEST_F(TestVerificationModePathsFixture, GoldenModeWithDataPasses)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("golden_ok", /*includeGoldenOutput=*/true),
-                 VerificationMode::GOLDEN,
-                 matchingEngine(),
-                 capabilityMissRef(),
-                 &results);
+    using ::testing::_;
+    useMatchingEngine();
+    EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("golden_ok", /*includeGoldenOutput=*/true), VerificationMode::GOLDEN, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
-TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataSkips)
+// An explicit mode is a demand for a specific oracle, not a preference. Skipping
+// when that oracle is absent means the run did not do what it was asked and still
+// went green — `auto` is the mode with a fallback chain.
+TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataFails)
 {
+    useMatchingEngine();
+    useMatchingReference();
+
     ::testing::TestPartResultArray results;
     runCapturing(loadBundle("golden_absent", /*includeGoldenOutput=*/false),
                  VerificationMode::GOLDEN,
-                 matchingEngine(),
-                 matchingRef(),
                  &results);
 
-    EXPECT_TRUE(anySkipped(results));
-    EXPECT_FALSE(anyFailed(results));
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// A live reference is available here and would have produced an answer, but the
+// caller asked for golden. Falling back silently is the behaviour `auto` exists
+// for; `golden` must not borrow it.
+TEST_F(TestVerificationModePathsFixture, GoldenModeDoesNotFallBackToAReference)
+{
+    using ::testing::_;
+    useMatchingEngine();
+    useMatchingReference();
+    EXPECT_CALL(_mocks.referenceExecutors, get(_)).Times(0);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(loadBundle("golden_absent_ref_ok", /*includeGoldenOutput=*/false),
+                 VerificationMode::GOLDEN,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
 }
 
 // ── Explicit GPU mode ───────────────────────────────────────────────────────
@@ -370,75 +302,100 @@ TEST_F(TestVerificationModePathsFixture, GoldenModeWithoutDataSkips)
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeRefSucceedsPasses)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("gpu_ok", /*includeGoldenOutput=*/true),
-                 VerificationMode::GPU,
-                 matchingEngine(),
-                 matchingRef(),
-                 &results);
+    using ::testing::ReturnRef;
+    useMatchingEngine();
+    useMatchingReference();
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
+    // Explicit GPU mode must dispatch the GPU executor, never CPU — both stubs
+    // return the golden value, so a wrong dispatch would otherwise pass unnoticed.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.gpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU)).Times(0);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("gpu_ok", /*includeGoldenOutput=*/true), VerificationMode::GPU, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, DeviceModeCapabilityMissSkips)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("gpu_miss", /*includeGoldenOutput=*/true),
-                 VerificationMode::GPU,
-                 matchingEngine(),
-                 capabilityMissRef(),
-                 &results);
+    useMatchingEngine();
+    useCapabilityMissReference();
 
-    EXPECT_TRUE(anySkipped(results));
-    EXPECT_FALSE(anyFailed(results));
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("gpu_miss", /*includeGoldenOutput=*/true), VerificationMode::GPU, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
 // ── Explicit CPU mode ───────────────────────────────────────────────────────
 
 TEST_F(TestVerificationModePathsFixture, CpuModeRefSucceedsPasses)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("cpu_ok", /*includeGoldenOutput=*/true),
-                 VerificationMode::CPU,
-                 matchingEngine(),
-                 matchingRef(),
-                 &results);
+    using ::testing::ReturnRef;
+    useMatchingEngine();
+    useMatchingReference();
 
-    EXPECT_FALSE(anyFailed(results));
-    EXPECT_FALSE(anySkipped(results));
+    // Explicit CPU mode must dispatch the CPU executor, never GPU — both stubs
+    // return the golden value, so a wrong dispatch would otherwise pass unnoticed.
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::CPU))
+        .Times(1)
+        .WillRepeatedly(ReturnRef(_mocks.cpuReference));
+    EXPECT_CALL(_mocks.referenceExecutors, get(ReferenceExecutorType::GPU)).Times(0);
+
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("cpu_ok", /*includeGoldenOutput=*/true), VerificationMode::CPU, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
 }
 
 TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
 {
-    ::testing::TestPartResultArray results;
-    runCapturing(loadBundle("cpu_miss", /*includeGoldenOutput=*/true),
-                 VerificationMode::CPU,
-                 matchingEngine(),
-                 capabilityMissRef(),
-                 &results);
+    useMatchingEngine();
+    useCapabilityMissReference();
 
-    EXPECT_TRUE(anySkipped(results));
-    EXPECT_FALSE(anyFailed(results));
+    ::testing::TestPartResultArray results;
+    runCapturing(
+        loadBundle("cpu_miss", /*includeGoldenOutput=*/true), VerificationMode::CPU, &results);
+
+    EXPECT_TRUE(testing_support::anySkipped(results));
+    EXPECT_FALSE(testing_support::anyFailed(results));
 }
 
 // ── Enforcement-level gate ──────────────────────────────────────────────────
-// runComparison() routes on enforcement level alone. The --enforce-support-claims
-// flag controls what happens *inside* enforceAtLevel(), not whether it runs, so a
-// non-FULL bundle must reach it even with the flag off (isEnforcingSupportClaims()
-// is false in this harness). These cover the routing branch only; enforceAtLevel()
-// itself is stubbed because the real one needs a device.
+// runComparison() routes on enforcement level alone: a non-FULL bundle reaches
+// enforceAtLevel() regardless of --enforce-support-claims, which only controls
+// what checkSupportClaims() does earlier in TestBody(). enforceAtLevel() is no
+// longer stubbable, so these assert its real rung behaviour directly through the
+// engine-runner mock instead of an intercepted EnforcementLevel value.
+//
+// Both rungs need a named engine to check applicability against, so these two
+// construct the harness with one. Without it the real rung returns unverifiable
+// ("enforcement_level requires --test-engine") — pinned separately in
+// TestEnforcementRungs.EnforcementRungWithoutAnEngineIsUnverifiable.
 
 TEST_F(TestVerificationModePathsFixture, NonFullBundleRoutesToEnforcementPath)
 {
+    using ::testing::_;
     auto bundle = loadBundle("enforce_gate", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
 
-    bool engineCalled = false;
-    ModeTestableHarness harness(
-        VerificationMode::AUTO,
-        [&](std::unordered_map<int64_t, void*>&) { engineCalled = true; },
-        matchingRef());
+    // APPLICABILITY with an accepted session (the default openGraph() stub) passes
+    // without ever compiling plans, and never reaches the comparison path.
+    EXPECT_CALL(_mocks.engineRunner, buildPlans(_, _)).Times(0);
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)),
+        LoadedEngine{11, "ENGINE_UNDER_TEST"});
     harness.setBundle(std::move(bundle), "vmode-test-bundle");
 
     ::testing::TestPartResultArray results;
@@ -449,25 +406,56 @@ TEST_F(TestVerificationModePathsFixture, NonFullBundleRoutesToEnforcementPath)
         harness.TestBody();
     }
 
-    EXPECT_EQ(harness.enforcedLevel(), EnforcementLevel::APPLICABILITY)
-        << "non-FULL bundle must route to enforceAtLevel()";
-    EXPECT_FALSE(engineCalled) << "comparison path must not run for a non-FULL bundle";
-    EXPECT_FALSE(anyFailed(results));
+    EXPECT_FALSE(testing_support::anyFailed(results))
+        << "APPLICABILITY rung with an accepted session must pass";
+    EXPECT_FALSE(testing_support::anySkipped(results))
+        << "APPLICABILITY rung with an accepted session must pass, not skip";
+}
+
+TEST_F(TestVerificationModePathsFixture, BuildableBundleRoutesToBuildPlans)
+{
+    using ::testing::_;
+    auto bundle = loadBundle("enforce_gate_buildable", /*includeGoldenOutput=*/true);
+    bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
+
+    // BUILDABLE additionally compiles plans; the default buildPlans() stub
+    // succeeds, so this passes without reaching the comparison path either.
+    EXPECT_CALL(_mocks.engineRunner, buildPlans(_, _)).Times(1);
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)),
+        LoadedEngine{11, "ENGINE_UNDER_TEST"});
+    harness.setBundle(std::move(bundle), "vmode-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        harness.SetUp();
+        harness.TestBody();
+    }
+
+    EXPECT_FALSE(testing_support::anyFailed(results))
+        << "BUILDABLE rung with a successful buildPlans() must pass";
+    EXPECT_FALSE(testing_support::anySkipped(results))
+        << "BUILDABLE rung with a successful buildPlans() must pass, not skip";
 }
 
 TEST_F(TestVerificationModePathsFixture, FullBundleRoutesToComparisonPath)
 {
+    using ::testing::_;
     auto bundle = loadBundle("enforce_gate_full", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::FULL;
+    useMatchingEngine();
 
-    bool engineCalled = false;
-    ModeTestableHarness harness(
-        VerificationMode::AUTO,
-        [&](std::unordered_map<int64_t, void*>& variantPack) {
-            engineCalled = true;
-            matchingEngine()(variantPack);
-        },
-        matchingRef());
+    // FULL uses neither rung: no plans are compiled, and the comparison path's
+    // engine execution runs instead.
+    EXPECT_CALL(_mocks.engineRunner, buildPlans(_, _)).Times(0);
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
     harness.setBundle(std::move(bundle), "vmode-test-bundle");
 
     ::testing::TestPartResultArray results;
@@ -478,10 +466,7 @@ TEST_F(TestVerificationModePathsFixture, FullBundleRoutesToComparisonPath)
         harness.TestBody();
     }
 
-    EXPECT_FALSE(harness.enforcedLevel().has_value())
-        << "FULL bundle must not route to enforceAtLevel()";
-    EXPECT_TRUE(engineCalled) << "FULL bundle must run the comparison path";
-    EXPECT_FALSE(anyFailed(results));
+    EXPECT_FALSE(testing_support::anyFailed(results)) << "FULL bundle must run the comparison path";
 }
 
 // NOLINTEND(readability-identifier-naming)
