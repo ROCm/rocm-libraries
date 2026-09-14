@@ -448,12 +448,6 @@ class BaseTuner(ABC):
     def _get_value_type_name(self) -> str:
         return "value_type"
 
-    def _get_key_type(self) -> str:
-        return "key_type"
-
-    def _get_value_type(self) -> str:
-        return "value_type"
-
     def _save_output(
         self,
         cache_file: str | pathlib.Path,

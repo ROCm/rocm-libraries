@@ -76,7 +76,6 @@ def get_available_algorithms() -> List[str]:
         "device_merge_sort_block_merge",
         "device_merge_sort_block_sort",
         "device_radix_sort_block_sort",
-        'device_search_n',
         "device_partition_flag",
         "device_partition_predicate",
         "device_partition_three_way",
