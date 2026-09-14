@@ -198,12 +198,29 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
             raise ValueError("timing kernel metadata differs from enrolled candidate")
         if not isinstance(result.get("is_valid"), bool):
             raise ValueError("timing response must preserve the benchmark's is_valid verdict")
+        # RFC 0019 §13.2: "A timing is only a training label once the candidate is known
+        # correct ... and records the verdict on the row." Required, not defaulted: a bench
+        # that emits no verdict has performed no check, and reading that as valid is exactly
+        # the inverted oracle the section exists to prevent. `null` is the honest verdict
+        # when the cross-check could decide nothing, and it is spelled differently from
+        # `true` precisely so it cannot be mistaken for one.
+        if "numerically_valid" not in result or not isinstance(result.get("validation"), str):
+            raise ValueError("timing response must carry a numerical-validation verdict "
+                             "(RFC 0019 §13.2); this benchmark performed no correctness check")
+        verdict = result["numerically_valid"]
+        if verdict not in (True, False, None):
+            raise ValueError("numerically_valid must be true, false or null")
         elapsed = result.get("robust_time_ms")
         if result.get("succeeded") and (not isinstance(elapsed, (int, float)) or not math.isfinite(elapsed) or elapsed <= 0):
             raise ValueError("successful timing requires a positive finite robust_time_ms")
         row = {"benchmark": first["graph_id"], "device": first["device_id"],
                "arch": first["device_arch"].split(":", 1)[0], "device_arch": first["device_arch"],
                "engine": first["engine_id"], "kernel": candidate["id"], "is_valid": result["is_valid"],
+               # A second column beside `is_valid`, never folded into it. `is_valid` means
+               # "a measurement was obtained" and §8.1 plus `evaluate`'s exclusion counters
+               # both read it that way; a row that ran and computed the wrong answer is a
+               # different fact from a row that never ran, and §13.2 keeps both.
+               "numerically_valid": verdict, "validation": result["validation"],
                "succeeded": result.get("succeeded"), "skip_reason": result.get("skip_reason"),
                "robustMeanMs": elapsed, "minTimeMs": result.get("min_time_ms"), "avgTimeMs": result.get("avg_time_ms"),
                # RFC 0019.13 §8.3 makes `stddevMs` and `iters` columns of the result
@@ -212,6 +229,16 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
                # inert on a corpus that drops them.
                "stddevMs": result.get("stddev_ms"), "iters": result.get("iterations"),
                "knob_settings": json.dumps(candidate["knob_settings"], sort_keys=True)}
+        if verdict is False:
+            # §13.2: the row "is written with its measurement suppressed and an explicit
+            # invalid marker, so the model learns the failure surface instead of inferring
+            # one from absence". Suppressed here, at the one place the corpus row is built,
+            # so every consumer of it sees the same thing: `corpus.json`, `corpus.csv`, the
+            # `evaluate` regret pass that reads the corpus back, and any later retrain. A
+            # wrong-but-fast kernel holds the best time in its group, so leaving the number
+            # in place and relying on each consumer to filter is how it becomes the label.
+            for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs"):
+                row[column] = None
         for mapping in (first["problem_features"], first["device_features"], candidate["kernel_features"]):
             collision = set(row) & set(mapping)
             if collision:
@@ -369,7 +396,19 @@ def run_generate(args: argparse.Namespace) -> int:
         _write_json(stage / "provenance.json", provenance)
         frame.to_csv(stage / "corpus.csv", index=False)
         _write_json(stage / "corpus.json", rows)
-        usable = frame.copy() if immediate else frame[frame["is_valid"] & frame["succeeded"].eq(True)].copy()
+        # Three conditions, because they are three different facts about a candidate and
+        # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
+        # measurement came back, and `numerically_valid is not False` says nothing showed
+        # the result to be wrong. The last one is the label gate -- a wrong-but-fast kernel
+        # holds the best time in its group, so admitting it trains the ranker to prefer it.
+        # `ne(False)` rather than `eq(True)`: an undecidable verdict is null, and null is
+        # the pre-existing state of every corpus collected before there was a reference to
+        # check against (Open Question 19). Gating on it would train on nothing at all.
+        # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
+        # with its measurement suppressed and its marker, which is what §13.2 asks for.
+        usable = (frame.copy() if immediate else
+                  frame[frame["is_valid"] & frame["succeeded"].eq(True)
+                        & frame["numerically_valid"].ne(False)].copy())
         if usable.empty:
             raise ValueError("the benchmark produced no successful valid timings")
         if immediate:
