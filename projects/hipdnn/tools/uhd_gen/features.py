@@ -3,12 +3,12 @@
 """Canonical inline UHD features and the shared runtime evaluator protocol."""
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 MAX_SAFE_NUMERIC_LITERAL = 1e15
@@ -75,20 +75,23 @@ def _validate_numeric_literals(node) -> None:
             _validate_numeric_literals(value)
 
 
-def canonicalize_signature(signature: list) -> str:
-    parsed = [parse_signature_entry(entry) for entry in signature]
-    return json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False, allow_nan=False)
+def compute_features_hash(signature: list, categorical_encoding: dict | None = None,
+                          executable: str | Path | None = None) -> str:
+    """The descriptor's `features_hash`, from the routine the loader verifies it with.
 
+    RFC 0019 §6.3 requires generation and verification to share ONE definition of this
+    digest, and that definition is FeatureExtractor::computeHash. So the digest is asked
+    for rather than recomputed here: the evaluator canonicalises the AST and the
+    categorical vocabulary and hashes them itself. Zero rows, because §6.5 folds only the
+    signature and the codes into the digest -- no corpus is needed to ask for it.
 
-def compute_features_hash(signature: list, categorical_encoding: dict | None = None) -> str:
-    """Preserve raw-reference hashes; computed training uses the helper's hash."""
-    serialized = canonicalize_signature(signature)
-    if categorical_encoding:
-        serialized += "|" + json.dumps(
-            categorical_encoding, separators=(",", ":"), sort_keys=True,
-            ensure_ascii=False, allow_nan=False,
-        )
-    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    This module used to carry a second, pure-Python implementation. It agreed with C++
+    only because a test pinned the same literal digest on both sides; a change to either
+    canonicalisation would have shipped a descriptor the runtime refuses to load rather
+    than failing a test here.
+    """
+    digest, _ = _run_feature_evaluator(signature, categorical_encoding, [], executable)
+    return digest
 
 
 def encode_feature_value(reference: str, value) -> float:
@@ -126,15 +129,97 @@ def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[s
     return encoding
 
 
+EVALUATOR_NAME = "hipdnn_uhd_features"
+EVALUATOR_ENV_VAR = "HIPDNN_UHD_FEATURE_EVALUATOR"
+
+#: Where a build or an install puts the evaluator, relative to a search root: `bin` is
+#: CMAKE_INSTALL_BINDIR under an install prefix (and a virtualenv), `build/bin` is an
+#: in-tree build beside the sources.
+_EVALUATOR_RELATIVE_DIRS = ("bin", "build/bin")
+
+
+def _evaluator_search_roots() -> list[Path]:
+    """Roots derived from where this package sits, never from an absolute path.
+
+    A batch script that named the executable absolutely worked on the login node and
+    broke inside the container, where the same tree is mounted at a different root. Every
+    root here is relative to this file (or to the interpreter's own prefix), so the search
+    moves with the checkout. Four parents reaches `tools/`, `projects/hipdnn/`,
+    `projects/` and the checkout root -- far enough for a `build/` beside the sources,
+    short enough not to wander into whatever shared directory holds the checkout.
+    """
+    package = Path(__file__).resolve().parent
+    return [Path(sys.prefix), *package.parents[:4]]
+
+
 def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
-    requested = str(executable) if executable else os.environ.get("HIPDNN_UHD_FEATURE_EVALUATOR", "hipdnn_uhd_features")
-    resolved = shutil.which(requested)
+    """Locate the shared evaluator: explicit path, then environment, then build, then PATH.
+
+    Every signature needs it now, raw references included: RFC 0019 §6.3 leaves the digest
+    with one definition, and that definition is in the binary. Guessing one in Python would
+    put a plausible but unverified hash in a shipped descriptor, which fails much later and
+    much further away, at load time on a user's machine.
+
+    A name that was supplied and cannot be run is an error rather than a reason to keep
+    looking: silently falling through to a different binary than the one asked for is how
+    a typo becomes a model stamped by something nobody chose.
+    """
+    for source, requested in ((" (--feature-evaluator)", str(executable) if executable else None),
+                              (f" ({EVALUATOR_ENV_VAR})", os.environ.get(EVALUATOR_ENV_VAR))):
+        if requested:
+            resolved = shutil.which(requested)
+            if resolved is None:
+                raise ValueError(f"feature evaluator {requested!r}{source} is not a runnable executable")
+            return resolved
+    searched = []
+    for root in _evaluator_search_roots():
+        for relative in _EVALUATOR_RELATIVE_DIRS:
+            candidate = root / relative
+            searched.append(str(candidate))
+            resolved = shutil.which(str(candidate / EVALUATOR_NAME))
+            if resolved is not None:
+                return resolved
+    resolved = shutil.which(EVALUATOR_NAME)
     if resolved is None:
         raise ValueError(
-            f"shared feature evaluator {requested!r} is unavailable; pass --feature-evaluator, "
-            "set HIPDNN_UHD_FEATURE_EVALUATOR, or install hipdnn_uhd_features on PATH"
+            f"{EVALUATOR_NAME} was not found and features_hash has no Python implementation "
+            f"to fall back on; set {EVALUATOR_ENV_VAR} to the built executable, pass "
+            f"--feature-evaluator, or put it on PATH. Searched: {', '.join(searched)}"
         )
     return resolved
+
+
+def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, rows: list,
+                           executable: str | Path | None) -> tuple[str, list[list[float]]]:
+    """The only crossing into FeatureExtractor, which owns both the digest and the values.
+
+    Entries are parsed before the request is built so an unauthorable signature fails with
+    this module's message (which names the offending entry) instead of a subprocess exit
+    code. That parse is authoring validation, not a second canonicalisation: the bytes that
+    get hashed are the ones the evaluator dumps, never the ones serialised here.
+    """
+    parsed = [parse_signature_entry(entry) for entry in signature]
+    request = {"signature": parsed, "categorical_encoding": categorical_encoding or {}, "rows": rows}
+    result = subprocess.run(
+        [resolve_feature_evaluator(executable)],
+        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
+        capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    if result.returncode:
+        raise ValueError(f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}")
+    try:
+        response = json.loads(result.stdout)
+        digest, values = response["features_hash"], response["values"]
+        if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            raise ValueError("missing features_hash")
+        if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
+            raise ValueError("feature matrix shape does not match the request")
+        if any(not isinstance(value, (int, float)) or not math.isfinite(value)
+               for row in values for value in row):
+            raise ValueError("non-finite or non-numeric feature result")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+    return digest, values
 
 
 def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None = None,
@@ -147,24 +232,4 @@ def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None
         raise ValueError(f"Missing feature columns: {sorted(missing)}")
     # to_dict preserves full floating-point precision and native list-valued bindings.
     rows = df[columns].to_dict(orient="records")
-    request = {"signature": signature, "categorical_encoding": categorical_encoding or {}, "rows": rows}
-    result = subprocess.run(
-        [resolve_feature_evaluator(executable)],
-        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
-        capture_output=True, text=True, encoding="utf-8", check=False,
-    )
-    if result.returncode:
-        raise ValueError(f"hipdnn_uhd_features failed ({result.returncode}): {result.stderr.strip()}")
-    try:
-        response = json.loads(result.stdout)
-        digest, values = response["features_hash"], response["values"]
-        if not isinstance(digest, str) or not digest.startswith("sha256:"):
-            raise ValueError("missing features_hash")
-        if len(values) != len(df) or any(len(row) != len(signature) for row in values):
-            raise ValueError("feature matrix shape does not match the request")
-        if any(not isinstance(value, (int, float)) or not math.isfinite(value)
-               for row in values for value in row):
-            raise ValueError("non-finite or non-numeric feature result")
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(f"invalid hipdnn_uhd_features response: {error}") from error
-    return digest, values
+    return _run_feature_evaluator(signature, categorical_encoding, rows, executable)

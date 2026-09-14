@@ -523,11 +523,16 @@ def _run_train(args: argparse.Namespace) -> int:
         coverage = device_field_coverage(df)
         enforce_device_coverage(signature, coverage)
         categorical_encoding = derive_categorical_encoding(df, [ref[1:] for ref in references])
+        # The branch decides where the VALUES come from, never where the digest comes from:
+        # RFC 0019 §6.3 gives features_hash one definition and both kinds of signature take
+        # it from the shared evaluator. Values still split, because a raw reference is a
+        # column gather that pandas does in-process, and pushing a whole training corpus
+        # through the evaluator's JSON pipe to re-derive it would buy nothing.
         if any(isinstance(entry, dict) for entry in signature):
             features_hash, values = evaluate_feature_rows(df, signature, categorical_encoding, args.feature_evaluator)
             matrix = np.asarray(values, dtype=np.float64)
         else:
-            features_hash = compute_features_hash(signature, categorical_encoding)
+            features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
             matrix = build_feature_matrix(df, [entry[1:] for entry in signature], categorical_encoding)
         names = [entry[1:] if isinstance(entry, str) else f"expression_{index}"
                  for index, entry in enumerate(signature)]
@@ -554,10 +559,10 @@ def _run_train(args: argparse.Namespace) -> int:
                 matrix = matrix[:, keep]
                 remaining_refs = set(signature_references(signature))
                 categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
-                if any(isinstance(entry, dict) for entry in signature):
-                    features_hash, _ = evaluate_feature_rows(df.iloc[:0], signature, categorical_encoding, args.feature_evaluator)
-                else:
-                    features_hash = compute_features_hash(signature, categorical_encoding)
+                # Pruning changed the signature, so the descriptor's identity changed with
+                # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
+                # are already the values for the surviving entries.
+                features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
                 logger.warning("Dropping constant model inputs %s; authored knobs are unchanged", dropped)
         if args.objective == "max" and _looks_like_cost_metric(args.target):
             logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
