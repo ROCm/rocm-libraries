@@ -94,7 +94,7 @@ STINKYTOFU_EXPORT Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilde
 //      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
 //                                            ds_load_b64 v[4:5], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                               GfxArchID archId, bool hasVgprMsb);
+                                               GfxArchID archId);
 
 // Legalize ds_store_b192 instruction
 // Expands into two ds_store instructions (b128 + b64).
@@ -104,7 +104,7 @@ STINKYTOFU_EXPORT Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBui
 //      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
 //                                            ds_store_b64 v[4:5], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                                GfxArchID archId, bool hasVgprMsb);
+                                                GfxArchID archId);
 
 // Legalize ds_store_b256 instruction
 // Expands into two ds_store_b128 instructions.
@@ -114,7 +114,7 @@ STINKYTOFU_EXPORT Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBu
 //      ds_store_b256 v[0:7], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
 //                                            ds_store_b128 v[4:7], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                                GfxArchID archId, bool hasVgprMsb);
+                                                GfxArchID archId);
 
 // Legalize implicit special registers (SCC, VCC, EXEC) on an instruction.
 //
