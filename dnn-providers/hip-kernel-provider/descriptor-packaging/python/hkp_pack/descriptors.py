@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .errors import HkpPackError
 
@@ -227,6 +227,31 @@ def _reject_nonbare_arch(archs, where):
             raise HkpPackError(f"{where}: arch '{arch}' is not usable -- {hint}")
 
 
+def _validate_embedded_source_file(source_file, where):
+    """Reject an embedded_source `source_file` that cannot act as an identity.
+
+    The value names the source file and is not normalised anywhere. A '..'
+    segment lets one file be named by two different spellings, so one file
+    takes two identities. An absolute path names a location on one machine,
+    and the emitted key must be the same on every machine.
+    """
+    if not isinstance(source_file, str) or not source_file:
+        raise HkpPackError(
+            f"{where} kernel_source 'source_file' must be a non-empty string"
+        )
+    posix = source_file.replace("\\", "/")
+    if ".." in posix.split("/"):
+        raise HkpPackError(
+            f"{where} kernel_source source_file '{source_file}' must not "
+            "contain a '..' segment"
+        )
+    if posix.startswith("/") or PureWindowsPath(source_file).is_absolute():
+        raise HkpPackError(
+            f"{where} kernel_source source_file '{source_file}' must be "
+            "relative to its descriptor, not absolute"
+        )
+
+
 def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
@@ -262,10 +287,13 @@ def _validate_ukd_fields(ukd, where, log=print):
         _require(ks, ["file", "symbol"], where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256"], where)
+    elif kind == "embedded_source":
+        _require(ks, ["source_file", "entry_point"], where)
+        _validate_embedded_source_file(ks["source_file"], where)
     else:
         raise HkpPackError(
             f"{where} kernel_source has unsupported kind '{kind}' "
-            "(expected 'hip', 'rocke', 'hsaco', or 'kpack')"
+            "(expected 'hip', 'rocke', 'hsaco', 'kpack', or 'embedded_source')"
         )
 
 
@@ -283,9 +311,10 @@ def _validate_standalone_ukd(desc, log=print):
     """A standalone `<name>.ukd.json` carries the same fields as an inline UKD.
 
     Kind-specific checks are delegated to _validate_ukd_fields, so a standalone
-    UKD may be hip or rocke. Its optional `arch` narrows the shards it ships in
-    (empty/omitted = wildcard, applying to every referencing arch) and must be a
-    subset of each referencing KDP's arch, checked in _validate_references.
+    UKD may be of any kind that function accepts. Its optional `arch` narrows
+    the shards it ships in (empty/omitted = wildcard, applying to every
+    referencing arch) and must be a subset of each referencing KDP's arch,
+    checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
@@ -433,9 +462,11 @@ def load_flat_input(root, log=print):
     sources the UKDs name. Each descriptor's type is derived from its
     `<name>.<type>.json` filename. A `*.json` whose name carries no type token
     is not one of ours: warn and skip it rather than aborting the pack, so an
-    incidental file in the source folder is tolerated. Raises HkpPackError on any
-    malformed / missing-field / unknown-type / dangling-reference descriptor that
-    IS type-tagged.
+    incidental file in the source folder is tolerated. A hidden path -- any
+    dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
+    the same way, so nothing the walk passes over is invisible. Raises
+    HkpPackError on any malformed / missing-field / unknown-type /
+    dangling-reference descriptor that IS type-tagged.
 
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
@@ -449,8 +480,16 @@ def load_flat_input(root, log=print):
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
+        rel_path = jp.relative_to(root)
+        # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
+        # source root is user-supplied and plausibly a checkout, so `.git/`,
+        # `.venv/` and friends are skipped rather than refused, unlike the
+        # reserved `kpack/` below -- a hidden path collides with nothing.
+        if any(part.startswith(".") for part in rel_path.parts):
+            log(f"skipping hidden path {rel_path}")
+            continue
         if type_from_filename(jp) is None:
-            log(f"skipping non-descriptor file {jp.relative_to(root)}")
+            log(f"skipping non-descriptor file {rel_path}")
             continue
         rel_dir = jp.parent.relative_to(root)
         # `kpack/` at the arch root is where the archive itself is written, and
@@ -459,7 +498,7 @@ def load_flat_input(root, log=print):
         # intermixed with the archive -- today they survive only because the
         # archive happens to be written last. Refuse the name rather than depend
         # on write order.
-        # Compared case-insensitively. On Linux `KPACK/` and `kpack/` are
+        # The comparison is case-insensitive. On Linux `KPACK/` and `kpack/` are
         # distinct directories and coexist harmlessly (verified), so a
         # case-sensitive check would be correct here -- but the packed tree also
         # gets built and consumed on Windows, where they are the SAME directory

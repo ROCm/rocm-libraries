@@ -5,8 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -107,6 +109,21 @@ inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_v
                                  + "'");
     }
     return *match;
+}
+
+/// How many distinct pack ids @p set holds.
+///
+/// The packer emits one copy of a pack per architecture. Every copy keeps the authored
+/// pack id. Count the ids to get the number of authored packs. That count does not
+/// change with the number of architectures.
+inline std::size_t distinctPackIdCount(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+    for(const auto& pack : set.packs)
+    {
+        ids.insert(pack.id);
+    }
+    return ids.size();
 }
 
 /// KMD fields both reference packs vary along. Shared because the *schema* shape is
@@ -531,7 +548,9 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000002");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.source.sourceFile = entryPoint + ".cpp";
+    // The key the compiled-in source table holds, which is what the staged descriptor of
+    // this kernel carries.
+    kernel.source.sourceFile = "kernels/" + entryPoint + ".cpp";
     kernel.source.entryPoint = entryPoint;
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
