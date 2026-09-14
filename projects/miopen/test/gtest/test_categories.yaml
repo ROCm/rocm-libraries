@@ -291,8 +291,19 @@ test_categories:
       - "nightly"
 
   full:
-    description: "Complete test suite - (target: hours+)"
-    test_patterns: *positive_patterns
+    description: >-
+      Complete test suite - Jenkins CI parity (POC: matches the full miopen_gtest
+      population run by projects/miopen/Jenkinsfile's Full Tests stage --
+      -DMIOPEN_TEST_ALL=On, no ctest-label/gtest-filter restriction beyond the
+      same negative exclusions Jenkins itself always applies). test_patterns is
+      deliberately "*" (match everything) instead of the shared positive_patterns
+      anchor, since that anchor is missing ~117 suite families present in the
+      binary (see ALMIOPEN sharding investigation). exclude below is Jenkins'
+      own MIOPEN_GTEST_FILTER negative list byte-for-byte (test/CMakeLists.txt
+      add_gtest_negative_filter calls + Jenkinsfile), not the old standard/full
+      curated exclusions.
+    test_patterns:
+      - "*"
 
     test_files:
       # All test files in the suite
@@ -300,38 +311,20 @@ test_categories:
       - "gtest/*.cpp"
 
     exclude:
-      # Excluding slower tests for faster PR validation
+      # Exactly Jenkins' MIOPEN_GTEST_FILTER negative list (gfx942 Full Tests
+      # stage): DBSync/DeepBench/MIOpenTestConv are off by default there too,
+      # LstmMSRnn/1095 is a known-flaky gfx94X exclusion, LargeStride OOMs when
+      # shards share a GPU, HipGraphExist OOMs the LLVM JIT under concurrent
+      # GPU pressure (Jenkins re-adds it as a separate RUN_SERIAL entry, which
+      # this POC category does not attempt to replicate).
+      - "*DBSync*"
       - "*DeepBench*"
       - "*MIOpenTestConv*"
-      - "Full/GPU_Reduce_FP64*"
-      - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
-      - "Full/GPU_Lrn_FP32*"
-      - "Full/GPU_Lrn_FP16*"
-      - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
-      - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP32*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
-      - "Full/GPU_ConvGrpActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer_FP32*"
-      - "Full/GPU_ConvGrpActivInfer_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "Full/GPU_MIOpenDriverConv2dTransTest*"
-      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      # Only exclude explicitly disabled tests
+      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
+      - "*UnitTestConvSolver*LargeStride*"
+      - "*HipGraphExist*"
+      # gtest already skips DISABLED_-prefixed tests by default; kept for
+      # clarity, not required for Jenkins parity.
       - "*DISABLED*"
 
     labels:
