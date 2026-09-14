@@ -761,7 +761,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                 {
                     VE = adjoint(V_b) * B_b * V_b - HMat::Eye(numMatchingEigs);
                 }
-                S eta = std::max(VE.norm(), std::numeric_limits<S>::epsilon());
+                double eta = std::max(VE.norm(), std::numeric_limits<S>::epsilon());
                 *max_err = rocblas_max_nan(eta, *max_err);
 
                 auto AE = HMat::Empty();

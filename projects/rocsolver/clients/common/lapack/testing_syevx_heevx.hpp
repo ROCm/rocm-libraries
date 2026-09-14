@@ -456,7 +456,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
 
             // Check orthogonality of computed eigenvectors
             auto OE = adjoint(V_b) * V_b - HMat::Eye(num_eigs);
-            S ortho_err = OE.norm();
+            double ortho_err = OE.norm();
             *max_err = rocblas_max_nan(ortho_err, *max_err);
 
             // Check accuracy of eigenpairs
