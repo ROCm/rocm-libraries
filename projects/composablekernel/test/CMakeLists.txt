@@ -125,13 +125,8 @@ set(REGRESSION_TESTS
 # All of the failing tests must be fixed asap.
 set(KNOWN_FAILING_TESTS
     test_ck_tile_mx_scale
-    test_tile_gemm_quant_bquant_microscale_rcr_1d_64
-    test_tile_gemm_quant_bquant_microscale_ccr_1d_64
-    test_tile_gemm_quant_bquant_microscale_rcr_1d_128
-    test_tile_gemm_quant_bquant_microscale_ccr_1d_128
     test_ck_tile_mx_gemm_pipeline_tdm_wmma
     test_gemm_blockscale_wp_fp8
-    test_grouped_gemm_multi_abd_fixed_nk
     test_fp6
     test_bf6
     test_mx_fp4

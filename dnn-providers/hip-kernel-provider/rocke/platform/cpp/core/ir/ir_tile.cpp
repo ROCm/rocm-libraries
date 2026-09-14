@@ -760,6 +760,58 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
 }
 
+static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mnemonic, int imm)
+{
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
+    const char* text;
+    if(!rocke_i_live(b))
+        return;
+    if(imm < 0 || imm > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s imm must fit an unsigned i16 (0..65535), got %d",
+                        mnemonic,
+                        imm);
+        return;
+    }
+    text = rocke_arena_printf(&b->arena, "%s %d", mnemonic, imm);
+    if(!text)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "%s inline-asm text allocation failed", mnemonic);
+        return;
+    }
+    memset(&opts, 0, sizeof(opts));
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    op = rocke_b_inline_asm(b, text, "", NULL, 0, NULL, 0, &opts);
+    if(!op)
+        return;
+    rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
+    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+}
+
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_delay_alu", imm);
+}
+
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_alu", imm);
+}
+
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_clause", imm);
+}
+
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_xcnt", imm);
+}
+
 /* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----
  *
  * These emit AMDGPU exec-mask manipulation instructions used by the wavelet
