@@ -11499,7 +11499,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # inner = one ds_load_b128 = 16 bytes of elements; kMid = wave32 / 16-lane N-group = 2.
       tP["swizzlePackK"] = 1
       innerKElems = 16 // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
-      kMid = kernel["WavefrontSize"] // 16
+      miMorN = kernel["MatrixInstM"] if cM == "A" else kernel["MatrixInstN"]  # tile free-dim MI extent
+      kMid = kernel["WavefrontSize"] // miMorN
       tP["swizzleK"] = innerKElems * kMid
 
   ##############################################################################
