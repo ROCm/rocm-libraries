@@ -1357,8 +1357,9 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatency(hw, targetDSLoadKind,
-//            matchingDsLoadCount, targetDSLoadLatency, numWaves).
+//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
+//            numWaves) over every matching ds_read (last-load latency,
+//            proportion-weighted throughput).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1385,22 +1386,22 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         // anchor.
         StinkyInstruction* groupBarrier = group.barriers.front();
 
-        // Step 1b: scan [regionStart, groupBarrier) — find the latest ds_read whose
-        //          dest PSEUDO token matches a src token of this barrier group.
+        // Step 1b: scan [regionStart, groupBarrier) — collect every matching
+        //          ds_read (kind + latency) in order; the latest also anchors
+        //          the VGPR / WMMA overlap scan below.
         StinkyInstruction* targetDSLoad = nullptr;
         IRList::iterator targetDSLoadIt = regionEnd;
-        uint32_t targetDSLoadLatency = 0;
-        int matchingDsLoadCount = 0;
+        std::vector<DsLoadDrainEntry> matchingDsLoads;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
             if (&inst == groupBarrier) break;
             if (!isDSRead(inst)) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
                 if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
+                    matchingDsLoads.push_back(
+                        {getDsReadKind(inst), static_cast<int>(inst.latencyCycles)});
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
-                    targetDSLoadLatency = inst.latencyCycles;
-                    matchingDsLoadCount++;
                     break;
                 }
             }
@@ -1423,16 +1424,16 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency)
         // + 1. A positive dsReadDrainLatency pins the latency. A non-positive value
-        // (default 0) means "use dynamic drain latency," derived from the matching
-        // ds_load count and the latest matching ds_read latency by the HWModel
-        // helper, keyed by this pass context's NumWaves.
+        // (default 0) means "use dynamic drain latency," derived from all matching
+        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency +
+        // proportion-weighted throughput), keyed by this pass context's NumWaves.
         const int configuredDrainLatency = dsReadDrainLatency();
         const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
+        const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
         const int latencyForAfterThreshold =
             configuredDrainLatency > 0
                 ? configuredDrainLatency
-                : computeDynamicDrainLatency(hw_, getDsReadKind(*targetDSLoad), matchingDsLoadCount,
-                                             (int)targetDSLoadLatency, numWaves);
+                : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);

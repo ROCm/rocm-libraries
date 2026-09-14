@@ -76,61 +76,103 @@ constexpr HWModel kGfx1250Model = {
 // hazards at a gfx1250v0 rule table if its cycles or rule set diverge.
 constexpr HWModel kGfx1250v0Model = kGfx1250Model;
 
+constexpr int kMinModeledWaves = 1;
+constexpr int kMaxModeledWaves = 4;
+
+bool isB128ClassDsRead(DsReadKind kind) {
+    return kind == DsReadKind::B128 || kind == DsReadKind::Tr16B128;
+}
+
+int dsLoadThroughputForKind(const HWModel& hw, DsReadKind kind) {
+    return isB128ClassDsRead(kind) ? hw.lds.dsLoadThroughput.b128
+                                   : hw.lds.dsLoadThroughput.defaultValue;
+}
+
+int maxDrainLatencyForKind(const HWModel& hw, DsReadKind kind) {
+    const auto& maxDrain = hw.lds.dsLoadMaxDrainLatency;
+    switch (kind) {
+        case DsReadKind::B32:
+            return maxDrain.b32;
+        case DsReadKind::B64:
+            return maxDrain.b64;
+        case DsReadKind::B128:
+            return maxDrain.b128;
+        case DsReadKind::Tr8B64:
+            return maxDrain.tr8B64;
+        case DsReadKind::Tr16B128:
+            return maxDrain.tr16B128;
+        case DsReadKind::Unknown:
+            return maxDrain.b32;
+    }
+    return maxDrain.b32;
+}
+
+int capDrainLatency(int latency, int maxDrainLatency) {
+    return maxDrainLatency > 0 ? std::min(latency, maxDrainLatency) : latency;
+}
+
 }  // namespace
 
 int computeDynamicDrainLatency(const HWModel& hw, DsReadKind kind, int matchingDsLoadCount,
                                int targetDSLoadLatency, int rawNumWaves) {
-    // Keep these local: they only define this function's modeled input range.
-    constexpr int kMinModeledWaves = 1;
-    constexpr int kMaxModeledWaves = 4;
     const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
     const int queueDepth = hw.lds.readQueueDepth;
-    const auto& maxDrain = hw.lds.dsLoadMaxDrainLatency;
-    // Unclassified DS read types use the B32 timing model.
-    int maxDrainLatency = maxDrain.b32;
-    switch (kind) {
-        case DsReadKind::B32:
-            maxDrainLatency = maxDrain.b32;
-            break;
-        case DsReadKind::B64:
-            maxDrainLatency = maxDrain.b64;
-            break;
-        case DsReadKind::B128:
-            maxDrainLatency = maxDrain.b128;
-            break;
-        case DsReadKind::Tr8B64:
-            maxDrainLatency = maxDrain.tr8B64;
-            break;
-        case DsReadKind::Tr16B128:
-            maxDrainLatency = maxDrain.tr16B128;
-            break;
-        case DsReadKind::Unknown:
-            break;
-    }
-    const auto capDrainLatency = [maxDrainLatency](int latency) {
-        return maxDrainLatency > 0 ? std::min(latency, maxDrainLatency) : latency;
-    };
+    const int maxDrainLatency = maxDrainLatencyForKind(hw, kind);
 
     // A zero queue depth means the arch has no modeled LDS return queue (the
     // other consumers of lds.* already treat it as inert), and a lone load has
     // nothing queued behind it. Either way only the load's own latency applies.
-    if (queueDepth <= 0 || matchingDsLoadCount <= 1) return capDrainLatency(targetDSLoadLatency);
+    if (queueDepth <= 0 || matchingDsLoadCount <= 1)
+        return capDrainLatency(targetDSLoadLatency, maxDrainLatency);
 
     // Up to the queue depth every load is in flight at once, so the burst costs
     // one load's latency plus the per-wave issue spacing of the loads ahead of
     // it.
     if (matchingDsLoadCount <= queueDepth)
-        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves);
+        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves,
+                               maxDrainLatency);
 
-    const int dsLoadThroughput = (kind == DsReadKind::B128 || kind == DsReadKind::Tr16B128)
-                                     ? hw.lds.dsLoadThroughput.b128
-                                     : hw.lds.dsLoadThroughput.defaultValue;
+    const int dsLoadThroughput = std::max(1, dsLoadThroughputForKind(hw, kind));
     // Past the depth the queue is full. Divide by throughput so B128 /
     // Tr16B128 (half of the default rate) pay a larger overflow term than
     // other DS read kinds.
     return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * numWaves +
-                           (matchingDsLoadCount - queueDepth) * numWaves /
-                               std::max(1, dsLoadThroughput));
+                               (matchingDsLoadCount - queueDepth) * numWaves / dsLoadThroughput,
+                           maxDrainLatency);
+}
+
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
+                                       int rawNumWaves) {
+    if (loads.empty()) return 0;
+
+    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+    const int queueDepth = hw.lds.readQueueDepth;
+    const int count = static_cast<int>(loads.size());
+    const int targetLatency = loads.back().latency;
+
+    // Cap with the largest per-kind max among the whole burst, not just the
+    // last load — a mixed burst that includes B128 should still be allowed up
+    // to the B128 experimental ceiling.
+    int maxDrainLatency = 0;
+    long long throughputSum = 0;
+    for (const DsLoadDrainEntry& load : loads) {
+        maxDrainLatency = std::max(maxDrainLatency, maxDrainLatencyForKind(hw, load.kind));
+        throughputSum += std::max(1, dsLoadThroughputForKind(hw, load.kind));
+    }
+
+    if (queueDepth <= 0 || count <= 1) return capDrainLatency(targetLatency, maxDrainLatency);
+
+    if (count <= queueDepth)
+        return capDrainLatency(targetLatency + (count - 1) * numWaves, maxDrainLatency);
+
+    // Count-weighted average of per-load issue rates. Homogeneous bursts reduce
+    // to the same throughput computeDynamicDrainLatency() would pick for that
+    // kind.
+    const int dsLoadThroughput =
+        static_cast<int>(std::max<long long>(1, throughputSum / std::max(1, count)));
+    return capDrainLatency(targetLatency + (queueDepth - 1) * numWaves +
+                               (count - queueDepth) * numWaves / dsLoadThroughput,
+                           maxDrainLatency);
 }
 
 const HWModel& hwModelForArch(const std::array<int, 3>& arch) {

@@ -147,16 +147,23 @@ constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 int computeDynamicDrainLatency(const HWModel& hw, DsReadKind kind, int matchingDsLoadCount,
                                int targetDSLoadLatency, int numWaves);
 
-/// Draft / review-only paced FIFO drain model. Not wired into any pass.
+/// One LDS read in an ordered burst for mixed-type drain estimation.
 struct DsLoadDrainEntry {
     DsReadKind kind = DsReadKind::Unknown;
     int latency = 0;
 };
 
-/// Independent paced-FIFO burst drain estimate. Does not modify or replace
+/// Mixed-type burst drain estimate. Does not modify
 /// computeDynamicDrainLatency(); callers must opt in explicitly.
-int computeFifoDynamicDrainLatency(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
-                                   int numWaves);
+///
+/// Order of non-final loads does not matter. Uses:
+/// - latency from the last load
+/// - max-drain cap = max over every load's kind in the burst
+/// - total load count
+/// - issue throughput as the count-weighted average of per-load rates
+///   (B128 / Tr16B128 use b128 throughput; everything else uses default)
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
+                                       int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

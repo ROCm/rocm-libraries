@@ -41,7 +41,7 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
-        throttleTime_ += cycles;
+        advanceThrottle(cycles);
     }
 
     // Advance saturated-queue pacing without aging real in-flight entries.

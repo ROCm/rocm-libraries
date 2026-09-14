@@ -22,8 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <vector>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #define DEBUG_TYPE "CDNA5ReadyQueueTest"
@@ -179,4 +183,63 @@ TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
     // Half-rate overflow exceeds the Tr16 experimental max, so it clamps.
     EXPECT_EQ(drain(DsReadKind::Tr16B128), 255);
     EXPECT_EQ(drain(DsReadKind::Unknown), 120);
+}
+
+TEST_F(CDNA5ReadyQueueTest, MixedDrainHomogeneousMatchesSingleTypeFormula) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    constexpr int kLoadLatency = 56;
+    constexpr int kNumWaves = 4;
+    constexpr int kCount = 17;
+
+    std::vector<DsLoadDrainEntry> b64Loads(kCount, {DsReadKind::B64, kLoadLatency});
+    std::vector<DsLoadDrainEntry> b128Loads(kCount, {DsReadKind::B128, kLoadLatency});
+
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b64Loads, kNumWaves),
+              computeDynamicDrainLatency(hw, DsReadKind::B64, kCount, kLoadLatency, kNumWaves));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b128Loads, kNumWaves),
+              computeDynamicDrainLatency(hw, DsReadKind::B128, kCount, kLoadLatency, kNumWaves));
+}
+
+TEST_F(CDNA5ReadyQueueTest, MixedDrainUsesLastLatencyAndProportionRate) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    constexpr int kB128Latency = 56;
+    constexpr int kB64Latency = 40;
+    constexpr int kNumWaves = 4;
+
+    // 17 B128 + 1 B64. Rate = (1*4 + 17*2) / 18 = 2.
+    // L=40 (last B64); cap = max(255,131) = 255 => 40 + 15*4 + (18-16)*4/2 = 104.
+    std::vector<DsLoadDrainEntry> endsWithB64(17, {DsReadKind::B128, kB128Latency});
+    endsWithB64.push_back({DsReadKind::B64, kB64Latency});
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB64, kNumWaves), 104);
+
+    // 9 B128 + 9 B64, last B64. Rate = (9*4 + 9*2) / 18 = 3 => 40+60+(2*4)/3 = 102.
+    // Two orders with the same multiset / last load must agree.
+    std::vector<DsLoadDrainEntry> grouped(9, {DsReadKind::B128, kB128Latency});
+    grouped.insert(grouped.end(), 9, {DsReadKind::B64, kB64Latency});
+    std::vector<DsLoadDrainEntry> interleaved;
+    for (int i = 0; i < 9; ++i) {
+        interleaved.push_back({DsReadKind::B128, kB128Latency});
+        interleaved.push_back({DsReadKind::B64, kB64Latency});
+    }
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, grouped, kNumWaves), 102);
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, interleaved, kNumWaves), 102);
+
+    // Same 17 B128 + 1 B64 mix but last is B128: L=56 => 56+60+4 = 120.
+    std::vector<DsLoadDrainEntry> endsWithB128(1, {DsReadKind::B64, kB64Latency});
+    endsWithB128.insert(endsWithB128.end(), 17, {DsReadKind::B128, kB128Latency});
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB128, kNumWaves), 120);
+}
+
+TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxKindInBurst) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    constexpr int kB128Latency = 56;
+    constexpr int kB64Latency = 40;
+    constexpr int kNumWaves = 4;
+
+    // 100 B128 + 1 B64. Rate = (1*4 + 100*2) / 101 = 2.
+    // Raw = 40 + 15*4 + (101-16)*4/2 = 270. Last is B64 (cap 131) but the burst
+    // also has B128, so the cap is max(131,255)=255.
+    std::vector<DsLoadDrainEntry> loads(100, {DsReadKind::B128, kB128Latency});
+    loads.push_back({DsReadKind::B64, kB64Latency});
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, loads, kNumWaves), 255);
 }
