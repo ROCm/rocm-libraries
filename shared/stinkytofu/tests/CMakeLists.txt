@@ -145,6 +145,7 @@ set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
     unit/FunctionDestructionTest.cpp
     unit/IntrusiveListTest.cpp
+    unit/ir/AsmSetSymbolMap_test.cpp
     unit/ir/IntrinsicExpansionPassTest.cpp
     unit/ir/RegisterWidthValidationTest.cpp
     unit/ir/SymbolicRegNameTest.cpp
