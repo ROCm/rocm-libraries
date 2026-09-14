@@ -19,7 +19,7 @@
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
 
@@ -131,6 +131,63 @@ def build_wait_counters(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_standalone_controls(b: IRBuilder) -> None:
+    barrier = b.smem_alloc(I64, [1], name_hint="named_barrier")
+    barrier_ptr = b.smem_addr_of(barrier)
+    members = b.const_i32(2)
+    b.s_wait_tensorcnt(3)
+    b.s_barrier_signal(1)
+    b.s_barrier_wait(1)
+    b.s_barrier_init(barrier_ptr, members)
+    b.s_barrier_signal_var(barrier_ptr, members)
+    b.s_barrier_join(barrier_ptr)
+    b.s_wakeup_barrier(barrier_ptr)
+    b.s_barrier_leave(1)
+    b.s_delay_alu(0x1234)
+    b.s_wait_alu(0x2345)
+    b.s_clause(0x3456)
+    b.s_wait_xcnt(0x4567)
+    b.ret()
+
+
+def build_async_store(b: IRBuilder) -> None:
+    out = b.param("out", PtrType(I32, "global"), noalias=True, align=16)
+    smem = b.smem_alloc(I32, [4], name_hint="store_src")
+    lds_ptr = b.smem_addr_of(smem)
+    for width in (1, 4, 8, 16):
+        b.global_store_async_from_lds(
+            out,
+            lds_ptr,
+            width_bytes=width,
+            offset_bytes=width,
+            cachepolicy=3,
+        )
+    b.ret()
+
+
+def _global_tr16(elem):
+    def build(b: IRBuilder) -> None:
+        src = b.param(
+            "src", PtrType(elem, "global"), noalias=True, readonly=True, align=16
+        )
+        out = b.param("out", PtrType(elem, "global"), noalias=True, align=16)
+        zero = b.const_i32(0)
+        value = b.global_load_tr16_b128(src, dtype=elem)
+        b.global_store(out, zero, value)
+        b.ret()
+
+    return build
+
+
+def build_tensor_transfers(b: IRBuilder) -> None:
+    d4 = b.zero_vec(I32, 4)
+    d8 = b.zero_vec(I32, 8)
+    b.tensor_load_to_lds(d4, d8, d4, d4, d8, cachepolicy=5)
+    b.tensor_store_from_lds(d4, d8, d4, d4, d8, cachepolicy=5)
+    b.s_wait_tensorcnt(0)
+    b.ret()
+
+
 # (builder, arch). Each gfx1250 config that tests a *choice* of encoding is
 # followed by its gfx950 twin, so the pair pins both branches.
 CONFIGS = [
@@ -148,6 +205,12 @@ CONFIGS = [
     (build_barrier_drains, "gfx950"),
     (build_wait_counters, "gfx1250"),
     (build_wait_counters, "gfx950"),
+    (build_standalone_controls, "gfx1250"),
+    (build_async_store, "gfx1250"),
+    (_global_tr16(F16), "gfx1250"),
+    (_global_tr16(BF16), "gfx1250"),
+    (_global_tr16(I16), "gfx1250"),
+    (build_tensor_transfers, "gfx1250"),
 ]
 
 
