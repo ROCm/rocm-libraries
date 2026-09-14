@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <memory>
@@ -52,6 +53,26 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
+
+class CountingBytesGraph final
+    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
+{
+public:
+    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
+        : _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        ++*_bytesCalls;
+        return ContentCarryingTestGraph::bytes();
+    }
+
+private:
+    std::shared_ptr<std::atomic_uint> _bytesCalls;
+};
+
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1038,6 +1059,38 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 
     EXPECT_EQ(context.plan().getWorkspaceSize(0), 64U);
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+}
+
+TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotReadGraphBytes)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    bytesCalls->store(0);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
+    EXPECT_EQ(bytesCalls->load(), 0U)
+        << "a second cold miss with benchmarking off must not read graph bytes";
 }
 
 /// prepare() fails for one kernel and succeeds for the rest: the shape of a code object

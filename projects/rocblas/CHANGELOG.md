@@ -5,7 +5,7 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.8.0
 
-## rocBLAS 5.7.0
+## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
 
@@ -29,7 +29,7 @@ rocBLAS documentation is available at
 * Fix a process hang on Windows exit when profile logging is enabled (`ROCBLAS_LAYER` bit 2, for example `ROCBLAS_LAYER=4`). The profile dump waited on a worker thread that the loader had already terminated during `DLL_PROCESS_DETACH`.
 
 
-## rocBLAS 5.6.0
+## rocBLAS 5.6.0 for ROCm 10.0.0
 
 ### Added
 
