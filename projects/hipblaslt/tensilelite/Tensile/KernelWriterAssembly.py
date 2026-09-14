@@ -21411,6 +21411,15 @@ class KernelWriterAssembly(KernelWriter):
                           sgpr("GlobalReadIncsMXSB")))
       return mod
     #TODO: should not directly use GRIA and GRIB
+    # Which member rides which parity is a property of the arrangement, not of
+    # the argument order. TDMCross reverses the second partitioned group, so the
+    # (MXSA, MXSB) call programs a descriptor whose even member is MXSB while the
+    # argument order still reads MXSA first. Selecting the operands by argument
+    # position then hands each wave the other member's increment, and since the
+    # descriptor init does follow the arrangement, the pointer drifts by the
+    # difference on every unroll iteration until it leaves the tensor. This is
+    # the same source the stagger wrap select above already reads, and it is
+    # inert at TDMCross=0, where arrangement and argument order agree.
     tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tpA, tpB)
     srcOdd = self.globalReadIncsOperand(tcOdd, self.states.unrollIdx)
     srcEven = self.globalReadIncsOperand(tcEven, self.states.unrollIdx)
