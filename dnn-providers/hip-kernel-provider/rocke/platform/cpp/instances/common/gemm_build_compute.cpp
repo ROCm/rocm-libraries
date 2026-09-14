@@ -325,7 +325,15 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
         /* Single-buffer load-then-compute pipeline. parity is compile-time 0
          * (Python passes no lds_parity -> default 0). */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, for_op.iv, 0, NULL);
-        rocke_b_sync(b);
+        if(ctx->dtl && strcmp(ctx->arch, "gfx1250") == 0)
+        {
+            rocke_b_s_wait_asynccnt(b, 0);
+            rocke_b_sync_lds_only(b);
+        }
+        else
+        {
+            rocke_b_sync(b);
+        }
 
         rocke_gemm_emit_mfma_phase(ctx,
                                    ctx->A_smem,

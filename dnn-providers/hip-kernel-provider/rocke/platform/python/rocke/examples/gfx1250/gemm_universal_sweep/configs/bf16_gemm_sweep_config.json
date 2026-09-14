@@ -25,7 +25,8 @@
     "epilogues": ["default"],
     "waves_per_eu": [null, 1, 2, 4],
     "lds_swizzle": [false, true],
-    "lds_k_pad": [0, 16]
+    "lds_k_pad": [0, 16],
+    "direct_to_lds": [true]
   },
   "selection": {
     "tile_finalists": 12,

@@ -70,6 +70,11 @@ def main() -> int:
     p.add_argument("--pipeline", default="mem")
     p.add_argument("--epilogue", default="default")
     p.add_argument(
+        "--direct-to-lds",
+        action="store_true",
+        help="stage A/B with the architecture's direct global-to-LDS instruction",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
@@ -116,6 +121,7 @@ def main() -> int:
         pad_n=True,
         pad_k=True,
         cshuffle_no_alias=args.cshuffle_no_alias,
+        direct_to_lds=args.direct_to_lds,
     )
     data = DataSpec(
         dtype_a=args.dtype,
