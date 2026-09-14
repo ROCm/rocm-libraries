@@ -74,11 +74,11 @@ inline auto
     std::uniform_int_distribution<distribution_type> distribution(min, max);
     std::vector<T>                                   data(items);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(items, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(items - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -93,11 +93,11 @@ inline auto
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T>                    data(items);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(items, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(items - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -111,11 +111,11 @@ inline std::vector<T>
     std::bernoulli_distribution distribution(p);
     std::vector<T>              data(items);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(items, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(items - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -415,7 +415,7 @@ std::vector<T>
     while(keys_start_index < items)
     {
         const size_t new_segment_length = segment_length_distribution(prng);
-        const size_t new_segment_end    = _HIPCUB_STD::min(items, keys_start_index + new_segment_length);
+        const size_t new_segment_end    = std::min(items, keys_start_index + new_segment_length);
         const T      key                = key_distribution(prng);
         std::fill(std::next(keys.begin(), keys_start_index),
                   std::next(keys.begin(), new_segment_end),
@@ -455,10 +455,10 @@ inline auto generate_random_data_n(
 
     using dis_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
     std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
-    std::generate_n(it, _HIPCUB_STD::min(items, max_random_size), [&]() { return distribution(gen); });
+    std::generate_n(it, std::min(items, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(it, _HIPCUB_STD::min(items - i, max_random_size), it + i);
+        std::copy_n(it, std::min(items - i, max_random_size), it + i);
     }
     return it + items;
 }
@@ -476,10 +476,10 @@ inline auto generate_random_data_n(OutputIterator it,
     using T = ::hipcub::detail::it_value_t<OutputIterator>;
 
     std::uniform_real_distribution<T> distribution((T)min, (T)max);
-    std::generate_n(it, _HIPCUB_STD::min(items, max_random_size), [&]() { return distribution(gen); });
+    std::generate_n(it, std::min(items, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(it, _HIPCUB_STD::min(items - i, max_random_size), it + i);
+        std::copy_n(it, std::min(items - i, max_random_size), it + i);
     }
     return it + items;
 }
