@@ -13,6 +13,11 @@ fixture can land in different shards and fail as unsatisfied. Sequencing them
 here also keeps the fixture's best property, that a replay which dies never
 reaches the comparison, without depending on ctest to enforce it.
 
+The two replays can only diverge for entry points named in kForwardingEntries, in
+src/private/routing.cpp. That array is empty today, so both replays run the same
+code and this entry cannot fail; adding the first name there is what gives it
+detection power. Until then it is a harness kept warm, not a check.
+
 Registered only where MIOPEN_ENABLE_HIPDNN_WRAPPER is on, so it never has to
 work out which kind of tree it is running in. It runs from both the build tree
 and an installed one, which differ only in where its inputs sit; the defaults
@@ -30,19 +35,30 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def find_library(lib_dirs, stem):
-    """Return the real (non-symlink) shared object for `stem`, or None.
+    """Return the one versioned shared object for `stem`, or (None, reason).
 
-    Skips the symlinks so the versioned file is what gets inspected.
+    Symlinks are skipped so the versioned file is what gets inspected. A second
+    versioned file beside it is a half-replaced earlier build -- exactly what the
+    co-versioning check downstream exists to catch -- and choosing between them
+    would pick by filename order, which is not version order. So both the zero
+    and the many case are reported rather than resolved.
     """
+    searched = ", ".join(str(d) for d in lib_dirs) or "<no lib directory>"
     for lib_dir in lib_dirs:
         matches = [
             p
             for p in sorted(lib_dir.glob(f"{stem}.so.*"))
             if p.is_file() and not p.is_symlink()
         ]
+        if len(matches) == 1:
+            return matches[0], None
         if matches:
-            return matches[0]
-    return None
+            listed = ", ".join(p.name for p in matches)
+            return None, (
+                f"{lib_dir} holds more than one {stem}.so.*: {listed}. One of them is "
+                "left over from an earlier build; remove it and run again."
+            )
+    return None, f"no {stem}.so.* found under {searched}"
 
 
 def run(argv, what, env=None):
@@ -91,19 +107,19 @@ def main():
     lib_dirs = (
         [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
     )
-    wrapper_lib = find_library(lib_dirs, "libMIOpen")
-    private_lib = find_library(lib_dirs, "libMIOpen_private")
-    if wrapper_lib is None or private_lib is None:
+    wrapper_lib, wrapper_problem = find_library(lib_dirs, "libMIOpen")
+    private_lib, private_problem = find_library(lib_dirs, "libMIOpen_private")
+    problems = [p for p in (wrapper_problem, private_problem) if p]
+    if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging or layout regression rather than a configuration to skip over.
         # Resolved before the replays so that regression is reported directly
         # instead of as a loader error inside the first replay.
-        print(
-            "FAIL: expected libMIOpen.so and libMIOpen_private.so under "
-            f"{', '.join(str(d) for d in lib_dirs) or '<no lib directory>'}",
-            flush=True,
-        )
+        for problem in problems:
+            print(f"FAIL: {problem}", flush=True)
         return 1
+    # Named, so a co-versioning failure below can be tied back to the files it is about.
+    print(f"libraries under test: {wrapper_lib}, {private_lib}", flush=True)
 
     # The replays have to load the pair the ABI check inspects. An installed test
     # binary's RUNPATH names the ROCm library directory, not the tree it was
@@ -138,8 +154,11 @@ def main():
 
     # --newer-than: two XML files left over from an earlier build compare just as
     # cleanly as two fresh ones, so it holds the replays to this run's binary.
+    # Both helpers are launched through this interpreter rather than their shebangs,
+    # so the harness and the scripts it drives cannot end up on different Pythons,
+    # and a lost exec bit becomes a FAIL line instead of a PermissionError traceback.
     ok = run(
-        [args.compare, *reports, "--newer-than", gtest],
+        [sys.executable, args.compare, *reports, "--newer-than", gtest],
         "forwarding parity comparison",
     )
 

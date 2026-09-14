@@ -5,9 +5,10 @@
 
 The comparator is the only thing that can turn a forwarding divergence into a
 red build, so the cases worth covering are the ones where it could report
-agreement that is not there: a name that appears twice in a run, and an XML that
-a crashed replay left half-written. Comparing two well-formed, agreeing files
-only ever exercises the passing path.
+agreement that is not there: a name that appears twice in a run, an XML that a
+crashed replay left half-written, a pair of reports left over from an earlier
+build, and two runs that skipped everything. Comparing two well-formed, agreeing
+files only ever exercises the passing path.
 
 Everything here works on string fixtures, so no build, toolchain or GPU is
 needed and the module runs in a lint lane:
@@ -15,6 +16,7 @@ needed and the module runs in a lint lane:
     python -m pytest projects/miopen/script/test_compare_forwarding_runs.py
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -51,11 +53,19 @@ def write(tmp_path, name, text):
     return str(path)
 
 
-def run(tmp_path, disabled_xml, enabled_xml):
+def run(tmp_path, disabled_xml, enabled_xml, newer_than=None):
     return cmp.main(
         write(tmp_path, "disabled.xml", disabled_xml),
         write(tmp_path, "enabled.xml", enabled_xml),
+        newer_than,
     )
+
+
+def aged(path, seconds):
+    """Backdate a file, so freshness can be tested without waiting for the clock."""
+    stamp = os.path.getmtime(path) - seconds
+    os.utime(path, (stamp, stamp))
+    return path
 
 
 def test_identical_runs_agree(tmp_path, capsys):
@@ -115,4 +125,54 @@ def test_truncated_xml_gives_a_diagnostic_not_a_traceback(tmp_path, capsys):
 def test_two_empty_runs_do_not_pass(tmp_path, capsys):
     empty = suite()
     assert run(tmp_path, empty, empty) == 1
-    assert "zero tests" in capsys.readouterr().err
+    assert "neither run executed a test" in capsys.readouterr().err
+
+
+def test_two_all_skipped_runs_do_not_pass(tmp_path, capsys):
+    # Non-empty and identical, so every other check here is satisfied. Nothing ran,
+    # so the agreement says nothing about forwarding.
+    skipped = suite(("A", "skipped"), ("B", "skipped"))
+    assert run(tmp_path, skipped, skipped) == 1
+    assert "neither run executed a test" in capsys.readouterr().err
+
+
+def test_one_executed_test_is_enough(tmp_path, capsys):
+    xml = suite(("A", "passed"), ("B", "skipped"))
+    assert run(tmp_path, xml, xml) == 0
+    assert "1 executed, 1 skipped" in capsys.readouterr().out
+
+
+def test_a_missing_report_is_not_agreement(tmp_path, capsys):
+    disabled = write(tmp_path, "disabled.xml", suite(("A", "passed")))
+    rc = cmp.main(disabled, str(tmp_path / "never_written.xml"))
+    assert rc == 1
+    assert "did not run" in capsys.readouterr().err
+
+
+def test_reports_older_than_the_binary_are_rejected(tmp_path, capsys):
+    # The harness's worst failure mode: both files are well-formed and agree, but
+    # they are the previous build's output and neither replay ran this time.
+    xml = suite(("A", "passed"))
+    binary = tmp_path / "miopen_gtest"
+    binary.touch()
+    rc = run(tmp_path, xml, xml, newer_than=str(binary))
+    assert rc == 0, "a report written after the binary is current"
+
+    aged(tmp_path / "disabled.xml", 60)
+    aged(tmp_path / "enabled.xml", 60)
+    assert (
+        cmp.main(
+            str(tmp_path / "disabled.xml"), str(tmp_path / "enabled.xml"), str(binary)
+        )
+        == 1
+    )
+    assert "left over from an earlier build" in capsys.readouterr().err
+
+
+def test_a_missing_newer_than_target_is_rejected(tmp_path, capsys):
+    # Nothing to date the reports against means their freshness is unknown, which
+    # is not the same as fresh.
+    xml = suite(("A", "passed"))
+    rc = run(tmp_path, xml, xml, newer_than=str(tmp_path / "no_such_binary"))
+    assert rc == 1
+    assert "cannot be shown to be current" in capsys.readouterr().err

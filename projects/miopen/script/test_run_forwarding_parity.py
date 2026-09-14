@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tests for where run_forwarding_parity.py puts its replay reports.
+"""Tests for the parts of run_forwarding_parity.py that do not need a GPU.
 
-ctest runs the installed entry from inside the install tree. On a shipping prefix
-that is root-owned and read-only to whoever runs the tests, so writing the reports
-beside the working directory fails the whole harness on a permission error that has
-nothing to do with parity.
+Where it puts its replay reports: ctest runs the installed entry from inside the
+install tree, which on a shipping prefix is root-owned and read-only to whoever runs
+the tests, so writing the reports beside the working directory fails the whole
+harness on a permission error that has nothing to do with parity.
 
-The replays are stood in for by a script that writes a well-formed report, and the
-comparison and ABI check by scripts that pass; this covers report placement only.
+How it drives the two helpers: which library pair it resolves and names, and that it
+holds the comparison to this run's binary. That last one is the harness's side of the
+guard against two leftover reports comparing cleanly, and it is invisible from the
+comparator's own tests.
+
+The replays are stood in for by a script that writes a well-formed report, the
+comparison by one that records how it was called, and the ABI check by one that
+passes.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +39,13 @@ open(out, "w").write(
 
 PASSES = "#!/usr/bin/env python3\n"
 
+# Passes, and leaves behind what it was called with, so the harness's own wiring can
+# be checked rather than assumed.
+RECORDS_ARGV = """#!/usr/bin/env python3
+import pathlib, sys
+pathlib.Path(__file__).with_suffix(".argv").write_text("\\n".join(sys.argv[1:]))
+"""
+
 
 @pytest.fixture
 def tree(tmp_path):
@@ -42,7 +56,7 @@ def tree(tmp_path):
     (lib / "libMIOpen_private.so.1.0").touch()
     for name, body in (
         ("fake_gtest.py", FAKE_GTEST),
-        ("fake_compare.py", PASSES),
+        ("fake_compare.py", RECORDS_ARGV),
         ("fake_abi.py", PASSES),
     ):
         path = tmp_path / name
@@ -86,6 +100,10 @@ def test_nothing_is_written_into_the_working_directory(tree):
     assert list(workdir.iterdir()) == []
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="root writes through the mode bits, so the read-only case cannot be created",
+)
 def test_a_read_only_working_directory_still_passes(tree):
     """The shipping case: an artifact the runner may not write to."""
     workdir = tree / "bin" / "MIOpen"
@@ -114,3 +132,36 @@ def test_the_report_directory_is_reported(tree):
     result = run(tree, tree)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "replay reports:" in result.stdout
+
+
+def test_the_comparison_is_held_to_this_run_s_binary(tree):
+    """--newer-than is what stops a leftover pair of reports comparing cleanly."""
+    result = run(tree, tree)
+    assert result.returncode == 0, result.stdout + result.stderr
+    argv = (tree / "fake_compare.argv").read_text().splitlines()
+    assert "--newer-than" in argv
+    assert argv[argv.index("--newer-than") + 1] == str(tree / "fake_gtest.py")
+
+
+def test_helpers_run_without_their_exec_bit(tree):
+    """They are launched through this interpreter, not their shebang lines."""
+    (tree / "fake_compare.py").chmod(0o644)
+    (tree / "fake_abi.py").chmod(0o644)
+    result = run(tree, tree)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_two_versioned_libraries_are_refused_rather_than_picked_between(tree):
+    """One of them is an earlier build, and filename order is not version order."""
+    (tree / "lib" / "libMIOpen.so.10.0").touch()
+    result = run(tree, tree)
+    assert result.returncode == 1
+    assert "more than one libMIOpen.so.*" in result.stdout
+
+
+def test_the_libraries_under_test_are_named(tree):
+    """A co-versioning failure downstream has to be tied back to concrete files."""
+    result = run(tree, tree)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert str(tree / "lib" / "libMIOpen.so.1.0") in result.stdout
+    assert str(tree / "lib" / "libMIOpen_private.so.1.0") in result.stdout

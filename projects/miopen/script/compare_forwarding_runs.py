@@ -52,6 +52,12 @@ def outcomes(path):
     return result
 
 
+def counts(run):
+    """Return (total entries, entries that ran) for one run's outcome map."""
+    statuses = [status for entry in run.values() for status in entry]
+    return len(statuses), sum(1 for status in statuses if status != "skipped")
+
+
 def describe(statuses):
     """Render one name's statuses, keeping the count visible when it is > 1."""
     if len(statuses) == 1:
@@ -117,8 +123,17 @@ def main(disabled_xml, enabled_xml, newer_than=None):
                 )
             )
 
-    if not a and not b:
-        problems.append("both runs reported zero tests")
+    # Two runs that skipped everything agree perfectly and prove nothing, exactly
+    # like two runs that reported nothing at all. Both are the same failure --
+    # coverage that looks present and never ran -- so both are rejected here.
+    total_a, ran_a = counts(a)
+    total_b, ran_b = counts(b)
+    if not ran_a and not ran_b:
+        problems.append(
+            "neither run executed a test ({} reported by the disabled run, {} by the "
+            "enabled run, all skipped) -- agreement between two runs that did nothing "
+            "is not evidence of parity".format(total_a, total_b)
+        )
 
     if problems:
         sys.stderr.write("forwarding parity failed:\n")
@@ -126,8 +141,10 @@ def main(disabled_xml, enabled_xml, newer_than=None):
             sys.stderr.write("  {}\n".format(p))
         return 1
 
-    total = sum(len(statuses) for statuses in a.values())
-    print("forwarding parity OK: {} tests identical under both modes".format(total))
+    print(
+        "forwarding parity OK: {} tests identical under both modes "
+        "({} executed, {} skipped)".format(total_a, ran_a, total_a - ran_a)
+    )
     return 0
 
 
