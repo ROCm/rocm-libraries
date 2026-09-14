@@ -141,6 +141,23 @@ def detect_gpu_archs():
     return _probe()[0]
 
 
+def cmake_gpu_target(name):
+    """The ``GPU_TARGETS`` spelling of an architecture name a host reported.
+
+    A detection tool answers with a configuration, not a build target:
+    amdgpu-arch names a gfx950 agent ``gfx950:sramecc+:xnack-``, listing the
+    target features that agent happens to have. The build validates
+    ``GPU_TARGETS`` against a fixed list of targets and appends ``:xnack+``
+    itself where a sanitizer build needs it, so a reported feature is not a
+    target it accepts -- configure fails on the whole string.
+
+    Only the colon-delimited features come off. A stepping is spelled with a
+    hyphen and is part of the name (``gfx1250-strict``), and dropping it would
+    build the other stepping's code objects, which the silicon rejects.
+    """
+    return name.split(":", 1)[0]
+
+
 def detect_gpu_arch():
     """The architecture name the runtime reports for the first GPU, or None."""
     archs, any_tool_found = _probe()
