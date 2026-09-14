@@ -34,8 +34,10 @@ from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
 BLOCK_SIZES = [128, 192, 256, 384, 512]
-IPT = list(range(i + 1 for i in range(15)))
+IPT = list(range(4,16))
 
+# this is not a tunable param
+MAXLENGTH = [10, 1000]
 
 class Tuner(BaseTuner):
     @classmethod
@@ -49,6 +51,7 @@ class Tuner(BaseTuner):
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
+        params['max_length'] = MAXLENGTH
         return params
 
     def _get_value_type_name(self):
@@ -64,9 +67,8 @@ class Tuner(BaseTuner):
             block_size = params['block_size_x']
             ipt = params['ipt']
 
-            max_ipt = min(max_shared_memory // key_size // (block_size - 1), 15)
-            return max_ipt == ipt
-
+            max_ipt = min((max_shared_memory // key_size // block_size) - 1, 15)
+            return ipt <= max_ipt
 
         return validate
 
