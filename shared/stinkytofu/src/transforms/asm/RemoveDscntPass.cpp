@@ -24,8 +24,8 @@
 // ----------------------------------------------------------------------------
 // RemoveDscntPass
 //
-// Runs after StinkyWaitCntInsertionPass and only operates on basic blocks that
-// are themselves loops (a block with a back-edge to itself).
+// Runs after StinkyWaitCntInsertionPass on the region-scoped loop blocks of
+// interest ({"loopWithPrefetch", "noLoadLoopBody"}).
 //
 // For each such block it performs a linear scan of the StinkyTofu IR while
 // tracking the current cycle count. The cycle model accounts for WMMA
@@ -33,12 +33,11 @@
 // instructions can co-issue into it without advancing the global cycle
 // counter.
 //
-//   * On a ds_load (LDS read) the current cycle and the load's destination
-//     register(s) are pushed onto an in-flight FIFO.
-//   * On an s_wait_dscnt (LDS-load wait) the wait's count N is read and the
-//     oldest in-flight loads are popped until only N remain outstanding.
-//
-// The actual instruction removal is not implemented yet.
+//   * On a ds_load / ds_store the current cycle and drain-model params are
+//     pushed onto an in-flight FIFO (reads also record destination VGPRs).
+//   * On an s_wait_dscnt the wait's count N is read, the oldest entries are
+//     popped until only N remain, and the dynamic drain model may tighten the
+//     wait further or replace a redundant wait with a comment.
 // ----------------------------------------------------------------------------
 
 #include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
@@ -53,7 +52,6 @@
 #include <string_view>
 #include <vector>
 
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
@@ -73,11 +71,13 @@ using namespace stinkytofu;
 constexpr int kDsProximityThreshold = 512;
 
 /// An outstanding LDS read: the cycle it was issued at, its modeled return
-/// latency, and the destination register(s) it will eventually write.
+/// latency / drain params, and the destination register(s) it will eventually
+/// write.
 struct DsLoadEntry {
     int cycle = 0;
     int latency = 0;
-    DsReadKind kind = DsReadKind::Unknown;
+    int throughput = 0;
+    int maxDrain = 0;
     std::vector<StinkyRegister> dests;
 };
 
@@ -106,8 +106,8 @@ struct ScanState {
     // Number of ds_load instructions seen since the last kept dscnt wait.
     int dsLoadsSinceLastKeptDscnt = 0;
 
-    // Prefetch / pre-activation DS ops (kind + latency) accumulated for dscnt
-    // tightening before waitCheckActive. Order matches issue order.
+    // Prefetch / pre-activation DS ops accumulated for dscnt tightening before
+    // waitCheckActive. Order matches issue order.
     std::vector<DsLoadDrainEntry> dsLoadsBeforeActivation;
 };
 
@@ -292,7 +292,7 @@ AsmDirective* createTextCommentDirective(const std::string& comment) {
     return directive;
 }
 
-int recomputePrefetchInFlightDsLoads(const BasicBlock& bb,
+int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw,
                                      std::vector<DsLoadDrainEntry>& inFlight) {
     inFlight.clear();
     for (const IRBase& node : bb) {
@@ -301,10 +301,11 @@ int recomputePrefetchInFlightDsLoads(const BasicBlock& bb,
         if (isLabel(*inst) || isPseudoInst(inst) || !inst->getHwInstDesc()) continue;
         if (isBranch(*inst) || isMatrixInstruction(*inst)) break;
 
-        if (isDSRead(*inst)) {
-            inFlight.push_back({getDsReadKind(*inst), static_cast<int>(inst->latencyCycles)});
-        } else if (isDSWrite(*inst)) {
-            inFlight.push_back({DsReadKind::Unknown, static_cast<int>(inst->latencyCycles)});
+        if (isDSRead(*inst) || isDSWrite(*inst)) {
+            const HwInstDesc* desc = inst->getHwInstDesc();
+            inFlight.push_back(makeDsLoadDrainEntry(hw, static_cast<int>(inst->latencyCycles),
+                                                    desc ? desc->dsThroughput : 0,
+                                                    desc ? desc->dsMaxDrain : 0));
         } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
             const size_t remaining = static_cast<size_t>(std::max(0, *keep));
             // dscnt keep=K retires the oldest loads first; keep the newest K.
@@ -358,7 +359,7 @@ class RemoveDscntPass : public StinkyInstPass {
                 return PreservedAnalyses::none();
             }
             std::vector<DsLoadDrainEntry> recomputedPrefetch;
-            if (recomputePrefetchInFlightDsLoads(bb, recomputedPrefetch) > 0) {
+            if (recomputePrefetchInFlightDsLoads(bb, *hw_, recomputedPrefetch) > 0) {
                 state.dsLoadsBeforeActivation = std::move(recomputedPrefetch);
             }
         }
@@ -375,13 +376,12 @@ class RemoveDscntPass : public StinkyInstPass {
     const HWModel* hw_ = nullptr;
     int numWaves_ = 0;
 
-    /// Map an in-flight FIFO entry to the drain helper's (kind, latency) pair.
-    /// Writes with no return latency fall back to the arch static figure, matching
-    /// the previous single-type path.
+    /// Map an in-flight FIFO entry to a drain-model entry. Writes with no return
+    /// latency fall back to the arch static figure.
     DsLoadDrainEntry toDrainEntry(const DsLoadEntry& entry) const {
         const int latency =
             entry.latency > 0 ? entry.latency : (hw_ ? hw_->lds.readDrainLatency : 0);
-        return {entry.kind, latency};
+        return {.latency = latency, .throughput = entry.throughput, .maxDrain = entry.maxDrain};
     }
 
     /// How many of the pre-activation LDS reads have returned by the time the
@@ -414,7 +414,7 @@ class RemoveDscntPass : public StinkyInstPass {
     ///
     /// computeDynamicDrainLatencyForLoads() answers, for a burst of N loads, how
     /// many cycles pass between the burst's first issue and the N-th load landing
-    /// (last-load latency, proportion-weighted throughput). Both that curve and
+    /// (last-load latency, count-weighted average throughput). Both that curve and
     /// the FIFO's issue cycles grow with N, so the loads that have come back are
     /// the prefix whose drain latency, plus the dsProximityThreshold_ margin,
     /// still fits in the time since each one issued.
@@ -488,12 +488,11 @@ class RemoveDscntPass : public StinkyInstPass {
             bool removeWaitInst = false;
             std::string removalComment;
 
-            if (isDSRead(*inst)) {
-                dsLoadsBeforeActivation.push_back(
-                    {getDsReadKind(*inst), static_cast<int>(inst->latencyCycles)});
-            } else if (isDSWrite(*inst)) {
-                dsLoadsBeforeActivation.push_back(
-                    {DsReadKind::Unknown, static_cast<int>(inst->latencyCycles)});
+            if (isDSRead(*inst) || isDSWrite(*inst)) {
+                const HwInstDesc* desc = inst->getHwInstDesc();
+                dsLoadsBeforeActivation.push_back(makeDsLoadDrainEntry(
+                    *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
+                    desc ? desc->dsMaxDrain : 0));
             } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
                 const int newVal = static_cast<int>(dsLoadsBeforeActivation.size()) - numDsFinished;
                 PASS_DEBUG(std::cerr << "[RemoveDscnt]   reduce dscnt: tighten wait " << *keep
@@ -592,17 +591,23 @@ class RemoveDscntPass : public StinkyInstPass {
 
             // --- track in-flight LDS ops / drain on dscnt waits ---
             if (isDSRead(*inst) || isDSWrite(*inst)) {
+                const HwInstDesc* desc = inst->getHwInstDesc();
+                const DsLoadDrainEntry drain = makeDsLoadDrainEntry(
+                    *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
+                    desc ? desc->dsMaxDrain : 0);
                 if (isDSRead(*inst)) {
                     inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
-                                                          .latency = inst->latencyCycles,
-                                                          .kind = getDsReadKind(*inst),
+                                                          .latency = drain.latency,
+                                                          .throughput = drain.throughput,
+                                                          .maxDrain = drain.maxDrain,
                                                           .dests = inst->getDestRegs()});
                 } else {
                     // DS writes contribute to dscnt accounting but have no produced VGPR
                     // dest.
                     inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
-                                                          .latency = inst->latencyCycles,
-                                                          .kind = DsReadKind::Unknown,
+                                                          .latency = drain.latency,
+                                                          .throughput = drain.throughput,
+                                                          .maxDrain = drain.maxDrain,
                                                           .dests = {}});
                 }
                 ++dsLoadsSinceLastKeptDscnt;

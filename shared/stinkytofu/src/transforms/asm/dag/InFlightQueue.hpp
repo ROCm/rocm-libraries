@@ -31,9 +31,10 @@ namespace stinkytofu {
 // Simulation of a finite-depth hardware pipeline queue.
 //
 // Entries are tracked by absolute expiry time (currentTime_ + drainLatency).
-// advance() is O(1) — it only increments the clock. Expired entries are
-// evicted lazily on push() and full(). Each entry carries its own drain
-// latency to support per-entry math-model variation.
+// advance() is O(1): it increments the real clock and the throttle clock.
+// Expired entries are evicted lazily on push() and full(). Each entry carries
+// its own drain latency to support per-entry math-model variation.
+// advanceThrottle() advances only the pacing clock without aging expiries.
 class InFlightQueue {
    public:
     InFlightQueue() = default;
@@ -93,6 +94,8 @@ class InFlightQueue {
     }
 
     // Seed with `count` entries each expiring `residual` cycles from now.
+    // Does not reset throttleTime_ / nextIssueTick_ beyond clearing the next
+    // issue tick; callers that need a clean throttle clock should clear() first.
     void seed(int count, int residual) {
         expiries_.clear();
         for (int i = 0; i < count; ++i) expiries_.push_back(currentTime_ + residual);

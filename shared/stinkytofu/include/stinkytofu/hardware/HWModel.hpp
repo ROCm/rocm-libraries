@@ -15,15 +15,16 @@
 // signal lead and the dsReadPerWmma / globalReadPerWmma scheduling ratios in
 // CDNA5Config.
 //
-// This header is deliberately include-light: it is reachable from core headers,
-// so it must not drag in the asm IR. HazardRule is therefore forward-declared
-// and referenced by pointer; only HWModel.cpp includes the rule table itself.
+// Per-opcode LDS drain caps / throughputs live on HwInstDesc (filled from each
+// arch's *.Instructions.def via .dsMaxDrain / .dsThroughput). This header only
+// keeps arch-level LDS queue facts and fallbacks for opcodes that omit those
+// fields. It is deliberately include-light: HazardRule is forward-declared and
+// referenced by pointer; only HWModel.cpp includes the rule table itself.
 
 #include <array>
 #include <span>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/hardware/DsReadKind.hpp"
 
 namespace stinkytofu {
 
@@ -38,28 +39,15 @@ struct HazardRule;  // stinkytofu/transforms/asm/dag/HazardRules.hpp
 struct HWModel {
     /// LDS (ds_read) return-queue model.
     struct Lds {
-        struct DsLoadThroughput {
-            int defaultValue;
-            int b128;
-        };
-        struct DsLoadMaxDrainLatency {
-            int b32;
-            int b64;
-            int b128;
-            int tr8B64;
-            int tr16B128;
-        };
-
         int readQueueDepth;
         int readDrainLatency;
         int readThrottleLatency;
-        /// Overflow issue throughput used as
-        /// (overflowCount * numWaves) / throughput. Higher throughput shortens
-        /// drain; B128 / Tr16B128 use half the default, so their overflow term
-        /// is larger. Values are per WGP.
-        DsLoadThroughput dsLoadThroughput;
-        /// Experimentally measured upper bound for each DS read kind.
-        DsLoadMaxDrainLatency dsLoadMaxDrainLatency;
+        /// Fallback overflow issue throughput (per WGP) when an opcode's
+        /// HwInstDesc::dsThroughput is 0.
+        int dsLoadDefaultThroughput;
+        /// Fallback experimental max drain latency when an opcode's
+        /// HwInstDesc::dsMaxDrain is 0.
+        int dsLoadDefaultMaxDrain;
     };
 
     /// s_barrier_signal / s_barrier_wait timing, and branch overhead.
@@ -142,26 +130,39 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
-// Internal helper used by stinkytofu passes to model dynamic LDS drain latency
-// from per-arch HWModel facts. Not part of the exported API surface.
-int computeDynamicDrainLatency(const HWModel& hw, DsReadKind kind, int matchingDsLoadCount,
-                               int targetDSLoadLatency, int numWaves);
-
 /// One LDS read in an ordered burst for mixed-type drain estimation.
+/// Callers resolve per-opcode throughput / max-drain from HwInstDesc (with
+/// HWModel.lds defaults when the desc fields are 0) before pushing an entry.
 struct DsLoadDrainEntry {
-    DsReadKind kind = DsReadKind::Unknown;
     int latency = 0;
+    int throughput = 0;
+    int maxDrain = 0;
 };
 
-/// Mixed-type burst drain estimate. Does not modify
-/// computeDynamicDrainLatency(); callers must opt in explicitly.
+/// Resolve a drain-model entry from an instruction's latency and optional
+/// HwInstDesc overrides. \p dsThroughput / \p dsMaxDrain of 0 select the
+/// arch defaults on \p hw.
+inline DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
+                                             int dsMaxDrain) {
+    return {
+        .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
+        .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
+        .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+    };
+}
+
+/// Homogeneous-burst drain estimate. Throughput and max-drain are already
+/// resolved (typically via makeDsLoadDrainEntry / HwInstDesc).
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int dsLoadThroughput, int maxDrainLatency, int numWaves);
+
+/// Mixed-type burst drain estimate.
 ///
 /// Order of non-final loads does not matter. Uses:
 /// - latency from the last load
-/// - max-drain cap = max over every load's kind in the burst
+/// - max-drain cap = max over every entry's maxDrain
 /// - total load count
-/// - issue throughput as the count-weighted average of per-load rates
-///   (B128 / Tr16B128 use b128 throughput; everything else uses default)
+/// - issue throughput as the count-weighted average of per-load throughputs
 int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
                                        int numWaves);
 

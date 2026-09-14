@@ -35,7 +35,6 @@
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/core/IRBuilder.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/hardware/DsReadKind.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
@@ -585,35 +584,6 @@ inline bool isVmemTex(const StinkyInstruction& inst) {
 
 inline bool isDSRead(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSRead);
-}
-
-inline bool isDSReadB32(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::ds_load_b32;
-}
-
-inline bool isDSReadB64(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::ds_load_b64;
-}
-
-inline bool isDSReadB128(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::ds_load_b128;
-}
-
-inline bool isDSReadTr8B64(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::ds_load_tr8_b64;
-}
-
-inline bool isDSReadTr16B128(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::ds_load_tr16_b128;
-}
-
-inline DsReadKind getDsReadKind(const StinkyInstruction& inst) {
-    if (isDSReadB32(inst)) return DsReadKind::B32;
-    if (isDSReadB64(inst)) return DsReadKind::B64;
-    if (isDSReadB128(inst)) return DsReadKind::B128;
-    if (isDSReadTr8B64(inst)) return DsReadKind::Tr8B64;
-    if (isDSReadTr16B128(inst)) return DsReadKind::Tr16B128;
-    return DsReadKind::Unknown;
 }
 
 inline bool isDSWrite(const StinkyInstruction& inst) {

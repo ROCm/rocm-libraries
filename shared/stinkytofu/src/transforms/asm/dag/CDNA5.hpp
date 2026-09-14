@@ -1359,7 +1359,7 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
 //            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
 //            numWaves) over every matching ds_read (last-load latency,
-//            proportion-weighted throughput).
+//            count-weighted average throughput, max maxDrain over the burst).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1387,8 +1387,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         StinkyInstruction* groupBarrier = group.barriers.front();
 
         // Step 1b: scan [regionStart, groupBarrier) — collect every matching
-        //          ds_read (kind + latency) in order; the latest also anchors
-        //          the VGPR / WMMA overlap scan below.
+        //          ds_read's drain entry (latency + HwInstDesc throughput /
+        //          maxDrain) in order; the latest also anchors the VGPR / WMMA
+        //          overlap scan below.
         StinkyInstruction* targetDSLoad = nullptr;
         IRList::iterator targetDSLoadIt = regionEnd;
         std::vector<DsLoadDrainEntry> matchingDsLoads;
@@ -1398,8 +1399,10 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             if (!isDSRead(inst)) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
                 if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
-                    matchingDsLoads.push_back(
-                        {getDsReadKind(inst), static_cast<int>(inst.latencyCycles)});
+                    const HwInstDesc* desc = inst.getHwInstDesc();
+                    matchingDsLoads.push_back(makeDsLoadDrainEntry(
+                        hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
+                        desc ? desc->dsMaxDrain : 0));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     break;
@@ -1425,8 +1428,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency)
         // + 1. A positive dsReadDrainLatency pins the latency. A non-positive value
         // (default 0) means "use dynamic drain latency," derived from all matching
-        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency +
-        // proportion-weighted throughput), keyed by this pass context's NumWaves.
+        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency,
+        // count-weighted average throughput, max maxDrain over the burst), keyed
+        // by this pass context's NumWaves.
         const int configuredDrainLatency = dsReadDrainLatency();
         const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
         const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
@@ -1890,8 +1894,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int pickKind = -1;
         int pickWait = 0;
         if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
-            // No latency shadow here, so pickWait is 0; advance kept for safety.
-            if (pickWait > 0) advanceTime(pickWait);
+            // Same split as Phase C: DS throttle wait is pacing-only; RAW/hazard
+            // waits are genuine elapsed stalls. pickWait can be non-zero here
+            // (e.g. throttled DS while hideBudgetPending, or a hazard stall).
+            if (pickWait > 0) {
+                if (pickKind == kLocalRead) {
+                    dsSchedulingBudgetUsed_ += pickWait;
+                    dsReadInflight_.advanceThrottle(pickWait);
+                } else {
+                    advanceTime(pickWait);
+                }
+            }
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }
