@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -140,11 +141,17 @@ const std::vector<std::string> DTYPE_KNOBS = {"dtype", "tile_m"};
 /// the broken contract the check exists to refuse.
 const std::vector<std::string> KNOBS = {"tile_m"};
 
+/// The fields the KMD behind these fixtures declares. §6.3 check 2's other assertion --
+/// `F ⊆ KMD.fields` -- is re-checked at load, and a knob is a KMD field the engine chose
+/// to expose (§3.2), so the field set is the knob set plus whatever stays dispatch-only.
+const std::unordered_set<std::string> FIELDS = {"tile_m"};
+const std::unordered_set<std::string> DTYPE_FIELDS = {"dtype", "tile_m"};
+
 } // namespace
 
 TEST(TestIngestorUhdGeneratedModel, TheModelDecidesTheOrderRatherThanPriority)
 {
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -165,7 +172,7 @@ TEST(TestIngestorUhdGeneratedModel, TheSameCatalogRanksDifferentlyForADifferentP
     // The case that separates a model from a static order. Both rankings above
     // could be produced by a constant; only a model that reads $q.seqlen flips
     // when the problem does, and that flip is the reason a UHD exists at all.
-    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS);
+    const auto heuristic = makeKernelHeuristic(generatedDescriptor(), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -190,7 +197,7 @@ TEST(TestIngestorUhdGeneratedModel, TheModelRanksOnTheStringItWasTrainedOn)
     // The two catalogs differ ONLY in dtype -- same tiles, same priorities, same
     // seqlen -- so a model that never saw the string cannot produce this flip, and a
     // model reading it through the wrong codes produces the flip backwards.
-    const auto heuristic = makeKernelHeuristic(dtypeDescriptor(), {}, DTYPE_KNOBS);
+    const auto heuristic = makeKernelHeuristic(dtypeDescriptor(), {}, DTYPE_KNOBS, DTYPE_FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;

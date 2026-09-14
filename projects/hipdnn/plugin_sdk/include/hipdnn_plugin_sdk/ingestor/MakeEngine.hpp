@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -207,8 +208,21 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     {
         knobs = set.engine.knobs;
     }
-    auto heuristic = makeKernelHeuristic(
-        set.heuristic, describedBy, knobs, set.heuristicsByArch, set.unavailableHeuristicArches);
+    // Read from `set.schema` before the move below hands it to the state manager: RFC 0019
+    // §6.3 check 2's first assertion needs the KMD's declared fields, and a moved-from
+    // schema declares none -- which would refuse every model that reads a `$kernel.*`
+    // feature, exactly the way an empty knob list would.
+    std::unordered_set<std::string> kmdFields;
+    for(const auto& field : set.schema.fields)
+    {
+        kmdFields.insert(field.name);
+    }
+    auto heuristic = makeKernelHeuristic(set.heuristic,
+                                         describedBy,
+                                         knobs,
+                                         kmdFields,
+                                         set.heuristicsByArch,
+                                         set.unavailableHeuristicArches);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),
