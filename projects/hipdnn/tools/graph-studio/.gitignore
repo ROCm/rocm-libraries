@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-electron
+*.local
+.DS_Store
+bun.lock
+electron/native/build
+electron/native/hipdnn-config.gypi
+electron/native/node_modules
+release

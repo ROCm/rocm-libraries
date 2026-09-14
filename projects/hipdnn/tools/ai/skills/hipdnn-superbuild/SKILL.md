@@ -36,6 +36,7 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 | `hipblaslt-provider` | hipDNN, hipblaslt-provider, integration tests |
 | `hip-kernel-provider` | hipDNN, hip-kernel-provider, integration tests |
 | `hipdnn-samples` | hipDNN, supported providers, integration tests, samples |
+| `hipdnn-graph-studio` | hipDNN, all providers, Graph Studio desktop app |
 
 ## Workflow
 
