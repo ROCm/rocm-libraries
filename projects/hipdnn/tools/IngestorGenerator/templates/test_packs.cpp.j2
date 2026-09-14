@@ -100,6 +100,7 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// it, so the authored builder kind is not what arrives.
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
     = ingestor::KernelSourceKind::{{ {'embedded_source': 'EMBEDDED_SOURCE',
+                                      'hiprtc_file': 'HIPRTC_FILE',
                                       'kpack': 'KPACK',
                                       'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] }};
 

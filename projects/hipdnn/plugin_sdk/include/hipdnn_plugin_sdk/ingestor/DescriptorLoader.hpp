@@ -34,6 +34,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefineSubstitution.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -465,6 +466,10 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
     {
         return KernelSourceKind::KPACK;
     }
+    if(text == "hiprtc_file")
+    {
+        return KernelSourceKind::HIPRTC_FILE;
+    }
     if(text == "hsaco_file")
     {
         return KernelSourceKind::HSACO_FILE;
@@ -807,10 +812,17 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     // The union of every kind's keys, checked ahead of the kind switch so that a key
     // belonging to a kind this build cannot dispatch fails with the honest "no
     // implementation yet" below rather than a misleading "unknown key".
-    requireKnownKeys(
-        root,
-        {"kind", "source_file", "entry_point", "library", "toc_key", "symbol", "sha256"},
-        where);
+    requireKnownKeys(root,
+                     {"kind",
+                      "source_file",
+                      "entry_point",
+                      "library",
+                      "toc_key",
+                      "symbol",
+                      "sha256",
+                      "bundle",
+                      "defines"},
+                     where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
@@ -839,10 +851,41 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
         source.symbol = requireString(root, "symbol", where);
         source.sha256 = requireString(root, "sha256", where);
     }
+    else if(source.kind == KernelSourceKind::HIPRTC_FILE)
+    {
+        // Neither the bundle nor the file inside it is opened here. Resolution and the
+        // containment check belong to the provider's adapter, which is the only place
+        // that knows the tree the descriptor was loaded from; this mirrors KPACK above,
+        // whose `library` is likewise taken as authored.
+        source.bundle = requireString(root, "bundle", where);
+        source.sourceFile = requireString(root, "source_file", where);
+        source.entryPoint = requireString(root, "entry_point", where);
+
+        // `defines` is optional -- a kernel that needs no compile-time binding is a
+        // legal hiprtc_file kernel. requireKnownKeys/requireString see only the outer
+        // object, so the nested map is walked here.
+        if(const auto it = root.find("defines"); it != root.end())
+        {
+            const std::string definesWhere = where + " defines";
+            requireObject(*it, definesWhere);
+            for(const auto& item : it->items())
+            {
+                if(!item.value().is_string())
+                {
+                    fail("define '" + item.key() + "' in " + definesWhere
+                         + " must be a string; a bound define is literal text with"
+                           " optional '$kernel.<field>' tokens, never a JSON number,"
+                           " bool or nested object");
+                }
+                source.defines.emplace(item.key(), item.value().get<std::string>());
+            }
+        }
+    }
     else
     {
         fail("kernel source kind '" + kindText + "' in " + where
-             + " has no implementation yet; only 'embedded_source' and 'kpack' can be dispatched");
+             + " has no implementation yet; only 'embedded_source', 'kpack' and"
+               " 'hiprtc_file' can be dispatched");
     }
     return source;
 }
@@ -1233,6 +1276,40 @@ inline bool
         {
             error = "kernel '" + kernel.name + "' supplies metadata field '" + name
                     + "', which schema '" + schema.name + "' does not declare";
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Checks that every `$kernel.<field>` token in a hiprtc_file kernel's `defines` could
+/// resolve against this engine's KMD.
+///
+/// Runs here, beside coerceKernelMetadata, because this is the first point the schema is
+/// known and the last point before the state manager: a template naming an undeclared
+/// field would otherwise survive load and throw out of prepare() on the first graph that
+/// selected the kernel, long after the authoring mistake. Schema-level, not value-level
+/// -- the kernel's metadata is type-checked here but not yet completed with KMD
+/// defaults, so asking for the value would reject a legal descriptor that omits a
+/// defaulted field.
+///
+/// Same bool/error shape as coerceKernelMetadata, so a failure drops the one pack on the
+/// caller's existing LOG_ERROR path rather than throwing and costing the whole engine.
+inline bool validateKernelDefines(const KernelDescriptor& kernel,
+                                  const MetadataSchema& schema,
+                                  std::string& error)
+{
+    if(kernel.source.kind != KernelSourceKind::HIPRTC_FILE)
+    {
+        return true;
+    }
+    for(const auto& [name, templateText] : kernel.source.defines)
+    {
+        std::string templateError;
+        if(!validateKernelDefineTemplate(templateText, schema, templateError))
+        {
+            error = "kernel '" + kernel.name + "' cannot bind define '" + name
+                    + "': " + templateError;
             return false;
         }
     }
@@ -1832,7 +1909,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             {
                 for(auto& kernel : pack.kernels)
                 {
-                    if(!detail::coerceKernelMetadata(kernel, set.schema, reason))
+                    if(!detail::coerceKernelMetadata(kernel, set.schema, reason)
+                       || !detail::validateKernelDefines(kernel, set.schema, reason))
                     {
                         break;
                     }

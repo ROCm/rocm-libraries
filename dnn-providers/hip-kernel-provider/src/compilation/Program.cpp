@@ -31,17 +31,46 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
         headersData.emplace_back(h.data());
     }
 
+    // Kernel sources and includes are generated from R-string literals
+    // (null-terminated) — see kernels/templates/kernel_sources.cpp.in.
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
+    compileAndLoad(kernelSrc.data(), headersData, includeNames, options);
+}
+
+Program::Program(std::string sourceText,
+                 std::string programName,
+                 std::vector<std::pair<std::string, std::string>> headers,
+                 const std::vector<std::string>& options)
+    : _programName(std::move(programName))
+{
+    // The pairs stay alive for the whole constructor, so the pointers hipRTC is handed
+    // stay valid for the one call that reads them.
+    std::vector<const char*> headerTexts;
+    std::vector<const char*> headerNames;
+    headerTexts.reserve(headers.size());
+    headerNames.reserve(headers.size());
+    for(const auto& [name, text] : headers)
+    {
+        headerNames.emplace_back(name.c_str());
+        headerTexts.emplace_back(text.c_str());
+    }
+
+    compileAndLoad(sourceText.c_str(), headerTexts, headerNames, options);
+}
+
+void Program::compileAndLoad(const char* sourceText,
+                             const std::vector<const char*>& headerTexts,
+                             const std::vector<const char*>& headerNames,
+                             const std::vector<std::string>& options)
+{
     // Create program
     hiprtcProgram prog;
-    // Kernel sources are generated from R-string literals (null-terminated) — see
-    // kernels/templates/kernel_sources.cpp.in.
-    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
     HIPRTC_CHECK(hiprtcCreateProgram(&prog,
-                                     kernelSrc.data(),
+                                     sourceText,
                                      _programName.c_str(),
-                                     static_cast<int>(headersData.size()),
-                                     headersData.data(),
-                                     includeNames.data()));
+                                     static_cast<int>(headerTexts.size()),
+                                     headerTexts.data(),
+                                     headerNames.data()));
 
     // Compile
     std::vector<const char*> optPtrs;

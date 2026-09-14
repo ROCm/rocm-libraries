@@ -17,10 +17,14 @@ import gzip
 import itertools
 import re
 import warnings as _warnings
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
+from .kernel_defines import (
+    KernelDefineError,
+    validate_kernel_define_template,
+)
 from .models import (
     ARCH_BASE_ID_PATTERN,
     DIALECT_DIRECT_LOAD,
@@ -30,6 +34,7 @@ from .models import (
     ENGINE_NAME_PATTERN,
     KERNEL_SOURCE_KIND_EMBEDDED,
     KERNEL_SOURCE_KIND_HIP,
+    KERNEL_SOURCE_KIND_HIPRTC_FILE,
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_HSACO_FILE,
     KERNEL_SOURCE_KIND_KPACK,
@@ -165,7 +170,7 @@ def load_config(path: Path) -> IngestorConfig:
                 f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
                 f"kernel_source",
             )
-            for key in ("spec", "build"):
+            for key in ("spec", "build", "defines"):
                 if key in kernel_raw["kernel_source"]:
                     _require_mapping(
                         kernel_raw["kernel_source"][key],
@@ -196,6 +201,8 @@ def load_config(path: Path) -> IngestorConfig:
                         kind=ks_raw["kind"],
                         source_file=ks_raw.get("source_file", ""),
                         entry_point=ks_raw.get("entry_point", ""),
+                        bundle=ks_raw.get("bundle", ""),
+                        defines=dict(ks_raw.get("defines", {})),
                         source=ks_raw.get("source", ""),
                         entry=ks_raw.get("entry", ""),
                         build=dict(ks_raw.get("build", {})),
@@ -234,6 +241,11 @@ def load_config(path: Path) -> IngestorConfig:
         delegates_to_existing_plan=bool(raw.get("delegates_to_existing_plan", False)),
         authored_subpath=raw.get("authored_subpath", ""),
         specialization=dict(raw.get("specialization") or {}),
+        # A `hiprtc_file` bundle is authored BESIDE its config and staged from
+        # there. Recorded at load, because nothing downstream is told where the
+        # config came from and a bundle path guessed from the cwd is a path
+        # that works for whoever generated it and nobody else.
+        config_dir=str(Path(path).parent),
     )
 
     _validate_config(config)
@@ -1255,6 +1267,7 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
     """
     required_by_kind = {
         KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
+        KERNEL_SOURCE_KIND_HIPRTC_FILE: ("bundle", "source_file", "entry_point"),
         KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
         KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
     }
@@ -1271,6 +1284,71 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
+
+
+def _check_kernel_bundles(config: IngestorConfig) -> None:
+    """A ``hiprtc_file`` bundle names a directory the loader will accept.
+
+    The runtime resolves ``bundle`` relative to the descriptor and refuses
+    anything that escapes the descriptor tree root, the same containment rule
+    ``IngestorKernelCode.hpp`` already applies to a ``.kpack``. An absolute
+    path or a ``..`` component is therefore a bundle that generates cleanly and
+    then drops its pack on the target machine, with a message about a path the
+    author cannot see from the config.
+    """
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            bundle = kernel.kernel_source.bundle
+            if not bundle:
+                continue
+            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
+            path = PurePosixPath(bundle)
+            if path.is_absolute() or ".." in path.parts:
+                raise ConfigError(
+                    f"{where}: bundle '{bundle}' must be a relative path with "
+                    f"no '..' component. The loader resolves it against the "
+                    f"descriptor and refuses any source outside the descriptor "
+                    f"tree root, so this bundle would generate and then drop "
+                    f"its pack at load."
+                )
+
+
+def _check_kernel_defines(config: IngestorConfig) -> None:
+    """Every ``defines`` entry is a string pair whose value the runtime
+    substituter would accept for SOME kernel of this engine.
+
+    Same check the loader runs at descriptor-set resolution, run here instead,
+    against the same rules (``codegen/kernel_defines.py`` mirrors
+    ``KernelDefineSubstitution.hpp`` case for case). Getting it wrong at load
+    costs one ``LOG_ERROR`` and a dropped pack on a machine that has no config
+    to look at; getting it wrong here names the pack, the kernel and the key.
+
+    Schema-level, exactly like the runtime's: a kernel may legally omit a field
+    the KMD defaults, and ``completeMetadata`` fills it before any substitution
+    happens, so asking for the authored value would reject a legal kernel.
+    """
+    field_types = {f.name: f.type for f in config.kmd_fields}
+    schema_name = f"{config.engine.local_name} variant fields"
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            for name, value in kernel.kernel_source.defines.items():
+                where = (
+                    f"pack '{pack.name}' kernel '{kernel.name}'"
+                    f".kernel_source.defines['{name}']"
+                )
+                if not isinstance(name, str) or not isinstance(value, str):
+                    raise ConfigError(
+                        f"{where}: defines is a flat string->string map, but "
+                        f"this entry is {type(name).__name__} -> "
+                        f"{type(value).__name__}. Quote the value: the "
+                        f"descriptor ships it verbatim as the text of a "
+                        f"-D<name>=<value> flag, and the loader rejects a "
+                        f"non-string there."
+                    )
+                try:
+                    validate_kernel_define_template(value, field_types, schema_name)
+                except KernelDefineError as e:
+                    raise ConfigError(f"{where}: {e}") from e
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:
@@ -1522,6 +1600,10 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
+    _check_kernel_bundles(config)
+    # After the metadata check (#3), so a defines token naming a field whose
+    # authored VALUE is also wrong is reported as the metadata problem it is.
+    _check_kernel_defines(config)
     # After the kind checks: the declaration's obligations depend on which kinds
     # this config actually builds, so an unrecognized kind is named as a kind
     # problem rather than as a specialization one.

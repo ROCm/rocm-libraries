@@ -32,9 +32,32 @@ public:
             std::make_shared<compilation::Program>(kernelFileName, options));
     }
 
+    std::unique_ptr<compilation::ICompiledProgram>
+        compileSource(const std::string& sourceText,
+                      const std::string& programName,
+                      const std::vector<compilation::KernelHeader>& headers,
+                      const std::vector<std::string>& options) const override
+    {
+        // Same two-step as compile() above: a cache hit is served, and a miss falls
+        // through to a direct construction whose exception says what hipRTC rejected.
+        auto program = sourceModuleCache().getOrLoad(sourceText, programName, headers, options);
+        if(program)
+        {
+            return std::make_unique<compilation::CompiledProgram>(program);
+        }
+        return std::make_unique<compilation::CompiledProgram>(
+            std::make_shared<compilation::Program>(sourceText, programName, headers, options));
+    }
+
     static HipMlopsModuleCache& moduleCache()
     {
         static HipMlopsModuleCache s_cache;
+        return s_cache;
+    }
+
+    static HipMlopsSourceModuleCache& sourceModuleCache()
+    {
+        static HipMlopsSourceModuleCache s_cache;
         return s_cache;
     }
 };

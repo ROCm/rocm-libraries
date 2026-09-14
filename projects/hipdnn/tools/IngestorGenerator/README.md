@@ -310,6 +310,9 @@ a few value lists, expanded at load time.
 `configs/variants_example.yaml` -- pack-level `variants`: a shape list crossed
 per-shape with a named knob set. See below.
 
+`configs/hiprtc_dropin.yaml` -- the drop-in kind (`hiprtc_file`), with its source
+bundle in `configs/scale_add_sources/`. See below.
+
 ## Generated variant sets: `variants`
 
 A generated set is written one YAML block per kernel. The largest shipped gfx942
@@ -413,6 +416,59 @@ packs:
         priority: 0
         arch: []                   # optional; must be a subset of the pack's arch
 ```
+
+## Drop-in kernels: `kind: hiprtc_file`
+
+`embedded_source` requires its source to be registered in CMake and embedded into
+the provider binary at configure time, so adding a kernel means reconfigure +
+rebuild + reinstall. `hiprtc_file` ships the sources as a plain **directory** (the
+*bundle*) beside the descriptors; hipRTC compiles them at `prepare()`. A new variant
+reaches an already-installed hipDNN by copying files in and restarting.
+
+```yaml
+kernel_source:
+  kind: hiprtc_file
+  bundle: scale_add_sources      # a DIRECTORY beside the config; staged into the
+                                 # descriptor tree and resolved there, relative to
+                                 # the descriptor and contained in the tree root
+  source_file: ScaleAddHiprtc.hip   # a file inside the bundle
+  entry_point: ScaleAddHiprtc
+  defines:                       # flat string -> string, emitted as -D<name>=<value>
+    SCALE_ADD_DTYPE: "$kernel.dtype"
+    SCALE_ADD_BLOCK_SIZE: "$kernel.block_size"
+```
+
+`defines` is **not** `build`: that key belongs to `packaged`/`hip` and is validated
+against a different schema. Every file in the bundle directory is staged, not only
+the ones a descriptor names, so headers ship with their sources.
+
+A `defines` value may carry `$kernel.<field>` tokens bound from that kernel's own
+metadata, which is how two descriptors over **one source file** compile to two
+binaries. This is **literal token replacement, not an expression language**:
+
+| | |
+|---|---|
+| `bool` renders | `1` / `0` |
+| `int` renders | decimal |
+| `string` renders | verbatim |
+| `float`, `int_list` | **refused** -- neither has one right spelling, and `-DA=1` vs `-DA=1.0` are different types in device code |
+| operators beside a token (`+ - * / % = < > ! & | ^ ~ ? : ( )`) | **refused** -- `$kernel.block_size * 2` must not become `64 * 2` in a flag |
+| a `$` not starting `$kernel.` | **refused** -- there is no other binding source |
+| a value with no `$` | passes through byte-identical, so `-DLIMIT=-1` stays authorable |
+
+Anything derived or conditional belongs in the pack's dispatch handler, which is
+native code and therefore a rebuild.
+
+`codegen/kernel_defines.py` is a port of the runtime's
+`KernelDefineSubstitution.hpp`, and the generator runs it over every `defines` value
+at load: the same rejection costs one `LOG_ERROR` and a dropped pack if it is left
+to the target machine. `tests/test_kernel_defines.py` re-runs the C++ test table
+against the port, naming the `TEST(...)` each row came from.
+
+**Scope.** A dropped-in set reuses an *already-installed* pack's native symbols, and
+its entry point must take the same arguments in the same order as that pack's
+registered dispatch handler launches. A genuinely new native symbol still needs a
+provider rebuild.
 
 ## The five pre-mint config-loader checks
 
