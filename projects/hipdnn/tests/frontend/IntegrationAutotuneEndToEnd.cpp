@@ -43,6 +43,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
@@ -231,7 +232,11 @@ protected:
     // name, so its own EXPECT/ASSERT failures are the ones that fail the parent.
     void runIsolated(const char* testId, AutotuneStrategy strategy)
     {
-        if(std::getenv("HIPDNN_STALL_RECOVERY_CHILD") == nullptr)
+        // std::getenv is unavailable under Windows' -Werror (deprecated in favor of
+        // _dupenv_s); getEnv() is the repo's existing cross-platform wrapper over
+        // whichever safe API each platform wants. Empty means unset here, since this
+        // variable is never intentionally set to "".
+        if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_STALL_RECOVERY_CHILD").empty())
         {
             if(!stallGateAvailable())
             {
@@ -256,25 +261,18 @@ protected:
 #endif
 
             // Set in this process, not via shell "VAR=1 cmd" prefix syntax: that syntax
-            // is POSIX-shell-only and cmd.exe does not support it. setenv/_putenv_s is
-            // inherited by the child regardless of which shell std::system() invokes.
-#if defined(_WIN32)
-            _putenv_s("HIPDNN_STALL_RECOVERY_CHILD", "1");
-#else
-            setenv("HIPDNN_STALL_RECOVERY_CHILD", "1", 1);
-#endif
+            // is POSIX-shell-only and cmd.exe does not support it. setEnv() changes this
+            // process's own environment, which std::system()'s child inherits regardless
+            // of which shell it invokes.
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_STALL_RECOVERY_CHILD", "1");
             const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
             const int rc = std::system(command.c_str());
 
-            // setenv/_putenv_s changed THIS process's own environment, not only the
-            // spawned child's: unset it now, or the next IntegrationAutotuneStallRecovery
-            // test in this same binary would see it already set, skip its own re-exec,
-            // and run unisolated in this process instead of a fresh one.
-#if defined(_WIN32)
-            _putenv_s("HIPDNN_STALL_RECOVERY_CHILD", "");
-#else
-            unsetenv("HIPDNN_STALL_RECOVERY_CHILD");
-#endif
+            // setEnv() changed THIS process's own environment, not only the spawned
+            // child's: unset it now, or the next IntegrationAutotuneStallRecovery test in
+            // this same binary would see it already set, skip its own re-exec, and run
+            // unisolated in this process instead of a fresh one.
+            hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_STALL_RECOVERY_CHILD");
 
             ASSERT_EQ(rc, 0) << "isolated child run of " << testId
                              << " failed (see its gtest output above)";
