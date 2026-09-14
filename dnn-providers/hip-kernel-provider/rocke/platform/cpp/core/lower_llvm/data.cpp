@@ -99,6 +99,15 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.wait.kmcnt", "declare void @llvm.amdgcn.s.wait.kmcnt(i16)"},
     {"s.wait.expcnt", "declare void @llvm.amdgcn.s.wait.expcnt(i16)"},
     {"s.wait.asynccnt", "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)"},
+    {"s.wait.tensorcnt", "declare void @llvm.amdgcn.s.wait.tensorcnt(i16 immarg)"},
+    {"s.barrier.signal", "declare void @llvm.amdgcn.s.barrier.signal(i32 immarg)"},
+    {"s.barrier.wait", "declare void @llvm.amdgcn.s.barrier.wait(i16 immarg)"},
+    {"s.barrier.init", "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(3) nocapture, i32)"},
+    {"s.barrier.signal.var",
+     "declare void @llvm.amdgcn.s.barrier.signal.var(ptr addrspace(3) nocapture, i32)"},
+    {"s.barrier.join", "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(3) nocapture)"},
+    {"s.wakeup.barrier", "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(3) nocapture)"},
+    {"s.barrier.leave", "declare void @llvm.amdgcn.s.barrier.leave(i16 immarg)"},
     {"global.load.async.to.lds.b32",
      "declare void @llvm.amdgcn.global.load.async.to.lds.b32(ptr addrspace(1) nocapture, ptr "
      "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
@@ -108,6 +117,30 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"global.load.async.to.lds.b128",
      "declare void @llvm.amdgcn.global.load.async.to.lds.b128(ptr addrspace(1) nocapture, ptr "
      "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.store.async.from.lds.b8",
+     "declare void @llvm.amdgcn.global.store.async.from.lds.b8(ptr addrspace(1) nocapture, ptr "
+     "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.store.async.from.lds.b32",
+     "declare void @llvm.amdgcn.global.store.async.from.lds.b32(ptr addrspace(1) nocapture, ptr "
+     "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.store.async.from.lds.b64",
+     "declare void @llvm.amdgcn.global.store.async.from.lds.b64(ptr addrspace(1) nocapture, ptr "
+     "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.store.async.from.lds.b128",
+     "declare void @llvm.amdgcn.global.store.async.from.lds.b128(ptr addrspace(1) nocapture, ptr "
+     "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.load.tr.b128.v8f16",
+     "declare <8 x half> @llvm.amdgcn.global.load.tr.b128.v8f16(ptr addrspace(1) nocapture)"},
+    {"global.load.tr.b128.v8bf16",
+     "declare <8 x bfloat> @llvm.amdgcn.global.load.tr.b128.v8bf16(ptr addrspace(1) nocapture)"},
+    {"global.load.tr.b128.v8i16",
+     "declare <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16(ptr addrspace(1) nocapture)"},
+    {"tensor.load.to.lds",
+     "declare void @llvm.amdgcn.tensor.load.to.lds(<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, "
+     "<8 x i32>, i32 immarg)"},
+    {"tensor.store.from.lds",
+     "declare void @llvm.amdgcn.tensor.store.from.lds(<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, "
+     "<8 x i32>, i32 immarg)"},
     {"exp2.f32", "declare float @llvm.exp2.f32(float)"},
     {"amdgcn.exp2.f32", "declare float @llvm.amdgcn.exp2.f32(float)"},
     {"log2.f32", "declare float @llvm.log2.f32(float)"},

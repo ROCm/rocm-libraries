@@ -631,29 +631,26 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 
 # --- real-corpus guards (rocke importable, no comgr needed) -----------------
 @pytest.mark.quick
-def test_real_gfx942_attention_dense_is_refused(rocke_importable):
-    """The corpus's one genuine unsuppliable-parameter case must be refused.
+def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
+    """gfx942's dense builder must stay packageable.
 
-    gfx942's build_attention_dense takes a keyword-only
-    `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no descriptor can set, so
-    packing it would silently freeze a performance knob. This asserts against
-    the real builder rather than a stub, so the guard cannot rot away from the
-    thing it protects.
+    Its sweep knobs are flat fields on the spec, so the signature is the
+    ``(spec, *, arch)`` the gate requires. Asserting against the real builder
+    catches a regression that reintroduces an unsuppliable keyword-only knob.
     """
     from kernels.gfx942 import attention_dense as m
 
     from hkp_pack.rocke_compile import _require_spec_arch_signature
 
-    with pytest.raises(HkpPackError, match="tuning"):
-        _require_spec_arch_signature(m.build_attention_dense, "build_attention_dense")
+    _require_spec_arch_signature(m.build_attention_dense, "build_attention_dense")
 
 
 @pytest.mark.quick
 def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
     """The builder the example descriptor tree uses must pass the gate.
 
-    Pairs with the refusal above: the gate has to be narrow enough that real
-    kernels remain packageable, not just strict.
+    The gate has to be narrow enough that real kernels remain packageable, not
+    just strict.
     """
     from kernels.gfx942 import attention_tiled_2d as m
 

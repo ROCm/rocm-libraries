@@ -627,27 +627,47 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
             matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)));
-        THROW_IF_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutSetAttribute(matA,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_a),
-                                              sizeof(int64_t)));
-        THROW_IF_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutSetAttribute(matB,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_b),
-                                              sizeof(int64_t)));
-        THROW_IF_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutSetAttribute(matC,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_c),
-                                              sizeof(int64_t)));
-        THROW_IF_HIPBLASLT_ERROR(
-            hipblasLtMatrixLayoutSetAttribute(matD,
-                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                              &(prob.batch_stride_d),
-                                              sizeof(int64_t)));
-        if(!prob.strided_batch)
+
+        if(prob.strided_batch)
+        {
+            if(prob.batch_stride_a != 0)
+            {
+                const int64_t stride_a = static_cast<int64_t>(prob.batch_stride_a);
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtMatrixLayoutSetAttribute(matA,
+                                                      HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                      &stride_a,
+                                                      sizeof(stride_a)));
+            }
+            if(prob.batch_stride_b != 0)
+            {
+                const int64_t stride_b = static_cast<int64_t>(prob.batch_stride_b);
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtMatrixLayoutSetAttribute(matB,
+                                                      HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                      &stride_b,
+                                                      sizeof(stride_b)));
+            }
+            if(prob.batch_stride_c != 0)
+            {
+                const int64_t stride_c = static_cast<int64_t>(prob.batch_stride_c);
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtMatrixLayoutSetAttribute(matC,
+                                                      HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                      &stride_c,
+                                                      sizeof(stride_c)));
+            }
+            if(prob.batch_stride_d != 0)
+            {
+                const int64_t stride_d = static_cast<int64_t>(prob.batch_stride_d);
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtMatrixLayoutSetAttribute(matD,
+                                                      HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                      &stride_d,
+                                                      sizeof(stride_d)));
+            }
+        }
+        else
         {
             if(prob.buffer_offset_a != 0)
             {
