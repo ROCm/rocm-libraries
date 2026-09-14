@@ -201,8 +201,9 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
-    # KDA chunkwise + GDN decode: every field is defaulted; the problem shape
-    # travels in the spec, so a descriptor names no mandatory field.
+    # The KDA chunkwise specs demand nothing: every field, problem shape included,
+    # carries a default, so a descriptor may omit any of them. `KdaTileSpec` is the
+    # nested tiling struct reached through the `tile` field of the other three.
     "kernels.gfx942.kda_chunkwise.KdaChunkFusedSpec": (),
     "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
@@ -245,6 +246,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_segments",
     ),
     "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
+    # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
     "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
