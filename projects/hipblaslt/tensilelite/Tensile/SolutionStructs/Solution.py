@@ -4171,15 +4171,6 @@ class Solution(collections.abc.Mapping):
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
-        # Multi-wave swizzled-A TDM uses the wave-separated (parity) builder: numComp = NumWaves//2
-        # A-loading components split A's mO rows, while the local read partitions M by MIWaveGroup[0].
-        # These band counts must agree, so restrict to numComp == MIWaveGroup[0] for now.
-        if swizzleAIsTDM and state["NumWaves"] > 1:
-          numComp = state["NumWaves"] // 2
-          if numComp != state["MIWaveGroup"][0]:
-            reject(state, printRejectionReason,
-                   f"Swizzled-A TDM multi-wave requires numComp(NumWaves//2={numComp}) == MIWaveGroup[0]({state['MIWaveGroup'][0]})")
-
       if state["ProblemType"]["SwizzleTensorB"]:
         if not state["DirectToVgprB"] and not swizzleBIsTDM:
           reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
@@ -4189,15 +4180,6 @@ class Solution(collections.abc.Mapping):
         # TODO- NN fails validation due to DTVB + Tail-Loop is not working correctly
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
-
-        # Multi-wave swizzled-B TDM uses the wave-separated (parity) builder: numComp = NumWaves//2
-        # B-loading components split B's nO rows, while the local read partitions N by MIWaveGroup[1].
-        # These band counts must agree, so restrict to numComp == MIWaveGroup[1] for now.
-        if swizzleBIsTDM and state["NumWaves"] > 1:
-          numComp = state["NumWaves"] // 2
-          if numComp != state["MIWaveGroup"][1]:
-            reject(state, printRejectionReason,
-                   f"Swizzled-B TDM multi-wave requires numComp(NumWaves//2={numComp}) == MIWaveGroup[1]({state['MIWaveGroup'][1]})")
 
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
