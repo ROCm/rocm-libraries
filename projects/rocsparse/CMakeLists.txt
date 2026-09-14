@@ -83,7 +83,6 @@ option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" 
 option(BUILD_MEMSTAT "Build rocSPARSE with memory statistics enabled" OFF)
 option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_t" OFF)
 option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
-option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
@@ -197,7 +196,6 @@ message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 set(VERSION_STRING "5.1.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
-set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
@@ -218,16 +216,6 @@ endif()
 find_package(rocprim REQUIRED)
 if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_VERSION})
   message(FATAL_ERROR "The version of rocPRIM found was incompatible. Found: ${rocprim_VERSION} Required: ${MIN_ROCPRIM_VERSION}")
-endif()
-
-# Find rocblas package
-if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas REQUIRED)
-  if (${rocblas_VERSION} VERSION_LESS ${MIN_ROCBLAS_VERSION})
-    message(FATAL_ERROR "The version of rocBLAS found was incompatible. Found: ${rocblas_VERSION} Required: ${MIN_ROCBLAS_VERSION}")
-  endif()
-else()
-  message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
 
 if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
@@ -319,16 +307,6 @@ rocm_package_add_dependencies(SHARED_DEPENDS "${DEPENDS_HIP_RUNTIME} >= ${HIP_RU
 ## add dependency on hip runtime for static libraries
 rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
 rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
-
-## add dependency on rocBLAS
-if (rocblas_FOUND)
-  set(ROCBLAS_MINIMUM "4.1.0")
-  rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${ROCBLAS_MINIMUM}")
-  rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${ROCBLAS_MINIMUM}")
-  rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${ROCBLAS_MINIMUM}")
-else()
-  message("-- Build rocSPARSE with rocBLAS is disabled since rocBLAS is not found")
-endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")

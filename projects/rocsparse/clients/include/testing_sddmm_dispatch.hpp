@@ -491,16 +491,6 @@ public:
         // Create rocsparse handle
         rocsparse_local_handle handle(arg);
 
-#ifndef ROCSPARSE_WITH_ROCBLAS
-        if(arg.sddmm_alg == rocsparse_sddmm_alg_dense)
-        {
-            std::cerr
-                << "No BLAS implementation is available, skipping rocsparse_sddmm_alg_dense test."
-                << std::endl;
-            return;
-        }
-#endif
-
         host_scalar<T> h_alpha(arg.get_alpha<T>());
         host_scalar<T> h_beta(arg.get_beta<T>());
 

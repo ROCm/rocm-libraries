@@ -224,8 +224,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # library/src changes.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_message.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_handle.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas_rocblas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_debug.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_envariables.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
@@ -327,19 +325,6 @@ target_link_libraries(rocsparse-unit-test-device PRIVATE
   hip::host
   hip::device
 )
-
-# rocsparse_blas_rocblas.cpp is compiled into this target (see
-# ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES). When rocBLAS is present the clients
-# directory defines -DROCSPARSE_WITH_ROCBLAS (clients/CMakeLists.txt), so that
-# TU includes <rocblas/rocblas.h> and calls into rocBLAS. Mirror the library
-# (library/CMakeLists.txt links roc::rocblas) so this test target picks up
-# rocBLAS's include directories and symbols in that configuration; without it
-# the compile fails with "'rocblas/rocblas.h' file not found" under the CI
-# with-rocBLAS build. Test-only; no library change. When rocBLAS is absent the
-# macro is undefined and the TU compiles as a stub, so no link is needed.
-if(rocblas_FOUND AND TARGET roc::rocblas)
-  target_link_libraries(rocsparse-unit-test-device PRIVATE roc::rocblas)
-endif()
 
 apply_omp_settings(rocsparse-unit-test-device)
 
