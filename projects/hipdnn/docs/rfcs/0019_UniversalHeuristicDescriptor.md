@@ -813,7 +813,9 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    something other than what was authored, which is why step 7 rethrows it. **What is optional degrades;
    what is required raises.** Each heuristic failure mode resolves to a usable answer plus a diagnostic:
    - **No model, or the scorer errors** → rank by `static_order` (priority + id). No ranking information
-     is available, and priority order is a valid answer.
+     is available, and priority order is a valid answer. A benchmark record, where one exists, is
+     consulted ahead of both ([step 9](#5-selection-flow)): a degraded model does not degrade a
+     measurement.
    - **Broken feature contract** — `features_hash` disagrees, a `$kernel.*` reference is dangling, or the
      KMD pairing is incompatible ([Section 6.3](#63-contract-enforcement)) → the model is not used (its
      inputs are not the ones it was trained on, so its scores would be wrong), an **error** is logged,
@@ -841,6 +843,39 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    the same way. Evaluating the model's usability once, over the whole catalog, leaves both paths
    starting from the same basis; `static_order` is itself per-candidate — `priority` then stable `id` —
    so a fallback order restricts to any subset unchanged.
+
+9. **A measurement outranks an estimate.** The two order sources above — the model, then
+   `static_order` — are both predictions about which kernel is fastest. When the provider already holds
+   a benchmark record that covers this graph on this device, it holds the answer those predictions were
+   approximating, and the ranked order is taken from the record rather than from the model.
+
+   This is not a third opinion competing with the other two; it is the ground truth they estimate. A
+   model earns its place precisely where no measurement exists, which is the overwhelming majority of
+   graphs a shipped engine sees. Where one does exist, preferring the estimate would be choosing a
+   prediction of a number over the number.
+
+   Three conditions make it safe, and each mirrors a rule already stated above:
+
+   - **Coverage is decided over the full applicable catalog, before any knob filter**, exactly as
+     scorer failure is in step 8. A record that covers only part of the catalog does not order it; the
+     model does, and the partial record is ignored rather than mixed in. Deciding coverage per filtered
+     subset would let a pinned and an unpinned request take different order sources over the same
+     candidates, which is the failure the commuting property exists to prevent.
+   - **The record is keyed by what would invalidate it** — the graph, the device, and the engine's
+     descriptor-set version ([Section 9.2](#92-loading-and-caching)). A measurement describes the
+     kernels that were installed when it was taken, so a changed engine version does not merely age the
+     record, it makes it a measurement of something else. Keying on the version is what makes that
+     judgement automatic rather than a comparison a reader has to remember to perform.
+   - **The store is capacity-bounded and evicts**, in memory and on disk
+     ([Section 9.2](#92-loading-and-caching)). A measured order that never expires is a cache that
+     eventually describes a machine the process is no longer running on.
+
+   **The engine's figure of merit follows the order source.** Engine selection reads the top of the
+   ranked list as the engine's estimate ([Section 11](#11-engine-selection-integration)). When a record
+   ordered the catalog, the engine reports the **measured** throughput of that top candidate, in the
+   same calibrated TFLOPS a model would have reported; a measurement and an estimate are comparable
+   because they are the same quantity, obtained differently. An engine with a record therefore competes
+   on evidence rather than on prediction, which is the outcome this rule exists to produce.
 
 **The output is the ranked catalog, not just a winner.** Selection returns the candidates in score order;
 the winner is simply its first element. Callers need the ordering, not only the argmax — a knob query
@@ -1723,14 +1758,22 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   ownership model does not currently allow.
 - **Result cache on the descriptor cache key.** Selection is a pure function of (feature vector,
   candidate set). Reuse RFC 0017's applicability cache key — **`(engine id, graph id, device id)` plus
-  the inventory generation counter** — rather than a bespoke fingerprint. "Engine id" here is the
+  the engine's descriptor-set version** — rather than a bespoke fingerprint. "Engine id" here is the
   **64-bit id** hipDNN keys on (the FNV-1a hash of the UED `name`), not the descriptor GUID;
   [RFC 0020 §3](0020_UniversalEngineDescriptor.md) keeps those two id spaces distinct. The device id
-  because it is what `$device.*` resolved against, and the generation counter so a newly dropped-in pack
-  invalidates. Where the cache already lives **on the engine** — as it does in the ingestor foundation —
-  the engine id is *implicit* in the cache's location rather than absent from the key. In practice this
-  is the **catalog cache** that foundation maintains: the ranked order rides along with the catalog it
-  ranks rather than living in a second structure.
+  because it is what `$device.*` resolved against, and the version so a pack that changed cannot be
+  served an order computed over the kernels it used to contain. Where the cache already lives **on the
+  engine** — as it does in the ingestor foundation — the engine id is *implicit* in the cache's location
+  rather than absent from the key. In practice this is the **catalog cache** that foundation maintains:
+  the ranked order rides along with the catalog it ranks rather than living in a second structure.
+
+  **Why a version rather than a process-local generation counter.** An earlier draft keyed on an
+  inventory counter bumped on re-scan. Descriptors are scanned when hipDNN initialises and not again, so
+  in a running process that counter is a constant and the only invalidation it can express is one that
+  never happens. The descriptor-set version says the same thing durably: it distinguishes two builds of
+  an engine rather than two scans of one, which is the distinction that actually matters both in memory
+  and — unlike a counter — across a restart. Should in-process re-scan ever land, a re-scan that changes
+  nothing leaves the version alone, which is the correct answer for a cache.
 
   **What is cached is the full applicable catalog's order**, which is why no knob filter appears in the
   key. A pin narrows the candidate set but not the ranking: a filtered request restricts the cached
@@ -1745,8 +1788,8 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   heuristic on the engine, both fixed for that engine's lifetime, so **a swap means new descriptors,
   a new engine, and a new empty cache.** The UHD's identity is implicit in the cache's *location*,
   exactly as the engine id is. Should hipDNN ever re-scan descriptors in-process without rebuilding
-  engines, the **inventory generation counter** already in the key covers that case too — a new UHD
-  arrives as a new inventory. Nothing UHD-specific is needed.
+  engines, the **descriptor-set version** already in the key covers that case too — a re-scan that
+  brings a new UHD brings a new version with it. Nothing UHD-specific is needed.
 
 - **Persistent: the UHD identity has to be in the path, because nothing else survives a restart.** The
   moment rankings outlive the process, the argument above evaporates — generation counters are
