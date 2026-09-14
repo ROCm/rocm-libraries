@@ -18,6 +18,7 @@ export type {
   LogEntry,
   LogLevel,
   LogSeverity,
+  SerializeGraphResult,
 } from "./types";
 
 /**

@@ -16,8 +16,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CommandPanel } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
 import { EnginePanel } from "./components/EnginePanel";
+import { MainTabs, TabPanel, type TabId } from "./components/MainTabs";
 import { DND_MIME, Palette } from "./components/Palette";
 import { OpNodeView } from "./components/OpNodeView";
 import { Toolbar } from "./components/Toolbar";
@@ -52,6 +54,7 @@ function Studio() {
   // Bumped whenever the graph is replaced (New/Open) so the engine panel drops
   // any built plan and resets its Build/Execute state.
   const [engineResetKey, setEngineResetKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<TabId>("create");
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -286,7 +289,8 @@ function Studio() {
         onSave={doSave}
         onSaveAs={doSaveAs}
       />
-      <div className="workspace">
+      <MainTabs active={activeTab} onSelect={setActiveTab} />
+      <TabPanel id="create" active={activeTab} className="workspace">
         <div className="app__body">
           <Palette onAdd={onPaletteAdd} />
           <div className="canvas" onDrop={onDrop} onDragOver={onDragOver}>
@@ -334,7 +338,13 @@ function Studio() {
           </div>
         </div>
         <EnginePanel getGraph={getGraph} resetKey={engineResetKey} />
-      </div>
+      </TabPanel>
+      <TabPanel id="implement" active={activeTab}>
+        <CommandPanel scope="implement" getGraph={getGraph} />
+      </TabPanel>
+      <TabPanel id="verify" active={activeTab}>
+        <CommandPanel scope="verify" getGraph={getGraph} />
+      </TabPanel>
     </div>
   );
 }
