@@ -82,6 +82,23 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op)
+    {
+        dispatch([&](auto impl)
+                 { impl.partial_inclusive_scan(input, output, valid_items, scan_op); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, storage_type& storage, BinaryFunction scan_op)
+    {
+        (void)storage;
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, BinaryFunction scan_op, T init)
     {
         dispatch([&](auto impl) { impl.inclusive_scan(input, output, scan_op, init); });
@@ -93,6 +110,23 @@ public:
     {
         (void)storage;
         inclusive_scan(input, output, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op, T init)
+    {
+        dispatch([&](auto impl)
+                 { impl.partial_inclusive_scan(input, output, valid_items, scan_op, init); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        (void)storage;
+        partial_inclusive_scan(input, output, valid_items, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -113,6 +147,28 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op)
+    {
+        dispatch([&](auto impl)
+                 { impl.partial_inclusive_scan(input, output, valid_items, reduction, scan_op); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op)
+    {
+        (void)storage;
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op, T init)
     {
         dispatch([&](auto impl) { impl.inclusive_scan(input, output, reduction, scan_op, init); });
@@ -125,6 +181,30 @@ public:
     {
         (void)storage;
         inclusive_scan(input, output, reduction, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op, T init)
+    {
+        dispatch(
+            [&](auto impl)
+            { impl.partial_inclusive_scan(input, output, valid_items, reduction, scan_op, init); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op,
+                                T              init)
+    {
+        (void)storage;
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op, init);
     }
 
     // Exclusive scan
