@@ -59,4 +59,15 @@ STINKYTOFU_EXPORT std::optional<uint32_t> settledDispatchFilledSgprCount(
 STINKYTOFU_EXPORT uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
                                              const std::array<int, 3>& workgroupIds);
 
+/// VGPRs the dispatch writes before the first instruction: the workitem id,
+/// which is one register per enabled dimension. \p vgprWorkItem is the
+/// descriptor's .amdhsa_system_vgpr_workitem_id, so 0 means x alone.
+STINKYTOFU_EXPORT uint32_t dispatchFilledVgprCount(int vgprWorkItem);
+
+/// VGPR count \p function must declare: the larger of what it uses and what
+/// the dispatch fills. A kernel that never reads its workitem id names it in
+/// no operand, so a count taken from usage alone can declare fewer registers
+/// than the dispatch writes.
+STINKYTOFU_EXPORT uint32_t requiredVgprCount(const Function& function, int vgprWorkItem);
+
 }  // namespace stinkytofu

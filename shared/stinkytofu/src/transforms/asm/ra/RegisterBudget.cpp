@@ -65,4 +65,14 @@ uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
                     dispatchFilledSgprCount(numSgprPreload, workgroupIds));
 }
 
+uint32_t dispatchFilledVgprCount(int vgprWorkItem) {
+    // The field counts extra dimensions, so x alone is 0 and reaches v0.
+    return vgprWorkItem < 0 ? 1u : static_cast<uint32_t>(vgprWorkItem) + 1u;
+}
+
+uint32_t requiredVgprCount(const Function& function, int vgprWorkItem) {
+    return std::max(highestRegisterCount(function, RegType::V),
+                    dispatchFilledVgprCount(vgprWorkItem));
+}
+
 }  // namespace stinkytofu

@@ -1471,6 +1471,7 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
                 refreshSgprCount();
+                refreshVgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
@@ -1492,6 +1493,46 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             }
             if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
             signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
+        }
+
+        /// The same for VGPRs: allocation rewrites operands, so the producer's
+        /// pool stops describing the code, and the hardware reserves what the
+        /// descriptor declares. Both directions, since a colouring may need
+        /// more than was reserved. A requirement past the addressable limit
+        /// throws rather than being clamped, since no descriptor expresses it.
+        void refreshVgprCount() const {
+            const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required =
+                    std::max(required, stinkytofu::requiredVgprCount(*function, kd.vgprWorkItem));
+            }
+            if (required == 0) return;
+
+            const uint32_t addressable = addressableVgprs();
+            if (addressable != 0 && required > addressable) {
+                throw std::runtime_error(
+                    "kernel needs " + std::to_string(required) +
+                    " VGPRs after register allocation but the architecture addresses only " +
+                    std::to_string(addressable));
+            }
+            signature_->setDeclaredVgprs(static_cast<int>(required));
+        }
+
+        /// Addressable VGPRs for the architecture this module was lifted for, or
+        /// 0 when it is not one this build knows. Looked up by triple so an
+        /// unknown target returns null instead of asserting.
+        uint32_t addressableVgprs() const {
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                const std::array<int, 3>& isa = function->getGemmTileConfig().arch;
+                const auto* info = stinkytofu::ArchHelper::getInstance().getArchInfo(
+                    static_cast<uint32_t>(isa[0]), static_cast<uint32_t>(isa[1]),
+                    static_cast<uint32_t>(isa[2]));
+                if (info != nullptr) return info->maxVGPR;
+            }
+            return 0;
         }
 
         /// SGPRs the descriptor declares, as `.amdhsa_next_free_sgpr`.
