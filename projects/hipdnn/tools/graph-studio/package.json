@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "build:native": "cd electron/native && bunx node-gyp rebuild",
+    "build:native": "node electron/native/build-addon.cjs",
     "electron:dev": "concurrently -k \"vite --port 5173\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 bunx electron .\"",
     "electron:start": "bun run build && bunx electron .",
     "electron:pack": "bun run build && bunx electron-builder"

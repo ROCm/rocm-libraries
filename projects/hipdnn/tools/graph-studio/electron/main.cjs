@@ -4,7 +4,10 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const fs = require("node:fs/promises");
+const { existsSync } = require("node:fs");
 const path = require("node:path");
+
+const studioPaths = require("./paths.cjs");
 
 // Dev mode = a Vite dev server URL was provided (set by the electron:dev
 // script). electron:start builds first and loads the bundled files instead.
@@ -14,26 +17,40 @@ const isDev = Boolean(DEV_URL);
 // The native addon is optional: if it hasn't been built (or hipDNN isn't
 // installed) the app still runs, and the engine reports itself unavailable.
 //
-// The addon depends on hipdnn_backend.dll + amdhip64_*.dll from the ROCm SDK
-// bin/. Put that directory on PATH (and the Win32 DLL search path) before the
-// require so the user doesn't have to configure their environment. Override the
-// SDK location with HIPDNN_SDK.
-const HIPDNN_SDK =
-  process.env.HIPDNN_SDK ??
-  "D:/develop/latest_wheels_nightly/Lib/site-packages/_rocm_sdk_devel";
-const sdkBin = path.join(HIPDNN_SDK, "bin");
-
+// The addon needs hipdnn_backend + the HIP runtime at load time, and hipDNN
+// needs HIPDNN_PLUGIN_DIR to discover the engine plugins. Both come from
+// wherever the addon was built against -- an in-tree build tree or an installed
+// SDK -- so resolve that here rather than making the user set up a shell.
+let paths = null;
 let nativeEngine = null;
 let nativeLoadError = "";
 try {
-  process.env.PATH = `${sdkBin}${path.delimiter}${process.env.PATH ?? ""}`;
-  if (process.platform === "win32" && typeof process.addDllDirectory === "function") {
-    process.addDllDirectory(sdkBin);
-  }
-  nativeEngine = require("./native/build/Release/hipdnn_engine.node");
+  paths = studioPaths.resolve();
 } catch (err) {
   nativeLoadError = err instanceof Error ? err.message : String(err);
 }
+
+if (paths) {
+  console.log(`hipDNN: ${paths.mode} build at ${paths.root}`);
+  try {
+    for (const dir of paths.runtimeDirs) {
+      process.env.PATH = `${dir}${path.delimiter}${process.env.PATH ?? ""}`;
+      if (process.platform === "win32" && typeof process.addDllDirectory === "function" && existsSync(dir)) {
+        process.addDllDirectory(dir);
+      }
+    }
+    if (paths.pluginDir && !process.env.HIPDNN_PLUGIN_DIR) {
+      process.env.HIPDNN_PLUGIN_DIR = paths.pluginDir;
+    }
+    nativeEngine = require(paths.addonPath);
+  } catch (err) {
+    nativeLoadError = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// Falling back to the in-source bundle keeps the window loadable even when
+// hipDNN resolution failed outright.
+const distDir = paths?.distDir ?? path.join(__dirname, "..", "dist");
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -52,7 +69,7 @@ function createWindow() {
     void win.loadURL(DEV_URL);
     win.webContents.openDevTools({ mode: "detach" });
   } else {
-    void win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+    void win.loadFile(path.join(distDir, "index.html"));
   }
   return win;
 }
