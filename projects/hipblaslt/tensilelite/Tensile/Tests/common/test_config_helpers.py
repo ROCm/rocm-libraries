@@ -14,6 +14,9 @@ import os
 
 import pytest
 
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnknownMarkWarning")
+
 from config_helpers import configMarks
 
 # configMarks takes rootDir only to compute the config's relpath (for the
@@ -21,8 +24,11 @@ from config_helpers import configMarks
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 _TESTS_ROOT = os.path.dirname(_COMMON_DIR)
 
-# A config tagged ``ffm_fail`` and a gfx1250 config that is not.
-_FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx1250.yaml")
+# A config tagged ``ffm_fail`` and a gfx1250 config that is not. Both now sit
+# under a ``core/`` dir, hence the unknown-mark filter on all four tests.
+_FFM_FAIL_CONFIG = os.path.join(
+    _COMMON_DIR, "streamk", "gfx1250", "core", "sk_hybrid_quick.yaml"
+)
 _PLAIN_GFX1250_CONFIG = os.path.join(
     _COMMON_DIR, "streamk", "gfx1250", "core", "sk_mxf4_force_dp_only.yaml"
 )
@@ -55,7 +61,6 @@ def test_ffm_fail_inert_on_other_arch(monkeypatch):
 # from every path component, and ``core`` is intentionally unregistered — the
 # resulting PytestUnknownMarkWarning is pre-existing repo behavior, not a
 # defect in this test, so scope it out here.
-@pytest.mark.filterwarnings("ignore::pytest.PytestUnknownMarkWarning")
 def test_unmarked_config_never_xfails_under_ffm(monkeypatch):
     """A gfx1250 config without ffm_fail is untouched even under FFM."""
     monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
