@@ -44,6 +44,32 @@ struct AffinitySet {
     }
 };
 
+/// Two values an architecture rule would rather see placed in some relation to
+/// each other: sharing a register, avoiding one, avoiding a bank.
+///
+/// Soft, and structurally so. A preference is consulted only to order candidate
+/// registers that placement has already accepted, so it can change which
+/// colouring comes out and never whether one does.
+///
+/// The pair carries no meaning of its own. Which relation was wanted lives on
+/// the rule that asked, which is what lets a new kind of preference be a new
+/// table row rather than a new field here.
+struct Preference {
+    SSAValueID a = kInvalidSSAValueID;
+    SSAValueID b = kInvalidSSAValueID;
+    /// Index into AllocationRules::all(), so the relation and the report line
+    /// come from the same place.
+    size_t rule = 0;
+    /// What satisfying it is worth, charged as a penalty when it goes unmet.
+    /// Comparable only with other preferences.
+    ///
+    /// Must never be negative, for the same reason AllocationRule::baseCost
+    /// must not be: placement stops searching once a base costs nothing.
+    double benefit = 1.0;
+
+    bool operator==(const Preference& other) const = default;
+};
+
 class AllocationConstraints {
    public:
     /// Recover constraints from \p function, letting \p rules append the offset
@@ -109,6 +135,12 @@ class AllocationConstraints {
         return affinitySets_;
     }
 
+    /// Soft pairings the architecture asked for. Empty on a chip with no
+    /// pairing rule, which is what keeps placement on its first-fit path.
+    std::span<const Preference> preferences() const {
+        return preferences_;
+    }
+
     std::string toString() const;
 
    private:
@@ -120,6 +152,7 @@ class AllocationConstraints {
     std::vector<SSAValueID> undefinedLiveIns_;
     std::vector<TupleRun> tupleRuns_;
     std::vector<AffinitySet> affinitySets_;
+    std::vector<Preference> preferences_;
 };
 
 }  // namespace stinkytofu

@@ -65,6 +65,10 @@ struct Block {
     /// register has the whole file; an 8-wide range on even bases has about half
     /// of it; a 2-wide range capped to the first bank has an eighth.
     uint32_t placementFreedom = 0;
+    /// Soft pairings naming one of this block's members, by index into
+    /// AllocationConstraints::preferences(). Empty for almost every block,
+    /// which is what keeps placement on its first-fit path.
+    std::vector<size_t> preferences;
     uint32_t evictions = 0;
     bool placed = false;
     uint32_t base = 0;

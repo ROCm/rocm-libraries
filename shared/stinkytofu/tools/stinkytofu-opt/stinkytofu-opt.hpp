@@ -321,6 +321,9 @@ const std::vector<PassInfo> availablePasses = {
     //                       with '+' for several; an unknown name is an error,
     //                       because a test that enables nothing still passes
     //   rules=all         — force every rule the triple declares
+    //   noRule=<name>     — force this rule Off, so a rule the chip ships
+    //                       Active can be compared against without a rebuild.
+    //                       Same spelling of lists as rules=
     //   ruleAudit         — force every declared rule to Audit, which reports
     //                       against the producer's colouring without enforcing
     //   noRules           — behave as if the chip declared no rules
@@ -362,6 +365,9 @@ const std::vector<PassInfo> availablePasses = {
                  continue;
              }
              options.rules.activate.push_back(std::move(name));
+         }
+         for (std::string& name : passArgValues(args, "noRule")) {
+             options.rules.disable.push_back(std::move(name));
          }
          return createRegisterAllocationPass(std::move(options));
      }},
