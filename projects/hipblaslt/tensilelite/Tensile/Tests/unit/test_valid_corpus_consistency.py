@@ -167,19 +167,6 @@ def _write_cu_variant_header_yaml(path, *, schedule="schedule", gfx="gfx942", cu
     return path
 
 
-def _write_overlay_yaml(path, *, schedule, gfx):
-    """gfx1250v0-overlay tests only care about ScheduleName / gfx arch, but
-    write the same full header shape ``_write_header_yaml`` does (rather than
-    a bare positional list of scalars) so these stay representative of the
-    real logic-file dialect that ``load_logic_schedule_name()`` /
-    ``load_logic_gfx_arch()`` parse."""
-    return _write_header_yaml(path, schedule=schedule, gfx=gfx)
-
-
-# ===========================================================================
-# read_device_names
-# ===========================================================================
-
 def test_read_device_names_parses_header_line(tmp_path, vcc):
     f = _write_header_yaml(tmp_path / "a.yaml", devices="Device 74a0, Device 74a1")
     assert vcc.read_device_names(f) == ("74a0", "74a1")
@@ -264,25 +251,6 @@ def test_resolve_corpus_root_skips_a_non_directory_asm_full_match(tmp_path, vcc)
     (tmp_path / "aldebaran" / "asm_full").parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / "aldebaran" / "asm_full").write_text("n/a")
     assert vcc._resolve_corpus_root(tmp_path) == tmp_path
-
-
-def test_gfx1250v0_overlay_violations_identical_via_ancestor_or_direct_corpus_root(tmp_path, vcc):
-    # The exact shape that broke PR #11447's own CI: TensileLogic invoked
-    # with `library` (an ancestor of asm_full), not asm_full directly. An
-    # unresolved ancestor previously reported both a false "ships no logic"
-    # violation (overlay_root computed at the wrong, nonexistent path) and a
-    # false "outside the overlay" violation for every real overlay file.
-    asm_full = tmp_path / "library" / "src" / "amd_detail" / "rocblaslt" / "src" / "Tensile" / "Logic" / "asm_full"
-    _write_overlay_yaml(
-        asm_full / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    _write_overlay_yaml(
-        asm_full / "gfx1250" / "Equality" / "logic.yaml",
-        schedule="gfx1250", gfx=vcc.GFX1250,
-    )
-    assert vcc.find_gfx1250v0_overlay_violations(asm_full) == []
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path / "library") == []
 
 
 def test_sibling_device_names_violations_identical_via_ancestor_or_direct_corpus_root(tmp_path, vcc):
@@ -599,144 +567,13 @@ def test_chip_id_arch_lock_dedupes_repeated_archs(tmp_path, vcc):
 
 
 # ===========================================================================
-# find_gfx1250v0_overlay_violations
+# check_corpus_invariants
 # ===========================================================================
 
-def test_gfx1250v0_overlay_clean(tmp_path, vcc):
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    # A sibling v1 file elsewhere in the corpus, correctly *not* claiming the
-    # v0 schedule name, must not trip the "leaked outside" check.
-    _write_overlay_yaml(
-        tmp_path / "gfx1250" / "Equality" / "logic.yaml",
-        schedule="gfx1250", gfx=vcc.GFX1250,
-    )
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path) == []
-
-
-def test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation_when_not_required(tmp_path, vcc):
-    # No gfx1250v0 directory anywhere, and the caller isn't specifically
-    # requesting the gfx1250v0 architecture -- this corpus simply hasn't done
-    # a v0/v1 split for gfx1250 (e.g. hipSPARSELt's corpus, which ships only a
-    # unified gfx1250 tree with no per-revision overlay at all, and never
-    # requests architecture gfx1250v0). Not every TensileLogic-checked corpus
-    # is hipBLASLt's, so this is inapplicable, not a violation.
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, overlay_required=False) == []
-
-
-def test_gfx1250v0_overlay_missing_is_a_violation_when_required(tmp_path, vcc):
-    # hipBLASLt's dedicated gfx1250v0 build (device-library/CMakeLists.txt
-    # invokes TensileLogic with --architecture gfx1250v0 specifically for
-    # this) must find the overlay -- a corpus that does the v0/v1 split for
-    # gfx1250 elsewhere cannot silently lose the overlay directory itself.
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path, overlay_required=True)
-    assert any("required" in v for v in violations)
-
-
-def test_gfx1250v0_overlay_existing_but_empty_is_a_violation(tmp_path, vcc):
-    # The overlay directory exists on disk but ships no logic files -- this
-    # is the actually-broken case: something started the v0/v1 split for
-    # this corpus but the overlay ended up empty. A violation regardless of
-    # overlay_required.
-    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
-    assert len(violations) == 1
-    assert "ships no logic" in violations[0]
-
-
-def test_gfx1250v0_overlay_wrong_schedule_name_is_a_violation(tmp_path, vcc):
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule="gfx1250",  # should be "gfx1250v0"
-        gfx=vcc.GFX1250,
-    )
-    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
-    assert any("ScheduleName" in v and "expected 'gfx1250v0'" in v for v in violations)
-
-
-def test_gfx1250v0_overlay_wrong_architecture_name_is_a_violation(tmp_path, vcc):
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0,
-        gfx="gfx1250v0",  # must stay the base arch, "gfx1250"
-    )
-    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
-    assert any("ArchitectureName" in v and "expected 'gfx1250'" in v for v in violations)
-
-
-def test_gfx1250v0_overlay_leaking_outside_is_a_violation(tmp_path, vcc):
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    # A file outside the overlay wrongly claims the v0 schedule name.
-    _write_overlay_yaml(
-        tmp_path / "gfx1250" / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    violations = vcc.find_gfx1250v0_overlay_violations(tmp_path)
-    assert any("outside the gfx1250v0 overlay" in v for v in violations)
-
-
-def test_gfx1250v0_overlay_respects_a_caller_supplied_file_subset_outside_scan(tmp_path, vcc):
-    # Regression: Run.py excludes "Experimental" logic from the file list it
-    # passes to check_corpus_invariants(), mirroring _runChecks()'s own
-    # per-file loop. An excluded Experimental file that wrongly claims the
-    # v0 schedule name outside the overlay must not trip this check just
-    # because find_gfx1250v0_overlay_violations() re-walked logic_root on
-    # its own instead of honoring the caller's selection.
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    _write_overlay_yaml(
-        tmp_path / "gfx1250" / "Equality" / "logic.yaml",
-        schedule="gfx1250", gfx=vcc.GFX1250,
-    )
-    _write_overlay_yaml(
-        tmp_path / "gfx1250" / "Experimental" / "probe.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    selected = [p for p in _all_yaml(tmp_path) if "Experimental" not in p.parts]
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, selected) == []
-    # Without the filter, the same corpus does flag it -- confirms the probe
-    # file is a real would-be violation and not just inert.
-    assert any(
-        "outside the gfx1250v0 overlay" in v
-        for v in vcc.find_gfx1250v0_overlay_violations(tmp_path)
-    )
-
-
-def test_gfx1250v0_overlay_respects_a_caller_supplied_file_subset_overlay_contents(tmp_path, vcc):
-    # Same selection contract, but for a file *inside* the overlay: an
-    # excluded Experimental file with a bad header inside the overlay
-    # directory must not be flagged either.
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
-    )
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Experimental" / "probe.yaml",
-        schedule="gfx1250",  # wrong ScheduleName, but excluded from selection
-        gfx=vcc.GFX1250,
-    )
-    selected = [p for p in _all_yaml(tmp_path) if "Experimental" not in p.parts]
-    assert vcc.find_gfx1250v0_overlay_violations(tmp_path, selected) == []
-
-
-# ===========================================================================
-# check_corpus_invariants / report_corpus_invariant_violations
-# ===========================================================================
-
-def test_check_corpus_invariants_aggregates_sibling_and_overlay_finders(tmp_path, vcc):
-    # One violation from each of the two finders check_corpus_invariants()
-    # aggregates, planted in the same tmp corpus. (find_chip_id_arch_lock_violations
-    # is deliberately not one of them -- see check_corpus_invariants()'s docstring.)
+def test_check_corpus_invariants_reports_the_sibling_finders_violations(tmp_path, vcc):
+    # What check_corpus_invariants() aggregates, planted in a tmp corpus.
+    # (find_chip_id_arch_lock_violations is deliberately not part of it --
+    # see check_corpus_invariants()'s docstring.)
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",
         devices="Device 75a0",
@@ -745,47 +582,9 @@ def test_check_corpus_invariants_aggregates_sibling_and_overlay_finders(tmp_path
         tmp_path / "aldebaran" / "gfx950" / "GridBased" / "logic.yaml",
         devices="Device 75a3",
     )
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    # An existing-but-empty overlay directory, not merely a missing one, is
-    # what actually trips the gfx1250v0-overlay finder when "all" is
-    # requested (see test_gfx1250v0_overlay_no_split_at_all_is_not_a_violation_when_not_required).
-    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
 
     violations = vcc.check_corpus_invariants(tmp_path)
     assert any("Divergent sibling DeviceNames" in v for v in violations)
-    assert any("ships no logic" in v for v in violations)
-
-
-def test_check_corpus_invariants_does_not_require_overlay_from_archs_alone(tmp_path, vcc):
-    # Regression for the actual bug this shipped with: requesting
-    # architecture gfx1250v0 does not by itself mean the corpus being
-    # validated owns a gfx1250/gfx1250v0 split. hipSPARSELt's shared gfx125X
-    # CI build invokes TensileLogic with --architecture gfx1250v0 against
-    # its own corpus, which never did the split and has no gfx1250v0
-    # directory at all -- that must not be a hard failure just because the
-    # architecture spelling matched.
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    assert vcc.check_corpus_invariants(tmp_path, archs=["gfx1250v0"]) == []
-
-
-def test_check_corpus_invariants_requires_overlay_only_when_caller_opts_in(tmp_path, vcc):
-    # hipBLASLt's dedicated gfx1250v0 device-library build opts in
-    # explicitly via overlay_required=True (--require-gfx1250v0-overlay);
-    # only then is a missing overlay a violation.
-    (tmp_path / "gfx1250" / "Equality").mkdir(parents=True)
-    violations = vcc.check_corpus_invariants(
-        tmp_path, archs=["gfx1250v0"], overlay_required=True
-    )
-    assert any("required" in v for v in violations)
-
-
-def test_check_corpus_invariants_skips_overlay_check_for_an_unrelated_architecture(tmp_path, vcc):
-    # A gfx942-only build has no reason to care about the gfx1250v0 overlay
-    # at all -- an absent (or even empty) overlay must not fail it.
-    (tmp_path / vcc.GFX1250V0).mkdir(parents=True)
-    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
-    files = [tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml"]
-    assert vcc.check_corpus_invariants(tmp_path, files=files, archs=["gfx942"]) == []
 
 
 def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path, vcc):
@@ -801,14 +600,14 @@ def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path
     )
     _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml", gfx="gfx942")
     gfx942_only = [tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml"]
-    assert vcc.check_corpus_invariants(tmp_path, files=gfx942_only, archs=["gfx942"]) == []
+    assert vcc.check_corpus_invariants(tmp_path, files=gfx942_only) == []
 
 
 def test_check_corpus_invariants_empty_for_a_clean_corpus(tmp_path, vcc):
     _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml")
-    _write_overlay_yaml(
-        tmp_path / vcc.GFX1250V0 / "Equality" / "logic.yaml",
-        schedule=vcc.GFX1250V0, gfx=vcc.GFX1250,
+    _write_header_yaml(
+        tmp_path / vcc.GFX1250_STRICT / "Equality" / "logic.yaml",
+        schedule=vcc.GFX1250_STRICT, gfx=vcc.GFX1250_STRICT,
     )
     assert vcc.check_corpus_invariants(tmp_path) == []
 
