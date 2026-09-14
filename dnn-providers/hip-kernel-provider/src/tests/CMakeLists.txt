@@ -153,6 +153,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
         PACK_NAMES unit unit_shared
     )
+
+    # One census entry per architecture the `unit` pack was wired for, each running this
+    # binary against that pack's own shard. Declared here because a census entry names one
+    # shard and the listener requires every case in the suite to pass without skipping, so
+    # only a suite confined to a single pack qualifies: every TestPointwisePacks case reads
+    # loadedSet("hipkernel:Pointwise") and nothing else, which the `unit` root holds.
+    # Suites that read a second shard -- TestConvFwdPack, which reaches across unit and
+    # unit_shared -- would fail by construction and are censused nowhere.
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_tests
+        PACK_NAME unit
+        SUITES TestPointwisePacks
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
