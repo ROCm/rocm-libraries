@@ -177,8 +177,8 @@ private:
         // Created on first use, like the event pair above: the timer is built in the
         // BenchmarkPlan constructor, which can run before any device context exists, and
         // a gate created then would be permanently unusable. Created once and then
-        // reused, since acquiring signal memory and a control stream on every sample
-        // would cost more than the submission gap the gate removes.
+        // reused, since acquiring signal memory on every sample would cost more than the
+        // submission gap the gate removes.
         auto gate = std::make_shared<std::optional<hipdnn_data_sdk::utilities::StallGate>>();
         return [events, gate](const IPlan<THandle>& plan,
                               const THandle& handle,

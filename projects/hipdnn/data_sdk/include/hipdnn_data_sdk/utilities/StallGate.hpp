@@ -24,9 +24,9 @@ namespace hipdnn_data_sdk::utilities
  *
  * arm() enqueues a wait packet on the work stream, so every later item on that stream
  * (the start event, the kernels, the stop event) stays queued but unexecuted until
- * release() writes the signal from a private control stream. Each event timestamp is
- * taken when the event executes, not when the host enqueued it, so the measured span
- * starts when the device actually begins the work.
+ * release() writes the host-visible signal. Each event timestamp is taken when the
+ * event executes, not when the host enqueued it, so the measured span starts when the
+ * device actually begins the work.
  *
  * Usage: arm(stream), record start, enqueue work, record stop, release(), synchronize.
  *
@@ -81,7 +81,6 @@ public:
             _lastOperation = "hipGetDevice";
             return;
         }
-        _device = device;
 
         int canUseStreamWaitValue = 0;
         status = hipDeviceGetAttribute(
@@ -96,7 +95,7 @@ public:
         }
 
         // Signal memory is an 8-byte HSA signal; a smaller size is rejected with
-        // hipErrorInvalidValue. The 32-bit wait/write ops act on its low word.
+        // hipErrorInvalidValue. The 32-bit wait acts on its low word.
         status = hipExtMallocWithFlags(
             reinterpret_cast<void**>(&_signal), sizeof(uint64_t), hipMallocSignalMemory);
         if(status != hipSuccess)
@@ -107,36 +106,7 @@ public:
             return;
         }
 
-        // Non-blocking so the release write runs concurrently with a stalled work stream;
-        // a blocking control stream would implicitly serialize with the legacy default
-        // stream and deadlock when the gate stalls it.
-        status = hipStreamCreateWithFlags(&_control, hipStreamNonBlocking);
-        if(status != hipSuccess)
-        {
-            _control = nullptr;
-            _lastError = status;
-            _lastOperation = "hipStreamCreateWithFlags";
-            freeResources();
-            return;
-        }
-
-        status = hipStreamWriteValue32(_control, _signal, 0U, 0);
-        if(status != hipSuccess)
-        {
-            _lastError = status;
-            _lastOperation = "hipStreamWriteValue32";
-            freeResources();
-            return;
-        }
-
-        status = hipStreamSynchronize(_control);
-        if(status != hipSuccess)
-        {
-            _lastError = status;
-            _lastOperation = "hipStreamSynchronize";
-            freeResources();
-            return;
-        }
+        writeSignal(0U);
     }
 
     ~StallGate()
@@ -146,7 +116,7 @@ public:
             // An armed, unreleased gate stalls its work stream forever.
             if(_armed)
             {
-                static_cast<void>(hipStreamWriteValue32(_control, _signal, 1U, 0));
+                writeSignal(1U);
                 _armed = false;
             }
             _stop = true;
@@ -163,7 +133,10 @@ public:
         {
             static_cast<void>(hipStreamSynchronize(_armedStream));
         }
-        freeResources();
+        if(_signal != nullptr)
+        {
+            static_cast<void>(hipFree(_signal));
+        }
     }
 
     // Not copyable, and not movable: the mutex and the watchdog thread bind the object
@@ -174,10 +147,10 @@ public:
     StallGate(StallGate&&) = delete;
     StallGate& operator=(StallGate&&) = delete;
 
-    /// True when construction acquired both the signal memory and the control stream.
+    /// True when construction acquired the signal memory.
     bool isUsable() const
     {
-        return _signal != nullptr && _control != nullptr;
+        return _signal != nullptr;
     }
 
     /// Reset the signal, then enqueue a wait packet that holds every later item on
@@ -217,23 +190,12 @@ public:
             return false;
         }
 
-        auto status = hipStreamWriteValue32(_control, _signal, 0U, 0);
-        if(status != hipSuccess)
-        {
-            _lastError = status;
-            _lastOperation = "hipStreamWriteValue32";
-            return false;
-        }
+        // HIP documents volatile CPU access to hipMallocSignalMemory. Resetting from
+        // the host also avoids depending on a second GPU stream for gate progress.
+        writeSignal(0U);
 
-        status = hipStreamSynchronize(_control);
-        if(status != hipSuccess)
-        {
-            _lastError = status;
-            _lastOperation = "hipStreamSynchronize";
-            return false;
-        }
-
-        status = hipStreamWaitValue32(stream, _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU);
+        const auto status
+            = hipStreamWaitValue32(stream, _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU);
         if(status != hipSuccess)
         {
             _lastError = status;
@@ -256,9 +218,9 @@ public:
         return true;
     }
 
-    /// Release the gate from the otherwise idle control stream; the work stream proceeds
-    /// device-side, no host sync needed. Idempotent: a no-op when not armed, including
-    /// after the watchdog already released.
+    /// Release the gate with a host write, so forward progress does not depend on a
+    /// second GPU command. Idempotent: a no-op when not armed, including after the
+    /// watchdog already released.
     void release()
     {
         {
@@ -267,7 +229,7 @@ public:
             {
                 return;
             }
-            static_cast<void>(hipStreamWriteValue32(_control, _signal, 1U, 0));
+            writeSignal(1U);
             _armed = false;
         }
         _cv.notify_all();
@@ -324,13 +286,18 @@ public:
     }
 
 private:
+    void writeSignal(uint32_t value) noexcept
+    {
+        // hipMallocSignalMemory is host-accessible on AMD HIP backends. HIP requires
+        // volatile for CPU semaphore access; the fences preserve host-side ordering.
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+        *static_cast<volatile uint32_t*>(_signal) = value;
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+    }
+
     void watchdogLoop()
     {
         std::unique_lock<std::mutex> lock(_mutex);
-        // A HIP call needs the right device set on *this* thread; the constructor set it
-        // only on the thread that created _control and _signal. Without this, the write
-        // below can silently target the wrong context and never drain the real stream.
-        static_cast<void>(hipSetDevice(_device));
         while(!_stop)
         {
             if(!_armed)
@@ -344,27 +311,13 @@ private:
             // cannot fire the watchdog early.
             if(_cv.wait_until(lock, _deadline) == std::cv_status::timeout && _armed)
             {
-                // The blocked host is waiting on this stream draining, and this write is
-                // what drains it, so the write both ends the stall and unblocks the host.
-                static_cast<void>(hipStreamWriteValue32(_control, _signal, 1U, 0));
+                // The blocked host is waiting on this stream draining, and this host
+                // write both ends the stall and unblocks it without another GPU command.
+                writeSignal(1U);
                 _armed = false;
                 _timedOut = true;
                 disabledFlag().store(true, std::memory_order_relaxed);
             }
-        }
-    }
-
-    void freeResources() noexcept
-    {
-        if(_control != nullptr)
-        {
-            static_cast<void>(hipStreamDestroy(_control));
-            _control = nullptr;
-        }
-        if(_signal != nullptr)
-        {
-            static_cast<void>(hipFree(_signal));
-            _signal = nullptr;
         }
     }
 
@@ -378,8 +331,6 @@ private:
     }
 
     uint32_t* _signal = nullptr;
-    int _device = 0;
-    hipStream_t _control = nullptr;
     hipStream_t _armedStream = nullptr;
     hipError_t _lastError = hipSuccess;
     const char* _lastOperation = nullptr;

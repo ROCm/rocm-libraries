@@ -218,8 +218,7 @@ public:
         return getChecked().timedOut();
     }
 
-    // Release the gate from the otherwise idle control stream; the work stream proceeds
-    // device-side, no host sync needed.
+    // Release the gate with a host write; no host synchronization is needed.
     void release()
     {
         getChecked().release();

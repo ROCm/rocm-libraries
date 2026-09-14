@@ -87,8 +87,8 @@ private:
     // succeeded), not the current armed state -- exposed via STALL_USED_EXT.
     bool _stallUsed = false;
     // Created on the first STALL_ARM_EXT, so a descriptor that only times or only syncs
-    // never acquires signal memory, a control stream, or a watchdog thread. Destroyed
-    // with the descriptor, which releases the stall if the caller never did.
+    // never acquires signal memory or a watchdog thread. Destroyed with the descriptor,
+    // which releases the stall if the caller never did.
     std::optional<hipdnn_data_sdk::utilities::StallGate> _stallGate;
 
     void createEvents();

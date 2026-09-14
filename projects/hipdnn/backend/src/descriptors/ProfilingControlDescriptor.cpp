@@ -251,7 +251,7 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
         // setAttribute call itself is the trigger, as it is for DEVICE_SYNC above.
         //
         // Created here rather than with the descriptor, so a caller that only times or
-        // only syncs never pays for signal memory, a control stream, and a thread.
+        // only syncs never pays for signal memory and a watchdog thread.
         if(!_stallGate.has_value())
         {
             _stallGate.emplace();

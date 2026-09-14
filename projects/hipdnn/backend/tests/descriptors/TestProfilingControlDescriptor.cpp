@@ -459,8 +459,9 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     EXPECT_FALSE(gate.timedOut()) << "a declined arm still reports the earlier timeout";
 }
 
-// The host released in time, so the watchdog must stay out of the way: no timeout
-// reported, and stalling still enabled for everything after.
+// A normal release must not depend on another GPU command making forward progress:
+// some runtimes cannot execute a stream write while another stream waits on the signal.
+// Repeating the cycle also proves that arm() resets the host-written signal for reuse.
 TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
 {
     if(!stallGateAvailable())
@@ -470,11 +471,14 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
 
     hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(5000));
     ASSERT_TRUE(gate.isUsable());
-    ASSERT_TRUE(gate.arm(_testStream));
-    gate.release();
-    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+    for(int iteration = 0; iteration < 2; ++iteration)
+    {
+        ASSERT_TRUE(gate.arm(_testStream));
+        gate.release();
+        ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+        EXPECT_FALSE(gate.timedOut());
+    }
 
-    EXPECT_FALSE(gate.timedOut());
     EXPECT_FALSE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 }
 
