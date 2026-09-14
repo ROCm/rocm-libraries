@@ -7,8 +7,12 @@ Evidence is written as it is produced -- rendered prompt, argv, logs, extracted 
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import secrets
 import shlex
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -17,13 +21,45 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from . import refs
-from .errors import ConfigError, LoopExhausted, StepError
+from .errors import ConfigError, LoopExhausted, OrchestratorError, StepError
 from .flow import Flow, LoopGroup, Step
-from .outputs import Artifacts, extract, load_result
+from .outputs import Artifacts, LazyText, extract, load_result
 from .process import build_env, launch
 from .toolreg import ToolRegistry
 
 FEEDBACK_SEED = "first attempt - no prior failures\n"
+
+#: An agent CLI in `--output-format json` mode emits its whole session as one line, with
+#: the answer buried in an escaped string. The raw log stays byte-exact -- it is the
+#: evidence -- and a readable sibling is written next to it when it parses.
+PRETTY_LOG_LIMIT = 8 * 1024 * 1024
+
+
+def _prettify_json_log(log_path: Path) -> None:
+    try:
+        if not log_path.is_file() or log_path.stat().st_size > PRETTY_LOG_LIMIT:
+            return
+        text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not text or text[0] not in "{[":
+            return
+        document = json.loads(text)
+    except (OSError, json.JSONDecodeError):
+        return
+    # Long embedded strings (an agent's final message, a diff) are the whole point of
+    # reading this file, so they are unescaped into real lines rather than left as one
+    # \n-riddled blob.
+    pretty = json.dumps(_unescape_long_strings(document), indent=2, ensure_ascii=False)
+    log_path.with_suffix(".pretty.json").write_text(pretty, encoding="utf-8")
+
+
+def _unescape_long_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _unescape_long_strings(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_unescape_long_strings(item) for item in value]
+    if isinstance(value, str) and "\n" in value:
+        return value.splitlines()
+    return value
 
 
 @dataclass
@@ -32,7 +68,6 @@ class StepRecord:
     status: str
     group: str | None = None
     iteration: int | None = None
-    attempt: int = 1
     exit_code: int | None = None
     timed_out: bool = False
     duration_s: float = 0.0
@@ -43,12 +78,57 @@ class StepRecord:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class Invocation:
+    """Everything a launch needs, resolved once. `plan()` and the real run build this
+    the same way, so `--dry-run` describes the process that will actually start rather
+    than an approximation of it."""
+
+    argv: list[str]
+    cwd: str | None
+    env: dict[str, str]
+    stdin: str | None
+    result_file: str | None
+    timeout: float | None
+
+
+def _new_run_id() -> str:
+    """Timestamp for humans, random suffix for correctness. Two runs starting in the
+    same second is ordinary -- a sweep over graphs does it constantly -- and a
+    second-resolution id silently points both at one directory."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{secrets.token_hex(2)}"
+
+
+def _sha256(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def _git_revision(start: Path) -> str | None:
+    """Best effort: not every checkout is a git checkout, and a run must never fail
+    because provenance was unavailable."""
+    try:
+        finished = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return finished.stdout.strip() or None
+
+
 @dataclass
 class LoopRecord:
     id: str
     iterations: int
     satisfied: bool
     until: str
+    budget: int = 0
+    budget_source: str = ""
 
 
 @dataclass
@@ -86,7 +166,14 @@ class Engine:
         self.start_from = start_from
         self.profile = profile
         self.log = log or (lambda message: print(message, file=sys.stderr, flush=True))
-        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        if max_iterations is not None and max_iterations < 1:
+            raise ConfigError(
+                f"--max-iterations must be at least 1, got {max_iterations}"
+            )
+        self.run_id = _new_run_id()
+        #: An explicitly named run directory may be created for us; a generated one may
+        #: not already exist. Either way nothing in it is ever overwritten.
+        self.explicit_run_dir = run_dir is not None
         root = run_dir or (run_root or Path.cwd() / "runs") / flow.name / self.run_id
         self.run_dir = Path(root).resolve()
         self.feedback_path = self.run_dir / "feedback.md"
@@ -96,6 +183,8 @@ class Engine:
         self.completed: dict[str, dict[str, Any]] = {}
         self.records: list[StepRecord] = []
         self.loops: list[LoopRecord] = []
+        self.started = time.time()
+        self.provenance: dict[str, Any] = {}
 
     def _resolve_flow_vars(
         self, machine_vars: dict[str, Any], flow_vars: dict[str, Any]
@@ -140,12 +229,14 @@ class Engine:
 
     def run(self) -> RunReport:
         self.preflight()
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._create_run_dir()
         (self.run_dir / "inputs.json").write_text(
             json.dumps(self.inputs, indent=2, default=str), encoding="utf-8"
         )
         self.feedback_path.write_text(FEEDBACK_SEED, encoding="utf-8")
-        started = time.time()
+        self.started = time.time()
+        self.provenance = self._collect_provenance()
+        self._checkpoint()
         status, error = "ok", None
         try:
             for node in self._selected_nodes():
@@ -155,7 +246,8 @@ class Engine:
                     self._run_step(node, self.run_dir / node.id)
         except (StepError, LoopExhausted, ConfigError) as failure:
             status, error = "failed", str(failure)
-        report = RunReport(
+        self._checkpoint(status, error)
+        return RunReport(
             run_id=self.run_id,
             run_dir=self.run_dir,
             status=status,
@@ -163,8 +255,6 @@ class Engine:
             loops=self.loops,
             error=error,
         )
-        self._write_manifest(report, started)
-        return report
 
     def plan(self) -> list[dict[str, Any]]:
         """Resolve argv/env/cwd/prompt for every step without launching anything."""
@@ -172,6 +262,7 @@ class Engine:
         for node in self._selected_nodes():
             steps = node.steps if isinstance(node, LoopGroup) else [node]
             group = node.id if isinstance(node, LoopGroup) else None
+            budget = self._budget(node)[0] if isinstance(node, LoopGroup) else None
             for step in steps:
                 resolver = self._resolver(
                     step,
@@ -183,44 +274,113 @@ class Engine:
                                 self.run_dir / (group or "") / "iter-00"
                             ),
                             "feedback_path": str(self.feedback_path),
-                            "max_iterations": node.loop.max_iterations,
+                            "max_iterations": budget,
                         }
                         if isinstance(node, LoopGroup)
                         else None
                     ),
                     lenient=True,
                 )
-                # The prompt tells the agent where to write its result, so the plan has
-                # to resolve result_file before rendering the prompt -- otherwise
-                # --dry-run shows an empty path exactly where the contract lives.
-                result_file = (
-                    refs.render(step.result_file, resolver)
-                    if step.result_file
-                    else None
-                )
-                if result_file:
-                    resolver = resolver.child(step={"result_file": result_file})
-                tool = self.registry.get(step.tool)
-                argv = [str(self.registry.resolve_exe(tool))] + [
-                    refs.render(arg, resolver) for arg in step.args
-                ]
+                invocation, _ = self._invocation(step, resolver)
                 planned.append(
                     {
                         "id": step.id,
                         "group": group,
                         "tool": step.tool,
-                        "argv": argv,
-                        "cwd": refs.render(step.cwd, resolver) if step.cwd else None,
+                        "argv": invocation.argv,
+                        "cwd": invocation.cwd,
+                        # Only what this flow changes about the environment. Echoing the
+                        # whole inherited environment back would bury the tool wiring
+                        # that is the reason to look.
                         "env": {
-                            key: refs.render(value, resolver)
-                            for key, value in step.env.items()
+                            key: value
+                            for key, value in invocation.env.items()
+                            if os.environ.get(key) != value
                         },
-                        "timeout": step.timeout,
-                        "result_file": result_file,
-                        "stdin": self._stdin_text(step, resolver),
+                        "timeout": invocation.timeout,
+                        "result_file": invocation.result_file,
+                        "stdin": invocation.stdin,
                     }
                 )
         return planned
+
+    # -- resolution --------------------------------------------------------
+
+    def _invocation(
+        self, step: Step, resolver: refs.Resolver
+    ) -> tuple[Invocation, refs.Resolver]:
+        """Resolve one step's process. Returns the child resolver too, because
+        `${step.result_file}` only exists once the result file has been resolved."""
+        # The prompt tells the agent where to write its result, so result_file has to be
+        # resolved before the prompt is rendered -- otherwise the contract renders empty
+        # exactly where it matters most.
+        result_file = (
+            refs.render(step.result_file, resolver) if step.result_file else None
+        )
+        if result_file:
+            resolver = resolver.child(step={"result_file": result_file})
+        tool = self.registry.get(step.tool)
+        invocation = Invocation(
+            argv=[str(self.registry.resolve_exe(tool))]
+            + [refs.render(arg, resolver) for arg in step.args],
+            cwd=refs.render(step.cwd, resolver) if step.cwd else None,
+            env=build_env(
+                tool.env,
+                {key: refs.render(value, resolver) for key, value in step.env.items()},
+                [refs.render(item, resolver) for item in tool.path_prepend],
+            ),
+            stdin=self._stdin_text(step, resolver),
+            result_file=result_file,
+            timeout=step.timeout,
+        )
+        return invocation, resolver
+
+    def _budget(self, group: LoopGroup) -> tuple[int, str]:
+        # Where the budget came from matters in the failure message: "ran 1 iteration
+        # without satisfying until" reads like a broken loop when it is really a
+        # one-pass debugging run that was never allowed to iterate.
+        if self.max_iterations is not None:
+            return self.max_iterations, "--max-iterations"
+        return group.loop.max_iterations, f"{self.flow.path.name} max_iterations"
+
+    def _create_run_dir(self) -> None:
+        """A run directory is created, never joined. Previous evidence is not ours to
+        overwrite, and `--run-dir` aimed at a finished run is a mistake worth reporting
+        rather than a silent merge of two runs' logs."""
+        if self.explicit_run_dir:
+            if self.run_dir.exists() and any(self.run_dir.iterdir()):
+                raise ConfigError(
+                    f"run directory {self.run_dir} already contains a run. Point "
+                    f"--run-dir at a new or empty directory; re-running never "
+                    f"overwrites previous evidence."
+                )
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            return
+        try:
+            self.run_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            raise ConfigError(f"run directory {self.run_dir} already exists") from None
+
+    def _collect_provenance(self) -> dict[str, Any]:
+        """What this run was produced *from*. Two runs whose flow or prompts differed
+        are otherwise indistinguishable from two runs of the same thing."""
+        prompts: dict[str, str] = {}
+        for step in self.flow.all_steps():
+            if not step.prompt_file or list(refs.iter_refs(step.prompt_file)):
+                continue
+            path = (self.flow.path.parent / step.prompt_file).resolve()
+            if path.is_file():
+                prompts[step.id] = _sha256(path)
+        configs = {"flow": self.flow.path, "tools": self.registry.path}
+        return {
+            "config_sha256": {
+                name: _sha256(path)
+                for name, path in configs.items()
+                if Path(path).is_file()
+            },
+            "prompt_sha256": prompts,
+            "revision": _git_revision(self.flow.path.parent),
+        }
 
     # -- internals ---------------------------------------------------------
 
@@ -267,7 +427,8 @@ class Engine:
         )
 
     def _run_loop(self, group: LoopGroup) -> None:
-        budget = self.max_iterations or group.loop.max_iterations
+        budget, budget_source = self._budget(group)
+        outer = dict(self.completed)
         previous: dict[str, dict[str, Any]] | None = None
         satisfied = False
         iteration = 0
@@ -281,43 +442,99 @@ class Engine:
                 "max_iterations": budget,
             }
             self.log(f"[{group.id}] iteration {iteration + 1}/{budget}")
-            iteration_outputs: dict[str, dict[str, Any]] = {}
+            # Every iteration starts from the outputs that existed before the loop. A
+            # step that is skipped or fails this time round must not still be readable
+            # through `${steps...}` from the iteration where it succeeded: that is how
+            # an exit condition gets satisfied by a value this iteration never produced.
+            # Last iteration's values remain available, but only via `${loop.previous}`.
+            self.completed = dict(outer)
+            aborted: str | None = None
             for step in group.steps:
-                record = self._run_step(
-                    step,
-                    attempt_dir / step.id,
-                    loop=loop_ctx,
-                    previous=previous,
-                    group=group.id,
-                    iteration=iteration,
-                )
-                if record.status in ("ok", "skipped"):
-                    iteration_outputs[step.id] = self.completed.get(step.id, {})
+                try:
+                    self._run_step(
+                        step,
+                        attempt_dir / step.id,
+                        loop=loop_ctx,
+                        previous=previous,
+                        group=group.id,
+                        iteration=iteration,
+                    )
+                except StepError as failure:
+                    # `on_step_failure: fail` (the default) stops the run here. `retry`
+                    # abandons the rest of this iteration and starts the next one: the
+                    # cycle is the unit of retry, because re-running one step whose
+                    # inputs have not changed just repeats the same failure at the same
+                    # cost.
+                    if group.loop.on_step_failure != "retry":
+                        raise
+                    aborted = str(failure)
+                    self.log(f"[{group.id}] iteration abandoned: {aborted}")
+                    break
 
             resolver = self._resolver(group.steps[-1], loop=loop_ctx, previous=previous)
-            if refs.evaluate(group.loop.until, resolver):
+            measured = self._measured(group.loop.until, resolver)
+            if aborted is None and group.loop.until.evaluate(resolver):
                 satisfied = True
                 self.log(
-                    f"[{group.id}] until satisfied after {iteration + 1} iteration(s)"
+                    f"[{group.id}] done after {iteration + 1} iteration(s): "
+                    f"{measured} is true"
                 )
                 break
-            self.log(f"[{group.id}] until not satisfied: {group.loop.until}")
-            self._append_feedback(group, iteration, resolver)
-            previous = {key: dict(value) for key, value in iteration_outputs.items()}
+            if aborted is None:
+                self.log(
+                    f"[{group.id}] iteration {iteration + 1}/{budget} is not done yet: "
+                    f"{measured} is false - looping to repair it"
+                )
+                self._append_feedback(group, iteration, resolver)
+            else:
+                self._write_feedback(
+                    iteration,
+                    f"The previous attempt did not complete: {aborted}\n\n"
+                    f"Treat this as a failed round. Produce a complete result this time, "
+                    f"including every file the instructions require.",
+                )
+            previous = {
+                key: dict(value)
+                for key, value in self.completed.items()
+                if key not in outer
+            }
 
         self.loops.append(
             LoopRecord(
                 id=group.id,
                 iterations=iteration + 1,
                 satisfied=satisfied,
-                until=group.loop.until,
+                until=group.loop.until.text,
+                budget=budget,
+                budget_source=budget_source,
             )
         )
+        self._checkpoint()
         if not satisfied and group.loop.on_exhausted == "fail":
-            raise LoopExhausted(
-                f"loop '{group.id}' ran {iteration + 1} iteration(s) without satisfying "
-                f"`until: {group.loop.until}`. Evidence: {self.run_dir / group.id}"
+            hint = (
+                " The budget was 1, so the loop was never allowed to act on the "
+                "feedback it collected - raise it to iterate."
+                if budget == 1
+                else ""
             )
+            raise LoopExhausted(
+                f"loop '{group.id}' used its full budget of {budget} iteration(s) "
+                f"(from {budget_source}) and never reached its goal {measured}."
+                f"{hint} Evidence: {self.run_dir / group.id}"
+            )
+
+    def _measured(self, condition: refs.Condition, resolver: refs.Resolver) -> str:
+        """A condition as written *and* as measured: `${...critical_count} == 0 (0 == 0)`.
+
+        The text alone says what the loop wants and never says what it got, which reads
+        as an unexplained verdict in the log of a run that is about to spend another
+        hour of agent time.
+        """
+        try:
+            rendered = refs.render(condition.text, resolver.child(lenient=True))
+        except ConfigError:
+            return condition.text
+        return f"{condition.text} ({rendered})"
 
     def _append_feedback(
         self, group: LoopGroup, iteration: int, resolver: refs.Resolver
@@ -325,8 +542,10 @@ class Engine:
         if not group.loop.feedback_from:
             return
         text = refs.render(group.loop.feedback_from, resolver).strip()
-        if not text:
-            return
+        if text:
+            self._write_feedback(iteration, text)
+
+    def _write_feedback(self, iteration: int, text: str) -> None:
         existing = self.feedback_path.read_text(encoding="utf-8")
         if existing.strip() == FEEDBACK_SEED.strip():
             existing = ""
@@ -346,161 +565,154 @@ class Engine:
         group: str | None = None,
         iteration: int | None = None,
     ) -> StepRecord:
+        # One record per step, created before anything can fail and filled in as the
+        # step proceeds. The earlier shape built a populated record, raised, and rebuilt
+        # an empty one in the handler, so every failure -- the case an operator actually
+        # reads -- reported exit_code=None, timed_out=False, duration 0 and no argv.
+        record = StepRecord(
+            id=step.id,
+            status="pending",
+            group=group,
+            iteration=iteration,
+            dir=str(step_dir),
+        )
+        self.records.append(record)
         resolver = self._resolver(step, loop=loop, previous=previous)
-        if step.when and not refs.evaluate(step.when, resolver):
-            record = StepRecord(
-                id=step.id,
-                status="skipped",
-                group=group,
-                iteration=iteration,
-                dir=str(step_dir),
-            )
-            self.log(f"  - {step.id}: skipped (when: {step.when})")
-            self.completed.setdefault(step.id, {})
-            self.records.append(record)
-            return record
-
-        last_error: Exception | None = None
-        for attempt in range(step.retries + 1):
-            attempt_dir = (
-                step_dir
-                if attempt == 0
-                else step_dir.parent / f"{step.id}.retry-{attempt}"
-            )
-            try:
-                record = self._attempt(
-                    step, attempt_dir, resolver, group, iteration, attempt + 1
+        try:
+            if step.when and not step.when.evaluate(resolver):
+                record.status = "skipped"
+                self.log(
+                    f"  - {step.id}: skipped, its `when` is false: "
+                    f"{self._measured(step.when, resolver)}"
                 )
-                self.records.append(record)
+                # A skipped step produces nothing this iteration. It gets an empty
+                # bucket rather than inheriting whatever it produced last time.
+                self.completed[step.id] = {}
+                self._checkpoint()
                 return record
-            except StepError as failure:
-                last_error = failure
-                self.records.append(
-                    StepRecord(
-                        id=step.id,
-                        status="failed",
-                        group=group,
-                        iteration=iteration,
-                        attempt=attempt + 1,
-                        dir=str(attempt_dir),
-                        error=str(failure),
-                    )
-                )
-                if attempt == step.retries:
-                    break
-
-        assert last_error is not None
-        if step.continue_on_error:
+            self._attempt(step, step_dir, resolver, record)
+        except StepError as failure:
+            record.status = "timed_out" if record.timed_out else "failed"
+            record.error = str(failure)
+            self.log(f"  - {step.id}: FAILED - {failure}")
+            self._checkpoint()
+            if not step.continue_on_error:
+                raise
+            # Tolerated failure still has to be readable downstream: `continue_on_error`
+            # exists so a later step can branch on what happened here. `_attempt`
+            # registered the process metadata as soon as the process returned; this only
+            # covers a step that failed before it ever launched.
             self.completed.setdefault(step.id, {})
-            return self.records[-1]
-        raise last_error
+            return record
+        except OrchestratorError as failure:
+            record.status = "failed"
+            record.error = str(failure)
+            self._checkpoint()
+            raise
+        record.status = "ok"
+        self._checkpoint()
+        return record
 
     def _attempt(
-        self,
-        step: Step,
-        step_dir: Path,
-        resolver: refs.Resolver,
-        group: str | None,
-        iteration: int | None,
-        attempt: int,
-    ) -> StepRecord:
+        self, step: Step, step_dir: Path, resolver: refs.Resolver, record: StepRecord
+    ) -> None:
         step_dir.mkdir(parents=True, exist_ok=True)
-        tool = self.registry.get(step.tool)
-        exe = self.registry.resolve_exe(tool)
+        invocation, resolver = self._invocation(step, resolver)
+        record.argv = invocation.argv
+        record.cwd = invocation.cwd
 
-        result_file = (
-            refs.render(step.result_file, resolver) if step.result_file else None
-        )
-        if result_file:
-            resolver = resolver.child(step={"result_file": result_file})
-            Path(result_file).parent.mkdir(parents=True, exist_ok=True)
-            Path(result_file).unlink(missing_ok=True)
-
-        argv = [str(exe)] + [refs.render(arg, resolver) for arg in step.args]
-        cwd = refs.render(step.cwd, resolver) if step.cwd else None
-        env = build_env(
-            tool.env,
-            {key: refs.render(value, resolver) for key, value in step.env.items()},
-            [refs.render(item, resolver) for item in tool.path_prepend],
-        )
-        stdin_text = self._stdin_text(step, resolver)
+        if invocation.result_file:
+            result_path = Path(invocation.result_file)
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.unlink(missing_ok=True)
 
         (step_dir / "cmd.txt").write_text(
-            " ".join(shlex.quote(part) for part in argv) + "\n", encoding="utf-8"
-        )
-        (step_dir / "argv.json").write_text(
-            json.dumps({"argv": argv, "cwd": cwd, "timeout": step.timeout}, indent=2),
+            " ".join(shlex.quote(part) for part in invocation.argv) + "\n",
             encoding="utf-8",
         )
-        if stdin_text is not None:
-            (step_dir / "stdin.txt").write_text(stdin_text, encoding="utf-8")
+        (step_dir / "argv.json").write_text(
+            json.dumps(
+                {
+                    "argv": invocation.argv,
+                    "cwd": invocation.cwd,
+                    "timeout": invocation.timeout,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        if invocation.stdin is not None:
+            (step_dir / "stdin.txt").write_text(invocation.stdin, encoding="utf-8")
 
-        retry_note = f" (retry {attempt - 1})" if attempt > 1 else ""
-        self.log(f"  - {step.id}: {step.tool}{retry_note} ...")
+        self.log(f"  - {step.id}: {step.tool} ...")
+        record.status = "running"
+        self._checkpoint()
         proc = launch(
-            argv,
-            cwd=cwd,
-            env=env,
+            invocation.argv,
+            cwd=invocation.cwd,
+            env=invocation.env,
             stdout_path=step_dir / "stdout.log",
             stderr_path=step_dir / "stderr.log",
-            stdin_text=stdin_text,
-            timeout=step.timeout,
+            stdin_text=invocation.stdin,
+            timeout=invocation.timeout,
             tee=self.tee,
         )
+        record.exit_code = proc.exit_code
+        record.timed_out = proc.timed_out
+        record.duration_s = proc.duration_s
         self.log(
             f"  - {step.id}: exit {proc.exit_code} in {proc.duration_s}s "
             f"-> {step_dir.relative_to(self.run_dir) if step_dir.is_relative_to(self.run_dir) else step_dir}"
         )
-
-        record = StepRecord(
-            id=step.id,
-            status="ok",
-            group=group,
-            iteration=iteration,
-            attempt=attempt,
-            exit_code=proc.exit_code,
-            timed_out=proc.timed_out,
-            duration_s=proc.duration_s,
-            argv=argv,
-            cwd=cwd,
-            dir=str(step_dir),
-        )
-        if proc.timed_out:
-            record.status = "timed_out"
-            raise StepError(
-                f"step '{step.id}' exceeded its {step.timeout}s timeout and was killed "
-                f"(logs: {step_dir})"
-            )
-        if proc.exit_code not in step.expect_exit:
-            record.status = "failed"
-            raise StepError(
-                f"step '{step.id}' exited {proc.exit_code}, expected one of "
-                f"{list(step.expect_exit)} (logs: {step_dir})"
-            )
+        _prettify_json_log(step_dir / "stdout.log")
 
         artifacts = Artifacts(
             stdout_path=step_dir / "stdout.log",
             stderr_path=step_dir / "stderr.log",
-            workdir=Path(cwd) if cwd else Path.cwd(),
-            result_path=Path(result_file) if result_file else None,
+            workdir=Path(invocation.cwd) if invocation.cwd else Path.cwd(),
+            result_path=(
+                Path(invocation.result_file) if invocation.result_file else None
+            ),
         )
-        result = (
-            load_result(
-                step.id, Path(result_file), step.result_schema.get("required", [])
-            )
-            if result_file
-            else None
-        )
-
+        # Registered before the exit-code and timeout checks: a step that failed is
+        # still a step that ran, and both the failure record and any downstream
+        # condition reading its exit code depend on this metadata existing.
         values: dict[str, Any] = {
             "exit_code": proc.exit_code,
             "duration_s": proc.duration_s,
             "stdout_path": str(artifacts.stdout_path),
             "stderr_path": str(artifacts.stderr_path),
             "workdir": str(artifacts.workdir),
-            "stdout": artifacts.text("stdout"),
-            "stderr": artifacts.text("stderr"),
+            # Paths eagerly, text on demand. A build log is evidence on disk; holding
+            # every megabyte of it in orchestration state on the chance that some later
+            # condition reads it is what the streaming design exists to avoid.
+            "stdout": LazyText(artifacts.stdout_path),
+            "stderr": LazyText(artifacts.stderr_path),
         }
+        self.completed[step.id] = values
+        record.outputs = _recorded(values)
+
+        if proc.timed_out:
+            raise StepError(
+                f"step '{step.id}' exceeded its {step.timeout}s timeout and was killed "
+                f"(logs: {step_dir})"
+            )
+        if proc.exit_code not in step.expect_exit:
+            raise StepError(
+                f"step '{step.id}' exited {proc.exit_code}, expected one of "
+                f"{list(step.expect_exit)} (logs: {step_dir})"
+            )
+
+        result = (
+            load_result(
+                step.id,
+                Path(invocation.result_file),
+                step.result_schema.get("required", []),
+            )
+            if invocation.result_file
+            else None
+        )
+
         for spec in step.outputs:
             argument = (
                 refs.render(str(spec.argument), resolver)
@@ -510,13 +722,7 @@ class Engine:
             values[spec.name] = extract(
                 spec, argument, artifacts, result, proc.exit_code
             )
-
-        self.completed[step.id] = values
-        record.outputs = {
-            key: value
-            for key, value in values.items()
-            if key not in ("stdout", "stderr")
-        }
+        record.outputs = _recorded(values)
         (step_dir / "result.json").write_text(
             json.dumps(record.outputs, indent=2, default=str), encoding="utf-8"
         )
@@ -525,14 +731,15 @@ class Engine:
             step,
             loop=resolver.loop,
             previous=resolver.previous,
-            result_file=result_file,
+            result_file=invocation.result_file,
         )
         for item in step.asserts:
-            if not refs.evaluate(item["that"], assert_resolver):
-                record.status = "failed"
-                message = item["message"] or item["that"]
-                raise StepError(f"step '{step.id}': assertion failed - {message}")
-        return record
+            if not item.that.evaluate(assert_resolver):
+                raise StepError(
+                    f"step '{step.id}': assertion failed - "
+                    f"{item.message or item.that.text}; measured: "
+                    f"{self._measured(item.that, assert_resolver)}"
+                )
 
     def _stdin_text(self, step: Step, resolver: refs.Resolver) -> str | None:
         if step.stdin is not None:
@@ -548,24 +755,41 @@ class Engine:
             return refs.render(path.read_text(encoding="utf-8"), resolver)
         return None
 
-    def _write_manifest(self, report: RunReport, started: float) -> None:
+    def _checkpoint(self, status: str = "running", error: str | None = None) -> None:
+        """Write `run.json` now, atomically.
+
+        The manifest is the run's report, and a run that dies in its third hour still
+        has to leave one. Writing it only at the end means the evidence for the failure
+        mode most worth reading is the evidence that never gets written.
+        """
         payload = {
-            "run_id": report.run_id,
+            "run_id": self.run_id,
             "flow": self.flow.name,
             "flow_path": str(self.flow.path),
             "tools_path": str(self.registry.path),
             "profile": self.profile,
-            "status": report.status,
-            "error": report.error,
-            "started": datetime.fromtimestamp(started, timezone.utc).isoformat(
+            "status": status,
+            "error": error,
+            "started": datetime.fromtimestamp(self.started, timezone.utc).isoformat(
                 timespec="seconds"
             ),
-            "duration_s": round(time.time() - started, 3),
+            "duration_s": round(time.time() - self.started, 3),
+            "provenance": self.provenance,
             "inputs": self.inputs,
             "vars": self.vars,
-            "loops": [vars(loop) for loop in report.loops],
-            "steps": [vars(record) for record in report.steps],
+            "loops": [vars(loop) for loop in self.loops],
+            "steps": [vars(record) for record in self.records],
         }
-        (self.run_dir / "run.json").write_text(
+        temporary = self.run_dir / "run.json.tmp"
+        temporary.write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
+        os.replace(temporary, self.run_dir / "run.json")
+
+
+def _recorded(values: dict[str, Any]) -> dict[str, Any]:
+    """The manifest view of a step's outputs: everything except the log text, which is
+    already on disk and is referenced by path."""
+    return {
+        key: value for key, value in values.items() if key not in ("stdout", "stderr")
+    }

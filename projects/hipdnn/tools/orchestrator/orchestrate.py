@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument(
         "--max-iterations",
-        type=int,
+        type=_positive_int,
         help="override every loop's budget (1 = single pass)",
     )
     run.add_argument("--only", help="run only this top-level step or loop")
@@ -90,6 +90,21 @@ def main(argv: list[str] | None = None) -> int:
     except OrchestratorError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+
+
+def _positive_int(text: str) -> int:
+    """A budget of 0 used to fall back to the configured one and -1 ran no iterations at
+    all while recording that it had run one -- with `on_exhausted: continue`, a run that
+    executed nothing reported success."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(
+            f"must be at least 1 (got {value}); a loop that cannot iterate cannot repair"
+        )
+    return value
 
 
 def _common(parser: argparse.ArgumentParser) -> None:
@@ -160,7 +175,8 @@ def _dispatch(args: argparse.Namespace) -> int:
     for loop in report.loops:
         verdict = "satisfied" if loop.satisfied else "NOT satisfied"
         print(
-            f"  loop {loop.id}: {loop.iterations} iteration(s), {verdict}: {loop.until}"
+            f"  loop {loop.id}: {loop.iterations}/{loop.budget} iteration(s) "
+            f"(budget from {loop.budget_source}), {verdict}: {loop.until}"
         )
     if report.error:
         print(f"  {report.error}", file=sys.stderr)

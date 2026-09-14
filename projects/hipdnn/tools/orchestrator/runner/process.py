@@ -4,7 +4,10 @@
 
 Agent steps run for hours and emit a lot. Output therefore goes straight to files
 rather than through a pipe into memory, and a timeout kills the whole tree -- an agent
-CLI that spawns compilers leaves orphans behind if only the parent is signalled.
+CLI that spawns compilers leaves orphans behind if only the parent is signalled. The
+timeout is a deadline on the whole interaction, not just on waiting: a prompt bigger
+than the pipe buffer is delivered on a thread so a child that never reads stdin cannot
+block the caller outside its own timeout.
 """
 from __future__ import annotations
 
@@ -79,21 +82,27 @@ def launch(
                 _pump(process.stderr, err_file, sys.stderr),
             ]
 
-        if stdin_text is not None and process.stdin is not None:
-            try:
-                process.stdin.write(stdin_text.encode("utf-8"))
-            except (BrokenPipeError, OSError):
-                pass
-            finally:
-                process.stdin.close()
+        # One deadline covers the whole interaction, delivery included.
+        writer = (
+            _write_stdin(process, stdin_text.encode("utf-8"))
+            if stdin_text is not None and process.stdin is not None
+            else None
+        )
 
         timed_out = False
         try:
-            process.wait(timeout=timeout)
+            remaining = (
+                None
+                if timeout is None
+                else max(0.0, started + timeout - time.monotonic())
+            )
+            process.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
             timed_out = True
             kill_tree(process)
             process.wait()
+        if writer is not None:
+            writer.join(timeout=5)
         for pump in pumps:
             pump.join(timeout=5)
 
@@ -128,6 +137,33 @@ def kill_tree(process: subprocess.Popen) -> None:
             process.kill()
         except OSError:
             pass
+
+
+def _write_stdin(process: subprocess.Popen, payload: bytes) -> threading.Thread:
+    """Deliver the prompt without holding the deadline hostage.
+
+    A prompt is routinely larger than the pipe buffer, so a synchronous write blocks
+    until the child drains it. A child that never reads stdin -- hung, or busy with
+    something of its own -- then blocks the orchestrator *outside* the timeout, which is
+    precisely the case the timeout exists for. Writing on a thread puts delivery inside
+    the same deadline as execution.
+    """
+
+    def run() -> None:
+        assert process.stdin is not None
+        try:
+            process.stdin.write(payload)
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread
 
 
 def _new_group() -> dict[str, object]:

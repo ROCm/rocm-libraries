@@ -33,8 +33,11 @@ critical issue by name, and say in `assumptions` which ones you addressed and ho
 
 - Every graph output tensor must be written; every graph input must be read as declared.
 - Respect declared strides and layouts. Do not assume contiguity unless the graph says so.
-- Handle the full declared shape range, including shapes that do not divide evenly by
-  your block/tile size. Guard every global memory access.
+- **Handle the declared shape family, not just the shapes in this graph file.** The graph
+  carries one concrete set of dimensions; the kernel must be correct for every shape the
+  graph's declared types, layouts and rank admit, including shapes that do not divide
+  evenly by your block/tile size. Specialising to the literal dimensions in the file is a
+  correctness defect, not an optimisation. Guard every global memory access.
 - Use the exact compute and accumulation types the graph specifies. Where the graph
   implies a higher-precision accumulator (e.g. fp16 in, fp32 accumulate), use it.
 - The kernel must compile as a standalone hiprtc translation unit: no host headers, no

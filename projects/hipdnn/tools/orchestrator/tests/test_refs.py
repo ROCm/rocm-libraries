@@ -6,7 +6,11 @@ from __future__ import annotations
 import pytest
 
 from runner.errors import ConfigError, RefError
-from runner.refs import Resolver, evaluate, render, render_value
+from runner.refs import Resolver, parse_condition, render, render_value
+
+
+def check(condition: str, resolver: Resolver) -> bool:
+    return parse_condition(condition).evaluate(resolver)
 
 
 def make(**kwargs) -> Resolver:
@@ -83,15 +87,60 @@ def test_loop_refs_outside_a_loop_are_rejected():
     ],
 )
 def test_condition_grammar(condition, expected):
-    assert evaluate(condition, make()) is expected
+    assert check(condition, make()) is expected
 
 
 def test_string_numbers_compare_numerically_not_lexically():
     # "10" < "9" as strings; the exit condition of every loop depends on this.
     resolver = make(steps={"review": {"critical_count": "10"}})
-    assert evaluate("${steps.review.outputs.critical_count} > 9", resolver) is True
+    assert check("${steps.review.outputs.critical_count} > 9", resolver) is True
 
 
 def test_ordering_non_numbers_is_a_config_error_not_a_silent_false():
     with pytest.raises(ConfigError, match="cannot order non-numeric"):
-        evaluate("${steps.review.outputs.verdict} > 3", make())
+        check("${steps.review.outputs.verdict} > 3", make())
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        # The one that mattered: a single `=` used to concatenate its operands into the
+        # non-empty string "1=0" and report an exit condition as satisfied.
+        "${steps.review.outputs.critical_count} = 0",
+        "1 ==",
+        "== 1",
+        "${steps.review.outputs.critical_count} == 0 and",
+        "${steps.review.outputs.critical_count} == 0 or",
+        # Adjacent terms with no joiner: concatenation has to be spelled with '+'.
+        "${steps.review.outputs.verdict} pass",
+        "0 1",
+        "${steps.review.outputs.critical_count} + ",
+        "${steps.review.outputs.critical_count} contains",
+        "and",
+        "",
+    ],
+)
+def test_malformed_conditions_are_rejected_when_parsed(condition):
+    # Parsing happens at flow load, so these never reach a launched agent.
+    with pytest.raises(ConfigError):
+        parse_condition(condition)
+
+
+def test_single_equals_does_not_become_truthy():
+    # The reproduction from the review: a failing step, an exit condition that should
+    # read false, and a parser that used to say true.
+    resolver = make(steps={"validate": {"failed": 1}})
+    with pytest.raises(ConfigError, match="did you mean '=='"):
+        parse_condition("${steps.validate.outputs.failed} = 0").evaluate(resolver)
+
+
+def test_and_binds_tighter_than_or():
+    # `true or (false and false)`, not `(true or false) and false`.
+    assert check("true == true or false == true and false == true", make()) is True
+    assert check("false == true and false == true or true == true", make()) is True
+    assert check("true == true and false == true or false == true", make()) is False
+
+
+def test_explicit_plus_still_concatenates_and_sums():
+    assert check("'a' + 'b' == ab", make()) is True
+    assert check("${inputs.count} + 1 == 4", make()) is True
