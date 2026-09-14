@@ -813,6 +813,170 @@ void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, ops, 3 + num_lds_indices, &attrs);
 }
 
+static int rocke_i_is_local_ptr(const rocke_value_t* value)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    return type
+           && ((type->kind == ROCKE_TYPE_SCALAR && type->scalar == ROCKE_SCALAR_I64)
+               || (type->kind == ROCKE_TYPE_PTR && type->space
+                   && strcmp(type->space, "local") == 0));
+}
+
+static int rocke_i_is_global_ptr(const rocke_value_t* value)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    return type && type->kind == ROCKE_TYPE_PTR && type->space
+           && strcmp(type->space, "global") == 0;
+}
+
+static int rocke_i_check_cachepolicy(rocke_ir_builder_t* b, const char* op, int cachepolicy)
+{
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s cachepolicy must be in 0..31, got %d", op, cachepolicy);
+        return 0;
+    }
+    return 1;
+}
+
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
+                                         int cachepolicy)
+{
+    rocke_value_t* ops[2];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(width_bytes == 1 || width_bytes == 4 || width_bytes == 8 || width_bytes == 16))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_store_async_from_lds width_bytes must be 1, 4, 8, or 16 (got %d)",
+                        width_bytes);
+        return;
+    }
+    if(!rocke_i_is_global_ptr(dst_ptr))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_store_async_from_lds dst_ptr must be a global pointer");
+        return;
+    }
+    if(!rocke_i_is_local_ptr(lds_ptr))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_store_async_from_lds local pointer must be i64 from "
+                        "smem_addr_of or ptr<...,local>");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "global_store_async_from_lds", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width_bytes);
+    rocke_attr_set_int(b, &attrs, "offset_bytes", offset_bytes);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    ops[0] = dst_ptr;
+    ops[1] = lds_ptr;
+    rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS, ops, 2, &attrs);
+}
+
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
+                                             const rocke_type_t* dtype)
+{
+    rocke_attr_map_t attrs;
+    const rocke_type_t* result_type;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rocke_i_is_global_ptr(src_ptr))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_load_tr16_b128 src_ptr must be a global pointer");
+    if(!dtype
+       || !(dtype->scalar == ROCKE_SCALAR_F16 || dtype->scalar == ROCKE_SCALAR_BF16
+            || dtype->scalar == ROCKE_SCALAR_I16))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_load_tr16_b128 dtype must be f16/bf16/i16");
+    result_type = rocke_vector_type(b, dtype, 8);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "dtype", dtype->name);
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128, &src_ptr, 1, result_type, &attrs, "gtr");
+}
+
+static int rocke_i_check_tensor_group(
+    rocke_ir_builder_t* b, const char* op, const char* field, rocke_value_t* value, int lanes)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != lanes || !type->elem
+       || type->elem->scalar != ROCKE_SCALAR_I32)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s %s must be vec<i32x%d>", op, field, lanes);
+        return 0;
+    }
+    return 1;
+}
+
+static void rocke_b_tensor_lds_transfer(rocke_ir_builder_t* b,
+                                        rocke_opcode_t opcode,
+                                        const char* name,
+                                        rocke_value_t* d0,
+                                        rocke_value_t* d1,
+                                        rocke_value_t* d2,
+                                        rocke_value_t* d3,
+                                        rocke_value_t* d4,
+                                        int cachepolicy)
+{
+    rocke_value_t* ops[5] = {d0, d1, d2, d3, d4};
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_tensor_group(b, name, "d0", d0, 4)
+       || !rocke_i_check_tensor_group(b, name, "d1", d1, 8)
+       || !rocke_i_check_tensor_group(b, name, "d2", d2, 4)
+       || !rocke_i_check_tensor_group(b, name, "d3", d3, 4)
+       || !rocke_i_check_tensor_group(b, name, "d4", d4, 8)
+       || !rocke_i_check_cachepolicy(b, name, cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, opcode, ops, 5, &attrs);
+}
+
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
+                                int cachepolicy)
+{
+    rocke_b_tensor_lds_transfer(
+        b, ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS, "tensor_load_to_lds", d0, d1, d2, d3, d4, cachepolicy);
+}
+
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
+                                   int cachepolicy)
+{
+    rocke_b_tensor_lds_transfer(b,
+                                ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS,
+                                "tensor_store_from_lds",
+                                d0,
+                                d1,
+                                d2,
+                                d3,
+                                d4,
+                                cachepolicy);
+}
+
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -1166,6 +1330,133 @@ void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n)
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "n", (int64_t)n);
     rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_ASYNCCNT, NULL, 0, &attrs);
+}
+
+void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_wait_tensorcnt", "n", n))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "n", n);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_TENSORCNT, NULL, 0, &attrs);
+}
+
+void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "barrier_type", barrier_type);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_BARRIER_SIGNAL, NULL, 0, &attrs);
+}
+
+static void rocke_b_s_barrier_u16(rocke_ir_builder_t* b,
+                                  rocke_opcode_t opcode,
+                                  const char* name,
+                                  int barrier_type)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, name, "barrier_type", barrier_type))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "barrier_type", barrier_type);
+    rocke_i_op0(b, opcode, NULL, 0, &attrs);
+}
+
+void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type)
+{
+    rocke_b_s_barrier_u16(b, ROCKE_OP_TILE_S_BARRIER_WAIT, "s_barrier_wait", barrier_type);
+}
+
+static int rocke_i_check_i32_value(rocke_ir_builder_t* b,
+                                   const char* op,
+                                   const char* field,
+                                   rocke_value_t* value)
+{
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar != ROCKE_SCALAR_I32)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s %s must be i32", op, field);
+        return 0;
+    }
+    return 1;
+}
+
+static void rocke_b_named_barrier_two(rocke_ir_builder_t* b,
+                                      rocke_opcode_t opcode,
+                                      const char* name,
+                                      rocke_value_t* barrier,
+                                      rocke_value_t* member_count)
+{
+    rocke_value_t* ops[2] = {barrier, member_count};
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_local_ptr(barrier))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s local pointer must be i64 from smem_addr_of or ptr<...,local>",
+                        name);
+        return;
+    }
+    if(!rocke_i_check_i32_value(b, name, "member_count", member_count))
+        return;
+    rocke_i_op0(b, opcode, ops, 2, NULL);
+}
+
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
+                            rocke_value_t* member_count)
+{
+    rocke_b_named_barrier_two(
+        b, ROCKE_OP_TILE_S_BARRIER_INIT, "s_barrier_init", barrier, member_count);
+}
+
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
+                                  rocke_value_t* member_count)
+{
+    rocke_b_named_barrier_two(
+        b, ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR, "s_barrier_signal_var", barrier, member_count);
+}
+
+static void rocke_b_named_barrier_one(rocke_ir_builder_t* b,
+                                      rocke_opcode_t opcode,
+                                      const char* name,
+                                      rocke_value_t* barrier)
+{
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_local_ptr(barrier))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s local pointer must be i64 from smem_addr_of or ptr<...,local>",
+                        name);
+        return;
+    }
+    rocke_i_op0(b, opcode, &barrier, 1, NULL);
+}
+
+void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier)
+{
+    rocke_b_named_barrier_one(b, ROCKE_OP_TILE_S_BARRIER_JOIN, "s_barrier_join", barrier);
+}
+
+void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier)
+{
+    rocke_b_named_barrier_one(b, ROCKE_OP_TILE_S_WAKEUP_BARRIER, "s_wakeup_barrier", barrier);
+}
+
+void rocke_b_s_barrier_leave(rocke_ir_builder_t* b, int barrier_type)
+{
+    rocke_b_s_barrier_u16(b, ROCKE_OP_TILE_S_BARRIER_LEAVE, "s_barrier_leave", barrier_type);
 }
 
 void rocke_b_asyncmark(rocke_ir_builder_t* b)

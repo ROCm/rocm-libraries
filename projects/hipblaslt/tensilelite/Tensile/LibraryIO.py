@@ -578,6 +578,11 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     dict), then applies :func:`reorderSolutionsParams` so the three naming
     fields lead each solution block, matching merge output.
 
+    ``InternalSupportParams.KernArgsVersion`` is dropped: it is bound to the
+    generator version rather than being a tuning result, so logic files follow
+    ``defaultInternalSupportParams`` instead of pinning a layout that goes
+    stale. The ``.s`` metadata and benchmark solution files still carry it.
+
     Args:
         state: One solution entry after library-logic serialization.
 
@@ -591,7 +596,8 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     for key in sorted(state.keys()):
         value = state[key]
         if key == "InternalSupportParams" and isinstance(value, dict):
-            out[key] = dict(sorted(value.items()))
+            out[key] = {k: v for k, v in sorted(value.items())
+                        if k != "KernArgsVersion"}
         else:
             out[key] = value
     bundle = {"Solutions": [out]}
