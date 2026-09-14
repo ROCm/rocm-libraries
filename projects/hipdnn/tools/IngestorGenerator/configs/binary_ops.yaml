@@ -27,6 +27,11 @@ kernel_source_kind: embedded_source
 workspace_policy: none
 delegates_to_existing_plan: false
 
+# The authored set under test_descriptors/ this bundle is written into. Each set is
+# its own pack target, so this is what puts the descriptors in the shard the unit
+# test binary reads.
+authored_subpath: unit
+
 packs:
   - name: add
     discriminator: add

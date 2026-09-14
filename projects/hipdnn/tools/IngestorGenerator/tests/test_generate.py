@@ -82,7 +82,7 @@ class TestDryRun:
             str(tmp_path / "out"),
             "--dry-run",
         )
-        assert "descriptors/scale_add/scale_add.kmd.json" in result.stdout
+        assert "test_descriptors/unit/scale_add/scale_add.kmd.json" in result.stdout
         assert "packs/ScaleAddNative.cpp" in result.stdout
 
 
@@ -130,7 +130,7 @@ class TestGeneratedOutput:
         result = run_cli(
             "--config", str(SCALE_ADD_CONFIG), "--output-dir", str(tmp_path / "out")
         )
-        assert "Generated 15 files" in result.stdout
+        assert "Generated 14 files" in result.stdout
 
     def test_success_writes_files_to_disk(self, tmp_path):
         output_dir = tmp_path / "out"
@@ -139,6 +139,10 @@ class TestGeneratedOutput:
         )
         assert result.returncode == 0, result.stderr
         assert (
-            output_dir / "descriptors" / "scale_add" / "scale_add.kmd.json"
+            output_dir
+            / "test_descriptors"
+            / "unit"
+            / "scale_add"
+            / "scale_add.kmd.json"
         ).exists()
         assert (output_dir / "packs" / "ScaleAddNative.cpp").exists()

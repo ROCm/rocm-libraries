@@ -4,6 +4,7 @@
 """Factory helpers for building minimal valid model instances in unit tests."""
 
 from codegen.models import (
+    DIALECT_DIRECT_LOAD,
     EngineSpec,
     GraphMatchSpec,
     IngestorConfig,
@@ -62,6 +63,11 @@ def make_minimal_config(**overrides) -> IngestorConfig:
         graph_match=GraphMatchSpec(),
     )
     defaults.update(overrides)
+    if defaults.get("dialect", DIALECT_DIRECT_LOAD) == DIALECT_DIRECT_LOAD:
+        # Required of a direct-load bundle, so a config that omits it is not
+        # "minimal" -- it is one the loader refuses. Left alone for the packaged
+        # dialect, whose subpath legitimately falls back to <kind>/<slug>.
+        defaults.setdefault("authored_subpath", "unit")
     defaults.setdefault(
         "specialization",
         {

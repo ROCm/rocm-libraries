@@ -387,6 +387,7 @@ class TestPackDiscriminatorsCheck:
 class TestDeprecatedKeys:
     def _base_raw(self):
         return {
+            "authored_subpath": "unit",
             "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
             "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
             "packs": [
@@ -457,6 +458,29 @@ class TestBehaviorNotesVocabulary:
         path.write_text(yaml.dump(raw))
         config = load_config(path)
         assert config.engine.behavior_notes == ["runtime_compilation"]
+
+
+class TestDirectLoadAuthoredSubpath:
+    """A direct-load bundle names the authored set it is written into.
+
+    Each set under ``test_descriptors/`` is its own pack target, walked by
+    directory and read by a different binary. A bundle that names none has no
+    shard to land in, and a default would file it in one that no suite reads --
+    which installs cleanly and then loads nothing, so the diagnostic has to name
+    the four values rather than pick one.
+    """
+
+    def test_a_direct_load_config_without_authored_subpath_is_rejected(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        del raw["authored_subpath"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        message = str(excinfo.value)
+        assert "authored_subpath" in message
+        for value in ("shared", "unit", "integration", "archive_fixture"):
+            assert value in message, message
 
 
 class TestPackKernelDefaults:
@@ -797,6 +821,7 @@ class TestUnknownKeysAreRefused:
 
     def _valid(self):
         return {
+            "authored_subpath": "unit",
             "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
             "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
             "packs": [

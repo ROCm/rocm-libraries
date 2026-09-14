@@ -23,6 +23,7 @@ import yaml
 
 from .models import (
     ARCH_BASE_ID_PATTERN,
+    AUTHORED_TEST_SETS,
     DIALECT_DIRECT_LOAD,
     DIALECT_PACKAGED,
     DIALECTS,
@@ -1173,6 +1174,37 @@ def _check_dialect(config: IngestorConfig) -> None:
             )
 
 
+def _check_authored_subpath(config: IngestorConfig) -> None:
+    """A direct-load bundle names the authored set it writes into.
+
+    ``test_descriptors/{shared,unit,integration,archive_fixture}`` are four
+    separate pack targets, each walked by directory and each reaching a different
+    binary. Which one a bundle belongs to is decided by whoever will read it, and
+    nothing in the config implies the answer -- so there is no default that is
+    merely conservative. Defaulting would silently file the bundle in one shard
+    while its suite reads another, which shows up as an engine that loads nothing
+    rather than as a path mistake.
+
+    The packaged dialect is unaffected: its subpath is the shipped layout and
+    already falls back to ``<kind>/<slug>``.
+    """
+    if config.is_packaged:
+        return
+    if config.authored_subpath not in AUTHORED_TEST_SETS:
+        stated = (
+            f"'{config.authored_subpath}'" if config.authored_subpath else "nothing"
+        )
+        raise ConfigError(
+            f"engine '{config.engine.name}' is a '{DIALECT_DIRECT_LOAD}' bundle, so "
+            f"'authored_subpath' must name the authored set it is written into, and "
+            f"it states {stated}. Use one of: "
+            f"{', '.join(AUTHORED_TEST_SETS)}. Each is a separate pack target under "
+            f"test_descriptors/, so the set decides which shard these descriptors "
+            f"land in and which test binary can read them -- the consuming binary "
+            f"chooses it and this tool cannot infer it."
+        )
+
+
 def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
     """Reject a ``kernel_source.kind`` the configured dialect cannot emit.
 
@@ -1528,6 +1560,9 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
+    # Last, because it is about WHERE the bundle is written rather than what is in
+    # it: a config with a content defect should hear about the content first.
+    _check_authored_subpath(config)
 
     for note in config.engine.behavior_notes:
         from .models import BEHAVIOR_NOTES
