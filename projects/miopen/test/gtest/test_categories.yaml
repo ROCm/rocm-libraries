@@ -323,6 +323,22 @@ test_categories:
       - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       - "*UnitTestConvSolver*LargeStride*"
       - "*HipGraphExist*"
+      # Datatype parity: Jenkins' 4 gfx942 gtest jobs only cover BFP16, FP16,
+      # FP32, TF32 (+ NONE, which always runs). "*" positively selects every
+      # suite, so without these, this category also picks up I8/I16/I32/I64/
+      # FP8/BFP8/FP64-suffixed suites that no Jenkins job on gfx942 has ever
+      # exercised (verified empirically: diffed the actual test population of
+      # a live run against Jenkins' logged BF16/FP16/FP32/TF32 job output --
+      # every one of the ~10,900 "extra" tests was one of these 7 suffixes,
+      # e.g. GPU_TensorReorder_I8/_FP64, GPU_Bfp8Conversion_BFP8,
+      # GPU_HipBLASLtGEMMTest_FP8/_BFP8/_I64, GPU_binaryTensorOps_cast_*_I32).
+      - "*_I8.*"
+      - "*_I16.*"
+      - "*_I32.*"
+      - "*_I64.*"
+      - "*_FP8.*"
+      - "*_BFP8.*"
+      - "*_FP64.*"
       # gtest already skips DISABLED_-prefixed tests by default; kept for
       # clarity, not required for Jenkins parity.
       - "*DISABLED*"
