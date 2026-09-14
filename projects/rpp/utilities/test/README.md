@@ -6,8 +6,6 @@ A standalone [GoogleTest](https://github.com/google/googletest) correctness suit
 - An RPP install discoverable under `ROCM_PATH` (not needed for an in-tree build).
 - `ROCM_PATH` pointing at your ROCm install (defaults to `/opt/rocm` if unset).
 
-GoogleTest is fetched automatically at configure time (pinned to a tag; see `cmake/gtest.cmake`). Configure with `-DRPP_TEST_USE_SYSTEM_GTEST=ON` to use an installed GoogleTest instead, for builds with no network access. HIP tests are compiled only when the RPP being built against has the HIP backend.
-
 ## Building
 ```shell
 mkdir build && cd build
