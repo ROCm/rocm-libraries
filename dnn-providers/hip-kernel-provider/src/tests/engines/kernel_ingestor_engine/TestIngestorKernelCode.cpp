@@ -646,7 +646,7 @@ TEST(TestIngestorKernelCodeDevice, ResolvesASecondOrdinalOfTheSameArchitecture)
 
 TEST(TestIngestorKernelCodeDevice, RefusesAnOrdinalOfAnotherArchitecture)
 {
-    FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx950"}}, 0);
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx950"}}, 0);
 
     try
     {
@@ -668,7 +668,7 @@ TEST(TestIngestorKernelCodeDevice, RefusesAnOrdinalOfAnotherArchitecture)
 
 TEST(TestIngestorKernelCodeDevice, AnswersASeenOrdinalWithoutQueryingOrLoading)
 {
-    FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx942:sramecc+:xnack-"}}, 0);
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx942:sramecc+:xnack-"}}, 0);
 
     code.kernelFor(1);
     const size_t queriesAfterFirst = code.archQueries.size();
@@ -726,7 +726,7 @@ TEST(TestIngestorKernelCodeDevice, AnswersANonDeviceBoundProgramWithoutResolving
 
 TEST(TestIngestorKernelCodeDevice, ReportsADeviceItCannotQuery)
 {
-    FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}}, 0);
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}}, 0);
 
     try
     {
