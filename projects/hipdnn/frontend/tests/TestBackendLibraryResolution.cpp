@@ -17,10 +17,6 @@
 #include <string>
 #include <system_error>
 
-#if defined(__linux__)
-#include <link.h>
-#endif
-
 namespace
 {
 
@@ -372,6 +368,116 @@ TEST_F(TestBackendLibraryResolution, NonAsciiCandidateIsReportedAsUtf8)
               0);
 
     EXPECT_NE(resolution.diagnostics.find(utf8), std::string::npos) << resolution.diagnostics;
+    closeResolved(resolution);
+}
+
+namespace
+{
+
+using hipdnn_frontend::detail::backendResolutionInputs;
+
+/// CJK, Cyrillic, Greek and a non-BMP astral character in one name: no single ANSI
+/// code page can spell it, so any narrowing round-trip is visible as a mismatch
+/// rather than as a coincidentally equal string.
+constexpr const wchar_t* NATIVE_DIRECTORY_NAME = L"\u6D4B\u8BD5_\u0416_\u03A9_\U0001F9EA";
+
+/// Sets and restores an environment variable in UTF-16, including its absence.
+/// ScopedEnvironmentVariableSetter is narrow: it would push a native path through the
+/// active code page on the way in and on the way out, destroying exactly the property
+/// the cases below exist to check.
+class ScopedNativeEnvironmentVariable
+{
+public:
+    ScopedNativeEnvironmentVariable(const wchar_t* name, const wchar_t* value)
+        : _name(name)
+        , _previous(hipdnn_data_sdk::utilities::getEnvW(name, ABSENT))
+    {
+        SetEnvironmentVariableW(name, value);
+    }
+
+    ~ScopedNativeEnvironmentVariable()
+    {
+        SetEnvironmentVariableW(_name, _previous == ABSENT ? nullptr : _previous.c_str());
+    }
+
+    ScopedNativeEnvironmentVariable(const ScopedNativeEnvironmentVariable&) = delete;
+    ScopedNativeEnvironmentVariable& operator=(const ScopedNativeEnvironmentVariable&) = delete;
+    ScopedNativeEnvironmentVariable(ScopedNativeEnvironmentVariable&&) = delete;
+    ScopedNativeEnvironmentVariable& operator=(ScopedNativeEnvironmentVariable&&) = delete;
+
+private:
+    /// A value no real override can hold, so an unset variable stays distinguishable
+    /// from a set one. This mirrors the sentinel the production read uses.
+    static constexpr const wchar_t* ABSENT = L"\x01unset";
+
+    const wchar_t* _name;
+    std::wstring _previous;
+};
+
+} // namespace
+
+// Reading the override is not the one-shot: only the load is. These two cases call the
+// production input-gathering directly, which is what the environment read lives in.
+// It does close the programmatic setter for this process, and nothing here depends on
+// that staying open -- the setter's lifecycle is proven in a re-exec'd child above.
+
+// An ANSI round-trip turns every character of this directory name into a replacement
+// byte, so the override would silently name a directory that does not exist. The
+// comparison is on native() because a narrowed spelling is what a defect would produce.
+TEST_F(TestBackendLibraryResolution, NativeEnvironmentOverrideIsReadAsUtf16)
+{
+    const std::filesystem::path native = root() / std::wstring(NATIVE_DIRECTORY_NAME);
+    const ScopedNativeEnvironmentVariable variable(L"HIPDNN_BACKEND_LIBRARY_PATH", native.c_str());
+
+    const BackendResolutionInputs inputs = backendResolutionInputs();
+
+    // The source also proves the value came from the environment rather than from a
+    // programmatic override left behind by some earlier caller in this process.
+    EXPECT_EQ(inputs.overrideSource, hipdnn_frontend::detail::BACKEND_LIBRARY_PATH_ENV);
+    ASSERT_TRUE(inputs.overrideDirectory.has_value());
+    EXPECT_EQ(inputs.overrideDirectory->native(), native.native());
+}
+
+// An absent variable is no override at all. Were it read as an engaged empty path, the
+// resolver would reject it on stderr on every ordinary run, with no override in sight.
+TEST_F(TestBackendLibraryResolution, AbsentNativeEnvironmentOverrideIsNotAnEmptyOverride)
+{
+    const ScopedNativeEnvironmentVariable variable(L"HIPDNN_BACKEND_LIBRARY_PATH", nullptr);
+
+    const BackendResolutionInputs inputs = backendResolutionInputs();
+
+    EXPECT_FALSE(inputs.overrideDirectory.has_value())
+        << "an unset variable became an override: " << pathForDiagnostic(*inputs.overrideDirectory);
+}
+
+// The override must reach the filesystem as its own UTF-16. A narrowed spelling names
+// a different directory, so the file that is really there is reported absent and the
+// override is skipped -- silently, because skipping an absent candidate is normal.
+// NonAsciiCandidateIsReportedAsUtf8 above covers the diagnostic spelling of a candidate
+// that is not there; this covers a candidate that is.
+TEST_F(TestBackendLibraryResolution, NonAsciiOverrideIsFoundOnDiskRatherThanReportedAbsent)
+{
+    const std::filesystem::path native = root() / std::wstring(NATIVE_DIRECTORY_NAME);
+    std::error_code failed;
+    std::filesystem::create_directories(native, failed);
+    ASSERT_FALSE(failed) << failed.message();
+    std::ofstream backend(native / backendFileName(), std::ios::binary);
+    backend << "this is not a shared object";
+    ASSERT_TRUE(backend.good());
+    backend.close();
+
+    BackendResolutionInputs inputs;
+    inputs.overrideDirectory = native;
+    inputs.overrideSource = "HIPDNN_BACKEND_LIBRARY_PATH";
+
+    const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
+
+    const std::string reported = pathForDiagnostic(native / backendFileName());
+    ASSERT_NE(resolution.diagnostics.find(reported), std::string::npos)
+        << "the override was never attempted: " << resolution.diagnostics;
+    EXPECT_EQ(resolution.diagnostics.find(reported + ": not present"), std::string::npos)
+        << "the override was looked for under a spelling other than its own: "
+        << resolution.diagnostics;
     closeResolved(resolution);
 }
 
