@@ -688,6 +688,47 @@ class LocalReadMFMA(LocalRead):
         return imod, pack, packPre
 
 
+    def _localReadSwizzledTDM(self, writer, kernel, bufferIdx, iui, epsi, tP):
+        # gfx1250 F8 swizzled-B via TDM. B is pre-swizzled in global memory as
+        #   view(N/16,16,K/32,2,16).permute(0,2,3,1,4)
+        # and DMA'd to LDS by TDM (faithful contiguous copy), then read here with plain ds_load_b128
+        # from UNPADDED LDS (LdsPad=0). Bank-conflict-free (64 banks, 2-pass). LDS = off-order host
+        # buffer: off(n,k) = kO*kOStride + kM*blockOff + nI*innerK + kI. The WMMA 16x16x128 f8f6f4
+        # K->thread map is lane L -> n=L%MI_N, k = kO*(kMcount*innerK) + (L//MI_N)*innerK + kI, so the
+        # read-block index r == kO and the lane-half (L//MI_N) == kM (both set in
+        # lraTileAssignmentSwizzledTDM). All strides are element/byte counts (fp8).
+        imod        = Module("LocalReadDo%s_I%s_swizzledTDM" % (tP["tensorChar"], iui))
+        tc          = tP["tensorChar"]
+        tile01      = tP["tile01Idx"]
+        instruction = tP["localReadInstruction"]
+        blockWidth  = instruction.blockWidth
+        LocalReadX  = instruction.getInst(0)
+        maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
+        depthU      = kernel["_DepthU%s" % tc]
+        miN         = kernel["MatrixInstN"]
+        innerK      = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())  # elems per ds_load_b128
+        kMcount     = kernel["WavefrontSize"] // miN     # K-halves interleaved across lane-groups
+        blockOff    = miN * innerK                       # inner [nI,kI] block
+        kOStride    = kMcount * blockOff                 # read-block (kO) stride
+        nOStride    = miN * depthU                       # N-tile (nO) stride
+        numNtile    = kernel["MIWaveTile"][tile01]
+        numKChunk   = kernel["MIInputPerThread%s" % tc] // innerK
+        regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
+        regsPerNtile = numKChunk * regsPerLoad
+        swapByteOff = tP["localReadSwapByteOffset"]
+        for nt in range(numNtile):
+            for r in range(numKChunk):
+                off = nt * nOStride + r * kOStride + swapByteOff
+                reg = nt * regsPerNtile + r * regsPerLoad
+                offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
+                ds = DSModifiers(na=1, offset=offSplit)
+                destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
+                localReadCode = imod.add(Module("LocalRead%s swizzledTDM nt%u r%u" % (tc, nt, r)))
+                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds,
+                                  module=localReadCode, comment="swizzledTDM L->Reg nt=%u r=%u" % (nt, r))
+        return imod, Module(), Module()
+
+
     """
     Local Read: Do It A/B
     iui = Inner Unroll Idx
@@ -713,6 +754,9 @@ class LocalReadMFMA(LocalRead):
 
         isgfx950 = kernel["ISA"][:2] == (9, 5)
         isgfx950mx = isgfx950 and ("MXS" in tc)
+
+        if tP.get("isSwizzledTDM"):
+            return self._localReadSwizzledTDM(writer, kernel, bufferIdx, iui, epsi, tP)
 
         if ("MXS" in tc and writer.states.asmCaps["HasWMMA_V3"]
             and kernel["MXScaleFormat"] == "InMemorySwizzle"):

@@ -1186,6 +1186,7 @@ namespace TensileLite
 
             int m_mxScaleFormat = 0;
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            bool m_isGfx1250 = false; // gfx1250 F8 swizzle uses BK=32 (vs gfx942 BK=64)
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

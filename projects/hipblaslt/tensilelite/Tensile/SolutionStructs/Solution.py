@@ -4035,6 +4035,14 @@ class Solution(collections.abc.Mapping):
 
       genGRVWA = False
       genGRVWB = False
+      # gfx1250 TDM swizzle (SwizzleTensor{A,B} + TDM + WMMA_V3): the operand is pre-swizzled in
+      # global memory and DMA'd to LDS by TDM, then read compactly by ds_load_b128. It uses the
+      # normal (non-swizzle) GRVW/read derivation and does NOT require DirectToVgpr, so it is
+      # excluded from the DTV-swizzle special width, consistency reject, and DTV gate below. The
+      # gfx942 DTV swizzle path (no TDM) is unaffected.
+      hasWmmaV3     = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
+      swizzleAIsTDM = state["ProblemType"]["SwizzleTensorA"] and bool(state["TDMInst"] & 0x01) and hasWmmaV3
+      swizzleBIsTDM = state["ProblemType"]["SwizzleTensorB"] and bool(state["TDMInst"] & 0x02) and hasWmmaV3
       # Default GlobalReadVectorWidthA
       if state["EnableMatrixInstruction"]:
         if state["GlobalReadVectorWidthA"] < 0:
@@ -4045,7 +4053,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
-            if state["ProblemType"]["SwizzleTensorA"]:
+            if state["ProblemType"]["SwizzleTensorA"] and not swizzleAIsTDM:
               state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
               state["GlobalReadVectorWidthA"] = 32	  
@@ -4092,7 +4100,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
-            if state["ProblemType"]["SwizzleTensorB"]:
+            if state["ProblemType"]["SwizzleTensorB"] and not swizzleBIsTDM:
               state["GlobalReadVectorWidthB"] = swizzleGeometry(state, "B")["laneSize"]
             elif state["ProblemType"]["DataTypeB"].is6bitFloat():
               state["GlobalReadVectorWidthB"] = 32
@@ -4147,7 +4155,8 @@ class Solution(collections.abc.Mapping):
 
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
-        if state["ProblemType"][f"SwizzleTensor{tc}"]:
+        swizzleTcIsTDM = swizzleAIsTDM if tc == "A" else swizzleBIsTDM
+        if state["ProblemType"][f"SwizzleTensor{tc}"] and not swizzleTcIsTDM:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
@@ -4157,13 +4166,13 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
+        if not state["DirectToVgprA"] and not swizzleAIsTDM:
           reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
+        if not state["DirectToVgprB"] and not swizzleBIsTDM:
           reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")

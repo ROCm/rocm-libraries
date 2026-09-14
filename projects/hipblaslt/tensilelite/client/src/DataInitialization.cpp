@@ -354,7 +354,8 @@ namespace TensileLite
         void calculateKforSwizzling(rocisa::DataType datatype,
                                     size_t&          MiK,
                                     size_t&          MiKv,
-                                    size_t&          PackK)
+                                    size_t&          PackK,
+                                    bool             isGfx1250F8 = false)
         {
             switch(datatype)
             {
@@ -376,6 +377,9 @@ namespace TensileLite
                 MiKv = 4;
                 break;
             case rocisa::DataType::Int8:
+                MiK  = 32;
+                MiKv = 8;
+                break;
             case rocisa::DataType::Float8_fnuz:
             case rocisa::DataType::BFloat8_fnuz:
             case rocisa::DataType::Float8BFloat8_fnuz:
@@ -386,7 +390,9 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::E8:
             case rocisa::DataType::E5M3:
-                MiK  = 32;
+                // gfx1250 F8 WMMA_V3 (16x16x128) swizzle uses BK=32 (MiK=16); gfx942 MFMA uses BK=64
+                // (MiK=32). PackK = 16/MiKv/1 = 2 for both, so gfx1250 gives BK=MiK*PackK=32.
+                MiK  = isGfx1250F8 ? 16 : 32;
                 MiKv = 8;
                 break;
             default:
@@ -965,6 +971,7 @@ namespace TensileLite
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
+                m_isGfx1250     = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
             }
 
             m_rotatingBuffer
@@ -1040,7 +1047,7 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(dataType, MiK, MiKv, PackK);
+                            calculateKforSwizzling(dataType, MiK, MiKv, PackK, m_isGfx1250);
                             numAllocatedElements = getSwizzledTensorNumAllocatedElements(
                                 problem.tensors()[i], MiM_N, MiK, PackK);
                             numAllocatedBytes = multiplyElementSize(
@@ -1646,7 +1653,7 @@ namespace TensileLite
                         //TODO: support more swizzle types,
                         //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                         size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
+                        calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK, m_isGfx1250);
                         padding = pUnit.maxElements
                                   - getSwizzledTensorNumAllocatedElements(
                                       problem.tensors()[i], MiM_N, MiK, PackK);
@@ -2508,7 +2515,7 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+                            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
                             swizzlePadding
                                 = getSwizzledTensorNumAllocatedElements(desc, MiM_N, MiK, PackK)
                                   - desc.totalAllocatedElements();
@@ -2769,7 +2776,7 @@ namespace TensileLite
                     using Tensor = Tensor::Manipulation::Tensor;
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                    calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
+                    calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
                     auto                          unrolledSize = desc.sizes()[0];
                     auto                          tiledSize    = desc.sizes()[1];
                     ::Tensor::Manipulation::Shape paddedShape{

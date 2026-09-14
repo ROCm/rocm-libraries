@@ -10479,7 +10479,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["localWriteSwapByteOffset"] = 0
     tP["gpr"] = {}
     tP["metadataWriteSwapByteOffset"] = 0
-    tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
+    swizzleFlag = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
+    # gfx1250 TDM swizzle: the operand is pre-swizzled in global memory into WMMA-optimal order,
+    # DMA'd to LDS by TDM (tensor_load_to_lds), then read compactly by ds_load_b128 with no padding.
+    # This does NOT use the DTV swizzle SRD-load / swizzled-LDS-write machinery, so it is tracked
+    # separately and kept out of tP["isSwizzled"] to leave the gfx942 DTV path byte-for-byte intact.
+    tdmForTc = bool((kernel["TDMInst"] & 0x02 and tP["isB"]) or (kernel["TDMInst"] & 0x01 and tP["isA"]))
+    tP["isSwizzledTDM"] = bool(swizzleFlag and tdmForTc and self.states.asmCaps["HasWMMA_V3"])
+    tP["isSwizzled"] = bool(swizzleFlag and not tP["isSwizzledTDM"])
 
     if tP["isSwizzled"]:
       swz = swizzleGeometry(kernel, cM)
@@ -10488,6 +10495,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
+    elif tP["isSwizzledTDM"]:
+      # Compact swizzle block along K, matching the host pre-swizzle (gfx1250 F8: BK=32 elements).
+      # inner = one ds_load_b128 = 16 bytes of elements; kMid = wave32 / 16-lane N-group = 2.
+      tP["swizzlePackK"] = 1
+      innerKElems = 16 // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
+      kMid = kernel["WavefrontSize"] // 16
+      tP["swizzleK"] = innerKElems * kMid
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B

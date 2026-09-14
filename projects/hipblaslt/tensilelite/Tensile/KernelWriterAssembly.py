@@ -5855,6 +5855,36 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Read Addresses: Tile Assignment
   ##############################################################################
+  def lraTileAssignmentSwizzledTDM(self, kernel, tP):
+    # gfx1250 F8 swizzled-B via TDM: per-lane local-read base into the contiguous off-order LDS
+    # (off = kO*512 + kM*256 + nI*16 + kI). The WMMA 16x16x128 f8f6f4 K->thread map is
+    # lane L -> n=L%16, k = kO*32 + (L//16)*16 + kI, so the lane-half (L//16) is the kM term (*256)
+    # and n=L%16 is the nI term (*16):  lro = (L//16)*256 + (L%16)*16. The kO term (per read-block)
+    # is added as the ds_load immediate in LocalRead._localReadSwizzledTDM. Pairs with LdsPad=0;
+    # wave/pad offsets are added later by lraFinalOffset (both 0 for the single-wave case).
+    module = Module("lraTileAssignmentSwizzledTDM")
+    module.addComment0("lr%s swizzled-TDM base" % tP["tileChar"])
+    waveWidth = kernel["WavefrontSize"]
+    miN       = kernel["MatrixInstN"]
+    innerK    = 16 // int(kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
+    blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
+    tReg    = self.vgprPool.checkOut(1, "lroSwizTDM")     # result, kept for lraFinalOffset
+    lReg    = self.vgprPool.checkOut(1, "laneSwizTDM")
+    dummy   = self.vgprPool.checkOut(1, "dummySwizTDM")
+    tmpVgpr = self.vgprPool.checkOutAligned(2, 2, tag="lraSwizTDM_tmpVgpr")
+    tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
+    with self.allocTmpSgpr(1, tag="lraSwizTDM_sgpr") as tmpSgprInfo:
+      module.add(vectorStaticRemainder(dummy, lReg, "Serial", waveWidth, tmpVgprRes, tmpSgprInfo, "L = lane in wave"))
+      module.add(vectorStaticDivide(tReg, lReg, miN, tmpVgprRes, "kM = L // MI_N"))
+      module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), blockOff, tmpSgprInfo, "kM * (MI_N*innerK)"))
+      module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nIdx = L mod MI_N"))
+      module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro = nIdx*innerK + kM*blockOff"))
+    tP["gpr"]["lro"] = tReg
+    self.vgprPool.checkIn(dummy)
+    self.vgprPool.checkIn(lReg)
+    self.vgprPool.checkIn(tmpVgpr)
+    return module
+
   def lraTileAssignment(self, kernel, tPA, tPB):
     module = Module("lraTileAssignment")
 
@@ -5872,13 +5902,19 @@ class KernelWriterAssembly(KernelWriter):
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP0["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP0))
+        if tP0.get("isSwizzledTDM"):
+          module.add(self.lraTileAssignmentSwizzledTDM(kernel, tP0))
+        else:
+          module.add(component(self, kernel, tP0))
         if tPMXS0:
           module.add(component(self, kernel, tPMXS0))
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP1["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP1))
+        if tP1.get("isSwizzledTDM"):
+          module.add(self.lraTileAssignmentSwizzledTDM(kernel, tP1))
+        else:
+          module.add(component(self, kernel, tP1))
         if tPMXS1:
           module.add(component(self, kernel, tPMXS1))
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -19565,7 +19601,28 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
     dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
 
-    if isMetadataML1:
+    # gfx1250 F8 swizzled-B: host pre-swizzles B into off(n,k) order, contiguous. That multi-dim
+    # tensor reshapes to a 2-D [tile1 rows x tile0 cols] contiguous block, so fill the 2-D descriptor
+    # with swizzle values (stride0 = tile0) => TDM copies it linearly => LDS = off order, matching
+    # _localReadSwizzledTDM. off = outer*256 + inner; inner = nI*16+kI (256, LDS-fast);
+    # outer = nO*(du/16) + kO*2 + kM.
+    swizzledTDMB = bool(tP.get("isSwizzledTDM"))
+    if swizzledTDMB:
+      # The host pre-swizzles B into off(n,k) order CONTIGUOUSLY. Describe the whole per-wave tile as a
+      # single 1-D contiguous row (tile_dim1=1) so tensor_load_to_lds does an unambiguous contiguous
+      # copy => LDS = off order (element counts; data_size handles the fp8 width). A multi-row 2-D tile
+      # gets hardware-expanded into an interleaved LDS layout we don't control (TDM spec: no per-thread
+      # LDS address control), so keep it 1-D.
+      swzTotal = mt * du // numWaves                     # whole per-wave B tile in elements
+      with self.allocTmpSgpr(1, tag="swzTDM_desc") as swzTmp:
+        mod.add(SMovB32(sgpr(swzTmp.idx), swzTotal, "swizzled B: dim0 = stride0 = tile0 = whole tile"))
+        mod.add(comp.setTensorDim0(descSgprName(1), swzTmp.idx, self, 0))
+        mod.add(comp.setTensorStride0(descSgprName(1), swzTmp.idx, 0))
+        mod.add(SMovB32(sgpr(swzTmp.idx), 1, "swizzled B: dim1 = tile1 = 1 (single contiguous row)"))
+        mod.add(comp.setTensorDim1(descSgprName(1), swzTmp.idx, self, 0, False))
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTotal, self, 0))
+      mod.add(comp.setTensorTile1(descSgprName(1), 1, self))
+    elif isMetadataML1:
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
       mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
@@ -19607,7 +19664,9 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
 
     # --- Tensor stride ---
-    if isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
+    if swizzledTDMB:
+      pass  # stride0 already set to tile0 (contiguous) in the swizzled-B branch above
+    elif isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
       mod.add(comp.setTensorStride0Metadata(descSgprName(1), "SizeL"))
     elif isMetadataML1:
       ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
