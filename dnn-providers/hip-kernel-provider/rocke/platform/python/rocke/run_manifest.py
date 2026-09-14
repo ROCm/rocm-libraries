@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
+from .benchmark.perf import perfjson
 from .runtime.hip_module import Runtime
 from .instances.common.deep_fused_conv_pool import (
     run_deep_fused_conv_pool_fp16_manifest_problem,
@@ -262,21 +263,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(
         f"Perf: {summary.ms:.6g} ms, {summary.tflops:.6g} TFlops, {summary.gbps:.6g} GB/s"
     )
-    # Machine-readable line for tooling in the same package (e.g. the GEMM
-    # sweep harness). Parse this rather than the human "Perf:" string so that
-    # formatting changes above never silently drop metrics.
-    print(
-        "PerfJSON: "
-        + json.dumps(
-            {
-                "ms": summary.ms,
-                "tflops": summary.tflops,
-                "gbps": summary.gbps,
-                "max_abs_diff": summary.max_abs_diff,
-                "bad_count": summary.bad_count,
-                "total": summary.total,
-            }
-        )
+    # Machine-readable line for any tool measuring this command (the GEMM sweep
+    # harness, rocke.benchmark.perf). Parse this rather than the human "Perf:"
+    # string so that formatting changes above never silently drop metrics.
+    perfjson.emit(
+        ms=summary.ms,
+        tflops=summary.tflops,
+        gbps=summary.gbps,
+        max_abs_diff=summary.max_abs_diff,
+        bad_count=summary.bad_count,
+        total=summary.total,
     )
     if ns.verify and summary.bad_count:
         return 1

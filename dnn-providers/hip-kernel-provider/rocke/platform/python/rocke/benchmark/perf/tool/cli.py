@@ -94,7 +94,10 @@ def _cmd_profile(a: argparse.Namespace) -> int:
             )
         except RuntimeError as exc:
             raise SystemExit(f"profile: {exc}") from exc
-    rec = _aggregate.aggregate(samples)
+    try:
+        rec = _aggregate.aggregate(samples)
+    except ValueError as exc:
+        raise SystemExit(f"profile: {exc}") from exc
 
     identity = _schema.identity(rec)
     prior = _store.records_for(_store.load(cache=a.cache), identity)
@@ -135,6 +138,17 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
         raise SystemExit(
             "occupancy: could not read ELF notes "
             "(need llvm-readelf and a valid HSACO)"
+        )
+    target = res.get("target_arch")
+    requested = (a.arch or "").split(":", 1)[0]
+    if target and target != requested:
+        # The occupancy model follows the binary, so say so rather than letting a
+        # stale --arch look like it was honoured. Feature suffixes (e.g. :xnack-)
+        # do not change the family model and are ignored for this comparison.
+        print(
+            f"warning: {a.hsaco} is built for {target}, not --arch {a.arch}; "
+            f"occupancy computed for {target}",
+            file=sys.stderr,
         )
     human = "\n".join(f"{k}: {v}" for k, v in res.items())
     _emit(res, as_json=a.json, human=human)
