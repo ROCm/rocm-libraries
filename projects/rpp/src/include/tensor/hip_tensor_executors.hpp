@@ -92,7 +92,6 @@ RppStatus tensor_binary_arithmetic_op_dispatch_gpu_tensor(
 /**************************************** AUDIO AUGMENTATIONS
  * ****************************************/
 
-
 // -------------------- down_mixing --------------------
 
 RppStatus hip_exec_down_mixing_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -162,7 +161,6 @@ RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f* srcPtr, Rpp32f scalarValue,
                                            RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                            RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                            rpp::Handle& handle);
-
 
 /**************************************** BITWISE OPERATIONS
  * ****************************************/

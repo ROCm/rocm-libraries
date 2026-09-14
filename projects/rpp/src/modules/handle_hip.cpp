@@ -26,16 +26,15 @@ SOFTWARE.
 #include <unistd.h>
 #endif
 
+#include <rocfft/rocfft.h>
+
+#include <cstdint>
+#include <map>
 #include <thread>
 
 #include "device_name.hpp"
 #include "errors.hpp"
 #include "handle.hpp"
-
-#include <rocfft/rocfft.h>
-
-#include <cstdint>
-#include <map>
 
 namespace rpp {
 

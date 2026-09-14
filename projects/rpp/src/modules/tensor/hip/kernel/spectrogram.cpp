@@ -22,9 +22,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "hip_tensor_executors.hpp"
-
 #include <rocfft/rocfft.h>
+
+#include "hip_tensor_executors.hpp"
 
 /* Spectrogram kernel working overview
 1D Input -> 2D Output
@@ -226,8 +226,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                            hipMemcpyHostToDevice, handle.GetStream()));
 
     // Compute the number of windows required for each input in the batch
-    Rpp32s* numWindowsTensor = reinterpret_cast<Rpp32s*>(
-        handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
+    Rpp32s* numWindowsTensor =
+        reinterpret_cast<Rpp32s*>(handle.GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
     for (Rpp32u i = 0; i < dstDescPtr->n; i++)
         numWindowsTensor[i] =
             get_num_windows(srcLengthTensor[i], windowLength, windowStep, centerWindows);
@@ -236,9 +236,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
 
     // Allocate window output buffer (after d_windowFn)
     Rpp32f* windowOutput = d_windowFn + windowLength;
-    RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(windowOutput, 0,
-                                           windowOutputStride * dstDescPtr->n * sizeof(Rpp32f),
-                                           handle.GetStream()));
+    RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(
+        windowOutput, 0, windowOutputStride * dstDescPtr->n * sizeof(Rpp32f), handle.GetStream()));
 
     // Compute the windowOutput for all samples in a batch. Each sample will be of shape
     // (numWindows, nfft)
@@ -279,8 +278,7 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     if (rocfft_execution_info_create(&execInfo) != rocfft_status_success)
         return RPP_ERROR_NOT_ENOUGH_MEMORY;
 
-    if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) !=
-        rocfft_status_success) {
+    if (rocfft_execution_info_set_stream(execInfo, handle.GetStream()) != rocfft_status_success) {
         rocfft_execution_info_destroy(execInfo);
         return RPP_ERROR_HIP_RUNTIME;
     }
@@ -317,8 +315,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                            handle.GetStream(), fftOutput, fftOutputStride, dstPtr,
-                           make_uint2(dstDescPtr->strides.nStride, dstHStride),
-                           numWindowsTensor, make_int2(numBins, power), vertical);
+                           make_uint2(dstDescPtr->strides.nStride, dstHStride), numWindowsTensor,
+                           make_int2(numBins, power), vertical);
         if (hipGetLastError() != hipSuccess) retStatus = RPP_ERROR_HIP_LAUNCH;
     }
 
