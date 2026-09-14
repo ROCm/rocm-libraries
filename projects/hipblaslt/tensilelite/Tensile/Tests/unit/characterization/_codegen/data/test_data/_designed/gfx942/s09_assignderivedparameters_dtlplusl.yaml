@@ -20,6 +20,7 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   Device: 0
+  PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
   -

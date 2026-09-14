@@ -26,8 +26,13 @@ Each module was characterized the same way, one atomic commit per module, **add-
 ### Directory layout
 
 - One subdirectory per characterized module (e.g. `DataType/`, `LibraryIO/`, `Configuration/`, `TensileLogic/`, …), each with its `test_*_char.py` files and a local `__snapshots__/`.
-- `_codegen/` — the codegen record/replay harness (`codegen_harness.py`, `config_harness.py`, `matrix.py`), the per-arch attribution fixtures, and `GPU-MOCK.md`. Codegen goldens use an order-invariant `{basename, err}` digest rather than a full assembly-text hash, because the emitter's text is order-coupled through process-global rocisa scheduler state.
+- `_codegen/` — the codegen record/replay harness (`codegen_harness.py`, `config_harness.py`, `matrix.py`), the per-arch attribution fixtures, and `GPU-MOCK.md`. A test that claims a specific generated behavior asserts the relevant instruction or source structure directly. Broad set-cover cases are labeled as coverage-oriented smoke tests and check generation status without snapshotting compiler-sensitive assembly.
 - `conftest.py` — shared fixtures for the characterization suite.
+
+Within `_codegen`, a `{basename, err}` saved result records solution identity and
+generation status only. It does not prove that a cited emitter branch produced
+the intended instructions. Such a test is a reachability check unless it also
+uses a focused source or derived-state assertion.
 
 ## How to run
 
