@@ -159,10 +159,10 @@ namespace TensileLite
         COUNT,
     };
 
-    std::string toString(CustomArgSemantic arg);
-    CustomArgSemantic fromStringCustomArgSemantic(std::string& str);
-    std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t);
-    std::istream& operator>>(std::istream& stream, CustomArgSemantic& t);
+    TENSILELITEHOST_EXPORT std::string toString(CustomArgSemantic arg);
+    TENSILELITEHOST_EXPORT CustomArgSemantic fromStringCustomArgSemantic(std::string& str);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgSemantic& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgSemantic& t);
 
     struct CustomArgDefinition
     {
@@ -172,9 +172,9 @@ namespace TensileLite
         size_t index   = 0;
     };
 
-    std::string toString(CustomArgDefinition arg);
-    std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t);
-    std::istream& operator>>(std::istream& stream, CustomArgDefinition& t);
+    TENSILELITEHOST_EXPORT std::string toString(CustomArgDefinition arg);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgDefinition& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgDefinition& t);
 
     enum CustomGridSize
     {
@@ -190,10 +190,10 @@ namespace TensileLite
         CustomGridSize_Count,
     };
 
-    std::string toString(CustomGridSize mode);
-    CustomGridSize fromStringCustomGridSize(std::string& str);
-    std::ostream& operator<<(std::ostream& stream, const CustomGridSize& t);
-    std::istream& operator>>(std::istream& stream, CustomGridSize& t);
+    TENSILELITEHOST_EXPORT std::string toString(CustomGridSize mode);
+    TENSILELITEHOST_EXPORT CustomGridSize fromStringCustomGridSize(std::string& str);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomGridSize& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomGridSize& t);
 
     enum CustomWorkspaceType
     {
@@ -204,10 +204,10 @@ namespace TensileLite
         CustomWorkspaceType_Count,
     };
 
-    std::string toString(CustomWorkspaceType type);
-    CustomWorkspaceType fromStringCustomWorkspaceType(std::string& str);
-    std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
-    std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
+    TENSILELITEHOST_EXPORT std::string toString(CustomWorkspaceType type);
+    TENSILELITEHOST_EXPORT CustomWorkspaceType fromStringCustomWorkspaceType(std::string& str);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
 
     struct CustomKernel
     {

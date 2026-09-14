@@ -5824,10 +5824,25 @@ namespace TensileLite
                                                                 Hardware const& hardware) const
     {
         StreamKSettings sk;
-        if(sizeMapping.streamK == 0)
+        const bool customStreamK
+            = customKernel.workspaceType == CustomWorkspaceType::StreamK
+              || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
+        // Handwritten custom kernels advertise Stream-K via workspaceType, not
+        // sizeMapping.streamK. Without this, solve() enters the Stream-K path
+        // (customStreamK) then this helper returns grid=0 and hipLaunch fails
+        // with numWorkGroups=(0,1,1).
+        if(sizeMapping.streamK == 0 && !customStreamK)
             return sk;
 
-        auto tiles = problem.getNumTiles(sizeMapping, 1);
+        size_t tiles = 0;
+        if(handwrittenCustomKernel())
+        {
+            dim3 dimTiles;
+            calculateTiles(dimTiles, problem);
+            tiles = dimTiles.x * dimTiles.y * dimTiles.z;
+        }
+        else
+            tiles = problem.getNumTiles(sizeMapping, 1);
         const bool effectiveDynamic = (sizeMapping.streamK == 5)
                                           ? streamK5EffectiveDynamic(problem, hardware)
                                           : false;

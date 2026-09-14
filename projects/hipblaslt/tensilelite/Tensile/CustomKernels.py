@@ -124,7 +124,16 @@ def supportsUserSgprKernargPreload(rocmVersion):
         rocmVersion.major == 6 and rocmVersion.patch >= 32650
     )
 
+_DEFAULT_CUSTOM_KERNEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CustomKernels")
+
+
+def _custom_kernel_dir(directory=None):
+    """Resolve the CustomKernels tree; None means the packaged source directory."""
+    return _DEFAULT_CUSTOM_KERNEL_DIR if directory is None else directory
+
+
 def getCustomKernelFilepath(name, directory=None):
+    directory = _custom_kernel_dir(directory)
     flat = os.path.join(directory, (name + ".s"))
     if os.path.isfile(flat):
         return flat
@@ -135,6 +144,7 @@ def getCustomKernelFilepath(name, directory=None):
 
 def iterCustomKernelFiles(directory=None):
     """Yield custom kernel assembly files using the same recursive discovery as the loader."""
+    directory = _custom_kernel_dir(directory)
     for root, dirs, files in os.walk(directory):
         dirs.sort()
         for fname in sorted(files):
