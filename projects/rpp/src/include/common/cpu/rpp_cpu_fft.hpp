@@ -43,6 +43,9 @@ SOFTWARE.
 
 #include "rppdefs.h"
 
+constexpr Rpp64f RPP_PI = 3.14159265358979323846;
+constexpr Rpp64f RPP_2PI = 2.0 * RPP_PI;
+
 typedef std::complex<Rpp32f> RppFftComplex;
 
 struct RppCpuFftPlan {
@@ -88,7 +91,7 @@ inline void rpp_fft_build_bitrev(std::vector<Rpp32u>& bitRev, Rpp32s len) {
 inline void rpp_fft_build_twiddles(std::vector<RppFftComplex>& tw, Rpp32s len) {
     tw.resize(len / 2);
     for (Rpp32s k = 0; k < len / 2; k++) {
-        Rpp64f ang = -2.0 * 3.14159265358979323846 * (Rpp64f)k / (Rpp64f)len;
+        Rpp64f ang = -RPP_2PI * (Rpp64f)k / (Rpp64f)len;
         tw[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
     }
 }
@@ -141,12 +144,11 @@ inline void rpp_cpu_fft_plan_init(RppCpuFftPlan& plan, Rpp32s nfft) {
     rpp_fft_build_bitrev(plan.bitRevM, plan.m);
     rpp_fft_build_twiddles(plan.twiddlesM, plan.m);
 
-    constexpr Rpp64f PI = 3.141592653589793238462643383279502884;
     plan.chirp.resize(nfft);
     for (Rpp32s k = 0; k < nfft; k++) {
         // exp(-pi*i*k^2/n); reduce k^2 mod 2n to keep the argument small and precise
         Rpp64s k2mod = ((Rpp64s)k * (Rpp64s)k) % (2LL * (Rpp64s)nfft);
-        Rpp64f ang = -PI * (Rpp64f)k2mod / (Rpp64f)nfft;
+        Rpp64f ang = -RPP_PI * (Rpp64f)k2mod / (Rpp64f)nfft;
         plan.chirp[k] = RppFftComplex((Rpp32f)std::cos(ang), (Rpp32f)std::sin(ang));
     }
 
