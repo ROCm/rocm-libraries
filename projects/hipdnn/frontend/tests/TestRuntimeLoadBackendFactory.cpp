@@ -196,6 +196,10 @@ TEST_F(TestRuntimeLoadBackendFactory, ResolvedPathNamesTheBackendActuallyLoaded)
     const auto origin = getLoadedLibraryOrigin(handle);
     EXPECT_TRUE(std::filesystem::is_regular_file(origin / getLibraryName("hipdnn_backend")))
         << "the loaded backend's origin holds no backend library: " << origin;
+    // The loader-search tier resolves to a bare name, leaving no directory of the
+    // resolver's own to compare against, so the comparison below is skipped rather
+    // than failed. The check above still holds there. Asserting it unconditionally is
+    // what made this test reject a correctly loading build under a custom libdir.
     if(resolved.has_parent_path())
     {
         EXPECT_TRUE(pathCompEq(normalized(resolved).parent_path(), normalized(origin)))
