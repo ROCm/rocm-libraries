@@ -12,6 +12,36 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_PREFETCH_QDO 1
 #endif
 
+// Depth of the Q/dO/LSE/D software pipeline, in tiles. 2 reproduces the
+// ping-pong exactly, byte for byte; 3 leaves one tile in flight across every
+// wait and 4 leaves two. The hot loop is unrolled by this factor so the slot
+// index is a compile-time constant; the wait count falls out of the depth as
+// kTdmPerTile * (slots - 2) -- see the derivation in the pipeline.
+//
+// Default 2, i.e. no behaviour change. Deeper measured SLOWER on gfx1250,
+// b2h8 s4096 d128 bf16 nomask, 5 reps with the arm order rotated, correctness
+// 6/6, causal flat within 0.2% as the control:
+//
+//     slots=2  0.7124 ms  (baseline)
+//     slots=3  0.7244 ms  -1.66%
+//     slots=4  0.8040 ms  -11.39%, and run-to-run spread widens 1% -> 8.6%
+//
+// So the depth is not the lever here -- but this is one shape on one box, and
+// b07-3 is memory-limited where c3-2 is closer to compute-bound, so the knob
+// stays rather than the code being reverted.
+#ifndef CK_TILE_FMHA_BWD_QDO_SLOTS
+#define CK_TILE_FMHA_BWD_QDO_SLOTS 2
+#endif
+
+// Depth for masked instances, which do not benefit: the per-pixel mask VALU
+// already covers the transfer, their Q loop is half as long, and on the batch
+// path mirror tile pairing has doubled the body so any unroll lands on twice as
+// much code. 0 means "use the value above"; 2 leaves them on the ping-pong the
+// pipeline always ran, which at depth 2 is a single body copy.
+#ifndef CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED
+#define CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED 2
+#endif
+
 // Issue the dQ atomic one whole cache line at a time.
 //
 // A wave32 wmma C fragment gives lanes 0-15 row r and lanes 16-31 row r+8, each
@@ -953,13 +983,65 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
                !(Problem::FmhaMask::IsMasking && Problem::FmhaDropout::IsStoreRandval);
     }
 
+    // How many Q/dO/LSE/D slots the pipeline rotates through.
+    //
+    // 2 is the ping-pong this file shipped with: a tile is issued and waited on
+    // inside the same iteration, so only one tile's worth of compute covers the
+    // transfer. 4 keeps two tiles in flight across the wait, which is what the
+    // aiter kernel does -- see the CK_TILE_FMHA_BWD_QDO_SLOTS comment in the
+    // pipeline. Each extra slot costs GetQDOSlotStride bytes of LDS.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlots()
+    {
+        // Without the prefetch budget there is a single box and the pipeline
+        // falls back to issue-and-drain.
+        if constexpr(!UseQDOPrefetch<Problem>())
+        {
+            return 1;
+        }
+        else
+        {
+            // Masked instances measured worse at every depth above 2 -- batch
+            // causal -31..-43% at depth 4 and group causal -10..-13% -- while
+            // the same code is worth +13..+45% on unmasked instances whose Q
+            // loop is long enough. Masking is the discriminator, not tile
+            // pairing: group causal does not pair and still loses.
+            if constexpr(Problem::FmhaMask::IsMasking && CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED > 0)
+            {
+                return CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED;
+            }
+            else
+            {
+                return CK_TILE_FMHA_BWD_QDO_SLOTS;
+            }
+        }
+    }
+
+    // One slot is Q + dO + LSE + D. Slot 0 lives inside the staged region; the
+    // rest are appended past everything else, so slot 1 lands exactly where the
+    // old second Q/dO pair did and the two-slot layout stays byte-identical.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlotStride()
+    {
+        return GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>() +
+               GetSmemSizeLSE<Problem>() + GetSmemSizeD<Problem>();
+    }
+
+    // Base of slot j, j >= 1. j == 0 is addressed through the staged offsets.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetQDOSlotBase(index_t j)
+    {
+        return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
+               GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>() +
+               (j - 1) * GetQDOSlotStride<Problem>();
+    }
+
     // Base of the second Q/dO pair, used when the pipeline double-buffers them.
     // Appended past everything else so the existing layout is byte-identical.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQPrefetchSmemOffset()
     {
-        return GetSmemSizeStaged<Problem>() + GetSmemSizeKGradAcc<Problem>() +
-               GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
+        return GetQDOSlotBase<Problem>(1);
     }
 
     template <typename Problem>
@@ -988,10 +1070,7 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t single = GetSmemSizeStaged<Problem>() +
                                    GetSmemSizeKGradAcc<Problem>() +
                                    GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
-        return single + (UseQDOPrefetch<Problem>()
-                             ? GetSmemSizeQ<Problem>() + GetSmemSizeOGrad<Problem>() +
-                                   GetSmemSizeLSE<Problem>() + GetSmemSizeD<Problem>()
-                             : 0);
+        return single + (GetQDOSlots<Problem>() - 1) * GetQDOSlotStride<Problem>();
     }
 };
 

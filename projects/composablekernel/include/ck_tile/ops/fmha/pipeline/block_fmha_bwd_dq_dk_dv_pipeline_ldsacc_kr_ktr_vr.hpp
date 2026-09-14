@@ -43,6 +43,121 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_DV_IN_REG 1
 #endif
 
+// ABLATION ONLY -- PRODUCES WRONG RESULTS. Drops the D (row-sum of dO*O) TDM
+// transfer from every tile, taking the per-wave issue count from 4 to 3. D is
+// still read out of whatever stale LDS the slot happens to hold, so the numbers
+// are garbage; this exists purely to put an upper bound on what removing one of
+// the four transfers is worth before building the real thing.
+//
+// The real change is not a deletion: aiter covers all four streams with three
+// transfers per wave by specialising the scalar load across waves (waves 0/1
+// carry LSE, waves 2/3 carry D -- see the s_bfe of ttmp8 feeding the
+// s_cmp_gt_i32 s2, 1 that selects ptr_lse vs ptr_d in the disassembly). This
+// ablation measures the ceiling of that idea, not the idea itself.
+#ifndef CK_TILE_FMHA_BWD_ABLATE_DROP_D
+#define CK_TILE_FMHA_BWD_ABLATE_DROP_D 0
+#endif
+
+// ABLATION ONLY -- PRODUCES WRONG RESULTS FOR CAUSAL. Forces the per-pixel mask
+// check off, so the edge-tile `set_tile_if` never runs and the compiler can drop
+// the masked path out of the body entirely.
+//
+// The per-pixel mask is already gated on mask.IsEdgeTile(), so a correct tile
+// specialisation (report item P3) could at best make the non-edge body look like
+// this one: no predicate evaluation, and no masked code competing for registers
+// or schedule slots. This measures that ceiling. It is not itself a candidate
+// implementation -- it simply computes the wrong answer on the diagonal.
+#ifndef CK_TILE_FMHA_BWD_ABLATE_NO_MASK
+#define CK_TILE_FMHA_BWD_ABLATE_NO_MASK 0
+#endif
+
+// ABLATION ONLY. The opposite probe: run the per-pixel mask on *every* tile
+// instead of just the diagonal ones. Results stay correct -- masking a fully
+// valid tile is a no-op -- so this one can be validated.
+//
+// Together with the control and ABLATE_NO_MASK this separates the three things
+// the mask costs: (always - control) is the marginal cost of executing
+// set_tile_if on a tile; the control already pays that on the ~6% of tiles that
+// are edge tiles; whatever of (control - no_mask) remains is the price of merely
+// having the masked code sitting in the body. Only that last part is
+// recoverable by a correct tile specialisation.
+#ifndef CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
+#define CK_TILE_FMHA_BWD_ABLATE_ALL_MASK 0
+#endif
+
+// Split the Q-tile loop into an edge-tile prefix and a mask-free remainder,
+// instead of asking mask.IsEdgeTile() on every tile of a single shared body.
+//
+// For a non-local mask the edge tiles really are a prefix: IsEdgeTile reduces to
+// (k_origin + kN0) > min(seqlen_q_step + x, x_total), and the right-hand side
+// only grows as the loop walks Q down, so the predicate flips true->false once
+// and never back. Local/band masks can have edge tiles at both ends, so they
+// keep the old single-loop form.
+//
+// The point is not the saved predicate -- that is a couple of scalar ops. It is
+// that the mask-free instantiation of the body no longer carries the
+// set_tile_if block, so it stops competing for registers and schedule slots on
+// the ~94% of tiles that never needed it.
+// MEASURED A LOSS -- default off. Emitting the body twice costs far more than
+// the mask code it removes: mask1 0.446 -> 0.712 ms (59% worse), and even mask0,
+// whose predicate is loop-invariant so only the mask-free loop ever runs, lost
+// 8% (0.699 -> 0.756 ms). Both arms validate. Kept because the measurement is
+// the useful part: this kernel is bound by code size / register lifetime far
+// more tightly than by the ~5.5% the mask work itself is worth.
+#ifndef CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
+#define CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES 0
+#endif
+
+// Keep one body, but stop asking the mask which tiles are edge tiles. The edge
+// tiles form a leading run and a trailing run (IsEdgeTile is
+// top_right_edge || bottom_left_edge; the first only goes true->false down the Q
+// loop, the second only false->true), so both run lengths can be found once per
+// workgroup with two short scalar scans, and the per-tile question becomes two
+// integer compares on the loop counter.
+//
+// Unlike SPLIT_EDGE_TILES this emits no extra copy of the body, so it isolates
+// what the predicate evaluation itself costs, with none of the code-size
+// penalty that sank the split.
+#ifndef CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
+#define CK_TILE_FMHA_BWD_HOIST_EDGE_TEST 0
+#endif
+
+// Skip the -inf guard on the row LSE. A fully masked-out row carries
+// LSE = -inf, and feeding that into exp2(scale*s - row_lse) would give NaN, so
+// the guard maps it to 0. But a row only reaches -inf if it has no valid key at
+// all, which cannot happen for bottom-right causal with seqlen_q == seqlen_k --
+// every query row sees at least itself. Where that holds the guard is pure
+// overhead. Validate before trusting this on any other shape.
+#ifndef CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
+#define CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE 0
+#endif
+
+
+// PROBE: drop the remaining hand-written GemmStagedScheduler prescriptions
+// (<0>, <3>, <4>) and/or the sched_barrier that follows each, the same way A2
+// did for <1>/<2>.  Bit N of the mask selects scheduler N.
+
+
+// PROBE: fence the softmax/dropout stage from the operand prefetch that follows
+// it. The hot-loop VGPR peak is a ~1000-line band where the scheduler has
+// hoisted the next gemm's ds_load_tr fragments into the dropout stage; this
+// measures what that overlap costs in registers.
+
+
+// A2: merge the gemm_1 / gemm_2 scheduling regions -- drop the sched_barrier
+// between them AND both hand-written GemmStagedScheduler prescriptions.
+// Both halves are required; doing either alone is a loss (see HANDOFF_A2).
+
+
+// PROBE: keep ONLY dV in registers, leave dK in LDS. Halves the extra register
+// cost versus the fully register-resident pipeline (128 VGPR instead of 256).
+// PROBE: sink the next iteration's Q/LSE loads past gemm_4, so their live
+// ranges do not span it.  dO/D are already loaded after gemm_4; Q/LSE were the
+// odd ones out.  Safe: gemm_4 touches neither, and nothing between gemm_4 and
+// the dO/D loads writes LDS or barriers, so they sit in the same validity
+// window the dO/D loads already rely on.
+
+
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, with the dK and dV
 // accumulators held in LDS instead of registers.
 //
@@ -328,6 +443,30 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         const auto num_total_loop =
             amd_wave_read_first_lane(integer_divide_ceil(seqlen_q_end - seqlen_q_start, kM0));
 
+        // Leading and trailing edge-tile run lengths, for HOIST_EDGE_TEST. Both
+        // scans stop at the first tile that is not an edge tile, so they are a
+        // couple of scalar iterations in the shapes that matter.
+#if CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
+        index_t n_edge_head       = 0;
+        index_t n_edge_tail_start = num_total_loop;
+        {
+            auto tile_is_edge = [&](index_t i) {
+                return mask.IsEdgeTile(seqlen_q_start + i * kM0,
+                                       k_origin.at(number<0>{}),
+                                       number<kM0>{},
+                                       number<kN0>{});
+            };
+            while(n_edge_head < num_total_loop && tile_is_edge(n_edge_head))
+            {
+                n_edge_head += 1;
+            }
+            while(n_edge_tail_start > n_edge_head && tile_is_edge(n_edge_tail_start - 1))
+            {
+                n_edge_tail_start -= 1;
+            }
+        }
+#endif
+
         // check early exit if no work to do.
         // __builtin_expect is load-bearing: omitting it causes incorrect AGPR allocation in
         // the dK/dV accumulation loop on some compiler versions, leading to wrong results.
@@ -464,48 +603,100 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                              {seqlen_q_start, 0},
                              Policy::template MakeQDramTileDistribution<Problem>());
 
-        QDataType* q_lds_ptr = static_cast<QDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>()));
+        // ---- the Q/dO/LSE/D slot ring -----------------------------------
+        //
+        // kQDOSlots tiles are resident in LDS at once. Slot 0 is the box the
+        // staged region already held; slots 1.. are appended past V, slot 1
+        // landing exactly where the old second Q/dO pair sat -- so kQDOSlots==2
+        // is the previous layout byte for byte.
+        //
+        // Slot 0's four boxes are laid out dO, Q, LSE, D (that is the order the
+        // staged offsets were built in); the appended slots use Q, dO, LSE, D.
+        // Nothing depends on the order, only on the four offsets, so each box
+        // gets its own accessor rather than a single base plus a stride.
+        constexpr index_t kQDOSlots = Policy::template GetQDOSlots<Problem>();
+        static_assert(kQDOSlots >= 1 && kQDOSlots <= 4,
+                      "the hot loop is unrolled by kQDOSlots; keep it small");
 
-        auto q_lds = make_tensor_view<address_space_enum::lds>(
-            q_lds_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
+        auto q_slot_off = [&](auto j) -> index_t {
+            constexpr index_t jj = j;
+            if constexpr(jj == 0)
+            {
+                return Policy::template GetSmemSizeQT<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>() +
+                       Policy::template GetSmemSizeOGradT<Problem>();
+            }
+            else
+            {
+                return Policy::template GetQDOSlotBase<Problem>(jj);
+            }
+        };
+        auto do_slot_off = [&](auto j) -> index_t {
+            constexpr index_t jj = j;
+            if constexpr(jj == 0)
+            {
+                return Policy::template GetSmemSizeQT<Problem>();
+            }
+            else
+            {
+                return Policy::template GetQDOSlotBase<Problem>(jj) +
+                       Policy::template GetSmemSizeQ<Problem>();
+            }
+        };
+        auto lse_slot_off = [&](auto j) -> index_t {
+            constexpr index_t jj = j;
+            if constexpr(jj == 0)
+            {
+                return Policy::template GetSmemSizeQT<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>() +
+                       Policy::template GetSmemSizeOGradT<Problem>() +
+                       Policy::template GetSmemSizeQ<Problem>();
+            }
+            else
+            {
+                return Policy::template GetQDOSlotBase<Problem>(jj) +
+                       Policy::template GetSmemSizeQ<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>();
+            }
+        };
+        auto d_slot_off = [&](auto j) -> index_t {
+            constexpr index_t jj = j;
+            if constexpr(jj == 0)
+            {
+                return Policy::template GetSmemSizeQT<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>() +
+                       Policy::template GetSmemSizeOGradT<Problem>() +
+                       Policy::template GetSmemSizeQ<Problem>() +
+                       Policy::template GetSmemSizeLSE<Problem>();
+            }
+            else
+            {
+                return Policy::template GetQDOSlotBase<Problem>(jj) +
+                       Policy::template GetSmemSizeQ<Problem>() +
+                       Policy::template GetSmemSizeOGrad<Problem>() +
+                       Policy::template GetSmemSizeLSE<Problem>();
+            }
+        };
 
-        auto q_lds_window =
-            make_tile_window(q_lds, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
+        auto q_lds_windows = generate_tuple(
+            [&](auto j) {
+                auto tv = make_tensor_view<address_space_enum::lds>(
+                    static_cast<QDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr) +
+                                                               q_slot_off(j))),
+                    Policy::template MakeQLdsBlockDescriptor<Problem>());
+                return make_tile_window(
+                    tv, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
+            },
+            number<kQDOSlots>{});
 
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        // When this instance does not prefetch, B is built at A's offset. It
-        // then aliases A, phase never flips, and every selection below resolves
-        // to the original single-buffer behaviour.
-        constexpr bool kPrefetchQDO = Policy::template UseQDOPrefetch<Problem>();
-        QDataType* q_lds_ptr_b =
-            kPrefetchQDO ? static_cast<QDataType*>(static_cast<void*>(
-                               static_cast<char*>(smem_ptr) +
-                               Policy::template GetQPrefetchSmemOffset<Problem>()))
-                         : q_lds_ptr;
-        auto q_lds_b = make_tensor_view<address_space_enum::lds>(
-            q_lds_ptr_b, Policy::template MakeQLdsBlockDescriptor<Problem>());
-        auto q_lds_window_b =
-            make_tile_window(q_lds_b, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
-        auto q_lds_read_window_b =
-            make_tile_window(q_lds_window_b.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK0>{}),
-                             q_lds_window_b.get_window_origin(),
-                             Policy::template MakeQRegSliceBlockDescriptor<Problem>());
-        auto qt_lds_read_window_b =
-            make_tile_window(q_lds_window_b.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
-                             q_lds_window_b.get_window_origin(),
-                             Policy::template MakeQTRegSliceBlockDescriptor<Problem>());
-#endif
-
-        auto q_lds_read_window =
-            make_tile_window(q_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK0>{}),
-                             q_lds_window.get_window_origin(),
-                             Policy::template MakeQRegSliceBlockDescriptor<Problem>());
+        auto q_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(q_lds_windows.at(j).get_bottom_tensor_view(),
+                                        make_tuple(number<kM0>{}, number<kK0>{}),
+                                        q_lds_windows.at(j).get_window_origin(),
+                                        Policy::template MakeQRegSliceBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
 
         auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
             Policy::template MakePTRegSliceBlockDescriptor<Problem>());
@@ -513,11 +704,14 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         // second LDS copy it fed are gone -- ds_load_tr16_b128 does the
         // transpose in hardware. Q's shuffle ran once per Q-loop iteration, so
         // this removes hot-loop work, unlike K's which was once per block.
-        auto qt_lds_read_window =
-            make_tile_window(q_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
-                             q_lds_window.get_window_origin(),
-                             Policy::template MakeQTRegSliceBlockDescriptor<Problem>());
+        auto qt_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(q_lds_windows.at(j).get_bottom_tensor_view(),
+                                        make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
+                                        q_lds_windows.at(j).get_window_origin(),
+                                        Policy::template MakeQTRegSliceBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
 
         // dO: HBM ->Reg ->LDS
         auto do_dram_window =
@@ -526,53 +720,41 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                              {seqlen_q_start, 0},
                              Policy::template MakeOGradDramTileDistribution<Problem>());
 
-        OGradDataType* do_lds_ptr = static_cast<OGradDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>()));
+        auto do_lds_windows = generate_tuple(
+            [&](auto j) {
+                auto tv = make_tensor_view<address_space_enum::lds>(
+                    static_cast<OGradDataType*>(static_cast<void*>(
+                        static_cast<char*>(smem_ptr) + do_slot_off(j))),
+                    Policy::template MakeOGradLdsBlockDescriptor<Problem>());
+                return make_tile_window(
+                    tv, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
+            },
+            number<kQDOSlots>{});
 
-        auto do_lds = make_tensor_view<address_space_enum::lds>(
-            do_lds_ptr, Policy::template MakeOGradLdsBlockDescriptor<Problem>());
-
-        auto do_lds_window =
-            make_tile_window(do_lds, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
-
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        OGradDataType* do_lds_ptr_b =
-            kPrefetchQDO ? static_cast<OGradDataType*>(static_cast<void*>(
-                               static_cast<char*>(smem_ptr) +
-                               Policy::template GetOGradPrefetchSmemOffset<Problem>()))
-                         : do_lds_ptr;
-        auto do_lds_b = make_tensor_view<address_space_enum::lds>(
-            do_lds_ptr_b, Policy::template MakeOGradLdsBlockDescriptor<Problem>());
-        auto do_lds_window_b =
-            make_tile_window(do_lds_b, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
-        auto do_lds_read_window_b =
-            make_tile_window(do_lds_window_b.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK2>{}),
-                             do_lds_window_b.get_window_origin(),
-                             Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
-        auto dot_lds_read_window_b =
-            make_tile_window(do_lds_window_b.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kVHeaddim>{}),
-                             do_lds_window_b.get_window_origin(),
-                             Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
-#endif
-
-        auto do_lds_read_window =
-            make_tile_window(do_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK2>{}),
-                             do_lds_window.get_window_origin(),
-                             Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
+        auto do_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(
+                    do_lds_windows.at(j).get_bottom_tensor_view(),
+                    make_tuple(number<kM0>{}, number<kK2>{}),
+                    do_lds_windows.at(j).get_window_origin(),
+                    Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
         // dO^T: read transposed straight out of the single dO box.
         //
         // There used to be a second LDS copy here, produced by shuffling
         // do_block_tile in registers, so gemm_1 could read dO^T with a plain
         // load_tile. ds_load_tr16_b128 does that in hardware. Unlike K, dO is
         // reloaded every Q iteration, so this shuffle was in the hot loop.
-        auto dot_lds_read_window =
-            make_tile_window(do_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kVHeaddim>{}),
-                             do_lds_window.get_window_origin(),
-                             Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
+        auto dot_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(
+                    do_lds_windows.at(j).get_bottom_tensor_view(),
+                    make_tuple(number<kM0>{}, number<kVHeaddim>{}),
+                    do_lds_windows.at(j).get_window_origin(),
+                    Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
 
         // dS: Reg -> Reg -> LDS
         GemmDataType* ds_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
@@ -636,41 +818,30 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             {seqlen_q_start},
             Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
-        LSEDataType* lse_lds_ptr = static_cast<LSEDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>()));
+        auto lse_lds_views = generate_tuple(
+            [&](auto j) {
+                return make_tensor_view<address_space_enum::lds>(
+                    static_cast<LSEDataType*>(static_cast<void*>(
+                        static_cast<char*>(smem_ptr) + lse_slot_off(j))),
+                    Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
 
-        auto lse_lds = make_tensor_view<address_space_enum::lds>(
-            lse_lds_ptr, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+        auto lse_lds_write_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(lse_lds_views.at(j), make_tuple(number<kM0>{}), {0});
+            },
+            number<kQDOSlots>{});
 
-        auto lse_lds_write_window = make_tile_window(lse_lds, make_tuple(number<kM0>{}), {0});
-
-        auto lse_lds_read_window = make_tile_window(
-            lse_lds,
-            make_tuple(number<kM0>{}),
-            {0},
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
-
-        // Second LSE box. When this instance does not prefetch, B is built at A's
-        // offset, so it aliases A and every phase selection collapses to the
-        // original single-buffer behaviour.
-        LSEDataType* lse_lds_ptr_b =
-            Policy::template UseQDOPrefetch<Problem>()
-                ? static_cast<LSEDataType*>(static_cast<void*>(
-                      static_cast<char*>(smem_ptr) +
-                      Policy::template GetLSEPrefetchSmemOffset<Problem>()))
-                : lse_lds_ptr;
-        auto lse_lds_b = make_tensor_view<address_space_enum::lds>(
-            lse_lds_ptr_b, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
-        auto lse_lds_write_window_b =
-            make_tile_window(lse_lds_b, make_tuple(number<kM0>{}), {0});
-        auto lse_lds_read_window_b = make_tile_window(
-            lse_lds_b,
-            make_tuple(number<kM0>{}),
-            {0},
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+        auto lse_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(
+                    lse_lds_views.at(j),
+                    make_tuple(number<kM0>{}),
+                    {0},
+                    Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+            },
+            number<kQDOSlots>{});
 
         // D: HBM ->Reg
         auto d_dram_window = make_tile_window(
@@ -679,38 +850,35 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             {seqlen_q_start},
             Policy::template MakeLSEDDramTdmDistribution<Problem>());
 
-        DDataType* d_lds_ptr = static_cast<DDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeLSE<Problem>()));
+        auto d_lds_views = generate_tuple(
+            [&](auto j) {
+                return make_tensor_view<address_space_enum::lds>(
+                    static_cast<DDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr) +
+                                                               d_slot_off(j))),
+                    Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+            },
+            number<kQDOSlots>{});
 
-        auto d_lds = make_tensor_view<address_space_enum::lds>(
-            d_lds_ptr, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
+        auto d_lds_write_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(d_lds_views.at(j), make_tuple(number<kM0>{}), {0});
+            },
+            number<kQDOSlots>{});
+#if CK_TILE_FMHA_BWD_ABLATE_DROP_D
+        // The ablation drops every use of these; keep the definition so the
+        // rest of the slot plumbing is untouched between the two arms.
+        (void)d_lds_write_windows;
+#endif
 
-        auto d_lds_write_window = make_tile_window(d_lds, make_tuple(number<kM0>{}), {0});
-
-        auto d_lds_read_window = make_tile_window(
-            d_lds,
-            make_tuple(number<kM0>{}),
-            {0},
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
-
-        DDataType* d_lds_ptr_b =
-            Policy::template UseQDOPrefetch<Problem>()
-                ? static_cast<DDataType*>(static_cast<void*>(
-                      static_cast<char*>(smem_ptr) +
-                      Policy::template GetDPrefetchSmemOffset<Problem>()))
-                : d_lds_ptr;
-        auto d_lds_b = make_tensor_view<address_space_enum::lds>(
-            d_lds_ptr_b, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
-        auto d_lds_write_window_b =
-            make_tile_window(d_lds_b, make_tuple(number<kM0>{}), {0});
-        auto d_lds_read_window_b = make_tile_window(
-            d_lds_b,
-            make_tuple(number<kM0>{}),
-            {0},
-            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+        auto d_lds_read_windows = generate_tuple(
+            [&](auto j) {
+                return make_tile_window(
+                    d_lds_views.at(j),
+                    make_tuple(number<kM0>{}),
+                    {0},
+                    Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+            },
+            number<kQDOSlots>{});
 
         // RandVal: HBM ->Reg
         auto randval_dram_window = dropout.template MakeRandvalDramWindow<decltype(gemm_0), false>(
@@ -758,31 +926,75 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         /*
          * Store prefetched data into LDS
          */
+        // ---- pipeline depth ---------------------------------------------
+        //
+        // Iteration i holds tile i in registers, reads tile i's Q^T/dO^T out of
+        // slot i % kQDOSlots, and issues tile i + kIssueAhead into slot
+        // (i + kIssueAhead) % kQDOSlots.
+        //
+        // kIssueAhead is kQDOSlots - 1, which is what makes the write safe with
+        // no new barrier: (i + kQDOSlots - 1) % kQDOSlots is slot i - 1, last
+        // read in iteration i-1 before that iteration's block_sync_lds. Issuing
+        // any further ahead would land on the slot this iteration is still
+        // reading.
+        //
+        // At the wait, tiles up to i + kIssueAhead have been issued and tile
+        // i + 1 must have landed, so kQDOSlots - 2 tiles may still be in flight
+        // -- 4 transfers each, because CK splits LSE and D where aiter shares a
+        // descriptor. kQDOSlots == 2 gives a wait of 0, i.e. the full drain this
+        // loop used to do; kQDOSlots == 4 gives 8 and never drains.
+        constexpr index_t kIssueAhead  = kQDOSlots == 1 ? 1 : kQDOSlots - 1;
+        constexpr index_t kTdmPerTile  = CK_TILE_FMHA_BWD_ABLATE_DROP_D ? 3 : 4;
+        constexpr index_t kTdmWaitCnt  = kQDOSlots >= 2 ? kTdmPerTile * (kQDOSlots - 2) : 0;
+
+        // Advance the DRAM windows only while a real tile remains. Past the end
+        // the issue re-reads the last tile into a slot nothing will look at:
+        // in bounds, warm in L2, and it keeps the outstanding count at exactly
+        // kTdmPerTile * kIssueAhead so one compile-time wait is correct for
+        // every iteration including the last two.
+        auto advance_qdo_windows = [&](index_t next_tile) {
+            if(next_tile <= num_total_loop - 1)
+            {
+                move_tile_window(q_dram_window, {kM0, 0});
+                move_tile_window(lse_dram_window, {kM0});
+                move_tile_window(do_dram_window, {kM0, 0});
+                move_tile_window(d_dram_window, {kM0});
+            }
+        };
+
+        // Issue tile `tile` into slot `j`. The issue order Q, LSE, dO, D is
+        // fixed: TENSORcnt retires in order, so reordering these four changes
+        // what a given wait count means.
+        auto issue_qdo_tile = [&](auto j, index_t tile) {
+            load_tile_tdm(tdm_config_q, q_lds_windows.at(j), q_dram_window);
+            load_tile_tdm(tdm_config_lse, lse_lds_write_windows.at(j), lse_dram_window);
+            load_tile_tdm(tdm_config_do, do_lds_windows.at(j), do_dram_window);
+#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
+            load_tile_tdm(tdm_config_d, d_lds_write_windows.at(j), d_dram_window);
+#endif
+            advance_qdo_windows(tile + 1);
+        };
+
         block_sync_lds();
-        load_tile_tdm(tdm_config_q, q_lds_window, q_dram_window);
-        move_tile_window(q_dram_window, {kM0, 0});
+        // Fill: tiles 0 .. kIssueAhead-1, one per slot. No compute to overlap
+        // them with, which is why the wait below is the only one in the kernel
+        // that has to be met before any work at all can start.
+        static_for<0, kIssueAhead, 1>{}([&](auto j) { issue_qdo_tile(j, j); });
 
-        load_tile_tdm(tdm_config_lse, lse_lds_write_window, lse_dram_window);
-        move_tile_window(lse_dram_window, {kM0});
-
-        load_tile_tdm(tdm_config_do, do_lds_window, do_dram_window);
-        move_tile_window(do_dram_window, {kM0, 0});
-
-        load_tile_tdm(tdm_config_d, d_lds_write_window, d_dram_window);
-        move_tile_window(d_dram_window, {kM0});
         // All four operands now arrive by TDM and commit on TENSORcnt; nothing
-        // in this region goes through dscnt any more.
-        s_wait_tensorcnt_barrier<0>();
+        // in this region goes through dscnt any more. Waiting to kTdmWaitCnt
+        // rather than 0 releases tile 0 while tiles 1.. keep transferring.
+        s_wait_tensorcnt_barrier<kTdmWaitCnt>();
         block_sync_lds();
 
         /*
          * Prefetch LDS data into Reg to Asynchronous Data Movement and MFMA pipeline
          */
 
-        auto q_reg_tensor  = load_tile(q_lds_read_window);
-        auto lse           = load_tile(lse_lds_read_window);
-        auto do_reg_tensor = load_tile(do_lds_read_window);
-        auto d             = load_tile(d_lds_read_window);
+        auto q_reg_tensor  = load_tile(q_lds_read_windows.at(number<0>{}));
+        auto lse           = load_tile(lse_lds_read_windows.at(number<0>{}));
+        auto do_reg_tensor = load_tile(do_lds_read_windows.at(number<0>{}));
+        auto d             = load_tile(d_lds_read_windows.at(number<0>{}));
 
         // Zero the LDS accumulators. No barrier: each element is written and
         // later read-modify-written by the same thread, so there is no sharing
@@ -807,40 +1019,74 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             store_tile(dv_acc_lds_window, dv_zero);
         }
 
+        // Every slot's window has the same type -- they differ only in the LDS
+        // base held by the tensor view -- so picking one is a select, not a
+        // switch over code.
+        //
+        // Written as a conditional chain rather than a pointer that walks the
+        // tuple: taking the address of a tuple element makes the windows
+        // addressable, which stops them being scrubbed into registers and puts
+        // every descriptor back in scratch. Measured 13-18% on causal, which is
+        // the configuration that leans on this path.
+        auto pick_slot = [&](auto& tup, index_t j) -> auto& {
+            if constexpr(kQDOSlots == 1)
+            {
+                ignore = j;
+                return tup.at(number<0>{});
+            }
+            else if constexpr(kQDOSlots == 2)
+            {
+                // Two slots is what the loop always had, and a single ternary
+                // on two named windows is what it compiled to. Anything
+                // cleverer here costs: a chain over three or four windows makes
+                // all of them addressable and puts their descriptors back in
+                // scratch, which measured -14 to -37% across the sweep.
+                return j == 0 ? tup.at(number<0>{}) : tup.at(number<1>{});
+            }
+            else
+            {
+                auto* p = &tup.at(number<0>{});
+                static_for<1, kQDOSlots, 1>{}([&](auto k) {
+                    if(j == k)
+                    {
+                        p = &tup.at(k);
+                    }
+                });
+                return *p;
+            }
+        };
+
         __builtin_amdgcn_sched_barrier(0);
-        // Hot loop
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        // false: the body reads the A boxes and refills B; true: the reverse.
-        bool phase = false;
-#endif
-        while(i_total_loops < (num_total_loop - 1))
-        {
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-            auto& q_rd_cur   = phase ? q_lds_read_window_b   : q_lds_read_window;
-            auto& qt_rd_cur  = phase ? qt_lds_read_window_b  : qt_lds_read_window;
-            auto& do_rd_cur  = phase ? do_lds_read_window_b  : do_lds_read_window;
-            auto& dot_rd_cur = phase ? dot_lds_read_window_b : dot_lds_read_window;
-            auto& q_wr_dst   = phase ? q_lds_window          : q_lds_window_b;
-            auto& do_wr_dst  = phase ? do_lds_window         : do_lds_window_b;
-            auto& lse_wr_dst = phase ? lse_lds_write_window  : lse_lds_write_window_b;
-            auto& d_wr_dst   = phase ? d_lds_write_window    : d_lds_write_window_b;
-            auto& lse_rd_dst = phase ? lse_lds_read_window   : lse_lds_read_window_b;
-            auto& d_rd_dst   = phase ? d_lds_read_window     : d_lds_read_window_b;
-            auto& q_rd_dst   = phase ? q_lds_read_window     : q_lds_read_window_b;
-            auto& do_rd_dst  = phase ? do_lds_read_window    : do_lds_read_window_b;
-#else
-            auto& q_rd_cur   = q_lds_read_window;
-            auto& qt_rd_cur  = qt_lds_read_window;
-            auto& do_rd_cur  = do_lds_read_window;
-            auto& dot_rd_cur = dot_lds_read_window;
-            auto& q_wr_dst   = q_lds_window;
-            auto& do_wr_dst  = do_lds_window;
-            auto& q_rd_dst   = q_lds_read_window;
-            auto& do_rd_dst  = do_lds_read_window;
-#endif
+        // Hot loop.
+        //
+        // The body takes its eight LDS windows as parameters so that the two
+        // drivers below can bind them differently without a second copy of the
+        // body in the source:
+        //
+        //   depth >= 3 -- unrolled kQDOSlots times, each copy binding a
+        //     compile-time slot. This is the point of the unroll: a runtime
+        //     rotation costs address arithmetic per operand, and at 1024 VGPR
+        //     with spills already there is nowhere to put it (an earlier
+        //     three-deep Q experiment did exactly that and went 7 -> 384
+        //     spills).
+        //   depth <= 2 -- one copy, slot chosen by a running index, which is
+        //     what the ping-pong always did. Two slots do not need the unroll
+        //     and instances that keep depth 2 should not pay for it: mirror
+        //     tile pairing already doubles this body, and unrolling a doubled
+        //     body costs those instances 15-26%.
+        auto hot_loop_body = [&](auto kEdge,
+                                 auto& q_rd_cur,
+                                 auto& qt_rd_cur,
+                                 auto& do_rd_cur,
+                                 auto& dot_rd_cur,
+                                 auto& q_rd_dst,
+                                 auto& do_rd_dst,
+                                 auto& lse_rd_dst,
+                                 auto& d_rd_dst,
+                                 auto issue_next_tile) {
             // gemm_0/gemm_2 consume the register copies loaded at the end of the
             // previous iteration, so these two selections have no direct user --
-            // they exist to keep the A/B mapping symmetric and readable.
+            // they exist to keep the slot mapping symmetric and readable.
             ignore = q_rd_cur;
             ignore = do_rd_cur;
             // STAGE 1, Q@K Gemm0
@@ -895,9 +1141,20 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 });
             }
 
+            if constexpr(decltype(kEdge)::value)
             {
+#if CK_TILE_FMHA_BWD_HOIST_EDGE_TEST
+                bool need_perpixel_check =
+                    (i_total_loops < n_edge_head) || (i_total_loops >= n_edge_tail_start);
+#else
                 bool need_perpixel_check = mask.IsEdgeTile(
                     seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+#endif
+#if CK_TILE_FMHA_BWD_ABLATE_NO_MASK
+                need_perpixel_check = false;
+#elif CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
+                need_perpixel_check = FmhaMask::IsMasking;
+#endif
                 if(need_perpixel_check)
                 {
                     set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
@@ -912,9 +1169,13 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              FmhaMask::IsMasking)
                 {
+#if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
+                    return raw_lse;
+#else
                     return raw_lse == -numeric<LSEDataType>::infinity()
                                ? type_convert<LSEDataType>(0.f)
                                : raw_lse;
+#endif
                 }
                 else
                 {
@@ -988,29 +1249,20 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
             // This barrier existed so TDM could not overwrite an LDS box that
-            // some wave was still reading. With Q/dO *and* LSE/D double
-            // buffered the TDM below writes the other buffer of each, so there
-            // is no hazard left to guard. It is a full LDS drain
-            // (s_wait_dscnt 0x0), which is what pins the four waves together.
-            if constexpr(!Policy::template UseQDOPrefetch<Problem>())
+            // some wave was still reading. With two or more slots the issue
+            // below targets slot kWr, which is slot kCur - 1: last read in the
+            // previous iteration, behind that iteration's block_sync_lds. Only
+            // the single-slot fallback still overwrites what this iteration is
+            // reading and still needs the drain here.
+            if constexpr(kQDOSlots == 1)
             {
                 block_sync_lds();
             }
 
-            load_tile_tdm(tdm_config_q, q_wr_dst, q_dram_window);
-            move_tile_window(q_dram_window, {kM0, 0});
-
-            load_tile_tdm(tdm_config_lse, lse_wr_dst, lse_dram_window);
-            move_tile_window(lse_dram_window, {kM0});
-
-            load_tile_tdm(tdm_config_do, do_wr_dst, do_dram_window);
-            move_tile_window(do_dram_window, {kM0, 0});
-
-            load_tile_tdm(tdm_config_d, d_wr_dst, d_dram_window);
-            move_tile_window(d_dram_window, {kM0});
+            issue_next_tile();
 #if !CK_TILE_FMHA_BWD_SINK_TDM_WAIT
             // same as the prologue: Q/dO are on TENSORcnt now
-            s_wait_tensorcnt_barrier<0>();
+            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
 #endif
 
             __builtin_amdgcn_sched_barrier(0);
@@ -1072,7 +1324,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             block_sync_lds();
 
 #if CK_TILE_FMHA_BWD_SINK_TDM_WAIT
-            s_wait_tensorcnt_barrier<0>();
+            // Release tile i+1 only. kQDOSlots - 2 tiles stay in flight, which
+            // is the whole point of the depth: at kQDOSlots == 2 this is a full
+            // drain and the transfer has had one iteration's compute to hide
+            // behind; at 4 it has had three.
+            s_wait_tensorcnt_barrier<kTdmWaitCnt>();
 #endif
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
             q_reg_tensor = load_tile(q_rd_dst);
@@ -1133,16 +1389,189 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             }
             move_tile_window(dq_dram_window, {kM0, 0});
 
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-            if constexpr(Policy::template UseQDOPrefetch<Problem>())
+            i_total_loops += 1;
+            seqlen_q_step += kM0;
+        };
+
+        if constexpr(kQDOSlots >= 3)
+        {
+            // kQDOSlots copies, one per slot, with an exit test between them.
+            // The trip count is arbitrary, so a `main loop xN + peeled
+            // remainder` shape would need kQDOSlots - 1 extra copies of the body
+            // on top; breaking out of the middle costs a few scalar branches per
+            // round instead and emits the body exactly kQDOSlots times.
+            while(i_total_loops < (num_total_loop - 1))
             {
+                static_for<0, kQDOSlots, 1>{}([&](auto j) {
+                    if(i_total_loops < (num_total_loop - 1))
+                    {
+                        constexpr index_t kCur = j;
+                        constexpr index_t kNxt = (kCur + 1) % kQDOSlots;
+                        constexpr index_t kWr  = (kCur + kIssueAhead) % kQDOSlots;
+                        hot_loop_body(bool_constant<true>{},
+                                      q_lds_read_windows.at(number<kCur>{}),
+                                      qt_lds_read_windows.at(number<kCur>{}),
+                                      do_lds_read_windows.at(number<kCur>{}),
+                                      dot_lds_read_windows.at(number<kCur>{}),
+                                      q_lds_read_windows.at(number<kNxt>{}),
+                                      do_lds_read_windows.at(number<kNxt>{}),
+                                      lse_lds_read_windows.at(number<kNxt>{}),
+                                      d_lds_read_windows.at(number<kNxt>{}),
+                                      [&] {
+                                          issue_qdo_tile(number<kWr>{},
+                                                         i_total_loops + kIssueAhead);
+                                      });
+                    }
+                });
+            }
+        }
+        else
+        {
+            // One copy, and the slot is a single bool select on two named
+            // windows -- character for character the binding the ping-pong
+            // always compiled to. kB is the other slot: 1 at depth 2, and 0 at
+            // depth 1, where both arms of every select name the same window and
+            // the select folds away.
+            constexpr index_t kB   = kQDOSlots - 1;
+            constexpr bool kTwoBox = (kQDOSlots == 2);
+            // false: read slot 0 and refill slot kB; true: the reverse.
+            bool phase = false;
+
+            // How many leading tiles can be edge tiles. Walking IsEdgeTile until
+            // it turns false is exact for a non-local mask (it is monotone in
+            // seqlen_q_step) and costs a handful of scalar iterations once per
+            // workgroup -- typically 2 at kN0/kM0 = 2, and the walk stops at the
+            // first false. A local mask, or a K block hanging off the end of the
+            // key sequence, yields num_total_loop and the whole thing degrades
+            // to exactly the old single masked loop.
+            index_t n_edge_tiles = num_total_loop;
+#if CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
+            {
+                auto tile_is_edge = [&](index_t i) {
+                    return mask.IsEdgeTile(seqlen_q_start + i * kM0,
+                                           k_origin.at(number<0>{}),
+                                           number<kM0>{},
+                                           number<kN0>{});
+                };
+                // Edge tiles are a leading run plus a trailing run, never a hole
+                // in the middle: IsEdgeTile is top_right_edge || bottom_left_edge,
+                // top_right_edge only ever goes true->false as the loop walks Q
+                // down, and bottom_left_edge only ever goes false->true. So the
+                // front scan finds the whole leading run, and because the
+                // trailing term is monotone, testing the last tile alone decides
+                // whether a trailing run exists at all.
+                index_t probe = 0;
+                while(probe < num_total_loop && tile_is_edge(probe))
+                {
+                    probe += 1;
+                }
+                const bool has_trailing_edge =
+                    (num_total_loop > 0) && tile_is_edge(num_total_loop - 1);
+                // A trailing run would need a third loop to stay correct; not
+                // worth a third copy of the body, so those shapes keep the old
+                // fully-masked loop and the remainder below runs zero times.
+                n_edge_tiles = has_trailing_edge ? num_total_loop : probe;
+            }
+#endif
+            const index_t n_edge_body =
+                min(n_edge_tiles, num_total_loop > 0 ? num_total_loop - 1 : 0);
+
+            while(i_total_loops < n_edge_body)
+            {
+                const bool sec = kTwoBox && phase;
+                hot_loop_body(
+                    bool_constant<true>{},
+                    sec ? q_lds_read_windows.at(number<kB>{}) : q_lds_read_windows.at(number<0>{}),
+                    sec ? qt_lds_read_windows.at(number<kB>{})
+                        : qt_lds_read_windows.at(number<0>{}),
+                    sec ? do_lds_read_windows.at(number<kB>{})
+                        : do_lds_read_windows.at(number<0>{}),
+                    sec ? dot_lds_read_windows.at(number<kB>{})
+                        : dot_lds_read_windows.at(number<0>{}),
+                    sec ? q_lds_read_windows.at(number<0>{}) : q_lds_read_windows.at(number<kB>{}),
+                    sec ? do_lds_read_windows.at(number<0>{})
+                        : do_lds_read_windows.at(number<kB>{}),
+                    sec ? lse_lds_read_windows.at(number<0>{})
+                        : lse_lds_read_windows.at(number<kB>{}),
+                    sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
+                    [&] {
+                        load_tile_tdm(
+                            tdm_config_q,
+                            sec ? q_lds_windows.at(number<0>{}) : q_lds_windows.at(number<kB>{}),
+                            q_dram_window);
+                        load_tile_tdm(tdm_config_lse,
+                                      sec ? lse_lds_write_windows.at(number<0>{})
+                                          : lse_lds_write_windows.at(number<kB>{}),
+                                      lse_dram_window);
+                        load_tile_tdm(
+                            tdm_config_do,
+                            sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
+                            do_dram_window);
+#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
+                        load_tile_tdm(tdm_config_d,
+                                      sec ? d_lds_write_windows.at(number<0>{})
+                                          : d_lds_write_windows.at(number<kB>{}),
+                                      d_dram_window);
+#endif
+                        advance_qdo_windows(i_total_loops + kIssueAhead + 1);
+                    });
+                phase = !phase;
+            }
+#if CK_TILE_FMHA_BWD_SPLIT_EDGE_TILES
+            // Remainder: every tile from here down is fully inside the mask,
+            // so this instantiation of the body carries no set_tile_if at all.
+            // Guarded so that with the split off the second body is not emitted
+            // at all and the code stays byte-for-byte the old single-loop form,
+            // which is what makes the A/B honest.
+            while(i_total_loops < (num_total_loop - 1))
+            {
+                const bool sec = kTwoBox && phase;
+                hot_loop_body(
+                    bool_constant<false>{},
+                    sec ? q_lds_read_windows.at(number<kB>{}) : q_lds_read_windows.at(number<0>{}),
+                    sec ? qt_lds_read_windows.at(number<kB>{})
+                        : qt_lds_read_windows.at(number<0>{}),
+                    sec ? do_lds_read_windows.at(number<kB>{})
+                        : do_lds_read_windows.at(number<0>{}),
+                    sec ? dot_lds_read_windows.at(number<kB>{})
+                        : dot_lds_read_windows.at(number<0>{}),
+                    sec ? q_lds_read_windows.at(number<0>{}) : q_lds_read_windows.at(number<kB>{}),
+                    sec ? do_lds_read_windows.at(number<0>{})
+                        : do_lds_read_windows.at(number<kB>{}),
+                    sec ? lse_lds_read_windows.at(number<0>{})
+                        : lse_lds_read_windows.at(number<kB>{}),
+                    sec ? d_lds_read_windows.at(number<0>{}) : d_lds_read_windows.at(number<kB>{}),
+                    [&] {
+                        load_tile_tdm(
+                            tdm_config_q,
+                            sec ? q_lds_windows.at(number<0>{}) : q_lds_windows.at(number<kB>{}),
+                            q_dram_window);
+                        load_tile_tdm(tdm_config_lse,
+                                      sec ? lse_lds_write_windows.at(number<0>{})
+                                          : lse_lds_write_windows.at(number<kB>{}),
+                                      lse_dram_window);
+                        load_tile_tdm(
+                            tdm_config_do,
+                            sec ? do_lds_windows.at(number<0>{}) : do_lds_windows.at(number<kB>{}),
+                            do_dram_window);
+#if !CK_TILE_FMHA_BWD_ABLATE_DROP_D
+                        load_tile_tdm(tdm_config_d,
+                                      sec ? d_lds_write_windows.at(number<0>{})
+                                          : d_lds_write_windows.at(number<kB>{}),
+                                      d_dram_window);
+#endif
+                        advance_qdo_windows(i_total_loops + kIssueAhead + 1);
+                    });
                 phase = !phase;
             }
 #endif
-            i_total_loops += 1;
-            seqlen_q_step += kM0;
         }
         __builtin_amdgcn_sched_barrier(0);
+
+        // The tail runs on tile num_total_loop - 1, whose slot is only known at
+        // run time. It is outside the loop, so this is one select on an LDS base
+        // address rather than anything the schedule depends on.
+        const index_t i_tail_slot = (num_total_loop - 1) % kQDOSlots;
 
         // Tail
         auto s_acc = SPBlockTileType{};
@@ -1192,6 +1621,11 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
         {
             bool need_perpixel_check = mask.IsEdgeTile(
                 seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+#if CK_TILE_FMHA_BWD_ABLATE_NO_MASK
+            need_perpixel_check = false;
+#elif CK_TILE_FMHA_BWD_ABLATE_ALL_MASK
+            need_perpixel_check = FmhaMask::IsMasking;
+#endif
             if(need_perpixel_check)
             {
                 set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
@@ -1206,8 +1640,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          FmhaMask::IsMasking)
             {
+#if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
+                return raw_lse;
+#else
                 return raw_lse == -numeric<LSEDataType>::infinity() ? type_convert<LSEDataType>(0.f)
                                                                     : raw_lse;
+#endif
             }
             else
             {
@@ -1256,13 +1694,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
         Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor), decltype(p_gemm)>(
             pt_reg_tensor, p_gemm);
-#if CK_TILE_FMHA_BWD_PREFETCH_QDO
-        auto& dot_rd_tail = phase ? dot_lds_read_window_b : dot_lds_read_window;
-        auto& qt_rd_tail  = phase ? qt_lds_read_window_b  : qt_lds_read_window;
-#else
-        auto& dot_rd_tail = dot_lds_read_window;
-        auto& qt_rd_tail  = qt_lds_read_window;
-#endif
+        auto& dot_rd_tail = pick_slot(dot_lds_read_windows, i_tail_slot);
+        auto& qt_rd_tail  = pick_slot(qt_lds_read_windows, i_tail_slot);
+
         auto dot_reg_tensor = load_tile_transpose(dot_rd_tail);
         {
             if constexpr(kDVInReg)
