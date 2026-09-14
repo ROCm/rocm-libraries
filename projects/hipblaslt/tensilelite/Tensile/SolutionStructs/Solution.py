@@ -3410,6 +3410,7 @@ class Solution(collections.abc.Mapping):
             return
 
       iterModeMask = state["TDMIterateMode"]
+      autoTdmIterateMode = iterModeMask == -1
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
@@ -5033,6 +5034,8 @@ class Solution(collections.abc.Mapping):
                  f"supported here; set LdsBlockSizePerPad{tc} explicitly.")
           return False
 
+    auto_LdsPadA = (state["LdsPadA"] == -1)
+    auto_LdsPadB = (state["LdsPadB"] == -1)
     auto_LdsBlockSizePerPadA = (state["LdsBlockSizePerPadA"] == -1)
     auto_LdsBlockSizePerPadB = (state["LdsBlockSizePerPadB"] == -1)
     state["LdsBlockSizePerPadA"] = calcLdsBlockSizePerPad("A", state["LocalReadVectorWidthA"])
@@ -5313,6 +5316,74 @@ class Solution(collections.abc.Mapping):
       if auto_LdsBlockSizePerPadB:
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
+
+    # In an unroll-major layout, ordinary LDS padding is relative to the whole
+    # tensor, but every wave-separated TDM descriptor starts a new padding
+    # phase at its equal component base.  Check each enabled TDM operand
+    # independently: TN has two unroll-major operands, while NN/TT have one.
+    # Keep the established equal split and disable an auto-selected pad only
+    # when those two boundary sequences disagree.  Explicit pairs are rejected
+    # instead of silently overridden.
+    #
+    # This runs before LDS sizing and segment-interleave selection, so those
+    # paths consume the final pair.  Iterate mode is also supported: an auto
+    # iterate bit becomes unnecessary when its auto padding is removed.
+    for tc, tileIdx, autoPad, autoBlock in (
+        ("A", 0, auto_LdsPadA, auto_LdsBlockSizePerPadA),
+        ("B", 1, auto_LdsPadB, auto_LdsBlockSizePerPadB)):
+      pad = state["LdsPad%s" % tc]
+      block = state["LdsBlockSizePerPad%s" % tc]
+      shouldCheckPaddingPhase = (
+          state["TDMInst"] == 3
+          and state["enableTDM%s" % tc]
+          and state["NumWaves"] > 1
+          and not state.get("UseSubtileImpl", False)
+          and not state["TDMSplit"]
+          and state["UnrollMajorLDS%s" % tc]
+          and pad != 0
+          and block != 0)
+      if not shouldCheckPaddingPhase:
+        continue
+
+      numComponents = state["NumWaves"] // 2
+      # Mirror the equal row split used by the wave-separated descriptor.
+      componentRows = state["MacroTile%d" % tileIdx] // numComponents
+      componentBytes = int(componentRows * state["_DepthU%s" % tc]
+                           * getLdsBpe(tc))
+
+      paddingPhaseMismatch = False
+      for component in range(1, numComponents):
+        startPhase = (component * componentBytes) % block
+        if (startPhase != 0
+            and componentBytes > block - startPhase):
+          paddingPhaseMismatch = True
+          break
+      if not paddingPhaseMismatch:
+        continue
+
+      # Iterate mode exists only to encode a non-zero block that is too
+      # large for pad_interval.  Removing an auto pad also removes that need.
+      isIterate = state.get("_TDMIterateMode%s" % tc, False)
+      canDisableAutoPadding = (autoPad and autoBlock
+                               and (not isIterate
+                                    or autoTdmIterateMode))
+      if not canDisableAutoPadding:
+        reject(state, printRejectionReason,
+               "Unroll-major wave-separated TDM %s equal components "
+               "(%dB each) "
+               "are not padding-phase-compatible with explicit "
+               "LdsBlockSizePerPad%s=%dB; use no padding or a "
+               "phase-compatible block"
+               % (tc, componentBytes, tc, block))
+        return
+
+      state["LdsPad%s" % tc] = 0
+      state["LdsBlockSizePerPad%s" % tc] = 0
+      if isIterate:
+        state.pop("_TDMIterateMode%s" % tc, None)
+        state["TDMIterateMode"] = (
+            (1 if state.get("_TDMIterateModeA", False) else 0)
+            | (2 if state.get("_TDMIterateModeB", False) else 0))
 
     # set ldsbspp = 0 for ldspad = 0
     for tc in ['A', 'B']:
