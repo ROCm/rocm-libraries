@@ -245,7 +245,7 @@ static rocblas_status apply_diag_block(rocblas_handle handle,
             return (rocblas_status_success);
         }
     }
-    // LCOV_EXCL_END
+    // LCOV_EXCL_STOP
 
     I const max_blocks = 64 * 1024 - 3;
     I const nbz = std::min(max_blocks, batch_count);
@@ -510,7 +510,7 @@ static rocblas_status apply_pivot_upper(rocblas_handle handle,
             return (rocblas_status_success);
         }
     }
-    // LCOV_EXCL_END
+    // LCOV_EXCL_STOP
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -768,7 +768,7 @@ static rocblas_status apply_pivot_lower(rocblas_handle handle,
             return (rocblas_status_success);
         }
     }
-    // LCOV_EXCL_END
+    // LCOV_EXCL_STOP
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -830,7 +830,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
             return (rocblas_status_success);
         }
     }
-    // LCOV_EXCL_END
+    // LCOV_EXCL_STOP
 
     T const one = 1;
 
@@ -1157,7 +1157,7 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
             return (rocblas_status_success);
         }
     }
-    // LCOV_EXCL_START
+    // LCOV_EXCL_STOP
 
     bool const is_upper = (uplo == rocblas_fill_upper);
 
