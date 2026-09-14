@@ -124,14 +124,34 @@ class Greedy {
     /// from. With hints the colouring reproduces the producer's numbering wherever
     /// there is room; without them placement packs from the bottom, which is the
     /// only way the high-water mark can come down.
-    Greedy(const AllocationContext& context, bool followHints, const PlacementPolicy& policy)
-        : context_(context), followHints_(followHints), policy_(policy) {}
+    /// \p mayFoldPairs says whether this run may fold a pairing, which means
+    /// putting both values in one block so they share a register by
+    /// construction. Scoring is the other way to grant a pairing, and it is
+    /// always available. So this adds a mechanism rather than choosing one:
+    /// anything not folded is still scored.
+    ///
+    /// This names no rule and no architecture. Each rule answers for itself
+    /// through its own satisfiedBy.
+    Greedy(const AllocationContext& context, bool followHints, const PlacementPolicy& policy,
+           bool mayFoldPairs)
+        : context_(context),
+          followHints_(followHints),
+          policy_(policy),
+          mayFoldPairs_(mayFoldPairs) {}
+
+    /// Did this run fold anything? Folding can make a colouring refuse that
+    /// would otherwise have worked, so the caller needs to know whether a
+    /// refusal is worth retrying without it.
+    bool foldedAny() const {
+        return foldedAny_;
+    }
 
     Expected<AllocationResult> run() {
         if (context_.function.ssaArena().valueCount() == 0)
             return AllocationResult(context_.function);
 
         if (!buildBlocks()) return fail(error_);
+        if (mayFoldPairs_) foldPairs();
         measure();
         if (!place()) return fail(error_);
 
@@ -237,6 +257,153 @@ class Greedy {
         return true;
     }
 
+    /// Fold every pairing that one register would satisfy, where that is
+    /// possible. This is the stronger of the two mechanisms.
+    ///
+    /// Scoring cannot grant these reliably. A pair takes two placements. The
+    /// one placed second may find the register already taken by a third value
+    /// that outlives the first. Folding makes it one placement, so there is
+    /// nothing left to lose. The hand-written producer does the same thing: it
+    /// keeps an accumulator chain in one register range for the whole kernel.
+    ///
+    /// A whole chain folds, not just its first link. Each pair is checked
+    /// against the block as it stands, so the third value joins the block the
+    /// first two already formed.
+    ///
+    /// This cannot produce a wrong colouring. Two values are folded only when
+    /// their live ranges are disjoint at every register they would share. It
+    /// can still ask more of placement: one run of registers where two shorter
+    /// runs would have fitted. If that makes placement refuse, the caller runs
+    /// again without folding.
+    void foldPairs() {
+        for (const Preference& preference : context_.constraints.preferences())
+            foldPair(preference);
+        if (foldedAny_) compactBlocks();
+    }
+
+    /// Fold the two blocks \p preference names, so its two values share a
+    /// register. Returns false when the fold is refused, which happens when the
+    /// rule wanted something other than one register, when the two are already
+    /// in one block, when the two values are live at the same time, or when the
+    /// folded block would have no legal base.
+    bool foldPair(const Preference& preference) {
+        const SSAValueID a = preference.a;
+        const SSAValueID b = preference.b;
+        if (a == kInvalidSSAValueID || b == kInvalidSSAValueID) return false;
+        if (a >= blockIndexOf_.size() || b >= blockIndexOf_.size()) return false;
+        const size_t hostIndex = blockIndexOf_[a];
+        const size_t guestIndex = blockIndexOf_[b];
+        if (hostIndex == kNoBlock || guestIndex == kNoBlock) return false;
+        if (hostIndex == guestIndex) return false;
+
+        const Block& host = blocks_[hostIndex];
+        const Block& guest = blocks_[guestIndex];
+        if (host.regClass != guest.regClass) return false;
+
+        // Folding puts both values on one register. So asking the rule about a
+        // key against itself asks exactly the right question: would one
+        // register satisfy you? Nothing here needs to know what a rule means.
+        // A rule that wants its pair merely near, or apart, answers no, and
+        // scoring handles it instead.
+        const RegKey shared{host.regClass, 0, RegHalf::NONE};
+        if (!context_.rules.satisfiedBy(preference, shared, shared)) return false;
+        // A pinned block already has to be where it is. Folding would drag its
+        // partner onto that register, which decides the colouring instead of
+        // preferring one. Leave it to scoring.
+        if (pinReasonOf(host) != nullptr || pinReasonOf(guest) != nullptr) return false;
+        // Only fold two blocks under the same ceiling. A ceiling belongs to the
+        // one value whose operand field cannot reach past it, and folding would
+        // apply it to every member of the block: one capped scale operand could
+        // confine a whole accumulator chain to the first bank. That is a large
+        // price for one pairing, so it is left to scoring too.
+        if (host.maxIndex != guest.maxIndex) return false;
+
+        const std::optional<uint32_t> hostAt = offsetOf(host, a);
+        const std::optional<uint32_t> guestAt = offsetOf(guest, b);
+        if (!hostAt.has_value() || !guestAt.has_value()) return false;
+
+        // How far the guest's members move once b sits on a. This can be
+        // negative, when the guest reaches below the host's base. That is why
+        // the offsets below stay signed until normalise() rebases them.
+        const int64_t shift = static_cast<int64_t>(*hostAt) - static_cast<int64_t>(*guestAt);
+
+        std::vector<std::pair<SSAValueID, int64_t>> placed;
+        placed.reserve(host.members.size() + guest.members.size());
+        for (const Member& member : host.members)
+            placed.emplace_back(member.value, static_cast<int64_t>(member.offset));
+        for (const Member& member : guest.members) {
+            const int64_t offset = static_cast<int64_t>(member.offset) + shift;
+            // Two members conflict only if they land on the same register, so
+            // compare per offset rather than across the whole block.
+            for (const Member& other : host.members) {
+                if (static_cast<int64_t>(other.offset) != offset) continue;
+                if (rangeOf(other.value).overlaps(rangeOf(member.value))) return false;
+            }
+            placed.emplace_back(member.value, offset);
+        }
+
+        const Block folded = normalise(host.regClass, placed);
+        const BaseRejection rejected = rejectionFor(folded);
+        if (rejected.legalBases == 0) return false;
+
+        blocks_[guestIndex].members.clear();
+        blocks_[hostIndex] = folded;
+        blocks_[hostIndex].placementFreedom = rejected.legalBases;
+        for (const Member& member : folded.members) blockIndexOf_[member.value] = hostIndex;
+        foldedAny_ = true;
+        return true;
+    }
+
+    /// Offset of \p value inside \p block, or nullopt when it is not a member.
+    static std::optional<uint32_t> offsetOf(const Block& block, SSAValueID value) {
+        for (const Member& member : block.members) {
+            if (member.value == value) return member.offset;
+        }
+        return std::nullopt;
+    }
+
+    /// Build a block from \p placed: rebase the offsets on zero, and sort the
+    /// members the way placement and the feasibility check both expect.
+    Block normalise(RegType regClass,
+                    const std::vector<std::pair<SSAValueID, int64_t>>& placed) const {
+        int64_t lowest = placed.front().second;
+        int64_t highest = lowest;
+        for (const auto& [value, offset] : placed) {
+            lowest = std::min(lowest, offset);
+            highest = std::max(highest, offset);
+        }
+
+        Block block;
+        block.regClass = regClass;
+        block.width = static_cast<uint32_t>(highest - lowest) + 1;
+        for (const auto& [value, offset] : placed)
+            block.members.push_back({value, static_cast<uint32_t>(offset - lowest)});
+        std::sort(block.members.begin(), block.members.end(), [](const Member& a, const Member& b) {
+            return a.offset != b.offset ? a.offset < b.offset : a.value < b.value;
+        });
+        block.leader = block.members.front().value;
+        for (const Member& member : block.members)
+            block.leader = std::min(block.leader, member.value);
+        block.maxIndex = ceilingOf(block);
+        return block;
+    }
+
+    /// Remove the blocks that folding emptied, then point every value at the
+    /// index its block now has.
+    void compactBlocks() {
+        std::vector<Block> kept;
+        kept.reserve(blocks_.size());
+        for (Block& block : blocks_) {
+            if (block.members.empty()) continue;
+            kept.push_back(std::move(block));
+        }
+        blocks_ = std::move(kept);
+        std::fill(blockIndexOf_.begin(), blockIndexOf_.end(), kNoBlock);
+        for (size_t index = 0; index < blocks_.size(); ++index) {
+            for (const Member& member : blocks_[index].members) blockIndexOf_[member.value] = index;
+        }
+    }
+
     /// What placement rules have to say about \p block, for diagnostics.
     ///
     /// Both facts come from one scan because both callers want the same walk:
@@ -300,18 +467,18 @@ class Greedy {
     /// and freedoms say how finely the placement order can tell those blocks
     /// apart: an order can only separate blocks whose counts differ, so a
     /// histogram with few distinct values is an order with few distinct
-    /// opinions. `merged` counts blocks holding more values than they are wide,
-    /// which is the signature of overlapping runs and affinity sets rather than
-    /// one tuple run.
+    /// opinions. `shared` counts blocks holding more values than they are
+    /// wide. Three things produce those: overlapping tuple runs, affinity sets
+    /// and folded pairs. A block that is one plain tuple run is not counted.
     std::string shapeSummary() const {
         std::map<uint32_t, uint32_t> widths;
         std::map<uint32_t, uint32_t> freedoms;
-        uint32_t merged = 0;
+        uint32_t shared = 0;
         for (const Block& block : blocks_) {
             if (block.regClass != RegType::V) continue;
             ++widths[block.width];
             ++freedoms[block.placementFreedom];
-            if (block.members.size() > block.width) ++merged;
+            if (block.members.size() > block.width) ++shared;
         }
 
         auto render = [](const std::map<uint32_t, uint32_t>& counts) {
@@ -323,7 +490,7 @@ class Greedy {
             return text;
         };
         return "; v blocks by width [" + render(widths) + "], by freedom [" + render(freedoms) +
-               "], " + std::to_string(merged) + " holding more values than their width";
+               "], " + std::to_string(shared) + " holding more values than their width";
     }
 
     /// Why every base was refused, and whether the blockers could have moved.
@@ -465,6 +632,127 @@ class Greedy {
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
         }
+        indexPreferences();
+    }
+
+    /// Hand every block the pairings naming one of its members.
+    ///
+    /// Built from the value side, so a preference is found from either end: the
+    /// block being placed asks about it, and the partner may be anywhere.
+    void indexPreferences() {
+        const std::span<const Preference> preferences = context_.constraints.preferences();
+        if (preferences.empty()) return;
+
+        for (size_t index = 0; index < preferences.size(); ++index) {
+            // A pairing that folding already granted has nothing left to
+            // score. Skipping it keeps the block on the first-fit path with
+            // its early exit. Without this, every folded block would scan the
+            // whole register file only to learn it had already won.
+            if (alreadyShared(preferences[index])) continue;
+            for (const SSAValueID value : {preferences[index].a, preferences[index].b}) {
+                if (value == kInvalidSSAValueID || value >= blockIndexOf_.size()) continue;
+                const size_t block = blockIndexOf_[value];
+                if (block == kNoBlock) continue;
+                if (std::find(blocks_[block].preferences.begin(), blocks_[block].preferences.end(),
+                              index) == blocks_[block].preferences.end())
+                    blocks_[block].preferences.push_back(index);
+            }
+        }
+    }
+
+    /// Did folding already put both ends of \p preference on one register, by
+    /// placing them in one block at one offset?
+    bool alreadyShared(const Preference& preference) const {
+        if (preference.a == kInvalidSSAValueID || preference.b == kInvalidSSAValueID) return false;
+        if (preference.a >= blockIndexOf_.size() || preference.b >= blockIndexOf_.size())
+            return false;
+        const size_t index = blockIndexOf_[preference.a];
+        if (index == kNoBlock || index != blockIndexOf_[preference.b]) return false;
+        const std::optional<uint32_t> here = offsetOf(blocks_[index], preference.a);
+        const std::optional<uint32_t> there = offsetOf(blocks_[index], preference.b);
+        return here.has_value() && here == there;
+    }
+
+    /// One pairing this block can act on now. It records where the block's own
+    /// end sits, and which register the other end already took.
+    ///
+    /// Only a pairing whose partner is already placed appears here. If the
+    /// partner is still waiting there is no register to aim at, so the pairing
+    /// is skipped rather than guessed. This is why scoring settles a chain
+    /// fully when its members are placed in order, and only partly otherwise.
+    struct OpenPairing {
+        size_t index = 0;      ///< Into AllocationConstraints::preferences().
+        uint32_t offset = 0;   ///< This block's member, inside this block.
+        RegKey partner;        ///< Where the other end is.
+        bool mineIsA = false;  ///< Which side of the pair is this block's.
+    };
+
+    /// Resolve the pairings \p block can act on, once per placement.
+    ///
+    /// None of this depends on the candidate base. Doing it inside the base
+    /// loop would walk the block's members twice per pairing per base, which
+    /// is quadratic in the width of the block and buys nothing.
+    std::vector<OpenPairing> openPairings(const Block& block) const {
+        std::vector<OpenPairing> open;
+        for (const size_t index : block.preferences) {
+            const Preference& preference = context_.constraints.preferences()[index];
+            OpenPairing pairing;
+            pairing.index = index;
+            const std::optional<uint32_t> mine = offsetOf(block, preference.a);
+            pairing.mineIsA = mine.has_value();
+            const SSAValueID theirs = pairing.mineIsA ? preference.b : preference.a;
+            const std::optional<uint32_t> here =
+                pairing.mineIsA ? mine : offsetOf(block, preference.b);
+            if (!here.has_value()) continue;
+            pairing.offset = *here;
+
+            if (theirs == kInvalidSSAValueID || theirs >= blockIndexOf_.size()) continue;
+            const size_t partnerIndex = blockIndexOf_[theirs];
+            if (partnerIndex == kNoBlock) continue;
+            const Block& partner = blocks_[partnerIndex];
+            if (!partner.placed) continue;
+            const std::optional<uint32_t> there = offsetOf(partner, theirs);
+            if (!there.has_value()) continue;
+
+            pairing.partner = RegKey{partner.regClass, partner.base + *there, RegHalf::NONE};
+            open.push_back(pairing);
+        }
+        return open;
+    }
+
+    /// What \p block gives up by starting at \p base: the architecture's own
+    /// price for that base, plus every pairing in \p open it leaves unmet.
+    ///
+    /// The comparison uses member registers, not block bases. Two paired
+    /// values can sit at different offsets inside their own blocks, so
+    /// comparing the bases would relate the wrong pair of registers.
+    double costAt(const Block& block, uint32_t base, std::span<const OpenPairing> open) const {
+        double cost = context_.rules.baseCost(block.regClass, base, block.width);
+        for (const OpenPairing& pairing : open) {
+            const RegKey mine{block.regClass, base + pairing.offset, RegHalf::NONE};
+            const RegKey a = pairing.mineIsA ? mine : pairing.partner;
+            const RegKey b = pairing.mineIsA ? pairing.partner : mine;
+            const Preference& preference = context_.constraints.preferences()[pairing.index];
+            if (!context_.rules.satisfiedBy(preference, a, b)) cost += preference.benefit;
+        }
+        return cost;
+    }
+
+    /// The expensive half of a refusal message, or nothing when this attempt
+    /// is going to be thrown away.
+    ///
+    /// Both summaries walk every base and every block. A run that folded
+    /// something runs again without folding when it refuses, so nobody reads
+    /// its message. The second run is the one the caller sees, and it folds
+    /// nothing, so it builds the message in full.
+    std::string refusalDetail(const Block& block) const {
+        if (foldedAny_) return {};
+        std::string detail = blockerSummary(block) + shapeSummary();
+        // A rule narrowing the search is worth naming: without it the message
+        // blames pressure for a base a rule ruled out.
+        if (const AllocationRule* rule = rejectionFor(block).first; rule != nullptr)
+            detail += " (rule " + std::string(rule->name) + " also forbids some bases)";
+        return detail;
     }
 
     /// Tightest index any member of \p block may occupy, or nullopt when no
@@ -627,7 +915,7 @@ class Greedy {
                      std::to_string(*block.maxIndex) + " is free for " + valueName(block.leader) +
                      ", which its operands cannot address past (" +
                      std::to_string(block.placementFreedom) + " legal base(s) before occupancy)" +
-                     blockerSummary(block) + shapeSummary();
+                     refusalDetail(block);
             return false;
         }
 
@@ -652,22 +940,16 @@ class Greedy {
 
             const std::optional<uint32_t> evictBase = findEvictableBase(block);
             if (!evictBase.has_value() || evictionBudget == 0) {
-                error_ =
-                    "no " + regTypeToString(block.regClass) + " register is free for " +
-                    valueName(block.leader) +
-                    (block.width > 1
-                         ? " and the " + std::to_string(block.width - 1) + " register(s) tied to it"
-                         : "") +
-                    "; splitting and spilling are not implemented" +
-                    // How many bases it ever had, so a reader can tell a
-                    // full file from a shape with almost nowhere to go.
-                    " (" + std::to_string(block.placementFreedom) +
-                    " legal base(s) before occupancy)" + blockerSummary(block) + shapeSummary();
-                // A rule narrowing the search is worth naming here: without it
-                // the message blames pressure for a base a rule ruled out.
-                if (const AllocationRule* rule = rejectionFor(block).first; rule != nullptr) {
-                    error_ += " (rule " + std::string(rule->name) + " also forbids some bases)";
-                }
+                error_ = "no " + regTypeToString(block.regClass) + " register is free for " +
+                         valueName(block.leader) +
+                         (block.width > 1 ? " and the " + std::to_string(block.width - 1) +
+                                                " register(s) tied to it"
+                                          : "") +
+                         "; splitting and spilling are not implemented" +
+                         // How many bases it ever had, so a reader can tell a
+                         // full file from a shape with almost nowhere to go.
+                         " (" + std::to_string(block.placementFreedom) +
+                         " legal base(s) before occupancy)" + refusalDetail(block);
                 return false;
             }
 
@@ -691,6 +973,11 @@ class Greedy {
     /// and first-fit below is never reached - which is also why a hint-following
     /// run can never lower the high-water mark.
     bool tryPlace(Block& block) {
+        // Taking the hint skips scoring, so a preference cannot pull a block
+        // off the register it was lifted from. That is deliberate. The hint is
+        // the producer's own answer, and a run asked to reproduce it should
+        // keep it. A compacting run passes no hints, so it sees every
+        // preference.
         if (followHints_ && block.hintBase.has_value() && availableAt(block, *block.hintBase)) {
             bindAt(block, *block.hintBase);
             return true;
@@ -738,7 +1025,14 @@ class Greedy {
     template <typename Acceptable>
     std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
-        if (!context_.rules.prices()) {
+        const std::vector<OpenPairing> open =
+            block.preferences.empty() ? std::vector<OpenPairing>{} : openPairings(block);
+        // Asked per block, not per table. A chip can declare a pairing rule
+        // while most of its blocks are named by none of it, and those keep
+        // first-fit and the colouring they had before any of this existed. A
+        // block whose partners are all still unplaced scores the same at every
+        // base, so it takes this path too instead of scanning to find out.
+        if (!context_.rules.prices() && open.empty()) {
             for (uint32_t base = 0; base + block.width <= indexes; ++base) {
                 if (acceptable(base)) return base;
             }
@@ -747,11 +1041,19 @@ class Greedy {
         std::optional<uint32_t> best;
         double bestCost = 0.0;
         for (uint32_t base = 0; base + block.width <= indexes; ++base) {
+            // Scoring only sees bases that placement had already accepted. So
+            // a preference can change which colouring comes out, and never
+            // whether one comes out at all.
             if (!acceptable(base)) continue;
-            const double cost = context_.rules.baseCost(block.regClass, base, block.width);
+            const double cost = costAt(block, base, open);
             if (!best.has_value() || cost < bestCost) {
                 best = base;
                 bestCost = cost;
+                // Costs are penalties and never negative, so zero is the best
+                // any base can do. Stopping here saves a block with a
+                // satisfiable pairing from scanning the rest of the file only
+                // to confirm what it already found.
+                if (bestCost <= 0.0) break;
             }
         }
         return best;
@@ -763,6 +1065,8 @@ class Greedy {
     PhysRegMatrix matrix_{context_.target};
     bool followHints_ = true;
     const PlacementPolicy& policy_;
+    bool mayFoldPairs_ = false;
+    bool foldedAny_ = false;
     std::vector<Block> blocks_;
     std::vector<size_t> blockIndexOf_;
     std::string error_;
@@ -794,7 +1098,18 @@ bool weightMayEvict(const Block& evictor, const Block& occupant) {
 
 Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, bool followHints,
                                               const PlacementPolicy& policy) {
-    return Greedy(context, followHints, policy).run();
+    // No folding while following hints. That mode exists to reproduce the
+    // producer's numbering. Folding two blocks the producer kept apart leaves
+    // them with no hint they agree on, so the run would stop reproducing
+    // anything, which is the one thing it is for.
+    Greedy greedy(context, followHints, policy, /*mayFoldPairs=*/!followHints);
+    Expected<AllocationResult> result = greedy.run();
+    if (result.hasValue() || !greedy.foldedAny()) return result;
+
+    // Folding asks placement for one run of registers where two shorter runs
+    // would have done. If that is what refused the colouring, the preference
+    // gives way. A soft rule may not decide whether a kernel colours.
+    return Greedy(context, followHints, policy, /*mayFoldPairs=*/false).run();
 }
 
 const PlacementPolicy& weightPolicy() {

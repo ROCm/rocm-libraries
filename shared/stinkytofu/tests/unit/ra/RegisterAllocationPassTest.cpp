@@ -80,6 +80,37 @@ AllocationRules selfOverwriteTable(RuleStatus status) {
     return AllocationRules({rule});
 }
 
+/// `v<dest> = v_mov_b32 v<src>` -- one source, so it asks for no pairing and
+/// can scaffold a fixture without adding to the count under test.
+StinkyInstruction* vMov(BasicBlock* bb, int dest, int src) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", dest, 1));
+    mov->addSrcReg(StinkyRegister("v", src, 1));
+    return mov;
+}
+
+/// Pairs a destination with its second source, wherever there is one.
+///
+/// A stand-in for the shipped WMMA rule. What the report has to explain is why
+/// a pairing went unmet, and that reasoning does not depend on which rule asked
+/// or on an instruction only one chip has.
+AllocationRules destReusesSrc1() {
+    AllocationRule rule;
+    rule.name = "DestReusesSrc1";
+    rule.description = "a destination should reuse its second source's register";
+    rule.status = RuleStatus::Active;
+    rule.satisfiedBy = [](RegKey dest, RegKey source) { return dest == source; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues& values,
+                             std::vector<Preference>& preferences) {
+        const std::span<const SSAValueID> dest = values(0, true);
+        const std::span<const SSAValueID> source = values(1, false);
+        if (dest.empty() || source.empty()) return;
+        preferences.push_back({dest[0], source[0], 0, 1.0});
+    };
+    return AllocationRules({rule});
+}
+
 class RecolouringAllocator : public RegisterAllocator {
    public:
     const char* name() const override {
@@ -321,6 +352,22 @@ TEST_F(RegisterAllocationPassTest, AnUnknownForcedRuleNameIsAnError) {
     EXPECT_TRUE(contains(result.getError(), "SelfOverwrit")) << result.getError();
 }
 
+TEST_F(RegisterAllocationPassTest, ForcingARuleBothOnAndOffIsAnError) {
+    const ScopedArchRules rules(selfOverwriteTable(RuleStatus::Off));
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.activate.push_back("SelfOverwrite");
+    options.rules.disable.push_back("SelfOverwrite");
+
+    LegacyIdentityAllocator allocator;
+    Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+    ASSERT_TRUE(result.hasError());
+    EXPECT_TRUE(contains(result.getError(), "activate and to disable")) << result.getError();
+    EXPECT_TRUE(contains(result.getError(), "SelfOverwrite")) << result.getError();
+}
+
 TEST_F(RegisterAllocationPassTest, ForcingARuleActiveIgnoresTheArchGate) {
     // The testing hatch: a standalone run has no rocisa capabilities, so a
     // filecheck test has to be able to switch a rule on by name.
@@ -349,6 +396,75 @@ TEST_F(RegisterAllocationPassTest, NoRulesRestoresThePreFrameworkBehaviour) {
     LegacyIdentityAllocator allocator;
     Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
     EXPECT_TRUE(result.hasValue()) << result.getError();
+}
+
+// ---------------------------------------------------------------------------
+// Why a pairing went unmet
+// ---------------------------------------------------------------------------
+//
+// The legacy allocator hands back the registers as written, so these fixtures
+// set the colouring the report has to read rather than hoping an allocator
+// produces one. Both shapes leave the pairing unmet; they differ only in
+// whether the shared register was there to be had.
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithRoomReportsAsMissed) {
+    // v1 dies at the add and nothing else ever names it, so the destination
+    // could have been put there. Nothing was in the way, so the colouring is
+    // the only thing left to blame.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/3, /*src=*/2);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 0 blocked 1 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, AnUnmetPairingWithNoRoomEitherWayReportsAsBlocked) {
+    // Both ends walled in. A live-in on v2 reaches past the point where v1 is
+    // born, so v1 cannot move up; and a fresh value takes v1 while the add's v2
+    // is still live, so v2 cannot move down.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    vMov(entry, /*dest=*/4, /*src=*/2);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/2, /*src0=*/0, /*src1=*/1);
+    vMov(entry, /*dest=*/1, /*src=*/0);
+    vMov(entry, /*dest=*/5, /*src=*/2);
+    vMov(entry, /*dest=*/6, /*src=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 0/1 unmet 1 blocked 0 missed]"))
+        << report;
+}
+
+TEST_F(RegisterAllocationPassTest, ASatisfiedPairingAddsNoUnmetBreakdown) {
+    // The breakdown explains a loss, so with nothing lost it must stay out of
+    // the line. Otherwise every clean report carries two zeroes.
+    const ScopedArchRules rules(destReusesSrc1());
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/1, /*src0=*/0, /*src1=*/1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.report = true;
+    std::string report;
+    LegacyIdentityAllocator allocator;
+    ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
+
+    EXPECT_TRUE(contains(report, "pref[DestReusesSrc1=active 1/1]")) << report;
 }
 
 TEST_F(RegisterAllocationPassTest, PassReportsAnUnknownAllocator) {

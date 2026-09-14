@@ -64,6 +64,53 @@ uint32_t scalarTupleAlign(uint32_t width) {
     return width < 4 ? 2 : 4;
 }
 
+/// Pair a matrix destination with the accumulator it adds into.
+///
+/// Every WMMA is D = A*B + C, and the producer names one register range for D
+/// and C so an accumulator chain occupies one tuple however long it runs. The
+/// lift cannot see that: src2 is not read-write, correctly, since D and C are
+/// genuinely separate values and must differ whenever C outlives the
+/// instruction. So the chain arrives as a run of unrelated 8-wide values, and
+/// without this the allocator has no reason to keep them in one place.
+///
+/// A preference rather than an AffinitySet precisely because of that "whenever".
+/// Where C does outlive the instruction the two interfere, the shared register
+/// is not available, and this simply goes unmet -- no test for the case is
+/// needed here, because the one in placement already covers it.
+void pairMatrixAccumulator(const StinkyInstruction& inst, const OperandValues& values,
+                           std::vector<Preference>& preferences) {
+    if (!isMatrixInstruction(inst)) return;
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc == nullptr) return;
+
+    // By encoding field rather than by operand number or mnemonic: the position
+    // of src2 is a property of the format, and a new matrix opcode should not
+    // need this rule edited.
+    size_t srcIdx = 0;
+    size_t accumulator = 0;
+    bool found = false;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (field.isDest || field.isReadWrite) continue;
+        if (field.encodeField == EncodeField::src2) {
+            accumulator = srcIdx;
+            found = true;
+            break;
+        }
+        ++srcIdx;
+    }
+    if (!found) return;
+
+    const std::span<const SSAValueID> dest = values(0, /*isDest=*/true);
+    const std::span<const SSAValueID> from = values(accumulator, /*isDest=*/false);
+    // Unit by unit, so DWORD i of the destination wants DWORD i of the
+    // accumulator. Pairing only the bases would leave the rest of the tuple
+    // free to drift and satisfy nothing.
+    for (size_t unit = 0; unit < dest.size() && unit < from.size(); ++unit) {
+        if (dest[unit] == kInvalidSSAValueID || from[unit] == kInvalidSSAValueID) continue;
+        preferences.push_back({dest[unit], from[unit], 0, 1.0});
+    }
+}
+
 // A literal triple, not getArchTriple(GfxArchID::Gfx1250): this TU is compiled
 // into a Gfx1250v0-only build where that enumerator does not exist, and keying
 // on {12,5,0} is what gives v0 the same rules as v1.
@@ -116,7 +163,22 @@ AllocationRules buildGfx1250Rules(const AsmCapsConfig& caps) {
         return regClass == RegType::V && width > 1 && base % 2 != 0;
     };
 
-    return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment});
+    /// Keeps an accumulator chain in one register range rather than one range
+    /// per link. That lowers how many registers a WMMA-heavy kernel needs at
+    /// once.
+    ///
+    /// Soft, so it cannot stop a kernel colouring. It can raise the high-water
+    /// mark, because a destination may move up to reach its accumulator. Read
+    /// pref[...] and highest= together, and pass noRule=WmmaAccumulatorReuse
+    /// to measure without it.
+    AllocationRule wmmaAccumulator;
+    wmmaAccumulator.name = "WmmaAccumulatorReuse";
+    wmmaAccumulator.description = "a matrix destination should reuse its accumulator's registers";
+    wmmaAccumulator.status = RuleStatus::Active;
+    wmmaAccumulator.satisfiedBy = [](RegKey d, RegKey c) { return d == c; };
+    wmmaAccumulator.addPreferences = pairMatrixAccumulator;
+
+    return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator});
 }
 
 struct Gfx1250RulesRegistrar {

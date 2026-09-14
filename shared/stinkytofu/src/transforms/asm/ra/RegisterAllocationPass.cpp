@@ -126,12 +126,78 @@ CappedValues cappedValuesOf(const Function& function, const AllocationConstraint
     return capped;
 }
 
+/// Why a pairing rule did not get what it asked for.
+///
+/// A soft rule stays silent when it loses. A bare count therefore cannot say
+/// whether the register was unavailable, or whether placement simply did not
+/// take it. The two need different fixes -- shorter live ranges for the first,
+/// better placement for the second -- and the final colouring tells them
+/// apart.
+///
+/// The two counts differ in how sure they are. `blocked` is certain: a third
+/// value sits on the register across this value's whole range, so no order of
+/// placement could have paired them. `missed` is an upper bound: the register
+/// was free for this one value, but a value moves together with the block it
+/// is tied to, and this report does not see blocks. Read `missed` as how much
+/// is worth investigating.
+struct UnmetPreferences {
+    size_t blocked = 0;  ///< A third value holds the partner's register.
+    size_t missed = 0;   ///< It was free, and was not used.
+};
+
+/// Which values sit on each register. Built once, so the question above costs
+/// a lookup instead of a scan over every value per preference.
+///
+/// One register per value, which is how the allocator binds them. The lift
+/// makes one SSA value per DWORD, so a tuple is a run of values rather than
+/// one wide value.
+using RegOccupants = RegKeyMap<std::vector<SSAValueID>>;
+
+RegOccupants occupantsOf(const AllocationResult& coloured) {
+    RegOccupants occupants;
+    for (SSAValueID id = 1; id <= coloured.valueCount(); ++id) {
+        if (!coloured.isAssigned(id)) continue;
+        occupants[coloured.assignmentOf(id)].push_back(id);
+    }
+    return occupants;
+}
+
+/// Could \p mover have taken \p reg, given where everything else ended up?
+///
+/// Asks what placement asks, in the same order: first whether the register is
+/// off limits, then whether anything else is on it. \p partner is left out
+/// because sharing with it is the whole point. Counting the partner as a
+/// neighbour would report every pair as impossible.
+bool couldHaveTaken(RegKey reg, SSAValueID mover, SSAValueID partner,
+                    const SSALiveIntervals& intervals, const AllocationConstraints& constraints,
+                    const AllocationScope& scope, const AsmTargetRegisters& target,
+                    const AllocationRules& rules, const RegOccupants& occupants) {
+    if (reg.idx > constraints.maxIndexFor(mover)) return false;
+    if (!target.isAllocatable(reg.type, reg.idx)) return false;
+    // A held register accepts only the value that was lifted from it, which is
+    // the rule reachableAt applies during placement.
+    if (scope.isPinnedRegister(reg.type, reg.idx)) {
+        const std::optional<RegKey> hint = constraints.hintFor(mover);
+        if (!hint.has_value() || *hint != reg) return false;
+    }
+    if (rules.forbidsBase(reg.type, reg.idx, /*width=*/1) != nullptr) return false;
+
+    const auto found = occupants.find(reg);
+    if (found == occupants.end()) return true;
+    const LiveRange& range = intervals.rangeOf(mover);
+    for (const SSAValueID resident : found->second) {
+        if (resident == mover || resident == partner) continue;
+        if (intervals.rangeOf(resident).overlaps(range)) return false;
+    }
+    return true;
+}
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
-                         const AllocationRules& rules,
+                         const AllocationRules& rules, const AsmTargetRegisters& target,
                          std::span<const AllocationScope::HeldRange> unbankable,
                          const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
@@ -162,6 +228,49 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // which keeps every existing report byte-identical.
     for (const AllocationRule& rule : rules.all()) {
         text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
+    }
+    // How much of what each pairing rule asked for it actually got. A hard
+    // rule announces itself by refusing. A soft rule says nothing, so without
+    // this line a rule that collects nothing reads exactly like a rule that is
+    // satisfied everywhere. Prints nothing when the chip declares no pairing
+    // rule.
+    const RegOccupants occupants =
+        constraints.preferences().empty() ? RegOccupants{} : occupantsOf(coloured);
+    for (size_t index = 0; index < rules.all().size(); ++index) {
+        const AllocationRule& rule = rules.all()[index];
+        if (rule.kind() != RuleKind::Pairing) continue;
+        size_t offered = 0;
+        size_t satisfied = 0;
+        UnmetPreferences unmet;
+        for (const Preference& preference : constraints.preferences()) {
+            if (preference.rule != index) continue;
+            ++offered;
+            if (!coloured.isAssigned(preference.a) || !coloured.isAssigned(preference.b)) continue;
+            const RegKey a = coloured.assignmentOf(preference.a);
+            const RegKey b = coloured.assignmentOf(preference.b);
+            if (rules.satisfiedBy(preference, a, b)) {
+                ++satisfied;
+                continue;
+            }
+            // Moving either end onto the other would have paired them. So both
+            // directions must be blocked by a third value before this pair can
+            // be called impossible.
+            const bool reachable = couldHaveTaken(b, preference.a, preference.b, intervals,
+                                                  constraints, scope, target, rules, occupants) ||
+                                   couldHaveTaken(a, preference.b, preference.a, intervals,
+                                                  constraints, scope, target, rules, occupants);
+            if (reachable)
+                ++unmet.missed;
+            else
+                ++unmet.blocked;
+        }
+        text += " pref[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + " " +
+                std::to_string(satisfied) + "/" + std::to_string(offered);
+        if (unmet.blocked != 0 || unmet.missed != 0) {
+            text += " unmet " + std::to_string(unmet.blocked) + " blocked " +
+                    std::to_string(unmet.missed) + " missed";
+        }
+        text += "]";
     }
     // The live-ins left unpinned. Named because moving them rests on nothing
     // having defined them, which holds only while lifting saw every definition.
@@ -220,6 +329,14 @@ Expected<AllocationRules> resolveRules(const Function& function,
         for (const std::string& name : unknown) names += (names.empty() ? "" : ", ") + name;
         return Expected<AllocationRules>::Error("@" + function.getName() +
                                                 ": no such allocation rule: " + names);
+    }
+    if (const std::vector<std::string> both = AllocationRules::contradictoryNames(options.rules);
+        !both.empty()) {
+        std::string names;
+        for (const std::string& name : both) names += (names.empty() ? "" : ", ") + name;
+        return Expected<AllocationRules>::Error(
+            "@" + function.getName() +
+            ": asked to activate and to disable the same allocation rule: " + names);
     }
     rules.force(options.rules);
     return rules;
@@ -330,7 +447,7 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
 
     // Before destruction, which clears the attached SSA the report reads.
     if (options.report && report != nullptr) {
-        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
+        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules, target,
                                unbankable, allocator.name());
     }
 
