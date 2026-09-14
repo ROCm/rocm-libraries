@@ -14,6 +14,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(rocke_arch_target_identity core/test_arch_target_identity.cpp)
+  target_link_libraries(rocke_arch_target_identity PRIVATE rocke_core)
+  add_test(NAME rocke_arch_target_identity COMMAND rocke_arch_target_identity)
+  set_tests_properties(rocke_arch_target_identity PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_arch_target_identity)
+  set_target_properties(rocke_arch_target_identity
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_arch_target_identity
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_arch_target_identity)
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.

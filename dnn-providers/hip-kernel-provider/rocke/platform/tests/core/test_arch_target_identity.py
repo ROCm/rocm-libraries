@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+
 import pytest
 
 from rocke.core.arch import (
@@ -64,3 +67,42 @@ def test_arch_target_uses_base_architecture_rows() -> None:
     assert ArchTarget.from_gfx("gfx1250").gfx == "gfx1250"
     with pytest.raises(KeyError, match="unknown gfx target"):
         ArchTarget.from_gfx("gfx1250-strict")
+
+
+def test_cpp_target_identity_matches_python() -> None:
+    """Compare the native CTest executable with Python when a build is supplied."""
+    executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
+    if not executable:
+        pytest.skip("set ROCKE_ARCH_TARGET_TEST_EXE to the native target identity test")
+    targets = [
+        *known_arches(),
+        "gfx00a",
+        "unexpected-target",
+        "",
+        "gfx",
+        "gfx-",
+        "gfx942_bad",
+    ]
+    inputs = [
+        f"{prefix}{target}{profile}{features}"
+        for target in targets
+        for prefix in ("", "amdgcn-amd-amdhsa--", "gfx-named-prefix-")
+        for profile in ("", "-strict")
+        for features in ("", ":", ":sramecc+:xnack-", ":unknown+")
+    ]
+    result = subprocess.run(
+        [executable, *inputs], capture_output=True, text=True, check=True, timeout=30
+    )
+    actual = [tuple(line.split("\t")) for line in result.stdout.splitlines()]
+    expected = []
+    for isa in inputs:
+        target = target_id_from_isa(isa)
+        expected.append(
+            (
+                target,
+                base_arch_from_target_id(target),
+                compiler_target_from_target_id(target),
+                arch_from_isa(isa),
+            )
+        )
+    assert actual == expected
