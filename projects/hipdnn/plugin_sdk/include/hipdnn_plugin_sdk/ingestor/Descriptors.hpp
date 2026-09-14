@@ -197,15 +197,20 @@ enum class KernelSourceKind
     KPACK, ///< Prebuilt kpack archive plus toc key and symbol.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
+    /// Source file inside a bundle directory shipped beside the descriptor, compiled by
+    /// hipRTC at plan-build time with defines bound from this kernel's own metadata.
+    /// Appended rather than grouped with the implemented kinds above so no existing
+    /// enumerator changes value.
+    HIPRTC_FILE,
 };
 
-/// UKD's source. `EMBEDDED_SOURCE` and `KPACK` are implemented; a kind fills only its own
-/// fields and leaves the rest empty.
+/// UKD's source. `EMBEDDED_SOURCE`, `KPACK` and `HIPRTC_FILE` are implemented; a kind
+/// fills only its own fields and leaves the rest empty.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
-    std::string sourceFile; ///< EMBEDDED_SOURCE.
-    std::string entryPoint; ///< EMBEDDED_SOURCE.
+    std::string sourceFile; ///< EMBEDDED_SOURCE, HIPRTC_FILE.
+    std::string entryPoint; ///< EMBEDDED_SOURCE, HIPRTC_FILE.
     /// KPACK: archive path, relative to the directory of the descriptor that declared it.
     /// Relative because the installed tree is relocatable and an absolute build-machine
     /// path would not survive packaging.
@@ -226,6 +231,18 @@ struct KernelSource
     /// came from the same pack run, nothing more. The loader's defence against a wrong
     /// or corrupt payload is KpackArchive's container check, not this field.
     std::string sha256;
+    /// HIPRTC_FILE: directory of hipRTC sources, relative to the directory of the
+    /// descriptor that declared it and contained in the descriptor tree. A directory
+    /// rather than an archive, because drop-in means adding a kernel with `cp`. One
+    /// bundle serves many kernels; `sourceFile` names the file inside it.
+    std::string bundle;
+    /// HIPRTC_FILE: compile-time defines, emitted as `-D<name>=<value>` and nothing
+    /// else. A value may contain `$kernel.<field>` tokens, replaced with the rendered
+    /// value of that KMD field for the kernel being prepared -- see
+    /// KernelDefineSubstitution.hpp for the rendering table and what it refuses. This is
+    /// how two kernels sharing one source file and differing only in `metadata.dtype`
+    /// compile to two binaries with no native code and no rebuild.
+    std::map<std::string, std::string> defines;
 };
 
 namespace detail
@@ -250,7 +267,7 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count is pinned here: accepting exactly seven initializers and no
+// KernelSource's field count is pinned here: accepting exactly nine initializers and no
 // more makes an inserted field ill-formed at this assertion, rather than silently
 // rebinding every value after it at a positional initialization site. Only the count --
 // two same-typed members swapped past each other still brace-initialize.
@@ -261,7 +278,9 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                std::string,
                                                std::string,
                                                std::string,
-                                               std::string>
+                                               std::string,
+                                               std::string,
+                                               std::map<std::string, std::string>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        KernelSourceKind,
                                                        std::string,
@@ -270,6 +289,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::string,
+                                                       std::string,
+                                                       std::map<std::string, std::string>,
                                                        std::string>,
               "KernelSource gained or lost a field; append only, then extend this "
               "assertion.");

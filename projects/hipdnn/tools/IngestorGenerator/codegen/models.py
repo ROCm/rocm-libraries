@@ -43,6 +43,17 @@ DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
 
 #: The one runtime-dispatchable kind authored directly, in ``direct_load``.
 KERNEL_SOURCE_KIND_EMBEDDED = "embedded_source"
+#: The drop-in ``direct_load`` kind: hipRTC sources shipped as a plain
+#: DIRECTORY (a "bundle") beside the descriptors, compiled by the provider at
+#: prepare() time. Unlike ``embedded_source``, whose source must be registered
+#: in CMake and embedded into the provider binary at configure time, a
+#: ``hiprtc_file`` kernel is added to an already-installed hipDNN by copying
+#: files in and restarting -- no reconfigure, no rebuild.
+#:
+#: Its ``defines`` map is what makes one source file serve many kernels: each
+#: value may carry ``$kernel.<field>`` tokens bound from that kernel's own
+#: metadata (see ``codegen/kernel_defines.py``).
+KERNEL_SOURCE_KIND_HIPRTC_FILE = "hiprtc_file"
 #: Runtime kind, but never AUTHORED: ``hkp_pack`` produces it. A config naming
 #: it is rejected -- the packager stamps ``library``/``toc_key``/``symbol``/
 #: ``sha256`` from the artifact it actually built, and a hand-authored value
@@ -65,6 +76,7 @@ KERNEL_SOURCE_KIND_HSACO = "hsaco"
 #: IngestorGenerator can emit it.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
+    KERNEL_SOURCE_KIND_HIPRTC_FILE,
     KERNEL_SOURCE_KIND_HSACO_FILE,
     KERNEL_SOURCE_KIND_KPACK,
     KERNEL_SOURCE_KIND_ROCKE_BUILDER,
@@ -77,7 +89,10 @@ KERNEL_SOURCE_KINDS: tuple[str, ...] = (
 #: names the dialect, so the diagnostic is "wrong dialect for this kind"
 #: rather than a bare "unsupported".
 EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
-    DIALECT_DIRECT_LOAD: (KERNEL_SOURCE_KIND_EMBEDDED,),
+    DIALECT_DIRECT_LOAD: (
+        KERNEL_SOURCE_KIND_EMBEDDED,
+        KERNEL_SOURCE_KIND_HIPRTC_FILE,
+    ),
     DIALECT_PACKAGED: (KERNEL_SOURCE_KIND_HIP, KERNEL_SOURCE_KIND_ROCKE),
 }
 
@@ -169,6 +184,22 @@ class KernelSource:
     #: ``direct_load`` / ``embedded_source``.
     source_file: str = ""
     entry_point: str = ""
+    #: ``direct_load`` / ``hiprtc_file``: the bundle DIRECTORY holding the
+    #: sources, named relative to the descriptor that references it and
+    #: required by the loader to stay inside the descriptor tree root. It is a
+    #: directory and not an archive because drop-in means adding a kernel with
+    #: ``cp``. ``source_file``/``entry_point`` above are reused verbatim by
+    #: this kind; ``source_file`` names a file INSIDE the bundle.
+    bundle: str = ""
+    #: ``direct_load`` / ``hiprtc_file``: a flat name -> value map emitted as
+    #: ``-D<name>=<value>``. Any value may carry ``$kernel.<field>`` tokens
+    #: bound from the kernel's own metadata at prepare() time.
+    #:
+    #: NOT ``build`` -- that key belongs to ``packaged``/``hip``, is branched
+    #: on per kind in ``as_document``, and is validated by ``hkp_pack`` against
+    #: a different schema. Two kinds sharing one key would make each one's
+    #: rules the other's silent trap.
+    defines: dict = field(default_factory=dict)
     #: ``packaged`` / both kinds. For ``hip`` a path relative to the
     #: descriptor that names it; for ``rocke`` a DOTTED PYTHON MODULE PATH
     #: resolved through the importable ``kernels`` package -- not a file under
@@ -201,6 +232,14 @@ class KernelSource:
                 "kind": self.kind,
                 "source_file": self.source_file,
                 "entry_point": self.entry_point,
+            }
+        if self.kind == KERNEL_SOURCE_KIND_HIPRTC_FILE:
+            return {
+                "kind": self.kind,
+                "bundle": self.bundle,
+                "source_file": self.source_file,
+                "entry_point": self.entry_point,
+                "defines": self.defines,
             }
         if self.kind == KERNEL_SOURCE_KIND_HIP:
             return {
@@ -355,6 +394,11 @@ class IngestorConfig:
     #: than a scratch detail. Defaults to ``<kind>/<slug>``.
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
+    #: Directory the YAML config was loaded from, set by ``load_config``.
+    #: Read by one thing: bundle staging, which copies a ``hiprtc_file``
+    #: kernel's authored source directory into the emitted descriptor tree. A
+    #: config built in memory leaves it empty and has no bundle to stage.
+    config_dir: str = ""
 
     @property
     def is_packaged(self) -> bool:
@@ -363,6 +407,22 @@ class IngestorConfig:
     @property
     def is_multi_pack(self) -> bool:
         return len(self.packs) > 1
+
+    @property
+    def bundle_names(self) -> list[str]:
+        """Every distinct ``kernel_source.bundle`` this config references, in
+        first-seen order.
+
+        One bundle serves many kernels -- that is the point of the kind -- so
+        the emitter stages each directory once rather than once per kernel.
+        """
+        names: list[str] = []
+        for pack in self.packs:
+            for kernel in pack.kernels:
+                bundle = kernel.kernel_source.bundle
+                if bundle and bundle not in names:
+                    names.append(bundle)
+        return names
 
     @property
     def descriptor_dir(self) -> str:

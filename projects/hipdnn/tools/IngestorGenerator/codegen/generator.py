@@ -18,6 +18,7 @@ through every cross-reference from that one dict -- never retyped.
 """
 
 import json
+import shutil
 import uuid
 from pathlib import Path
 
@@ -39,6 +40,51 @@ CMAKE_COPYRIGHT_HEADER = (
     "# Copyright \u00a9 Advanced Micro Devices, Inc., or its affiliates.\n"
     "# SPDX-License-Identifier:  MIT\n"
 )
+
+
+class BundleError(Exception):
+    """Raised when a ``hiprtc_file`` bundle cannot be staged."""
+
+
+def _bundle_source_dir(config: IngestorConfig, bundle: str) -> Path:
+    """Where ``bundle`` is AUTHORED: beside the config that names it.
+
+    Not beside the output tree, and not resolved against the cwd: the config
+    is the one file that knows where its own sources live, and a cwd-relative
+    bundle generates for whoever ran the tool from the right directory and for
+    nobody else.
+    """
+    if not config.config_dir:
+        raise BundleError(
+            f"bundle '{bundle}' cannot be staged: this config was built in "
+            f"memory and records no directory, so there is nowhere to copy the "
+            f"sources from. Load it from a YAML file beside the bundle."
+        )
+    return Path(config.config_dir) / bundle
+
+
+def _bundle_source_names(config: IngestorConfig, bundle: str) -> list[str]:
+    """The files staged for ``bundle``, sorted.
+
+    Every regular file directly inside the directory -- sources AND their
+    headers, because a bundle that shipped only the ``.hip`` files named by a
+    descriptor would compile on the author's machine and fail at the target's
+    first ``#include``. One level only: hipRTC is given a flat include path
+    here, so a nested file could be staged but never found.
+    """
+    source_dir = _bundle_source_dir(config, bundle)
+    if not source_dir.is_dir():
+        raise BundleError(
+            f"bundle directory '{source_dir}' does not exist. A "
+            f"'{bundle}' bundle is authored beside the config that names it."
+        )
+    names = sorted(p.name for p in source_dir.iterdir() if p.is_file())
+    if not names:
+        raise BundleError(
+            f"bundle directory '{source_dir}' is empty. A descriptor naming an "
+            f"empty bundle loads, then fails to find its source at prepare()."
+        )
+    return names
 
 
 def mint_ids(config: IngestorConfig) -> dict:
@@ -784,6 +830,9 @@ class IngestorGenerator:
             files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.is_multi_pack:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
+        for bundle in config.bundle_names:
+            for name in _bundle_source_names(config, bundle):
+                files.append(f"{ddir}/{bundle}/{name}")
         files.append(f"packs/{config.native_class_name}Native.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Packs.cpp")
         files.append(f"tests/Test{config.engine.pascal_name}Matchers.cpp")
@@ -834,6 +883,36 @@ class IngestorGenerator:
                     f"{ddir}/operation_is_{pack.discriminator}.umd.json",
                     op_umd,
                 )
+
+        # --- hipRTC source bundles ---
+        #
+        # Staged INTO the descriptor tree, beside the descriptors that name
+        # them, because that is the layout the loader resolves `bundle`
+        # against and the whole unit a drop-in copies: descriptors plus
+        # sources, one directory, no build step between authoring and running.
+        for bundle in config.bundle_names:
+            source_dir = _bundle_source_dir(config, bundle)
+            destination = output_dir / ddir / bundle
+            destination.mkdir(parents=True, exist_ok=True)
+            staged = _bundle_source_names(config, bundle)
+            for name in staged:
+                shutil.copyfile(source_dir / name, destination / name)
+                written.append(f"{ddir}/{bundle}/{name}")
+            # The descriptor names a file inside the bundle; if that file is
+            # not there, nothing downstream notices until the target machine
+            # fails to open it at prepare() -- one log line, on a machine with
+            # no config and no bundle to compare against.
+            for pack in config.packs:
+                for kernel in pack.kernels:
+                    ks = kernel.kernel_source
+                    if ks.bundle != bundle or ks.source_file in staged:
+                        continue
+                    raise BundleError(
+                        f"pack '{pack.name}' kernel '{kernel.name}' names "
+                        f"source_file '{ks.source_file}', which bundle "
+                        f"'{bundle}' does not contain (it holds "
+                        f"{', '.join(staged)})."
+                    )
 
         # --- C++ stubs/tests ---
         packs_dir = output_dir / "packs"
