@@ -27,6 +27,7 @@
  */
 
 #include <hipdnn_bench/CsvOutput.hpp>
+#include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
 
 #include <hipdnn_backend.h>
@@ -544,6 +545,74 @@ const char* predictionStatus(hipdnn_frontend::PredictionStatus status)
     }
 }
 
+/// @brief Runs one candidate once, untimed, and copies back everything it wrote.
+///
+/// RFC 0019 §13.2 admits a timing as a training label only once the candidate is known
+/// correct, and the check has to see the candidate's own output to say anything about it.
+/// Autotune cannot supply that: every variant it benchmarks writes into the one shared
+/// variant pack, so by the time it returns only the last writer's bytes survive.
+///
+/// A freshly deserialized graph per candidate, because `create_execution_plan_ext` refuses
+/// to run after `add_engine_variants` (Graph.hpp: "Cannot call create_execution_plan_ext()
+/// after add_engine_*()"), and the timing graph has had exactly that called on it. The
+/// buffers are allocated and zero-filled the same way the timed run's were, so the two runs
+/// differ only in the plan -- a candidate compared against inputs it did not see would be
+/// reported as wrong for a difference the benchmark itself introduced.
+///
+/// Untimed and outside the measurement loop: this execution never contributes to a row's
+/// timing, and its cost is one extra launch beside the warmup plus up to `--max-iterations`
+/// timed launches the same candidate already pays.
+hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
+                                              const std::vector<uint8_t>& graphBytes,
+                                              bool looksLikeJson,
+                                              int64_t engineId,
+                                              const std::vector<KnobSetting>& settings,
+                                              std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
+                                              std::map<int64_t, std::vector<uint8_t>>& images)
+{
+    BenchGraph graph;
+    HIPDNN_CHECK_ERROR(looksLikeJson ? graph.deserialize(handle,
+                                                         std::string(graphBytes.begin(),
+                                                                     graphBytes.end()))
+                                     : graph.deserialize(handle, graphBytes));
+    HIPDNN_CHECK_ERROR(graph.create_execution_plan_ext(engineId, settings));
+    HIPDNN_CHECK_ERROR(graph.build_plans());
+
+    const auto plan = hipdnn_bench::planVariantPack(graph);
+    if(!plan.error.empty())
+    {
+        return {hipdnn_frontend::ErrorCode::INVALID_VALUE, plan.error};
+    }
+    DeviceBuffers buffers;
+    std::unordered_map<int64_t, void*> variantPack;
+    HIPDNN_CHECK_ERROR(allocateVariantPack(graph, buffers, variantPack));
+    int64_t workspaceSize = 0;
+    HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
+    void* workspace = workspaceSize > 0 ? buffers.add(workspaceSize) : nullptr;
+    if(workspaceSize > 0 && workspace == nullptr)
+    {
+        return {hipdnn_frontend::ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Out of device memory for a " + std::to_string(workspaceSize)
+                    + " byte validation workspace"};
+    }
+    HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
+    HIPDNN_CHECK_ERROR(
+        hipError(hipDeviceSynchronize(), "Validation execution did not complete"));
+
+    for(const auto& tensor : plan.tensors)
+    {
+        tensors[tensor.uid] = {tensor.name, tensor.dataType};
+        std::vector<uint8_t> image(static_cast<size_t>(tensor.bytes));
+        HIPDNN_CHECK_ERROR(hipError(hipMemcpy(image.data(),
+                                              variantPack.at(tensor.uid),
+                                              image.size(),
+                                              hipMemcpyDeviceToHost),
+                                    "Could not read a candidate's output back to the host"));
+        images[tensor.uid] = std::move(image);
+    }
+    return {};
+}
+
 hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
                                         hipdnn_frontend::graph::Graph& graph,
                                         const Options& options,
@@ -613,7 +682,17 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
     output["min_time_ms"] = *std::min_element(outcome.timings.begin(), outcome.timings.end());
     output["avg_time_ms"] = hipdnn_data_sdk::utilities::detail::mean(outcome.timings);
     output["stddev_ms"] = hipdnn_data_sdk::utilities::detail::stddev(outcome.timings);
-    output["is_valid"] = true; // Measured successfully, not a numerical correctness assertion.
+    // `is_valid` says a measurement was obtained; it is not, and must not become, a
+    // numerical correctness assertion -- uhd_gen and RFC 0019 §8.1 both read it that way.
+    output["is_valid"] = true;
+    // RFC 0019 §13.2's verdict, recorded rather than omitted. L1 measures the engine's one
+    // ordinary selection, so there is no second candidate to cross-check it against and no
+    // per-op reference to call (Open Question 19(a) is still open). `null` says exactly
+    // that; leaving the field out would let a consumer default it to "valid", which is the
+    // inverted oracle the section exists to prevent.
+    output["numerically_valid"] = nullptr;
+    output["validation"] = "no_reference: engine-immediate collection times one selection, "
+                           "so there is no second candidate to cross-check it against";
     return {};
 }
 
@@ -971,14 +1050,57 @@ int runBench(const std::vector<std::string>& args)
 
     const std::string problemId = options.problemId.empty() ? options.graphPath : options.problemId;
 
+    // RFC 0019 §13.2's correctness gate: "A timing is only a training label once the
+    // candidate is known correct." Every candidate that produced a measurement is re-run
+    // once, untimed, and cross-checked against the rest of this problem's catalog. Runs
+    // after autotune rather than instead of it, because a candidate that cannot be timed
+    // has no label to protect and is not worth an execution.
+    //
+    // Index-aligned with `results`, so both the JSON and the CSV row read their verdict by
+    // position. The verdict is recorded on every row including the ones it cannot decide;
+    // an absent field would be read as "valid" by the first consumer that defaults it.
+    std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
+    std::vector<hipdnn_bench::CandidateOutput> outputs;
+    outputs.reserve(results.size());
+    for(const auto& result : results)
+    {
+        hipdnn_bench::CandidateOutput captured;
+        if(!result.succeeded || result.iterationsRun == 0)
+        {
+            captured.failure = "the candidate carries no measurement to validate";
+        }
+        else
+        {
+            const auto ran = captureCandidateOutput(handle,
+                                                    graphBytes,
+                                                    looksLikeJson,
+                                                    options.engineId,
+                                                    result.knobSettings,
+                                                    tensors,
+                                                    captured.images);
+            captured.executed = ran.is_good();
+            if(!ran.is_good())
+            {
+                // A partial image is worse than none: a tensor missing from the map is
+                // skipped by the comparison, so half a read-back would silently narrow the
+                // check instead of declining it.
+                captured.failure = ran.get_message();
+                captured.images.clear();
+            }
+        }
+        outputs.push_back(std::move(captured));
+    }
+    const auto verdicts = hipdnn_bench::crossCheckCandidates(outputs, tensors);
+
     if(options.json)
     {
         auto output = pageJson(catalog);
         output.erase("candidates");
         output["problem"] = problemId;
         output["results"] = nlohmann::json::array();
-        for(const auto& result : results)
+        for(size_t index = 0; index < results.size(); ++index)
         {
+            const auto& result = results[index];
             const auto tuple = toVariantKnobs(result.knobSettings);
             const auto candidate = std::find_if(
                 catalog.candidates.begin(), catalog.candidates.end(), [&tuple](const auto& item) {
@@ -997,20 +1119,32 @@ int runBench(const std::vector<std::string>& args)
                   : result.iterationsRun == 0
                       ? "not_timed: autotune reported success without running an iteration"
                       : "";
-            output["results"].push_back({{"candidate_id", candidate->id},
-                                         {"knob_settings", knobJson(tuple)},
-                                         {"kernel_features", candidate->kernelFeatures},
-                                         {"rank", result.rank},
-                                         {"succeeded", result.succeeded},
-                                         {"is_valid", timed},
-                                         {"skip_reason", reason},
-                                         {"min_time_ms", result.minTimeMs},
-                                         {"avg_time_ms", result.avgTimeMs},
-                                         {"robust_time_ms", result.robustTimeMs},
-                                         {"stddev_ms", result.stddevMs},
-                                         {"iterations", result.iterationsRun},
-                                         {"converged", result.converged},
-                                         {"workspace_bytes", result.workspaceSize}});
+            // Three-valued, and a separate field from `is_valid`. `is_valid` answers "did we
+            // obtain a measurement", which uhd_gen and RFC 0019 §8.1 both depend on; folding a
+            // correctness verdict into it would make an unmeasured row and an incorrect row
+            // indistinguishable and break the coverage record §13.2 keeps deliberately.
+            const auto& verdict = verdicts[index];
+            output["results"].push_back(
+                {{"candidate_id", candidate->id},
+                 {"knob_settings", knobJson(tuple)},
+                 {"kernel_features", candidate->kernelFeatures},
+                 {"rank", result.rank},
+                 {"succeeded", result.succeeded},
+                 {"is_valid", timed},
+                 {"numerically_valid",
+                  verdict.verdict == hipdnn_bench::NumericalVerdict::AGREED ? nlohmann::json(true)
+                  : verdict.verdict == hipdnn_bench::NumericalVerdict::DISAGREED
+                      ? nlohmann::json(false)
+                      : nlohmann::json(nullptr)},
+                 {"validation", verdict.reason},
+                 {"skip_reason", reason},
+                 {"min_time_ms", result.minTimeMs},
+                 {"avg_time_ms", result.avgTimeMs},
+                 {"robust_time_ms", result.robustTimeMs},
+                 {"stddev_ms", result.stddevMs},
+                 {"iterations", result.iterationsRun},
+                 {"converged", result.converged},
+                 {"workspace_bytes", result.workspaceSize}});
         }
         std::cout << output.dump() << "\n";
         return results.empty() ? 2 : 0;
@@ -1039,8 +1173,12 @@ int runBench(const std::vector<std::string>& args)
         // one of §8.3's columns but is the name `export-benchmarks` and the uhd_gen
         // corpus already use for the same statistic; a second spelling for it would
         // make a harvested CSV unreadable by `uhd_gen evaluate --target robustMeanMs`.
-        std::cout << ",engine,rank,succeeded,is_valid,skip_reason,minTimeMs,avgTimeMs,"
-                     "robustMeanMs,stddevMs,iters,converged,workspace_bytes\n";
+        // `numerically_valid`/`validation` sit beside `is_valid`/`skip_reason` rather than
+        // replacing them: RFC 0019 §13.2 keeps a candidate that ran-but-is-wrong and a
+        // candidate that never ran as different facts, and one column cannot carry both.
+        // Three-valued text, not a boolean, so "not checked" cannot be read back as "valid".
+        std::cout << ",engine,rank,succeeded,is_valid,numerically_valid,validation,skip_reason,"
+                     "minTimeMs,avgTimeMs,robustMeanMs,stddevMs,iters,converged,workspace_bytes\n";
     }
 
     // Every variant is emitted, including the ones that lost and the ones that failed. A
@@ -1054,8 +1192,9 @@ int runBench(const std::vector<std::string>& args)
     // is no difference there to resolve. A model fitted to the winner would be fitting the
     // coin flip, which is why RFC 0019.13 §5.6 ranks on per-problem normalised time and why
     // `stddevMs` is emitted beside every measurement rather than folded into it.
-    for(const auto& result : results)
+    for(size_t index = 0; index < results.size(); ++index)
     {
+        const auto& result = results[index];
         std::cout << problemId;
         for(const auto& entry : options.query)
         {
@@ -1086,10 +1225,13 @@ int runBench(const std::vector<std::string>& args)
 
         std::cout << "," << (options.engineName.empty() ? result.engineName : options.engineName)
                   << "," << result.rank << "," << (result.succeeded ? 1 : 0) << ","
-                  << (timed ? "True" : "False") << "," << hipdnn_bench::csvField(skipReason) << ","
-                  << result.minTimeMs << "," << result.avgTimeMs << "," << result.robustTimeMs
-                  << "," << result.stddevMs << "," << result.iterationsRun << ","
-                  << (result.converged ? 1 : 0) << "," << result.workspaceSize << "\n";
+                  << (timed ? "True" : "False") << ","
+                  << hipdnn_bench::verdictText(verdicts[index].verdict) << ","
+                  << hipdnn_bench::csvField(verdicts[index].reason) << ","
+                  << hipdnn_bench::csvField(skipReason) << "," << result.minTimeMs << ","
+                  << result.avgTimeMs << "," << result.robustTimeMs << "," << result.stddevMs
+                  << "," << result.iterationsRun << "," << (result.converged ? 1 : 0) << ","
+                  << result.workspaceSize << "\n";
     }
 
     return results.empty() ? 2 : 0;

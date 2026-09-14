@@ -57,12 +57,15 @@ def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--remove-knob", action="append", default=[], dest="remove_knobs",
                         help="Explicitly remove an authored knob; requires a model trained against the prospective major revision")
     parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing")
+    parser.add_argument("--corpus", help="The corpus.json this model was trained from; "
+                                         "defaults to the one generate stages beside --model-dir")
 
 
 def run_promote(args: argparse.Namespace) -> int:
     try:
         plan = build_plan(Path(args.model_dir), Path(args.descriptor_tree), args.engine,
-                          role=args.role, arch=args.arch, remove_knobs=args.remove_knobs)
+                          role=args.role, arch=args.arch, remove_knobs=args.remove_knobs,
+                          corpus=Path(args.corpus) if args.corpus else None)
         for warning in plan.warnings:
             logger.warning("%s", warning)
         if not args.dry_run:
@@ -76,17 +79,92 @@ def run_promote(args: argparse.Namespace) -> int:
 
 def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None = None, *,
                role: str = "sort_kernel_catalog", arch: str | None = None,
-               remove_knobs: tuple[str, ...] | list[str] = ()) -> PromotePlan:
+               remove_knobs: tuple[str, ...] | list[str] = (),
+               corpus: Path | None = None) -> PromotePlan:
     """Resolve all dependencies, ownership and destination collisions without writes."""
     try:
-        return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch, remove_knobs)
+        return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch,
+                           remove_knobs, corpus)
     except ValueError as error:
         raise PromoteError(str(error)) from error
 
 
-def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
+def _corpus_path(model_dir: Path, corpus: Path | None) -> Path | None:
+    """The corpus that produced this model, when this run can see it.
+
+    `generate` stages `corpus.json` beside the `model/` directory it trains into and
+    promotes from exactly that layout, so the sibling is the ordinary case and needs no
+    flag; `--corpus` is for promoting a model whose corpus was archived elsewhere.
+    """
+    if corpus is not None:
+        if not corpus.is_file():
+            raise PromoteError(f"--corpus is not a readable file: {corpus}")
+        return corpus
+    for sibling in (model_dir / "corpus.json", model_dir.parent / "corpus.json"):
+        if sibling.is_file():
+            return sibling
+    return None
+
+
+def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
+    """RFC 0019 §13.4: refuse emission while any candidate carries an invalid marker.
+
+    §13.2 is explicit that this is diagnosis, not remedy: suppressing the timing protects
+    the training labels, but the scorer cannot exclude a candidate (§5), so a kernel that
+    is applicable and incorrect stays selectable through every path that does not consult
+    the model -- a knob pin, a winning candidate that fails to build, any `static_order`
+    fallback. A learned demotion is a preference, and preference is not a correctness gate.
+
+    So the refusal lives here, at the stage §13.4 calls "the only stage positioned to
+    refuse to ship it". Clearing the marker is a matcher or kernel change, deliberately
+    reaching back into the pack: this is the one documented exception to the two-stage
+    layering, not a hole in it.
+
+    Returns the warnings a caller should surface. An undecidable verdict is not a refusal
+    -- Open Question 19(a) has not settled what reference each op validates against, so a
+    corpus of nulls is the expected state today -- but it is reported, because a check that
+    decided nothing must never be mistaken for a check that passed.
+    """
+    path = _corpus_path(model_dir, corpus)
+    if path is None:
+        return ["no corpus.json beside the model, so RFC 0019 §13.2's correctness markers "
+                "could not be read; this promotion is not gated on them. Pass --corpus to "
+                "point at the corpus this model was trained from."]
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PromoteError(f"cannot read training corpus {path}: {error}") from error
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise PromoteError(f"{path}: the corpus must be an array of measured rows")
+    invalid = [row for row in rows if row.get("numerically_valid") is False]
+    if invalid:
+        named = "\n".join(
+            f"  {row.get('kernel', '<unnamed candidate>')} on {row.get('benchmark', '<unnamed problem>')}: "
+            f"{row.get('validation') or 'no reason recorded'}"
+            for row in invalid[:5])
+        more = f"\n  ... and {len(invalid) - 5} more" if len(invalid) > 5 else ""
+        raise PromoteError(
+            f"{len(invalid)} candidate(s) in {path} carry an unresolved RFC 0019 §13.2 "
+            f"invalid marker, so package emission is refused (§13.4):\n{named}{more}\n"
+            "The model cannot fix this: a ranking demotes a kernel, and every path that "
+            "does not consult the model still selects it. Narrow the pack's UMD so the "
+            "kernel is no longer applicable for those problems, or withdraw the UKD, then "
+            "regenerate.")
+    unchecked = sum(1 for row in rows if row.get("numerically_valid") is None)
+    if unchecked:
+        return [f"{unchecked} of {len(rows)} corpus row(s) carry no decided correctness "
+                f"verdict (RFC 0019 Open Question 19 leaves the per-op reference open), so "
+                f"their timings were trained on without being shown correct"]
+    return []
+
+
+def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, corpus=None):
     if role not in ROLES:
         raise PromoteError(f"unknown heuristic role {role!r}")
+    # First, because it is the one refusal that is not about this installation at all: a
+    # correctness defect the timing run found is a fact about the pack, and it holds whether
+    # or not the descriptors line up.
+    gate_warnings = _correctness_gate(model_dir, corpus)
     descriptor_path = _find_descriptor(model_dir)
     _contained(descriptor_path, model_dir, "source descriptor")
     descriptor = _load_json(descriptor_path, "UHD")
@@ -117,6 +195,7 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
     index = load_descriptor_tree(descriptor_tree)
     if any(identity in entries for entries in index.values()):
         raise PromoteError(f"incoming UHD identity {identity} conflicts with a dependency descriptor")
+
     ued_path, original_ued = select_engine(index, engine)
     engine_name = str(original_ued.get("name", ""))
     destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
@@ -131,6 +210,7 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
     plan = PromotePlan(descriptor_path, identity, artifact_path, ued_path, ued,
                        engine_name, old, role, arch,
                        destination_descriptor, installed_descriptor)
+    plan.warnings.extend(gate_warnings)
     if remove_knobs:
         exposed = ued.get("knobs", [])
         if not isinstance(exposed, list) or any(not isinstance(item, str) for item in exposed):
