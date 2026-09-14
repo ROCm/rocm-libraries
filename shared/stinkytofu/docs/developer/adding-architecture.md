@@ -95,7 +95,12 @@ DEF_ARCH(GfxYourArch,
     .wavefront = 64,            // 64 for CDNA, 32 for RDNA
     .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 256,
     .totalVgprPerSimd = 512,    // physical VGPR file per SIMD
-    .vgprAllocGranule = 8,
+    .vgprAllocGranule = 8,      // what the hardware reserves in; confirm it rather
+                                // than copy it. Assemble `.amdhsa_next_free_vgpr N`
+                                // for the target and disassemble: the value you get
+                                // back is the granule at work.
+    .maxWavesPerSimd = 8,       // wave slots per SIMD. Occupancy is capped here once
+                                // a kernel is small enough that registers stop binding
     .defaultCycle = 4, .defaultLatency = 4)   // 4 for CDNA, 1 for RDNA
 ```
 

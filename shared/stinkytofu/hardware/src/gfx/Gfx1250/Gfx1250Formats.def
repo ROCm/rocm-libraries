@@ -31,7 +31,8 @@ DEF_ARCH(Gfx1250,
     .wavefront = 32,
     .maxVGPR = 1024, .maxSGPR = 106, .maxAGPR = 0,
     .totalVgprPerSimd = 1024,  // physical VGPR file per SIMD (wave32)
-    .vgprAllocGranule = 8,     // VGPR allocation granule (wave32, static allocation)
+    .vgprAllocGranule = 16,    // VGPR allocation granule (wave32, static allocation).
+    .maxWavesPerSimd = 10,     // wave slots per SIMD, the limit once registers stop binding
     .defaultCycle = 1, .defaultLatency = 1,
     .d16Writes32BitVgpr = 1)
 
