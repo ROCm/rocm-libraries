@@ -762,8 +762,8 @@ class TestPythonPathSplitMirror(unittest.TestCase):
 LLVM_BIN_ENV = "ROCKE_TEST_LLVM_BIN"
 
 
-def configured_llvm_tool(name):
-    """Find ``name`` only in an explicitly configured LLVM toolchain."""
+def configured_llvm_dirs() -> list[str]:
+    """List explicitly configured LLVM directories in precedence order."""
     configured = []
     if os.environ.get(LLVM_BIN_ENV):
         configured.append(os.environ[LLVM_BIN_ENV])
@@ -775,7 +775,12 @@ def configured_llvm_tool(name):
                 os.path.join("lib", "llvm", "bin"),
             )
         )
-    for directory in configured:
+    return configured
+
+
+def configured_llvm_tool(name):
+    """Find ``name`` only in an explicitly configured LLVM toolchain."""
+    for directory in configured_llvm_dirs():
         candidate = shutil.which(name, path=directory)
         if candidate:
             return candidate
@@ -810,16 +815,18 @@ def llvm_tool(name):
 
 
 def llvm_codegen_tool():
-    """Return an AMDGPU object-code driver from one coherent toolchain.
+    """Return an AMDGPU object-code driver respecting directory precedence.
 
-    Some ROCm packages ship ``clang`` but not ``llc``. Prefer either driver
-    from an explicitly configured toolchain over an unrelated tool on PATH;
-    otherwise retain the historical PATH-first discovery order.
+    Some ROCm packages ship ``clang`` but not ``llc``. Try llc then Clang in
+    each configured directory before moving to the next, so a lower-priority
+    llc cannot displace a higher-priority Clang. If no configured driver is
+    available, retain the existing PATH/default fallback.
     """
-    for name in ("llc", "clang"):
-        candidate = configured_llvm_tool(name)
-        if candidate:
-            return name, candidate
+    for directory in configured_llvm_dirs():
+        for name in ("llc", "clang"):
+            candidate = shutil.which(name, path=directory)
+            if candidate:
+                return name, candidate
     for name in ("llc", "clang"):
         candidate = llvm_tool(name)
         if candidate:
@@ -948,7 +955,45 @@ class TestLlvmToolDiscovery(unittest.TestCase):
                 env.pop(LLVM_BIN_ENV, None)
                 self.assertSameTool(llvm_tool("llc"), expected)
 
-    def test_configured_llc_wins_over_configured_clang(self):
+    def test_explicit_bin_clang_beats_rocm_llc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            override = os.path.join(tmp, "override")
+            expected = self.make_tool(override, "clang")
+            assembler = self.make_tool(override, "llvm-as")
+            dumper = self.make_tool(override, "llvm-dwarfdump")
+            self.fake_bin(tmp, "llc")
+            with mock.patch.dict(
+                os.environ, {"ROCM_PATH": tmp, LLVM_BIN_ENV: override}
+            ):
+                self.assertSameTool(llvm_tool("llvm-as"), assembler)
+                self.assertSameTool(llvm_tool("llvm-dwarfdump"), dumper)
+                driver, tool = llvm_codegen_tool()
+            self.assertEqual(driver, "clang")
+            self.assertSameTool(tool, expected)
+
+    def test_rocm_llvm_bin_clang_beats_lib_llvm_bin_llc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = self.fake_bin(tmp, "clang")
+            self.make_tool(os.path.join(tmp, "lib", "llvm", "bin"), "llc")
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
+                env.pop(LLVM_BIN_ENV, None)
+                driver, tool = llvm_codegen_tool()
+            self.assertEqual(driver, "clang")
+            self.assertSameTool(tool, expected)
+
+    def test_codegen_falls_through_configured_bin_without_drivers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            override = os.path.join(tmp, "override")
+            self.make_tool(override, "llvm-as")
+            expected = self.fake_bin(tmp, "clang")
+            with mock.patch.dict(
+                os.environ, {"ROCM_PATH": tmp, LLVM_BIN_ENV: override}
+            ):
+                driver, tool = llvm_codegen_tool()
+            self.assertEqual(driver, "clang")
+            self.assertSameTool(tool, expected)
+
+    def test_llc_wins_over_clang_in_same_configured_bin(self):
         with tempfile.TemporaryDirectory() as tmp:
             expected = self.fake_bin(tmp, "llc")
             self.fake_bin(tmp, "clang")
