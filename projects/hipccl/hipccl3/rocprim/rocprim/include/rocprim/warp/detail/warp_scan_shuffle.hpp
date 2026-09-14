@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,15 +49,7 @@ public:
     {
         output = input;
 
-        T                  value;
-        const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
-        ROCPRIM_UNROLL
-        for(unsigned int offset = 1; offset < VirtualWaveSize; offset *= 2)
-        {
-            value = warp_shuffle_up(output, offset, VirtualWaveSize);
-            if(id >= offset)
-                output = scan_op(value, output);
-        }
+        common_inclusive_scan(output, scan_op);
     }
 
     template<class BinaryFunction>
@@ -70,21 +62,35 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op)
+    {
+        const unsigned int id       = detail::logical_lane_id<VirtualWaveSize>();
+        const bool         is_valid = (static_cast<int>(id) < valid_items);
+
+        if(is_valid)
+        {
+            output = input;
+        }
+
+        common_inclusive_scan(output, scan_op, is_valid);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, storage_type& /*storage*/, BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, BinaryFunction scan_op, T init)
     {
         output = input;
 
-        T                  value;
-        const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
-        ROCPRIM_UNROLL
-        for(unsigned int offset = 1; offset < VirtualWaveSize; offset *= 2)
-        {
-            value = warp_shuffle_up(output, offset, VirtualWaveSize);
-            if(id >= offset)
-                output = scan_op(value, output);
-        }
-        // Include init value in scan results
-        output = scan_op(init, output);
+        common_inclusive_scan(output, scan_op);
+        include_init(output, output, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -97,11 +103,38 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op, T init)
+    {
+        const unsigned int id       = detail::logical_lane_id<VirtualWaveSize>();
+        const bool         is_valid = (static_cast<int>(id) < valid_items);
+
+        if(is_valid)
+        {
+            output = input;
+        }
+
+        common_inclusive_scan(output, scan_op, is_valid);
+        include_init(output, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T   input,
+                                T&  output,
+                                int valid_items,
+                                storage_type& /*storage*/,
+                                BinaryFunction scan_op,
+                                T              init)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in the warp
-        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
+        compute_reduction(output, reduction);
     }
 
     template<class BinaryFunction>
@@ -115,13 +148,32 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+        compute_reduction(output, valid_items, reduction);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T   input,
+                                T&  output,
+                                int valid_items,
+                                T&  reduction,
+                                storage_type& /*storage*/,
+                                BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op, T init)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in the warp
-        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
-        // Include init value in scan results
-        output = scan_op(init, output);
+        compute_reduction(output, reduction);
+        include_init(output, output, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -131,6 +183,29 @@ public:
     {
         (void)storage;
         inclusive_scan(input, output, reduction, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op, T init)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+        compute_reduction(output, valid_items, reduction);
+        include_init(output, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T   input,
+                                T&  output,
+                                int valid_items,
+                                T&  reduction,
+                                storage_type& /*storage*/,
+                                BinaryFunction scan_op,
+                                T              init)
+    {
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -266,15 +341,32 @@ public:
     }
 
 private:
+    // Include init value in scan results
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void include_init(T input, T& output, BinaryFunction scan_op, T init)
+    {
+        output = scan_op(init, input);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void include_init(T input, T& output, int valid_items, BinaryFunction scan_op, T init)
+    {
+        const unsigned int lid = detail::logical_lane_id<VirtualWaveSize>();
+        if(static_cast<int>(lid) < valid_items)
+        {
+            output = scan_op(init, input);
+        }
+    }
+
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_exclusive(T inclusive_input, T& exclusive_output, T init, BinaryFunction scan_op)
     {
-        // include init value in scan results
-        exclusive_output = scan_op(init, inclusive_input);
-        // get exclusive results
-        exclusive_output = warp_shuffle_up(exclusive_output, 1, VirtualWaveSize);
+        include_init(inclusive_input, exclusive_output, scan_op, init);
+        to_exclusive(exclusive_output, exclusive_output);
         if(detail::logical_lane_id<VirtualWaveSize>() == 0)
         {
             exclusive_output = init;
@@ -286,6 +378,36 @@ private:
     {
         // shift to get exclusive results
         exclusive_output = warp_shuffle_up(inclusive_input, 1, VirtualWaveSize);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void common_inclusive_scan(T& output, BinaryFunction scan_op, bool extra_cond = true)
+    {
+        T value;
+        const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
+        ROCPRIM_UNROLL
+        for(unsigned int offset = 1; offset < VirtualWaveSize; offset *= 2)
+        {
+            value = warp_shuffle_up(output, offset, VirtualWaveSize);
+            if(id >= offset && extra_cond)
+                output = scan_op(value, output);
+        }
+    }
+
+    // Broadcast reduction from the last valid thread in the warp
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void compute_reduction(T& output, T& reduction)
+    {
+        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void compute_reduction(T& output, int valid_items, T& reduction)
+    {
+        const int last_valid_src_lane
+            = ::rocprim::clamp(valid_items - 1, 0, static_cast<int>(VirtualWaveSize - 1));
+        reduction = warp_shuffle(output, last_valid_src_lane, VirtualWaveSize);
     }
 };
 

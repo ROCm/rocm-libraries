@@ -538,6 +538,28 @@ inline std::vector<size_t> get_sizes(T seed_value)
     return sizes;
 }
 
+template<unsigned int LogicalWarpSize, class T>
+inline std::vector<int> get_warp_valid_items(T seed_value)
+{
+    // clang-format off
+    std::vector<int> sizes = {
+        -1, 0, 1,
+        LogicalWarpSize,
+        LogicalWarpSize + 1};
+    // clang-format on
+
+    const std::vector<int> random_sizes = {
+        test_utils::get_random_value<int>(2,
+                                          std::max(2, static_cast<int>(LogicalWarpSize)),
+                                          seed_value), /*small size*/
+        test_utils::get_random_value<int>(LogicalWarpSize + 2,
+                                          test_utils::numeric_limits<int>::max(),
+                                          seed_value) /*big size*/
+    };
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    return sizes;
+}
+
 } // namespace test_utils
 
 #endif // HIPCUB_TEST_HIPCUB_TEST_UTILS_DATA_GENERATION_HPP_
