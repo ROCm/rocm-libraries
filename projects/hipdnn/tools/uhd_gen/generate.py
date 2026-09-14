@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import addressing
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
@@ -279,11 +280,13 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError("--descriptor-tree must be an existing descriptor root (it may be empty)")
             provenance, ued, exposed = None, {}, {}
             kernel_fields = set()
+            ordinals = {}
         else:
             provenance = snapshot_provenance(tree, args.engine, args.arch)
             ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
             _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
             kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+            ordinals = {}
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
         environment = dict(os.environ)
@@ -293,7 +296,20 @@ def run_generate(args: argparse.Namespace) -> int:
             collection_tree = stage / "collection_descriptors"
             shutil.copytree(tree, collection_tree)
             exposed = dict(ued)
-            exposed["knobs"] = [field["name"] for field in kmd["fields"] if field["type"] == "int"]
+            # RFC 0019 13.2: the collection UED exposes EVERY addressable KMD field, so the knob
+            # tuple equals the metadata tuple and every catalog entry is individually reachable.
+            # Only `int` addresses itself -- a knob value is an int64 end to end -- so the other
+            # four KMD types are addressed by an ordinal over their value set (addressing.py).
+            # Exposing `int` alone made two kernels differing only in e.g. `dtype` share a tuple
+            # and abort the run on the collision at _knob_tuple.
+            ordinals = addressing.encodings(kmd, addressing.engine_kernels(tree, provenance["ued"]["id"], args.arch))
+            exposed["knobs"] = addressing.exposable(kmd, ordinals)
+            unaddressable = addressing.unaddressable(kmd, ordinals)
+            if unaddressable:
+                # Named rather than dropped: a declared field no kernel carries addresses
+                # nothing, and the tuple collision it causes surfaces far from this cause.
+                logger.warning("KMD fields no kernel populates, so nothing can be pinned on them: %s",
+                               ", ".join(sorted(unaddressable)))
             _write_json(collection_tree / ued_path.relative_to(tree), exposed)
             _write_json(stage / "shipping_ued.json", ued)
             environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
@@ -458,6 +474,11 @@ def run_generate(args: argparse.Namespace) -> int:
             "device_coverage": coverage, "training_problem_keys": sorted(training_keys),
             "eval_problem_keys": sorted(evaluated_keys), "seed": args.seed, "eval_fraction": args.eval_fraction,
             "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
+            # The runtime derives the same tables from the same inventory, so this is recorded
+            # for reading rather than for use: an ordinal in a stored row means nothing without
+            # the value set it indexes, and a disagreement between the two sides should be
+            # visible here rather than only in a kernel that was addressed wrongly.
+            "knob_encodings": {name: list(values) for name, values in sorted(ordinals.items())},
             "engine_id": args.engine_id, "training_arches": arches, "promotion_role": args.role,
             "promotion_arch": args.arch or arches[0],
         })
