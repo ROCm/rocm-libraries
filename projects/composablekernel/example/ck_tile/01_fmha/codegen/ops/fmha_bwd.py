@@ -333,6 +333,10 @@ class FmhaBwdDQDKDVTileSize:
     # this many workgroups the CUs sit idle and the regular pipeline wins, so
     # the bound is deliberately conservative.
     dispatch_min_grid: int = 0
+    # Emit the masked variants of this tile. Opt-in per tile: the masked
+    # QrQtrDor path is only worth generating where its dispatch has been
+    # measured, and the gfx950 decode tiles have not been.
+    allow_mask: bool = False
     # Hold the dK/dV accumulators in LDS rather than registers. Frees
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
@@ -587,7 +591,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # bk4=32 and bn0>=bk4.
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
-                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768),
+                FmhaBwdDQDKDVTileSize( 32,  32,  64,  32,  64,  32,  32,   64,   64,  1, 1, 1,  1, 1, 1,  1, 1, 1,  16, 16, 32,  16, 16, 32,  2, 32, dispatch_min_grid=768, allow_mask=True),
             ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
@@ -1176,7 +1180,7 @@ def get_bwd_blobs(
             hdim = tile.F_bhdq
             if (mode == "group") and (spad1d == "f"):
                 continue
-            if ("no" not in mask) and tile.seq_q_limit != 0:
+            if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue
