@@ -40,6 +40,10 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    BF16,
+    F16,
+    I16,
+    I32,
     KernelDef,
     Op,
     Param,
@@ -406,6 +410,23 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
     "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
+    "s.wait.tensorcnt": "declare void @llvm.amdgcn.s.wait.tensorcnt(i16 immarg)",
+    "s.barrier.signal": ("declare void @llvm.amdgcn.s.barrier.signal(i32 immarg)"),
+    "s.barrier.wait": "declare void @llvm.amdgcn.s.barrier.wait(i16 immarg)",
+    "s.barrier.init": (
+        "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(3) nocapture, i32)"
+    ),
+    "s.barrier.signal.var": (
+        "declare void @llvm.amdgcn.s.barrier.signal.var("
+        "ptr addrspace(3) nocapture, i32)"
+    ),
+    "s.barrier.join": (
+        "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(3) nocapture)"
+    ),
+    "s.wakeup.barrier": (
+        "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(3) nocapture)"
+    ),
+    "s.barrier.leave": "declare void @llvm.amdgcn.s.barrier.leave(i16 immarg)",
     "global.load.async.to.lds.b32": (
         "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
@@ -417,6 +438,42 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "global.load.async.to.lds.b128": (
         "declare void @llvm.amdgcn.global.load.async.to.lds.b128("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b8": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b8("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b32": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b32("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b64": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b64("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b128": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b128("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.load.tr.b128.v8f16": (
+        "declare <8 x half> @llvm.amdgcn.global.load.tr.b128.v8f16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "global.load.tr.b128.v8bf16": (
+        "declare <8 x bfloat> @llvm.amdgcn.global.load.tr.b128.v8bf16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "global.load.tr.b128.v8i16": (
+        "declare <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "tensor.load.to.lds": (
+        "declare void @llvm.amdgcn.tensor.load.to.lds("
+        "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
+    ),
+    "tensor.store.from.lds": (
+        "declare void @llvm.amdgcn.tensor.store.from.lds("
+        "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
@@ -1568,6 +1625,13 @@ class _Lowerer:
                 f"{op} {field} must fit an unsigned i16 (0..65535), got {v}"
             )
         return v
+
+    def _require_gfx1250_llvm23(self, op: str) -> None:
+        """Reject use of an LLVM-23 gfx1250-only operation on another backend."""
+        if self._backend.arch.gfx != "gfx1250":
+            raise ValueError(f"{op} requires gfx1250, got {self._backend.arch.gfx}")
+        if self._flavor != LLVM_FLAVOR_LLVM23:
+            raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
 
@@ -4049,6 +4113,17 @@ class _Lowerer:
         The ``$N`` placeholders in the template refer to: ``$0`` = the
         output (if any), then the inputs in ``op.operands`` order.
         """
+        required_arch = op.attrs.get("required_arch")
+        required_flavor = op.attrs.get("required_llvm_flavor")
+        if required_arch is not None and self._backend.arch.gfx != required_arch:
+            raise ValueError(
+                f"tile.inline_asm requires {required_arch}, got {self._backend.arch.gfx}"
+            )
+        if required_flavor is not None and self._flavor != required_flavor:
+            raise ValueError(
+                f"tile.inline_asm requires LLVM flavor {required_flavor}, "
+                f"got {self._flavor}"
+            )
         template = _escape_llvm_asm_string(op.attrs["template"])
         constraints = op.attrs["constraints"]
         flags = []
@@ -4239,6 +4314,83 @@ class _Lowerer:
         self._need("s.wait.asynccnt")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
 
+    def _op_tile_s_wait_tensorcnt(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_wait_tensorcnt")
+        n = self._check_u16("s_wait_tensorcnt", "n", op.attrs.get("n", 0))
+        self._need("s.wait.tensorcnt")
+        self._current().emit(f"  call void @llvm.amdgcn.s.wait.tensorcnt(i16 {n})")
+
+    def _op_tile_s_barrier_signal(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_signal")
+        barrier_type = int(op.attrs.get("barrier_type", 0))
+        if not 0 <= barrier_type <= 0xFFFFFFFF:
+            raise ValueError(
+                "s_barrier_signal barrier_type must fit an unsigned i32, "
+                f"got {barrier_type}"
+            )
+        self._need("s.barrier.signal")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.signal(i32 {barrier_type})"
+        )
+
+    def _op_tile_s_barrier_wait(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_wait")
+        barrier_type = self._check_u16(
+            "s_barrier_wait", "barrier_type", op.attrs.get("barrier_type", 0)
+        )
+        self._need("s.barrier.wait")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.wait(i16 {barrier_type})"
+        )
+
+    def _op_tile_s_barrier_init(self, op: Op) -> None:
+        self._lower_named_barrier_count(op, "s.barrier.init")
+
+    def _op_tile_s_barrier_signal_var(self, op: Op) -> None:
+        self._lower_named_barrier_count(op, "s.barrier.signal.var")
+
+    def _lower_named_barrier_count(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        if len(op.operands) != 2:
+            raise ValueError(f"{short_name} expects barrier and member_count")
+        barrier, member_count = op.operands
+        if member_count.type != I32:
+            raise TypeError(f"{short_name} member_count must be i32")
+        local = self._lds_ptr_operand(short_name, barrier)
+        self._need(intrinsic)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}("
+            f"ptr addrspace(3) {local}, i32 {self._operand(member_count)})"
+        )
+
+    def _op_tile_s_barrier_join(self, op: Op) -> None:
+        self._lower_named_barrier_one(op, "s.barrier.join")
+
+    def _op_tile_s_wakeup_barrier(self, op: Op) -> None:
+        self._lower_named_barrier_one(op, "s.wakeup.barrier")
+
+    def _lower_named_barrier_one(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        if len(op.operands) != 1:
+            raise ValueError(f"{short_name} expects one barrier pointer")
+        local = self._lds_ptr_operand(short_name, op.operands[0])
+        self._need(intrinsic)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}(ptr addrspace(3) {local})"
+        )
+
+    def _op_tile_s_barrier_leave(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_leave")
+        barrier_type = self._check_u16(
+            "s_barrier_leave", "barrier_type", op.attrs.get("barrier_type", 0)
+        )
+        self._need("s.barrier.leave")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.leave(i16 {barrier_type})"
+        )
+
     def _op_tile_global_load_async_to_lds(self, op: Op) -> None:
         src_ptr = op.operands[0]
         src_index = op.operands[1]
@@ -4271,6 +4423,102 @@ class _Lowerer:
             f"  call void @llvm.amdgcn.global.load.async.to.lds.{suffix}("
             f"ptr addrspace(1) {gep_s}, ptr addrspace(3) {gep_l}, "
             f"i32 {ioff}, i32 {cpol})"
+        )
+
+    def _op_tile_global_store_async_from_lds(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_store_async_from_lds")
+        if len(op.operands) != 2:
+            raise ValueError("global_store_async_from_lds expects two operands")
+        dst_ptr, lds_ptr = op.operands
+        if self._ptr_llvm_type(dst_ptr) != "ptr addrspace(1)":
+            raise TypeError(
+                "global_store_async_from_lds dst_ptr must be a global pointer"
+            )
+        width = int(op.attrs["width_bytes"])
+        if width not in (1, 4, 8, 16):
+            raise ValueError(
+                f"global_store_async_from_lds width_bytes must be 1, 4, 8, or 16, got {width}"
+            )
+        offset = int(op.attrs.get("offset_bytes", 0))
+        if not -(1 << 31) <= offset < (1 << 31):
+            raise ValueError(
+                f"global_store_async_from_lds offset_bytes must fit signed i32, got {offset}"
+            )
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"global_store_async_from_lds cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        suffix = {1: "b8", 4: "b32", 8: "b64", 16: "b128"}[width]
+        local = self._lds_ptr_operand("global_store_async_from_lds", lds_ptr)
+        key = f"global.store.async.from.lds.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.global.store.async.from.lds.{suffix}("
+            f"ptr addrspace(1) {self._operand(dst_ptr)}, "
+            f"ptr addrspace(3) {local}, i32 {offset}, i32 {cachepolicy})"
+        )
+
+    def _op_tile_global_load_tr16_b128(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_load_tr16_b128")
+        if len(op.operands) != 1:
+            raise ValueError("global_load_tr16_b128 expects one operand")
+        src_ptr = op.operands[0]
+        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
+            raise TypeError("global_load_tr16_b128 src_ptr must be a global pointer")
+        dtype = str(op.attrs.get("dtype", ""))
+        suffixes = {"f16": "v8f16", "bf16": "v8bf16", "i16": "v8i16"}
+        if dtype not in suffixes:
+            raise TypeError(
+                f"global_load_tr16_b128 dtype must be f16/bf16/i16, got {dtype}"
+            )
+        expected = VectorType({"f16": F16, "bf16": BF16, "i16": I16}[dtype], 8)
+        if op.result.type != expected:
+            raise TypeError(
+                f"global_load_tr16_b128 result must be {expected}, got {op.result.type}"
+            )
+        suffix = suffixes[dtype]
+        llvm_ty = _llvm_type(op.result.type)
+        key = f"global.load.tr.b128.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.global.load.tr.b128.{suffix}("
+            f"ptr addrspace(1) {self._operand(src_ptr)})"
+        )
+
+    def _op_tile_tensor_load_to_lds(self, op: Op) -> None:
+        self._lower_tensor_lds_transfer(op, "tensor.load.to.lds")
+
+    def _op_tile_tensor_store_from_lds(self, op: Op) -> None:
+        self._lower_tensor_lds_transfer(op, "tensor.store.from.lds")
+
+    def _lower_tensor_lds_transfer(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        expected = (
+            VectorType(I32, 4),
+            VectorType(I32, 8),
+            VectorType(I32, 4),
+            VectorType(I32, 4),
+            VectorType(I32, 8),
+        )
+        if len(op.operands) != len(expected):
+            raise ValueError(f"{short_name} expects five descriptor groups")
+        for index, (operand, want) in enumerate(zip(op.operands, expected)):
+            if operand.type != want:
+                raise TypeError(
+                    f"{short_name} d{index} must be {want}, got {operand.type}"
+                )
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"{short_name} cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        self._need(intrinsic)
+        args = ", ".join(self._operand_with_type(value) for value in op.operands)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}({args}, i32 {cachepolicy})"
         )
 
     def _op_tile_sync(self, op: Op) -> None:
