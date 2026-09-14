@@ -328,10 +328,8 @@ class FmhaBwdDQDKDVTileSize:
     dispatch_max_seq_q: int = 0
     dispatch_max_seq_k: int = 0
     # Smallest batch*nhead this tile may be dispatched for. The QrQtrDor
-    # pipeline moves the kv axis from the grid into a loop, so its grid is
-    # batch*nhead alone where the regular pipeline's also spans kv tiles. Below
-    # this many workgroups the CUs sit idle and the regular pipeline wins, so
-    # the bound is deliberately conservative.
+    # pipeline loops over kv instead of spanning it in the grid, so batch*nhead
+    # is the whole grid; below this many workgroups the CUs sit idle.
     dispatch_min_grid: int = 0
     # Emit the masked variants of this tile. Opt-in per tile: the masked
     # QrQtrDor path is only worth generating where its dispatch has been
@@ -1098,12 +1096,9 @@ class FmhaBwdApiPool:
             per_dtypes = ""
             for i_dtype, (dtype, pool_by_dtype) in enumerate(pool_by_arch.items()):
                 per_hdim_case = ""
-                # Ascending hdim, because hdim_cond emits `hdim_q <= N` and a
-                # smaller hdim also satisfies every larger bound. Insertion
-                # order happened to be ascending until a tile was added whose
-                # headdim bucket was not reached in ascending order, which put
-                # `<= 64` ahead of `<= 32` and sent hdim 32 shapes to the padded
-                # 64 kernel.
+                # Ascending hdim: hdim_cond emits `hdim_q <= N`, so a smaller
+                # hdim also satisfies every larger bound and the first matching
+                # branch wins. Insertion order does not guarantee this.
                 for i_hdim, (hdim, pool_by_hdim) in enumerate(sorted(pool_by_dtype.items())):
                     traits = sorted(pool_by_hdim, key=self.max_seq_q_sort_key)
                     inners = self._api_inners(traits)
