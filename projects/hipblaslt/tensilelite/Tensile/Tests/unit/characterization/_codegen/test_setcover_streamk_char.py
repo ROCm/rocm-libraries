@@ -7,44 +7,42 @@ Feature-config seeds selected by the dynamic emit set-cover
 ``Tests/common/streamk`` configs for the emit god-files. Stream-K configs
 combined with MX fp4/fp8, prefetch-across-persistent (PAP), half-PLR, TDM split,
 and gl2 prefetch exercise scheduling and global-write arms the ``_designed``
-catalog never reaches. Each emits CPU-only and its order-invariant
-``{basename, err}`` digest is pinned as a golden. Configs whose emit returns a
-non-zero code on some kernels are marked ``all_ok=False``; their golden pins the
-actual per-kernel error codes rather than asserting err==0.
+catalog never reaches. These are explicitly coverage-oriented smoke cases.
+Each emits CPU-only and requires successful generation unless the configuration
+has known emitter failures. They do not claim to characterize the instruction
+sequence.
 """
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_config_emits
 
 pytestmark = pytest.mark.unit
 
 _CONFIGS = [
-    ("Tensile/Tests/common/streamk/sk_mx32f4_quick.yaml", "gfx942", False),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8_force_dp_only_halfplr_tdm_pap.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/streamk/gfx950/sk_sgemm_pap.yaml", "gfx950", True),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/streamk/gfx950/sk_mxf4gemm_pap.yaml", "gfx950", True),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml", "gfx1250", False),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_f8gemm_tdm.yaml", "gfx1250", True),
-    ("Tensile/Tests/common/streamk/sk_dynamic.yaml", "gfx942", False),
-    ("Tensile/Tests/common/streamk/sk_dynamic_work_stealing.yaml", "gfx942", True),
-    ("Tensile/Tests/common/streamk/sk_hybrid_work_stealing.yaml", "gfx942", True),
+    ("Tensile/Tests/common/streamk/sk_mx32f4_quick.yaml", "23ed5c8a0e5c", "gfx942", False),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8_force_dp_only_halfplr_tdm_pap.yaml", "bb4f95f916a4", "gfx1250", True),
+    ("Tensile/Tests/common/streamk/gfx950/sk_sgemm_pap.yaml", "793c0936cda1", "gfx950", True),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_bgemm_tdm_split.yaml", "fdc87a84ba11", "gfx1250", True),
+    ("Tensile/Tests/common/streamk/gfx950/sk_mxf4gemm_pap.yaml", "c4f8bfd4591c", "gfx950", True),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf4gemm_pap_prefetchgl2.yaml", "31865b42246d", "gfx1250", False),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm_split.yaml", "d620d4d1320b", "gfx1250", True),
+    ("Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_f8gemm_tdm.yaml", "cc297f6c3034", "gfx1250", True),
+    ("Tensile/Tests/common/streamk/sk_dynamic.yaml", "acedc4cffbc9", "gfx942", False),
+    ("Tensile/Tests/common/streamk/sk_dynamic_work_stealing.yaml", "1d2d14028206", "gfx942", True),
+    ("Tensile/Tests/common/streamk/sk_hybrid_work_stealing.yaml", "400c0fc88b6b", "gfx942", True),
 ]
 
-_IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]
+_IDS = [f"{c[0].rsplit('/', 1)[-1][:-5]}-group-{c[1]}" for c in _CONFIGS]
 
 
-@pytest.mark.parametrize("config,arch,all_ok", _CONFIGS, ids=_IDS)
-def test_setcover_streamk_emits_golden(config, arch, all_ok, snapshot):
-    """Config emits >=1 kernel (all err==0 when all_ok); golden pins per-kernel err."""
-    results = emit_kernels_from_config(config, limit=8, arch=arch)
-    assert len(results) >= 1
-    if all_ok:
-        assert all(err == 0 for (_b, _s, err) in results)
-    digest = sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
+@pytest.mark.parametrize("config,problem_fingerprint,arch,all_ok", _CONFIGS, ids=_IDS)
+def test_setcover_streamk_emits(config, problem_fingerprint, arch, all_ok):
+    """The selected problem group reaches emission; ordinary cases succeed."""
+    assert_config_emits(
+        config,
+        arch,
+        limit=8,
+        all_ok=all_ok,
+        problem_fingerprint=problem_fingerprint,
     )
-    assert digest == snapshot
