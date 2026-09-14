@@ -15,4 +15,4 @@
 [submodule "dnn-benchmarking"]
 	path = projects/hipdnn/tools/dnn-benchmarking
 	url = https://github.com/ROCm/dnn-benchmarking.git
-	branch = users/bharriso/agent-kernel-integration-poc
+	branch = users/sareeder/hipdnn-studio-integration
