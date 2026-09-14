@@ -220,43 +220,43 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
     launch_test_on_streams([&] { test; }, streams, devices)
 
 // Macro to run test across threads
-#define RUN_TEST_ON_THREADS_STREAMS(test)                                                    \
-    do                                                                                       \
-    {                                                                                        \
-        const auto& arg          = GetParam();                                               \
-        size_t      threads      = arg.threads;                                              \
-        size_t      streams      = arg.streams;                                              \
-        size_t      devices      = arg.devices;                                              \
-        int         availDevices = 0;                                                        \
-        bool        HMM          = arg.HMM;                                                  \
-        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                                   \
-        if(devices > availDevices)                                                           \
-        {                                                                                    \
-            GTEST_SKIP() << TOO_FEW_DEVICES_PRESENT_STRING;                                  \
-            return;                                                                          \
-        }                                                                                    \
-        else if(HMM)                                                                         \
-        {                                                                                    \
-            for(int i = 0; i < devices; i++)                                                 \
-            {                                                                                \
-                int flag = 0;                                                                \
-                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
-                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), devices)); \
-                if(!flag)                                                                    \
-                {                                                                            \
-                    GTEST_SKIP() << HMM_NOT_SUPPORTED_STRING;                                \
-                    return;                                                                  \
-                }                                                                            \
-            }                                                                                \
-        }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
-        if(threads)                                                                          \
-        {                                                                                    \
-            client_omp_manager manager(threads);                                             \
-            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
-        }                                                                                    \
-        else                                                                                 \
-            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                                  \
+#define RUN_TEST_ON_THREADS_STREAMS(test)                                              \
+    do                                                                                 \
+    {                                                                                  \
+        const auto& arg          = GetParam();                                         \
+        size_t      threads      = arg.threads;                                        \
+        size_t      streams      = arg.streams;                                        \
+        size_t      devices      = arg.devices;                                        \
+        int         availDevices = 0;                                                  \
+        bool        HMM          = arg.HMM;                                            \
+        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                             \
+        if(devices > availDevices)                                                     \
+        {                                                                              \
+            GTEST_SKIP() << TOO_FEW_DEVICES_PRESENT_STRING;                            \
+            return;                                                                    \
+        }                                                                              \
+        else if(HMM)                                                                   \
+        {                                                                              \
+            for(int i = 0; i < devices; i++)                                           \
+            {                                                                          \
+                int flag = 0;                                                          \
+                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                 \
+                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
+                if(!flag)                                                              \
+                {                                                                      \
+                    GTEST_SKIP() << HMM_NOT_SUPPORTED_STRING;                          \
+                    return;                                                            \
+                }                                                                      \
+            }                                                                          \
+        }                                                                              \
+        g_stream_pool.reset(devices, streams);                                         \
+        if(threads)                                                                    \
+        {                                                                              \
+            client_omp_manager manager(threads);                                       \
+            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                   \
+        }                                                                              \
+        else                                                                           \
+            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                            \
     } while(0)
 
 // Thread worker class

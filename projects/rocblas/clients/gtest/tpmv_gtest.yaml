@@ -4,10 +4,12 @@ include: known_bugs.yaml
 
 Definitions:
   - &small_matrix_size_range
+    - { N:     1 }
+    - { N:    10 }
+    - { N:   100 }
+
+  - &small_strided_matrix_size_range
     - { N:     1, stride_a:       1 }
-    - { N:     1, stride_a:       1 }
-    - { N:    10, stride_a:       100 }
-    - { N:    1, stride_a:       1 }
     - { N:    10, stride_a:      55 }
     - { N:   100, stride_a:    40000 }
 
@@ -48,7 +50,7 @@ Tests:
   uplo: [L, U]
   transA: [N, T, C]
   diag: [N, U]
-  api: [ C, FORTRAN ]
+  api: [ C, FORTRAN, FORTRAN_64 ]
 
 - name: tpmv_arg_checks
   category: quick
@@ -235,7 +237,7 @@ Tests:
   uplo: [L, U]
   transA: [N, T, C]
   diag: [N, U]
-  matrix_size: *small_matrix_size_range
+  matrix_size: *small_strided_matrix_size_range
   incx: *incx_range_small
   batch_count: [ -1, 0, 3 ]
   stride_scale: [ 2 ]
@@ -248,7 +250,7 @@ Tests:
   uplo: [L, U]
   transA: [N, T, C]
   diag: [N, U]
-  matrix_size: *small_matrix_size_range
+  matrix_size: *small_strided_matrix_size_range
   incx: *incx_range
   batch_count: [ 1, 3 ]
   stride_scale: [ 2 ]
