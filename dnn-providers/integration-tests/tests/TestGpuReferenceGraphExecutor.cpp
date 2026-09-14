@@ -408,13 +408,10 @@ void runConvFwdExecutorVsCpu(const std::vector<int64_t>& xDims,
     }
 }
 
-template <typename T, typename ComputeT = double>
+template <typename IOType, typename ComputeType = float>
 void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
                                const std::vector<int64_t>& outDims,
-                               hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
-                               hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType,
-                               hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                               = hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE)
+                               hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode)
 {
     constexpr int64_t IN_UID = 1;
     constexpr int64_t OUT_UID = 2;
@@ -426,7 +423,7 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
-
+    const auto ioDataType = hipdnn_test_sdk::utilities::nativeTypeToDataType<IOType>();
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, IN_UID, "input", ioDataType, &inStrides, &inDims));
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -436,6 +433,7 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
         builder, mode, IN_UID, OUT_UID);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    const auto computeDataType = hipdnn_test_sdk::utilities::nativeTypeToDataType<ComputeType>();
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "reduction_node",
@@ -453,9 +451,9 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     builder.Finish(graphOffset);
 
     // Prepare tensors and fill input with random values
-    hipdnn_data_sdk::utilities::Tensor<T> inputTensor(inDims, inStrides);
-    hipdnn_data_sdk::utilities::Tensor<T> outputTensor(outDims, outStrides);
-    inputTensor.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), 42);
+    hipdnn_data_sdk::utilities::Tensor<IOType> inputTensor(inDims, inStrides);
+    hipdnn_data_sdk::utilities::Tensor<IOType> outputTensor(outDims, outStrides);
+    inputTensor.fillWithRandomValues(static_cast<IOType>(-1.0f), static_cast<IOType>(1.0f), 42);
 
     // Run GPU Graph executor
     std::unordered_map<int64_t, void*> variantPack;
@@ -467,14 +465,14 @@ void runReductionExecutorVsCpu(const std::vector<int64_t>& inDims,
     outputTensor.markDeviceModified();
 
     // Run CPU reference reduction
-    hipdnn_data_sdk::utilities::Tensor<T> refOutputTensor(outDims, outStrides);
-    hipdnn_test_sdk::utilities::CpuFpReferenceReduction::reduce<T, T, ComputeT>(
+    hipdnn_data_sdk::utilities::Tensor<IOType> refOutputTensor(outDims, outStrides);
+    hipdnn_test_sdk::utilities::CpuFpReferenceReduction::reduce<IOType, IOType, ComputeType>(
         inputTensor, refOutputTensor, mode);
 
     // Compare GPU output against CPU reference
-    const auto* outputHost = static_cast<const T*>(outputTensor.rawHostData());
-    const auto* refOutputHost = static_cast<const T*>(refOutputTensor.rawHostData());
-    const auto tolerance = hipdnn_test_sdk::utilities::reduction::getTolerance<T>();
+    const auto* outputHost = static_cast<const IOType*>(outputTensor.rawHostData());
+    const auto* refOutputHost = static_cast<const IOType*>(refOutputTensor.rawHostData());
+    const auto tolerance = hipdnn_test_sdk::utilities::reduction::getTolerance<IOType>();
     for(size_t i = 0; i < outputTensor.elementCount(); ++i)
     {
         EXPECT_NEAR(
@@ -1078,10 +1076,8 @@ TEST(TestGpuReferenceGraphExecutorFp32, ReductionExecutes)
 {
     SKIP_IF_NO_DEVICES();
 
-    runReductionExecutorVsCpu<float>({4, 16, 28, 28},
-                                     {4, 16, 1, 1},
-                                     hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD,
-                                     hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    runReductionExecutorVsCpu<float>(
+        {4, 16, 28, 28}, {4, 16, 1, 1}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX);
 }
 
 TEST(TestGpuReferenceGraphExecutorFp16, ReductionExecutes)
@@ -1089,10 +1085,7 @@ TEST(TestGpuReferenceGraphExecutorFp16, ReductionExecutes)
     SKIP_IF_NO_DEVICES();
 
     runReductionExecutorVsCpu<hipdnn_data_sdk::types::half>(
-        {4, 16, 28, 28},
-        {1, 1, 28, 28},
-        hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MUL,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+        {4, 16, 28, 28}, {1, 1, 28, 28}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MUL);
 }
 
 TEST(TestGpuReferenceGraphExecutorBfp16, ReductionExecutes)
@@ -1102,6 +1095,13 @@ TEST(TestGpuReferenceGraphExecutorBfp16, ReductionExecutes)
     runReductionExecutorVsCpu<hipdnn_data_sdk::types::bfloat16>(
         {4, 16, 28, 28},
         {1, 16, 1, 28},
-        hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NORM2,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+        hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NORM2);
+}
+
+TEST(TestGpuReferenceGraphExecutorFp32, ReductionWithDoubleComputeTypeExecutes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runReductionExecutorVsCpu<float, double>(
+        {4, 16, 28, 28}, {4, 16, 1, 1}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::AVG);
 }

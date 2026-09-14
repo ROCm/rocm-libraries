@@ -6,13 +6,8 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
-#include <hipdnn_data_sdk/types/Bfloat16.hpp>
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include "harness/gpu-graph-executor/detail/GpuReductionPlan.hpp"
@@ -102,7 +97,7 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForIncorrectReductionM
     auto nodeAttributes
         = const_cast<ReductionAttributes*>(graph.getNode(0).attributes_as_ReductionAttributes());
     ASSERT_NE(nodeAttributes, nullptr);
-    nodeAttributes->mutate_mode(static_cast<ReductionMode>(999)); // Invalid mode
+    ASSERT_TRUE(nodeAttributes->mutate_mode(static_cast<ReductionMode>(99))); // Invalid mode
 
     EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()));
 }

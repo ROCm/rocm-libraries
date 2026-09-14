@@ -34,7 +34,8 @@ struct GpuReductionParams
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT inputTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT outputTensor;
-    hipdnn_flatbuffers_sdk::data_objects::ReductionMode reductionMode;
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode reductionMode
+        = hipdnn_flatbuffers_sdk::data_objects::ReductionMode::NOT_SET;
 };
 
 template <typename InputDataType, typename OutputDataType, typename ComputeDataType>
