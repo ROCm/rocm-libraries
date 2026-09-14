@@ -115,7 +115,9 @@ namespace TensileLite
 
         using BitWidth        = uint8_t;
         using Size            = uint64_t;
-        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        // Key includes the tensor index so A and B (which can share dtype+sizes on a square
+        // problem) get distinct swizzle entries instead of aliasing each other's data.
+        using SwizzleCacheKey = std::tuple<size_t, BitWidth, Size, Size>;
         using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
         using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
         static thread_local SwizzleCache g_swizzleCache;
@@ -2874,7 +2876,7 @@ namespace TensileLite
                         DGen::roundUp(tiledSize, MiM_N),
                         DGen::roundUp(effUnrolled, effMiK * effPackK)};
                     auto swizzleKey
-                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+                        = std::make_tuple(i, toBitWidth(desc.dataType()), unrolledSize, tiledSize);
 
                     // Convert byte-granularity flat size back to native element count
                     // for the GPU copy (e.g. FP4: 2 elements per byte)
