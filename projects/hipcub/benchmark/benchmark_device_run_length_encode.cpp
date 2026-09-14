@@ -61,7 +61,7 @@ class encode_benchmark : public primbench::benchmark_interface
         while(offset < items)
         {
             const size_t key_count = key_counts[runs_count % key_counts.size()];
-            const size_t end       = _HIPCUB_STD::min(items, offset + key_count);
+            const size_t end       = std::min(items, offset + key_count);
             for(size_t i = offset; i < end; i++)
             {
                 input[i] = runs_count;
@@ -148,7 +148,7 @@ class non_trivial_runs_benchmark : public primbench::benchmark_interface
         while(offset < items)
         {
             const size_t key_count = key_counts[runs_count % key_counts.size()];
-            const size_t end       = _HIPCUB_STD::min(items, offset + key_count);
+            const size_t end       = std::min(items, offset + key_count);
             for(size_t i = offset; i < end; i++)
             {
                 input[i] = runs_count;
