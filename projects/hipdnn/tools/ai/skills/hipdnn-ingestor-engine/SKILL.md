@@ -15,6 +15,7 @@ These pages supply contracts, not alternate procedures:
 | [extend.md](extend.md) | Existing identities and addition-only splices |
 | [graph-contract.md](graph-contract.md) | Graph semantics, UID edges, fields and reference capability |
 | [rocke-mining.md](rocke-mining.md) | Applicability, specialization, layout, geometry and ABI |
+| [hiprtc-mining.md](hiprtc-mining.md) | Drop-in `hiprtc_file` kernels: scope, entry point, defines and bundles |
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
 | [workloads.md](workloads.md) | Corpus identity, coverage and runtime accounting |
 | [Sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) | Python CLI, YAML, measurement and resume |
@@ -28,14 +29,17 @@ a capable numerical reference blocks the corresponding gate; scope changes requi
 explicit approval. Keep local scheduling and experiment evidence outside product
 source according to workspace policy.
 
-| | `direct_load` | `packaged` |
-|---|---|---|
-| Authored source | `embedded_source` | `rocke` or `hip` |
-| Runtime descriptors | Authored direct-load tree | Lowered per-arch tree, `kind: kpack` |
-| Source staging | Provider embedding/descriptor lists | Production packager's authored source root |
+| | `direct_load` / `embedded_source` | `direct_load` / `hiprtc_file` | `packaged` |
+|---|---|---|---|
+| Authored source | HIP, embedded at configure time | HIP, compiled at `prepare()` | `rocke` or `hip` |
+| Runtime descriptors | Authored direct-load tree | Authored tree, usually a drop-in root | Lowered per-arch tree, `kind: kpack` |
+| Source staging | Provider embedding/descriptor lists | Bundle directory beside the descriptors | Production packager's authored source root |
+| Adding a variant | Reconfigure, rebuild, reinstall | Copy files, restart the process | Repack, reinstall |
 
 rocKE is always packaged. Direct-load engines need neither a fictitious rocKE
-profile nor a compiled-specialization claim their path cannot supply.
+profile nor a compiled-specialization claim their path cannot supply. `hiprtc_file`
+adds variants to an **already-installed** pack only, reusing its registered symbols
+and its handler's launch ABI; a new native symbol is still a rebuild.
 
 ## Completion and handoff
 
