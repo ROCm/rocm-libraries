@@ -521,11 +521,24 @@ recursively for both. Form is decided by content rather than extension, the same
 given a reproducible UUID5 of its canonical content; a serialized graph already
 carries its own id and the bench preserves it, so nothing is injected there.
 
-Collection uses STANDARD autotune for each explicitly enrolled candidate; an
-internal exhaustive sweep must not substitute a different kernel. Providers that
-do not implement enumeration report unsupported, not an empty catalog.
-Existing timing-based `is_valid` semantics are unchanged: this workflow does not
-establish per-candidate numerical correctness.
+Collection times **one invocation per graph**: `hipdnn_bench enumerate` decides the
+candidate set, then a single `hipdnn_bench --sweep --json` times every candidate in
+that set, in one process. Plugin load, graph build and kernel compilation are paid
+once per graph instead of once per row, which is most of the wall time on kernels
+that run in well under a millisecond. Collection pins restrict which candidates are
+enrolled; they are never combined with a candidate's own settings, so one enrolled
+tuple still times exactly one candidate. The sweep must return exactly the
+enumerated candidates — a subset is silent data loss and fails the run.
+
+The trade is crash granularity: a candidate that fails to build or run is reported
+as an unsuccessful result and still reaches the corpus, but a candidate that crashes
+the process now costs its graph's remaining rows rather than only its own.
+
+Each candidate is timed with STANDARD autotune; an internal exhaustive sweep must
+not substitute a different kernel. Providers that do not implement enumeration
+report unsupported, not an empty catalog. `is_valid` keeps its timing-based meaning
+— "a measurement was obtained" — and `numerically_valid` carries the separate
+per-candidate correctness verdict beside it.
 
 Every collected row carries §8.3's envelope, `stddevMs` and `iters` included, so
 `evaluate`'s noise band works on a generated corpus rather than being inert on it.
