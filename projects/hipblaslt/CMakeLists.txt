@@ -23,7 +23,6 @@ endif()
 
 include(hipblaslt_shim)
 include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
 
@@ -61,12 +60,12 @@ option(HIPBLASLT_ENABLE_EXTOPS "Build hipBLASLt ExtOp device libraries." ON)
 option(HIPBLASLT_ENABLE_MATRIX_TRANSFORM "Build hipBLASLt MatrixTransform device library." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
+option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipBLASLt library as shared vs static." ON)
+option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
 option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
-option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
-
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
 option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_TESTING})
@@ -84,15 +83,14 @@ if(HIPBLASLT_ENABLE_CLIENT)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
-    option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
-    option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
-    option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
+    option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
+    option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
@@ -111,6 +109,12 @@ mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+mark_as_advanced(HIPBLASLT_ENABLE_FETCH)
+mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
+mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
+mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
+mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
+mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
@@ -225,15 +229,10 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     endif()
 endif()
 
-if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    set(HIPBLASLT_PYTHON_DEPS "_rocisa")
-    set(hipblaslt_python_dev Development.Module)
-    hipblaslt_find_python("${hipblaslt_python_dev}")
-    hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
-else()
-    hipblaslt_find_python("${hipblaslt_python_dev}")
-    set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
-endif()
+set(HIPBLASLT_PYTHON_DEPS "_rocisa")
+set(hipblaslt_python_dev Development.Module)
+hipblaslt_find_python("${hipblaslt_python_dev}")
+hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
@@ -244,6 +243,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
                 set(ROCROLLER_ENABLE_FETCH ON)
                 set(ROCROLLER_BUILD_TESTING OFF)
                 set(ROCROLLER_ENABLE_CLIENT OFF)
+                set(BUILD_SHARED_LIBS OFF)
                 option(YAML_CPP_INSTALL "" ON)
                 set(BUILD_TESTING OFF)
                 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
@@ -269,20 +269,22 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     endif()
 endif()
 
-if(NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_THEROCK)
-        find_package(origami CONFIG QUIET)
-    endif()
+if(ROCM_LIBS_SUPERBUILD)
     if(NOT TARGET roc::origami)
-        block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_FETCH ON)
-            set(ORIGAMI_BUILD_TESTING OFF)
-            set(ORIGAMI_ENABLE_PYTHON OFF)
-            set(BUILD_TESTING OFF)
-            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
-        endblock()
+        message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::origami target before configuring hipBLASLt.")
     endif()
+elseif(HIPBLASLT_ENABLE_THEROCK)
+    find_package(origami CONFIG REQUIRED)
+else()
+    block(SCOPE_FOR VARIABLES)
+        set(ORIGAMI_BUILD_SHARED_LIBS OFF)
+        set(ORIGAMI_ENABLE_FETCH ON)
+        set(ORIGAMI_BUILD_TESTING OFF)
+        set(ORIGAMI_ENABLE_PYTHON OFF)
+        set(BUILD_TESTING OFF)
+        set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami")
+    endblock()
 endif()
 
 add_library(hipblaslt-headers INTERFACE)
@@ -351,18 +353,22 @@ if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
 
-add_subdirectory(tensilelite)
+block(SCOPE_FOR VARIABLES)
+    set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
+    add_subdirectory(tensilelite)
+endblock()
+
+set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")
 
 if(HIPBLASLT_ENABLE_HOST)
-    if(HIPBLASLT_BUILD_SHARED_LIBS)
-        add_library(hipblaslt SHARED)
-        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL,
-        # only when a resource compiler was found (see version.rc guard above).
-        if(_hipblaslt_have_version_rc)
-            target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
-        endif()
-    else()
-        add_library(hipblaslt STATIC)
+    add_library(hipblaslt)
+    if(WIN32 AND BUILD_SHARED_LIBS AND _hipblaslt_have_version_rc)
+        target_sources(
+            hipblaslt
+            PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
+        )
+    endif()
+    if(NOT BUILD_SHARED_LIBS)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
@@ -450,6 +456,8 @@ if(HIPBLASLT_ENABLE_HOST)
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
 
+    rocm_install_targets(TARGETS hipblaslt)
+
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
     install(
@@ -467,36 +475,11 @@ if(HIPBLASLT_ENABLE_HOST)
         COMPONENT devel
     )
 
-    rocm_install_targets(TARGETS hipblaslt)
-
-    set(_hipblaslt_export_targets roc::hipblaslt)
-    if(TENSILELITE_BUILD_SHARED_LIBS)
-        list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
-    endif()
-    rocm_export_targets(
-        TARGETS ${_hipblaslt_export_targets}
-        DEPENDS PACKAGE hip
-        DEPENDS PACKAGE ${hipblas_target}
-        NAMESPACE roc::
-    )
-
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
-        @ONLY
-    )
-
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
-        COMPONENT devel
-    )
-
     if( LEGACY_HIPBLAS_DIRECT )
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
     else()
         set(hipblas_common_minimum 1.0.0)
-        if(HIPBLASLT_BUILD_SHARED_LIBS)
+        if(BUILD_SHARED_LIBS)
             rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
             rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
         else()
@@ -506,7 +489,74 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
-# Both the device-library contents and custom kernels in the rocroller directory should be installed if selected for
+if(TENSILELITE_ENABLE_HOST)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_codegen.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
+        COMPONENT devel
+    )
+endif()
+
+set(_hipblaslt_export_targets)
+set(_hipblaslt_export_depends PACKAGE hip)
+
+if(HIPBLASLT_ENABLE_HOST)
+    list(APPEND _hipblaslt_export_targets roc::hipblaslt)
+    list(APPEND _hipblaslt_export_depends PACKAGE ${hipblas_target})
+endif()
+if(TENSILELITE_ENABLE_HOST)
+    list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
+endif()
+
+if(_hipblaslt_export_targets)
+    block(SCOPE_FOR VARIABLES)
+        set(_hipblaslt_static_depends)
+
+        if(TARGET tensilelite-host)
+            get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+        endif()
+        if(TARGET hipblaslt)
+            get_target_property(_hipblaslt_target_type hipblaslt TYPE)
+        endif()
+
+        if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
+            list(APPEND _hipblaslt_static_depends PACKAGE ZLIB)
+        endif()
+
+        if(HIPBLASLT_ENABLE_YAML)
+            if(_tensilelite_host_type STREQUAL "STATIC_LIBRARY")
+                list(APPEND _hipblaslt_static_depends PACKAGE LLVM)
+            endif()
+        elseif(_tensilelite_host_type STREQUAL "STATIC_LIBRARY"
+               OR _hipblaslt_target_type STREQUAL "STATIC_LIBRARY")
+            if(hipblaslt_msgpack_target STREQUAL "msgpack-cxx")
+                list(APPEND _hipblaslt_static_depends PACKAGE msgpack-cxx CONFIG)
+            else()
+                list(APPEND _hipblaslt_static_depends
+                    PACKAGE msgpackc-cxx CONFIG NAMES msgpackc-cxx msgpack)
+            endif()
+        endif()
+
+        # rocm_export_targets emits STATIC_DEPENDS only when the canonical
+        # variable is OFF. Scope that choice to config generation so a mixed
+        # shared hipBLASLt/static TensileLite export remains discoverable.
+        if(_hipblaslt_static_depends)
+            set(BUILD_SHARED_LIBS OFF)
+        endif()
+
+        rocm_export_targets(
+            TARGETS ${_hipblaslt_export_targets}
+            DEPENDS ${_hipblaslt_export_depends}
+            STATIC_DEPENDS ${_hipblaslt_static_depends}
+            INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-package-config.cmake"
+            NAMESPACE roc::
+        )
+    endblock()
+endif()
+
+unset(_hipblaslt_export_targets)
+unset(_hipblaslt_export_depends)
+
 if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
     if(WIN32)
         # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
@@ -586,7 +636,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT benchmarks
     )
-
     rocm_install(
         PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/performance/hipblaslt-perf"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -717,16 +766,20 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             COMPONENT tests
         )
     endif()
-    # Co-install stinkytofu shared library next to _rocisa
-    if(TARGET stinkytofu AND NOT WIN32)
-        install(FILES $<TARGET_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
-        install(FILES $<TARGET_SONAME_FILE:stinkytofu>
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
+    if(TARGET stinkytofu)
+        get_target_property(_hipblaslt_stinkytofu_type stinkytofu TYPE)
+        if(_hipblaslt_stinkytofu_type STREQUAL "SHARED_LIBRARY")
+            install(FILES $<TARGET_FILE:stinkytofu>
+                DESTINATION "${_tensilelite_install_dest}/rocisa"
+                COMPONENT tests
+            )
+            if(NOT WIN32)
+                install(FILES $<TARGET_SONAME_FILE:stinkytofu>
+                    DESTINATION "${_tensilelite_install_dest}/rocisa"
+                    COMPONENT tests
+                )
+            endif()
+        endif()
     endif()
 
     # rocisa tests
@@ -824,10 +877,6 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
 endif()
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
-    # rocm_create_package makes decisions on what type of package to produce
-    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
-    # a dev package.
-    set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
         NAME hipblaslt

@@ -37,7 +37,8 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKMulticast
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKCluster, \
+    streamKMulticast
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -3269,10 +3270,10 @@ class StreamKTwoTileDPFirst(StreamK):
         never anchored on the StreamKMulticast path (GlobalSplitU == 0). One
         wave per workgroup arrives (others branch over it), uniformly across
         peers, keeping cluster-scope signal/wait counts balanced. Inert unless
-        the cluster multicast is active.
+        ``streamKCluster``.
         """
         module = Module("StreamK multicast prologue signal")
-        if not streamKMulticast(kernel):
+        if not streamKCluster(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
@@ -3310,11 +3311,10 @@ class StreamKTwoTileDPFirst(StreamK):
         leaving the arrive unbalanced. Emit the matching all-waves wait on the
         skip edge (scc1 == numIterL == 0; branch over it on scc0) so every peer
         does exactly one arrive + one wait on every path. The wait leaves scc
-        intact for the following long branch. Inert unless the cluster multicast
-        is active.
+        intact for the following long branch. Inert unless ``streamKCluster``.
         """
         module = Module("StreamK multicast zero-iteration cluster wait")
-        if not streamKMulticast(kernel):
+        if not streamKCluster(kernel):
             return module
         assert writer.states.asmCaps.get("HasClusterBarrier", False), \
             "cluster B-multicast requires the HasClusterBarrier asm capability"
@@ -3355,7 +3355,7 @@ class StreamKTwoTileDPFirst(StreamK):
         ``WorkGroup0`` and BEFORE ``streamKMulticastPrologueSignal``.
         """
         module = Module("StreamK cluster pad early-exit")
-        if not streamKMulticast(kernel):
+        if not streamKCluster(kernel):
             return module
         assert clusterEnabled(kernel["ClusterDim"]), \
             "streamKClusterPadEarlyExit requires an enabled cluster"
@@ -3415,7 +3415,7 @@ class StreamKTwoTileDPFirst(StreamK):
         #   StreamKIdx = WorkGroup2*(nWG0*nWG1) + WorkGroup1*nWG0 + WorkGroup0
         # written into WorkGroup0 so the save below copies the final index. A 1-D
         # [Cs, 1] cluster launches the same 2-D grid, so it folds identically.
-        if streamKMulticast(kernel):
+        if streamKCluster(kernel):
             with writer.allocTmpSgpr(2, tag="ClusterDPFold") as tRes:
                 t0 = tRes.idx
                 t1 = tRes.idx + 1
@@ -3446,7 +3446,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # here would over-count the -3 barrier. DEFER that arrive to just after the
         # work-check. The ForceDPOnly cluster has already dropped its no-work peers
         # in streamKClusterPadEarlyExit above, so it arrives here.
-        if streamKMulticast(kernel):
+        if streamKCluster(kernel):
             module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:
