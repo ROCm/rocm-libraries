@@ -118,10 +118,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # the binary is running instead of reaching back into the tree that configured it -- an
     # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        # The production root the provider itself loads from, which TestShippedDescriptorSets
-        # walks. It was HIPDNN_DESCRIPTOR_BUILD_DIR before descriptor packaging replaced the
-        # staging variables; the packed root is the same tree under the new name.
-        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+        # The staged tree TestShippedDescriptorSets walks. It was HIPDNN_DESCRIPTOR_BUILD_DIR
+        # before descriptor packaging replaced the staging variables, and that tree held the
+        # descriptors this branch shipped -- which develop moved under test_descriptors/ and
+        # left the production root dormant by default. The unit root is the one this binary
+        # stages, so pointing anywhere else makes every case here vacuous, which is the exact
+        # failure the first test in that file exists to catch.
+        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_UNIT_BUILD_DIR}"
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
