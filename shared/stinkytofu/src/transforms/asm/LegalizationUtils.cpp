@@ -284,13 +284,6 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     return {signalInst, waitInst};
 }
 
-/// Helper: compute MSB offset for VGPR when hasVgprMsb is true.
-/// When regIdx crosses 256 boundary (e.g., 256, 512), the offset differs from the base.
-static int16_t getVgprMsbOffsetForIdx(RegType type, uint32_t regIdx, bool hasVgprMsb) {
-    if (!hasVgprMsb || type != RegType::V) return 0;
-    return static_cast<int16_t>((regIdx / 256) * (-256));
-}
-
 /// Helper function to adjust symbolic register name for split instructions
 static std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0) {
     if (symbolicName.empty()) return "";
@@ -312,8 +305,7 @@ static std::string adjustSymbolicRegName(const std::string& symbolicName, int of
     return baseName + "+" + std::to_string(newDigitBase);
 }
 
-Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                             bool hasVgprMsb) {
+Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSLoadB192: ds_load_b192 v[a:a+5], v[b] offset:X
     // →
     // ds_load_b128 v[a:a+3], v[b] offset:X
@@ -339,9 +331,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     const HwInstDesc* desc1 = getMCIDByUOp(GFX::ds_load_b128, archId);
     StinkyInstruction* load1 = irBuilder.create(desc1, inst);
 
-    StinkyRegister dstData1{origDst.reg.type, origDst.reg.idx,
-                            4,  // 4 registers
-                            origDst.reg.offset};
+    StinkyRegister dstData1{origDst.reg.type, origDst.reg.idx, 4};
 
     if (!origDst.getSymbolicName().empty()) {
         dstData1.setSymbolicName(origDst.getSymbolicName());
@@ -371,11 +361,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
            "Invalid destination register index");
 
     uint32_t dstData2Idx = static_cast<uint16_t>(origDst.reg.idx + 4);
-    int16_t dstData2Offs = (hasVgprMsb && origDst.reg.type == RegType::V)
-                               ? getVgprMsbOffsetForIdx(origDst.reg.type, dstData2Idx, hasVgprMsb)
-                               : origDst.reg.offset;
-
-    StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2, dstData2Offs};
+    StinkyRegister dstData2{origDst.reg.type, dstData2Idx, 2};
 
     if (!origDst.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origDst.getSymbolicName(), 4);
@@ -406,8 +392,7 @@ Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, G
     return {load1, load2};
 }
 
-Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                              bool hasVgprMsb) {
+Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSStoreB192: ds_store_b192 v[addr], v[b:b+5] offset:X
     // →
     // ds_store_b128 v[addr], v[b:b+3] offset:X
@@ -435,9 +420,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     store1->addSrcReg(origDstAddr);
 
-    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx,
-                            4,  // 4 registers
-                            origSrcData.reg.offset};
+    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         srcData1.setSymbolicName(origSrcData.getSymbolicName());
@@ -468,12 +451,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
            "Invalid source register index");
 
     uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
-    int16_t srcData2Offs =
-        (hasVgprMsb && origSrcData.reg.type == RegType::V)
-            ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
-            : origSrcData.reg.offset;
-
-    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2, srcData2Offs};
+    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 2};
 
     if (!origSrcData.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origSrcData.getSymbolicName(), 4);
@@ -503,8 +481,7 @@ Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     return {store1, store2};
 }
 
-Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
-                              bool hasVgprMsb) {
+Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     // DSStoreB256: ds_store_b256 v[addr], v[b:b+7] offset:X
     // →
     // ds_write_b128/ds_store_b128 v[addr], v[b:b+3] offset:X
@@ -533,9 +510,7 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
 
     store1->addSrcReg(origDstAddr);
 
-    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx,
-                            4,  // 4 registers
-                            origSrcData.reg.offset};
+    StinkyRegister srcData1{origSrcData.reg.type, origSrcData.reg.idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         srcData1.setSymbolicName(origSrcData.getSymbolicName());
@@ -565,12 +540,7 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
            "Invalid source register index");
 
     uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
-    int16_t srcData2Offs =
-        (hasVgprMsb && origSrcData.reg.type == RegType::V)
-            ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
-            : origSrcData.reg.offset;
-
-    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 4, srcData2Offs};
+    StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 4};
 
     if (!origSrcData.getSymbolicName().empty()) {
         std::string adjustedName = adjustSymbolicRegName(origSrcData.getSymbolicName(), 4);
