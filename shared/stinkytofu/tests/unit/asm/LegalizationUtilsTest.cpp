@@ -262,7 +262,7 @@ TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/32));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSLoadB192(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSLoadB192(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
@@ -301,7 +301,7 @@ TEST_F(LegalizationUtilsTest, DSStoreB192SplitsIntoB128AndB64) {
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSStoreB192(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSStoreB192(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
@@ -336,7 +336,7 @@ TEST_F(LegalizationUtilsTest, DSStoreB256SplitsIntoTwoB128) {
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
-    auto result = legalizeDSStoreB256(inst, builder, arch, /*hasVgprMsb=*/false);
+    auto result = legalizeDSStoreB256(inst, builder, arch);
 
     ASSERT_NE(result.first, nullptr);
     ASSERT_NE(result.last, nullptr);
