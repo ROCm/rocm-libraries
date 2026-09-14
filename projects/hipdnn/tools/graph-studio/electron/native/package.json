@@ -1,0 +1,18 @@
+{
+  "name": "hipdnn-engine-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "N-API addon bridging Electron to the hipDNN frontend C++ API.",
+  "main": "build/Release/hipdnn_engine.node",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.2.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.0.0"
+  }
+}
