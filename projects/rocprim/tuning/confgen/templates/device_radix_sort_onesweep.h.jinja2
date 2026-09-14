@@ -11,7 +11,7 @@ radix_sort_onesweep_config_params{
     kernel_config_params{ {{ config.block_size_x }}, {{  config.ipt }} },
     kernel_config_params{ {{ config.sort_block_size_x }}, {{  config.sort_ipt }} },
     {{ config.radix_bits }},
-    block_radix_rank_algorithm::{{ config.algo }}
+    {{ config.algo }}
 }
 {%- endblock %}
 
