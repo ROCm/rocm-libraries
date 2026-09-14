@@ -9,6 +9,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -20,10 +22,15 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// Models are loaded only when a multi-candidate selection needs the architecture's
 /// scorer. Explicitly unavailable architecture entries suppress default fallback.
+/// @param knobs The UED's declared knobs and @p kmdFields the KMD's declared fields, the
+///        two halves of RFC 0019 §6.3 check 2. Both are re-checked here rather than only in
+///        the offline validator, because a descriptor set is drop-in: the set this provider
+///        loads need not be the set the pipeline emitted.
 inline std::shared_ptr<IKernelHeuristic>
     makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
                         const std::string& describedBy = {},
                         const std::vector<std::string>& knobs = {},
+                        const std::unordered_set<std::string>& kmdFields = {},
                         const std::map<std::string, HeuristicDescriptor>& byArch = {},
                         const std::set<std::string>& unavailableArches = {})
 {
@@ -47,7 +54,8 @@ inline std::shared_ptr<IKernelHeuristic>
     }
     if(!entries.empty() || !unavailableArches.empty())
     {
-        return UhdKernelHeuristic::makeArchResolver(entries, describedBy, knobs, unavailableArches);
+        return UhdKernelHeuristic::makeArchResolver(
+            entries, describedBy, knobs, kmdFields, unavailableArches);
     }
     HIPDNN_PLUGIN_LOG_WARN("ingestor: "
                            << (describedBy.empty() ? "engine" : describedBy)

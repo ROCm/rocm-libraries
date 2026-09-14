@@ -64,6 +64,16 @@ const std::vector<nlohmann::json> ENGINE_SIGNATURE = {"$kernel.tile_m"};
 /// would describe a descriptor pair the loader is required to refuse.
 const std::vector<std::string> KNOBS = {"tile_m"};
 
+/// The fields a conformant KMD would declare for SIGNATURE. §6.3 check 2 is two assertions
+/// over the same set -- `F ⊆ KMD.fields` as well as `F ⊆ set(UED.knobs)` -- and the loader
+/// re-checks both, so a fixture omitting these describes a pair it is required to refuse.
+const std::unordered_set<std::string> FIELDS = {"tile_m"};
+
+/// For the cases that vary the knob list. `split_k` is a knob there, and §3.2 makes a knob a
+/// KMD field the engine exposes, so the KMD has to carry it too or the fixture describes a
+/// descriptor set that could not exist.
+const std::unordered_set<std::string> FIELDS_WITH_SPLIT_K = {"tile_m", "split_k"};
+
 DescriptorId testId(uint8_t tag)
 {
     DescriptorId id{};
@@ -359,7 +369,7 @@ TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRe
                                             fixture.featuresHash,
                                             RESPELLED_SIGNATURE);
 
-    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS), nullptr);
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test", KNOBS, FIELDS), nullptr);
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsHashAgrees)
@@ -371,7 +381,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsH
         dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity",
         EXPRESSION_SIGNATURE);
 
-    EXPECT_NE(UhdKernelHeuristic::tryCreate(modelDescriptor(dir.path(), fixture), "test", KNOBS),
+    EXPECT_NE(UhdKernelHeuristic::tryCreate(
+                  modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS),
               nullptr);
 }
 
@@ -380,7 +391,8 @@ TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_happy");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -400,7 +412,8 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_problem");
     const auto fixture = writeFixture(dir.path(), preferLargeTilesOnLongSequences());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -426,9 +439,9 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
     const auto minFixture = writeFixture(minDir.path(), preferLargeTiles(), "min");
 
     const auto maximising
-        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(maxDir.path(), maxFixture), {}, KNOBS, FIELDS);
     const auto minimising
-        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(minDir.path(), minFixture), {}, KNOBS, FIELDS);
     ASSERT_NE(maximising, nullptr);
     ASSERT_NE(minimising, nullptr);
 
@@ -460,7 +473,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
     // check -- with no knobs declared the heuristic would refuse before it ever looked for
     // the file, and this case would pass without exercising what it names.
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -481,7 +494,8 @@ TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrde
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -502,7 +516,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_partial");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     Catalog catalog;
@@ -530,7 +545,8 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_list");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     auto catalog = catalogAgainstPriority(2048);
@@ -564,7 +580,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRan
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"});
+        = makeKernelHeuristic(
+            modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"}, FIELDS_WITH_SPLIT_K);
     ASSERT_NE(heuristic, nullptr);
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -584,7 +601,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
     // its scores turn on something no caller can influence.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_no_knob");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {});
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {}, FIELDS);
     ASSERT_NE(heuristic, nullptr);
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -592,6 +610,73 @@ TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+}
+
+/// RFC 0019 §6.3 check 2's other assertion: `F ⊆ KMD.fields`.
+///
+/// §6.3 puts this check in two places -- "the pipeline enforces it when it emits the engine
+/// and the loader re-checks" -- and only the pipeline half existed: ValidateDescriptors
+/// refused such a pair offline while the loader took it. That gap is the whole point of a
+/// drop-in format, because the set a provider loads need not be the set the tool emitted; a
+/// UED and KMD regenerated out of step, or hand-edited, arrive with nothing having looked.
+///
+/// What loading anyway costs: `$kernel.tile_m` binds from a kernel's metadata, and metadata
+/// is what the KMD's fields declare. A field no kernel carries leaves the slot unbound, so
+/// the model ranks on a column the runtime cannot fill -- silently, since an unbound
+/// reference is not an error the extractor can attribute to the descriptor pair.
+TEST(TestIngestorUhdKernelHeuristic, AModelReadingAFieldTheKmdDoesNotDeclareIsRefusedAtLoad)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_undeclared_field");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles());
+    const auto descriptor = modelDescriptor(dir.path(), fixture);
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    // The UED exposes `tile_m` as a knob, so check 2's second assertion passes and this can
+    // only fail on the first. A KMD declaring `warp_n` and not `tile_m` is the realistic
+    // shape of the drift: fields were renamed on one side of the pair.
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test-engine", KNOBS, {"warp_n"}),
+              nullptr);
+
+    // §5 step 8 wants the failure attributable, and a message naming only the engine leaves
+    // an author with several descriptors to open.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "test model heuristic"))
+        << "the refusal did not name the UHD that was refused";
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "test-engine"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "tile_m"));
+
+    // The control: the same descriptor against a KMD that does declare the field. Without it
+    // this case would also pass against a loader that refused every model.
+    EXPECT_NE(UhdKernelHeuristic::tryCreate(descriptor, "test-engine", KNOBS, FIELDS), nullptr);
+}
+
+/// RFC 0019 §6.3 check 4: "each adapter verifies its artifact accepts the resolved vector".
+///
+/// EnginePredictor made this comparison; the kernel path did not, and the consequence was
+/// worse than a wrong answer. TreeDataAdapter dispatches a row shorter than `num_features`
+/// to its missing-value branch, so every split on an absent column takes the default
+/// direction and the model still returns a number -- a ranking produced by a model scoring
+/// on padding, reported as if the model had ranked it.
+///
+/// The features hash cannot catch this: it fingerprints the input *contract*, and the
+/// artifact's own column count is not part of the contract it hashes. Here the hash agrees
+/// end to end and only the widths differ, which is exactly the case check 3 lets through.
+TEST(TestIngestorUhdKernelHeuristic, AModelWhoseFeatureCountDisagreesWithItsSignatureIsRefused)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_kernel_heuristic_width");
+
+    // Built here rather than through writeFixture, which derives num_features from the
+    // signature so the two can never disagree -- and that agreement is what is under test.
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
+    model.setFeaturesHash(uhd::FeatureExtractor::computeHash(SIGNATURE))
+        .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()) + 1)
+        .setTrainingArches({"gfx942"})
+        .addTree(preferLargeTiles());
+    ASSERT_TRUE(model.buildToFile((dir.path() / "model.bin").string()));
+
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(
+                  modelDescriptor(dir.path(), "model.bin"), "test-engine", KNOBS, FIELDS),
+              nullptr);
 }
 
 /// RFC 0019 §3.1 lets a UED name a UHD per architecture; §8.3 resolves exact gcnArchName then
@@ -612,7 +697,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
+        = makeKernelHeuristic(
+            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -639,7 +725,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
+        = makeKernelHeuristic(
+            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -667,7 +754,8 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, byArch);
+        = makeKernelHeuristic(
+            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -697,7 +785,8 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_scored_form");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -733,7 +822,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescri
     // The reverse -- a knob the model ignores -- no longer does, so it cannot be used to
     // reach the degraded path here.
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, {"split_k"});
+        = makeKernelHeuristic(
+            modelDescriptor(dir.path(), fixture), {}, {"split_k"}, FIELDS_WITH_SPLIT_K);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -819,7 +909,8 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -856,7 +947,7 @@ TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchite
         {"gfx942", modelDescriptor(dir.path(), onNine42)}};
 
     // No descriptor: there is no `default` for the loader to have resolved.
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -894,7 +985,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -933,7 +1024,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/false);
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -972,7 +1064,8 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotC
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_out_of_domain");
     const auto fixture = writeFixture(dir.path(), preferNegativeScores(), "max", {}, false, "exp");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1009,7 +1102,8 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroug
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1038,7 +1132,8 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1061,7 +1156,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "min", {}, /*calibrated=*/false, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1093,7 +1189,8 @@ TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSw
     const auto fixture
         = writeFixture(dir.path(), preferNegativeScores(), "max", {}, /*calibrated=*/true, "log1p");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1127,7 +1224,8 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "max", {}, /*calibrated=*/true, "identity");
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1163,7 +1261,7 @@ TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
         {"gfx950", modelDescriptor(gfx950Dir.path(), onNine50)}};
 
     // No descriptor: there is no `default` for the loader to have resolved.
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1192,7 +1290,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
     const std::map<std::string, HeuristicDescriptor> byArch{
         {"gfx950", modelDescriptor(dir.path(), onNine50)}};
 
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, byArch);
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     // A device the UED says nothing about.
@@ -1228,7 +1326,7 @@ TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedEx
         {"gfx950", modelDescriptor(archDir.path(), specific)}};
 
     const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, byArch);
+        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, FIELDS, byArch);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1269,7 +1367,7 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
     if(condition == "healthy_model")
     {
         const auto fixture = writeFixture(dir, preferLargeTiles());
-        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS);
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS, FIELDS);
     }
     if(condition == "features_hash_disagrees")
     {
@@ -1277,14 +1375,15 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
         // extractor will produce.
         const auto fixture
             = writeFixture(dir, preferLargeTiles(), "max", "sha256:not_the_real_hash");
-        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS);
+        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", KNOBS, FIELDS);
     }
     if(condition == "knobs_disagree_with_axes")
     {
         // §6.3 check 2: the model ranks on an axis the UED never exposed. The reverse is
         // legal now -- an exposed knob the model ignores warns and still ranks.
         const auto fixture = writeFixture(dir, preferLargeTiles());
-        return makeKernelHeuristic(modelDescriptor(dir, fixture), "e", {"split_k"});
+        return makeKernelHeuristic(
+            modelDescriptor(dir, fixture), "e", {"split_k"}, FIELDS_WITH_SPLIT_K);
     }
     if(condition == "calibrated_and_minimising")
     {
@@ -1296,12 +1395,13 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
             parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true),
                      dir / "test.uhd.json"),
             "e",
-            KNOBS);
+            KNOBS,
+            FIELDS);
     }
     if(condition == "no_uhd_at_all")
     {
         // §5 step 6: shipping no heuristic is valid and is the starting state.
-        return makeKernelHeuristic(std::nullopt, "e", KNOBS);
+        return makeKernelHeuristic(std::nullopt, "e", KNOBS, FIELDS);
     }
     if(condition == "arch_not_covered")
     {
@@ -1309,7 +1409,7 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
         const auto fixture = writeFixture(dir, preferLargeTiles());
         const std::map<std::string, HeuristicDescriptor> byArch{
             {"gfx950", modelDescriptor(dir, fixture)}};
-        return makeKernelHeuristic(std::nullopt, "e", KNOBS, byArch);
+        return makeKernelHeuristic(std::nullopt, "e", KNOBS, FIELDS, byArch);
     }
     return nullptr;
 }
@@ -1505,7 +1605,8 @@ TEST(TestIngestorUhdKernelHeuristic, ABareReferenceSignatureStillSatisfiesTheKno
     const auto fixture = writeFixture(
         dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity", SIGNATURE);
 
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), "e", KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), "e", KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1572,7 +1673,8 @@ TEST(TestIngestorUhdKernelHeuristic, InlineFeaturesReachTheTreeScorer)
     const std::vector<nlohmann::json> signature
         = {nlohmann::json::parse(R"({"ceil_div":["$attention.seqlen","$kernel.tile_m"]})")};
     const auto fixture = writeFixture(dir.path(), tree, "max", {}, false, "identity", signature);
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
@@ -1596,7 +1698,8 @@ TEST(TestIngestorUhdKernelHeuristic, ASingleCandidateCarriesItsModelScore)
     // promises; resolution is cached per engine and architecture, so the cost is one load.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_single_candidate");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1630,7 +1733,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnavailableExactArchitectureDoesNotUseDef
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto fallback = modelDescriptor(dir.path(), fixture);
     const auto heuristic
-        = makeKernelHeuristic(fallback, {}, KNOBS, {{"default", fallback}}, {"gfx942"});
+        = makeKernelHeuristic(fallback, {}, KNOBS, FIELDS, {{"default", fallback}}, {"gfx942"});
     const testing::TestGraph graph;
     const auto exact = gfx942();
     auto other = gfx942();
@@ -1654,6 +1757,7 @@ TEST(TestIngestorUhdKernelHeuristic, AFailedExactModelDoesNotUseDefault)
         fallback,
         {},
         KNOBS,
+        FIELDS,
         {{"default", fallback}, {"gfx942", modelDescriptor(dir.path(), "missing.bin")}});
     const testing::TestGraph graph;
     const auto properties = gfx942();

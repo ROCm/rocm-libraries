@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -175,11 +176,13 @@ public:
         makeArchResolver(const std::map<std::string, HeuristicDescriptor>& byArch,
                          const std::string& describedBy,
                          const std::vector<std::string>& knobs,
+                         const std::unordered_set<std::string>& kmdFields = {},
                          const std::set<std::string>& unavailableArches = {})
     {
         auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
         built->_byArch = byArch;
         built->_knobs = knobs;
+        built->_kmdFields = kmdFields;
         built->_unavailableArches = unavailableArches;
         if(const auto fallback = byArch.find("default"); fallback != byArch.end())
         {
@@ -188,10 +191,16 @@ public:
         return built;
     }
 
+    /// @param knobs The UED's declared knob names; @p kmdFields the KMD's declared field
+    ///        names. RFC 0019 §6.3 check 2 is two assertions over the same set, so both
+    ///        halves arrive the same way: a caller that cannot supply one supplies an empty
+    ///        list, and a model reading any `$kernel.*` axis is then refused rather than
+    ///        passing a check nothing was given to check against.
     static std::shared_ptr<UhdKernelHeuristic>
         tryCreate(const HeuristicDescriptor& descriptor,
                   const std::string& describedBy,
                   const std::vector<std::string>& knobs = {},
+                  const std::unordered_set<std::string>& kmdFields = {},
                   const std::map<std::string, HeuristicDescriptor>& byArch = {})
     {
         // RFC 0019 §9.4's first component: "descriptor load and model parse". Timed from
@@ -224,6 +233,7 @@ public:
                 built->_hasDefaultModel = true;
                 built->_byArch = byArch;
                 built->_knobs = knobs;
+                built->_kmdFields = kmdFields;
                 return built;
             }
 
@@ -243,6 +253,31 @@ public:
                 }
                 return text.empty() ? std::string("<none>") : text;
             };
+
+            // RFC 0019 §6.3 check 2, first assertion: `F ⊆ KMD.fields`. A feature can never
+            // read a variant field the kernels do not carry -- an unbound `$kernel.*`
+            // reference extracts nothing and the row the model scores is not the row it was
+            // fitted on. §6.3 puts the check in both places on purpose ("the pipeline
+            // enforces it when it emits the engine and the loader re-checks"), because a
+            // descriptor set is drop-in: ValidateDescriptors catches a set built here, and
+            // this catches a UED and KMD regenerated out of step or hand-edited after the
+            // tool ran. Same routine on both sides, so the two cannot disagree about what
+            // "reachable" means -- a `$kernel.*` nested inside a computed entry counts.
+            const auto undeclared = extractor->getMissingKmdFields(kmdFields);
+            if(!undeclared.empty())
+            {
+                std::vector<std::string> missing = undeclared;
+                std::sort(missing.begin(), missing.end());
+                std::vector<std::string> declared(kmdFields.begin(), kmdFields.end());
+                std::sort(declared.begin(), declared.end());
+                HIPDNN_PLUGIN_LOG_ERROR(
+                    "uhd: " << describeDescriptor("heuristic", descriptor.name, descriptor.id)
+                            << " on " << describedBy << " reads [" << join(missing)
+                            << "], which its KMD does not declare as fields [" << join(declared)
+                            << "]; RFC 0019 §6.3 requires the model's axes to be declared, so "
+                               "the model is not used and kernels rank by priority, then id");
+                return nullptr;
+            }
 
             std::vector<std::string> unexposed;
             for(const auto& axis : axes)
@@ -307,6 +342,27 @@ public:
                 return nullptr;
             }
 
+            // RFC 0019 §6.3 check 4: the adapter must accept the row the extractor will hand
+            // it. The hash above proves the *contract* is the one the model was trained
+            // against; it says nothing about the artifact's own arity, and the two can
+            // disagree -- a tree table carrying `num_features: 3` under a two-slot signature
+            // has a matching features_hash and a column count that does not.
+            //
+            // Without this the short row is not even an error: TreeDataAdapter dispatches a
+            // row shorter than `num_features` to its missing-value branch, so every split on
+            // an absent column silently takes the default direction and the model scores --
+            // wrongly, and quietly. EnginePredictor has always made this comparison on the L1
+            // path; the kernel path did not, which is the asymmetry this closes.
+            if(adapter->expectedFeatureCount() != extractor->featureCount())
+            {
+                HIPDNN_PLUGIN_LOG_ERROR(
+                    "uhd: " << describedBy << " model expects "
+                            << adapter->expectedFeatureCount() << " features, its signature "
+                            << "produces " << extractor->featureCount()
+                            << "; the model is not used and kernels rank by priority, then id");
+                return nullptr;
+            }
+
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
             built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
@@ -315,6 +371,7 @@ public:
             // device the first time it sees one that these do not describe.
             built->_byArch = byArch;
             built->_knobs = knobs;
+            built->_kmdFields = kmdFields;
             return built;
         }
         catch(const std::exception& e)
@@ -562,7 +619,11 @@ public:
         {
             return cached->second;
         }
-        auto loaded = tryCreate(*chosen, _describedBy, _knobs);
+        // The per-arch model gets the same contract the `default` one was checked against:
+        // RFC 0019 §8.3 resolves a different artifact per architecture, never a different
+        // UED or KMD, so a check that ran only on the eagerly built model would leave every
+        // lazily resolved arch unverified.
+        auto loaded = tryCreate(*chosen, _describedBy, _knobs, _kmdFields);
         if(!loaded)
         {
             HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for '" << key
@@ -899,6 +960,10 @@ private:
     std::map<std::string, HeuristicDescriptor> _byArch;
     std::set<std::string> _unavailableArches;
     std::vector<std::string> _knobs;
+
+    /// The KMD's declared field names, carried so a per-arch model resolved later faces
+    /// RFC 0019 §6.3 check 2's first assertion as well.
+    std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
     mutable std::map<std::string, std::shared_ptr<const UhdKernelHeuristic>> _archCache;
 
