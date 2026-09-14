@@ -219,7 +219,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 # Swizzled-B: host buffer is nO-major with row stride0 = MI_N*paddedK (elements),
                 # paddedK = roundup(SizeL, swzK). Component wCompId loads rowsPerComp nO rows ->
                 # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
-                swzMiN      = kernel["MatrixInstN"]
+                swzMiN      = kernel["MatrixInstM"] if tp["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
                 swzInnerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
                 swzK        = (wavelen // swzMiN) * swzInnerK
                 rowsPerComp = (mt // swzMiN) // numComp

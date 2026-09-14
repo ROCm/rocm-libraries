@@ -5865,7 +5865,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("lraTileAssignmentSwizzledTDM")
     module.addComment0("lr%s swizzled-TDM base" % tP["tileChar"])
     waveWidth = kernel["WavefrontSize"]
-    miN       = kernel["MatrixInstN"]
+    miN       = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
     innerK    = 16 // int(kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
     blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
     tile01    = tP["tile01Idx"]
@@ -13172,7 +13172,7 @@ class KernelWriterAssembly(KernelWriter):
       #   inc = numKChunk * kOStride, kOStride = (wave//MI_N)*MI_N*innerK, innerK = 16//bpe (elems=bytes fp8).
       module   = Module("localReadInc swizzledTDM")
       innerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
-      miN      = kernel["MatrixInstN"]
+      miN      = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
       kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
       inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
       numLra   = self.states.b.numVgprLocalReadAddr if tP["isB"] else self.states.a.numVgprLocalReadAddr
@@ -19640,8 +19640,8 @@ class KernelWriterAssembly(KernelWriter):
     # with swizzle values (stride0 = tile0) => TDM copies it linearly => LDS = off order, matching
     # _localReadSwizzledTDM. off = outer*256 + inner; inner = nI*16+kI (256, LDS-fast);
     # outer = nO*(du/16) + kO*2 + kM.
-    swizzledTDMB = bool(tP.get("isSwizzledTDM"))
-    if swizzledTDMB:
+    swizzledTDM = bool(tP.get("isSwizzledTDM"))
+    if swizzledTDM:
       # Host pre-swizzles B into off(n,k) order [nO, kO, kM, nI, kI], contiguous over the FULL K.
       # Describe a 2-D tile so tensor_load_to_lds gathers one DepthU K-slice across all N-tiles:
       #   tile0 = MI_N*DepthU   (one nO's DepthU slice, contiguous)
@@ -19649,7 +19649,7 @@ class KernelWriterAssembly(KernelWriter):
       #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, swzK))
       # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
       # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
-      swzMiN    = kernel["MatrixInstN"]
+      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
       swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
@@ -19708,7 +19708,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
 
     # --- Tensor stride ---
-    if swizzledTDMB:
+    if swizzledTDM:
       pass  # stride0 already set to tile0 (contiguous) in the swizzled-B branch above
     elif isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
       mod.add(comp.setTensorStride0Metadata(descSgprName(1), "SizeL"))
@@ -19860,7 +19860,7 @@ class KernelWriterAssembly(KernelWriter):
     # numComp=1 (M-only split) -> full nO band. Per-component global base comes from
     # calculateStartAddrWaveSeparated; per-component LDS base is the wId*dataBytes above.
     if bool(tP.get("isSwizzledTDM")):
-      swzMiN    = kernel["MatrixInstN"]
+      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
       swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)

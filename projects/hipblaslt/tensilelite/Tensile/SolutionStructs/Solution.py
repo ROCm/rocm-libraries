@@ -4171,6 +4171,15 @@ class Solution(collections.abc.Mapping):
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
+        # Multi-wave swizzled-A TDM uses the wave-separated (parity) builder: numComp = NumWaves//2
+        # A-loading components split A's mO rows, while the local read partitions M by MIWaveGroup[0].
+        # These band counts must agree, so restrict to numComp == MIWaveGroup[0] for now.
+        if swizzleAIsTDM and state["NumWaves"] > 1:
+          numComp = state["NumWaves"] // 2
+          if numComp != state["MIWaveGroup"][0]:
+            reject(state, printRejectionReason,
+                   f"Swizzled-A TDM multi-wave requires numComp(NumWaves//2={numComp}) == MIWaveGroup[0]({state['MIWaveGroup'][0]})")
+
       if state["ProblemType"]["SwizzleTensorB"]:
         if not state["DirectToVgprB"] and not swizzleBIsTDM:
           reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
