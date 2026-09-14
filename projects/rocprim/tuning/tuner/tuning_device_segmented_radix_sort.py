@@ -32,16 +32,16 @@ from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALU
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
-RADIX_BITS = [8]
-BLOCK_SIZES = [256]
-IPT = [4, 8, 16]
-WARP_SMALL_LWS = [8]
-WARP_SMALL_IPT = [4]
-WARP_SMALL_BS = [256]
-WARP_PARTITION = [64]
-WARP_MEDIUM_LWS = [16]
-WARP_MEDIUM_IPT = [8]
-WARP_MEDIUM_BS = [256]
+RADIX_BITS = [6, 7, 8]
+BLOCK_SIZES = [128, 256]
+IPT = list(range(1, 18)) 
+WARP_SMALL_LWS = [8, 16, 32]
+WARP_SMALL_IPT = list(range(1, 18)) 
+WARP_SMALL_BS = [128, 256]
+WARP_PARTITION = [5, 64, 3000]
+WARP_MEDIUM_LWS = [16, 32]
+WARP_MEDIUM_IPT = list(range(1, 18)) 
+WARP_MEDIUM_BS = [128, 256]
 
 class Tuner(BaseTuner):
     @classmethod
