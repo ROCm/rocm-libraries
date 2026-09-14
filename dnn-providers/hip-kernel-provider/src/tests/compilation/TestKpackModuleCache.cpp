@@ -25,10 +25,11 @@ using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelSource;
 using hip_kernel_provider::testing::unitKpackRoot;
 
-/// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
-/// payloads rather than HSA code objects, which is what makes it useful here: it is a
-/// real container, so the reader parses it, but nothing in it can load.
-constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
+/// rocm-kpack's own test archive, staged in the same test descriptor tree as the packed
+/// sets and resolved from this binary's location. Its entries are placeholder payloads
+/// rather than HSA code objects, which is what makes it useful here: it is a real
+/// container, so the reader parses it, but nothing in it can load.
+const std::string REAL_ARCHIVE = hip_kernel_provider::testing::testKpackArchive().string();
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
@@ -103,7 +104,7 @@ TEST(TestKpackModuleCacheKey, KeyIgnoresArchFeatureDecoration)
 TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the test kpack archive, resolved relative to this binary, is missing: " << REAL_ARCHIVE;
 
     try
     {
@@ -131,7 +132,7 @@ TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
 {
     ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+        << "the test kpack archive, resolved relative to this binary, is missing: " << REAL_ARCHIVE;
 
     try
     {
