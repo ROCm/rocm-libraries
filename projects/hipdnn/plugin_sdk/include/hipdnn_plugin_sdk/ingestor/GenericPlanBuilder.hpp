@@ -391,8 +391,15 @@ public:
         // A record that exists but did not serve this graph -- either it failed the coverage gate
         // or none of its ranked entries still resolved -- is being superseded, so its write must
         // append rather than adopt.
-        const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
-                                              : WinnerWriteCause::FRESH_MISS;
+        //
+        // `catalog.orderedFromRecord` is consulted alongside the lookup because the two can
+        // disagree now that the winner cache is bounded: a catalog can carry a measured order
+        // whose record has since been evicted, and reaching here then still means a record was
+        // tried and did not serve. Reading the lookup alone would call that a fresh miss and
+        // adopt the very line that just failed to resolve.
+        const auto cause = record.has_value() || catalog.orderedFromRecord
+                               ? WinnerWriteCause::COVERAGE_REBENCHMARK
+                               : WinnerWriteCause::FRESH_MISS;
 
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
