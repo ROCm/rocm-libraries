@@ -2039,8 +2039,23 @@ namespace TensileLite
                             std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()), 1);
                         for(size_t i = 0; i < boundSize[0]; i += innerMXLoop)
                         {
+                            // The last MX segment is short whenever K is not a multiple of
+                            // the block size (e.g. K=200 with mxBlock=128); clamp so the
+                            // summation never walks past K.
+                            //
+                            // NO-OP FOR BLOCK-ALIGNED K. The clamp can only bind when
+                            // boundSize[0] - i < innerMXLoop, i.e. when K is not a multiple
+                            // of the block size. Every kernel-dispatched problem has
+                            // K block-aligned (AssertSummationElementMultiple is raised to
+                            // max(MXBlockA, MXBlockB) during solution derivation), so for
+                            // all of them this is exactly the original `segment =
+                            // innerMXLoop` and results are bit-identical. Only direct
+                            // callers of the reference with arbitrary K are affected, where
+                            // the previous behaviour read past the end of A/B.
+                            // See ReferenceMXBlock128Demo.BlockAlignedKMakesTheSegmentClampANoOp.
+                            size_t      segment = std::min(innerMXLoop, boundSize[0] - i);
                             Accumulator val(0);
-                            for(size_t j = 0; j < innerMXLoop; j++)
+                            for(size_t j = 0; j < segment; j++)
                             {
                                 size_t idx = i + j;
                                 size_t aI

@@ -6,6 +6,8 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <algorithm>
+
 using namespace TensileLite;
 
 // ============================================================================
@@ -25,9 +27,10 @@ static ContractionProblemGemm makeMXProblem(size_t M,
                                             size_t N,
                                             size_t K,
                                             int    mxBlock,
-                                            size_t batch  = 1,
-                                            bool   transA = true,
-                                            bool   transB = false)
+                                            size_t batch                 = 1,
+                                            bool   transA                = true,
+                                            bool   transB                = false,
+                                            bool   padScaleTensorFreeDim = true)
 {
     auto problem = ContractionProblemGemm::GEMM_Strides(
         transA,
@@ -45,8 +48,8 @@ static ContractionProblemGemm makeMXProblem(size_t M,
         M, M * N,
         0.0);
 
-    problem.setMXScaleA(rocisa::DataType::E8, mxBlock);
-    problem.setMXScaleB(rocisa::DataType::E8, mxBlock);
+    problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim);
+    problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim);
     return problem;
 }
 
@@ -130,6 +133,89 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(99u,   50u, 256u,  8u, 128u,  64u)
     )
 );
+
+// ============================================================================
+// gfx1250 path (padScaleTensorFreeDim = false)
+//
+// The free dimension is never padded. The bound dimension holds
+// ceil(K/mxBlock) entries rounded up to a multiple of dimk = 128/mxBlock, so
+// that the scale entries tile the 128-element K step of the scaled WMMA. At
+// mxBlock == 128 a single scale already spans the whole step, dimk collapses
+// to 1, and no rounding happens at all.
+// ============================================================================
+
+// Params: mxBlock, M, N, K, expectedScaleK
+class MXScalePaddingGFX1250Test
+    : public ::testing::TestWithParam<std::tuple<int, size_t, size_t, size_t, size_t>>
+{
+};
+
+TEST_P(MXScalePaddingGFX1250Test, BoundDimensionPaddedFreeDimensionUntouched)
+{
+    auto [mxBlock, M, N, K, expectedScaleK] = GetParam();
+
+    auto problem = makeMXProblem(
+        M, N, K, mxBlock, /*batch=*/1, /*transA=*/true, /*transB=*/false,
+        /*padScaleTensorFreeDim=*/false);
+
+    auto const& sa = problem.mxsa().sizes();
+    auto const& sb = problem.mxsb().sizes();
+
+    EXPECT_EQ(sa[0], expectedScaleK);
+    EXPECT_EQ(sb[0], expectedScaleK);
+
+    // Free dimensions carry through verbatim on this path.
+    EXPECT_EQ(sa[1], M);
+    EXPECT_EQ(sb[1], N);
+    EXPECT_EQ(sa[2], 1u);
+    EXPECT_EQ(sb[2], 1u);
+
+    // There must be at least one scale per K block, and the padded count must
+    // tile the 128-element K step.
+    const size_t dimk = std::max<size_t>(1, 128 / (size_t)mxBlock);
+    EXPECT_GE(sa[0], CeilDivide(K, (size_t)mxBlock));
+    EXPECT_EQ(sa[0] % dimk, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ScalePaddingGFX1250,
+    MXScalePaddingGFX1250Test,
+    ::testing::Values(
+        //          mxBlock,    M,    N,    K, scaleK
+        // mxBlock=16 -> dimk=8: ceil(K/16) rounded up to a multiple of 8
+        std::make_tuple( 16, 256u, 256u, 2048u, 128u),
+        std::make_tuple( 16, 256u, 256u, 2064u, 136u), // ceil(2064/16)=129 -> 136
+        std::make_tuple( 16, 257u, 256u,  128u,   8u),
+        // mxBlock=32 -> dimk=4: ceil(K/32) rounded up to a multiple of 4
+        std::make_tuple( 32, 256u, 256u, 2048u,  64u),
+        std::make_tuple( 32, 256u, 256u, 2080u,  68u), // ceil(2080/32)=65 -> 68
+        std::make_tuple( 32, 256u, 257u,  128u,   4u),
+        // mxBlock=128 -> dimk=1: ceil(K/128) exactly, no rounding
+        std::make_tuple(128, 256u, 256u, 2048u,  16u),
+        std::make_tuple(128, 256u, 256u, 2176u,  17u), // tail: 2176/128 = 17
+        std::make_tuple(128, 256u, 256u,  128u,   1u),
+        std::make_tuple(128, 257u, 256u,  384u,   3u),
+        std::make_tuple(128, 256u, 257u,  896u,   7u),
+        // mxBlock=128 with K not a multiple of 128 still rounds up to cover K
+        std::make_tuple(128, 256u, 256u,  300u,   3u)
+    )
+);
+
+// dimk must never collapse to zero for blocks at or beyond the 128-element K
+// step, which would make the scale tensor unusable.
+TEST(MXScalePaddingGFX1250, LargeBlocksDoNotProduceEmptyScaleTensor)
+{
+    for(int mxBlock : {128, 256})
+    {
+        auto problem = makeMXProblem(
+            256, 256, 2048, mxBlock, 1, true, false, /*padScaleTensorFreeDim=*/false);
+
+        EXPECT_EQ(problem.mxsa().sizes()[0], CeilDivide((size_t)2048, (size_t)mxBlock))
+            << "mxBlock=" << mxBlock;
+        EXPECT_GT(problem.mxsa().totalAllocatedElements(), 0u) << "mxBlock=" << mxBlock;
+        EXPECT_GT(problem.mxsb().totalAllocatedElements(), 0u) << "mxBlock=" << mxBlock;
+    }
+}
 
 // Batch dimension must not be padded; strides and total size must be consistent
 TEST(MXScalePadding, BatchAndStridesCorrect)
