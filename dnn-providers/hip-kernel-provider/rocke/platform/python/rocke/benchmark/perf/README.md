@@ -101,15 +101,17 @@ Import and compose them; every consumer uses these same pieces.
   `warmup=N` drops the launcher's cold warmup dispatches from the counter medians
   (and from the duration); `per_dispatch=True` also emits raw per-dispatch counters
   and `duration_ns` (`counter_samples`) for downstream profiling.
+  `artifacts_dir=Path(...)` optionally retains the original profiler workspace in
+  a new caller-owned directory; existing destinations are refused before launch.
+  The primitive still returns its record; the CLI owns JSON bundle persistence.
 - `aggregate` - reduce K repeated runs to a median + spread (noise bound).
 - `report` - serialize a record, extract the diagnostic panel, and diff two records.
 
 ## 2. The local benchmarking tool (`tool/`)
 
 A thin layer that *uses* the primitives so a developer can keep a local history and
-see whether a change improved or regressed a workload. It is the **only** part that
-persists records, and it writes them **outside the repo** (a user cache dir), as
-**simple JSON Lines** - nothing more.
+see whether a change improved or regressed a workload. It persists history as
+**JSON Lines** outside the repo and optionally exports a portable artifact bundle.
 
 - `store` - append/read records in a user cache dir (`~/.cache/rocke-perf`;
   override with `$ROCKE_PERF_CACHE`). Append-only `history.jsonl`.
@@ -118,12 +120,79 @@ persists records, and it writes them **outside the repo** (a user cache dir), as
 - CLI: `python -m rocke.benchmark.perf.tool {profile,occupancy,compare}` (`--json`
   for machine output).
 
-**Scope boundary - the *system* is not here.** Which GPUs run and their scheduling,
-fleet orchestration, mass/central data storage, dashboards, at-scale analysis, and
-any **CSV / columnar / export** storage format are the concern of the external perf
-framework, which consumes the same records via the schema. (The harness *reads*
-`rocprofv3`'s CSV output only as an input to build a record - this package never
-produces or stores CSV.)
+**Scope boundary:** GPU scheduling, fleet orchestration, central storage and
+dashboards remain external. Artifact export preserves profiler-owned CSV bytes;
+it does not reconstruct CSV from normalized medians or depend on WaveScope.
+
+### Portable artifacts: CSV now, measurement JSON for future consumers
+
+For the WaveScope workflow, use
+[`capture_wavescope_pmc.py`](../../../../dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py)
+and its [usage guide](../../../../dsl_docs/optimization/utilities/tools/wavescope/README.md#capture-pmc-evidence-csv-and-json).
+That utility chooses the adjacent perf package, defaults to export-only, and prints
+CSV import paths plus the JSON entry point. The generic CLI option below is its
+supporting mechanism; it is also available to other perf consumers.
+
+```bash
+python3 -m rocke.benchmark.perf.tool profile \
+  --arch gfx950 --op gemm --shape '{"M":512,"N":512,"K":512}' \
+  --kernel-name my_gemm --match-kernel my_gemm --repeats 3 --warmup 5 \
+  --per-dispatch --artifacts-dir /tmp/my-gemm-before \
+  -- python3 run_kernel.py
+```
+
+Use the actual architecture, operation, shape, dispatched symbol and warmup count.
+The destination must not exist. Each repeat gets an isolated profiler workspace:
+
+```text
+my-gemm-before/
+  manifest.json                  rocke.bench.artifacts/v1
+  measurement.json               aggregate rocke.bench.measurement/v1
+  comparison.json                existing selfcheck result
+  samples/0000/
+    measurement.json             individual measurement/v1 + profile_capture
+    raw/pmc.txt                  original counter recipe
+    raw/prof/.../*counter_collection.csv
+  samples/0001/...
+```
+
+The manifest is the entry point for consumers. It records lifecycle status,
+requested samples, sample indices/run IDs, warmup selection, relative artifact
+paths, byte sizes and SHA-256 hashes (hex without a prefix). `files[].kind`
+distinguishes `pmc_csv`, `counter_config`, `measurement`, `comparison`, and other
+`profiler_output`. Paths remain valid when the bundle is moved. Each sample's
+`profile_capture` records the normalized-to-raw counter map, requested replay
+groups, selection and profiler status (`complete`, `failed`, or `unavailable`).
+
+`manifest.status=complete` means measurement export finished, not that all
+counters were available or performance improved. Check per-sample profiler
+status and `captured_counters`. Failures retain partial files and a failed
+manifest; interrupted processes may leave `running`, which is not complete.
+Failed exports must not be consumed as finalized baselines. A regression still
+exports a complete bundle and exits 1. `--no-store` suppresses history writes,
+not an explicitly requested bundle. Without the flag, behavior is unchanged.
+
+**WaveScope today:** open the ATT trace and upload a raw counter CSV from one
+sample through Bottlenecks, or copy that sample's relevant counter files beside
+`code.json`. Original pass directories and filenames are preserved, not flattened
+or merged. Use the JSON manifest to locate every pass; a single uploaded CSV may
+contain only part of the counter set. Do not combine repeats into one PMC import.
+These are separate captures: confirm the same workload, GPU and binary yourself;
+the bundle explicitly claims no ATT binding.
+
+**JSON readers:** consume `measurement.json` using its existing schema, the sample
+records and the manifest. They retain normalized counter medians, sample count,
+spread, correctness and separate `wall`/`profiled` timing with `timing_source`.
+`--per-dispatch` adds samples with repeat and counter-pass identity. WaveScope can
+add a reader for this published contract without another rocKE output change.
+
+**Do not equate CSV and JSON totals.** Raw CSVs retain all profiler dispatches,
+including warmup and other kernels. JSON counter medians select one target and
+drop warmup per pass. Optional `counter_samples` retain warmup for inspection.
+Raw PMC import sums and JSON medians therefore need not agree. Existing counter
+coverage is unchanged; exporting cannot supply uncollected LDS-bank-conflict or
+full roofline counters. No launcher environment variables are serialized; raw
+profiler files may contain kernel names, paths or workload-specific information.
 
 ## 3. The GEMM sweep integration (`examples/`)
 
