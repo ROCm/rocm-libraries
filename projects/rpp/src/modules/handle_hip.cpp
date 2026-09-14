@@ -32,14 +32,10 @@ SOFTWARE.
 #include "errors.hpp"
 #include "handle.hpp"
 
-#ifdef AUDIO_SUPPORT
-#ifdef RPP_USE_ROCFFT
 #include <rocfft/rocfft.h>
 
 #include <cstdint>
 #include <map>
-#endif
-#endif
 
 namespace rpp {
 
@@ -104,12 +100,8 @@ struct HandleImpl {
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
 
-#ifdef AUDIO_SUPPORT
-#ifdef RPP_USE_ROCFFT
     // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
     std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
-#endif
-#endif
 
     HandleImpl() : ctx(get_ctx()) {}
 
@@ -145,10 +137,9 @@ struct HandleImpl {
     void PreInitializeBuffer() {
         this->PreInitializeBufferCPU();
 
-#ifdef AUDIO_SUPPORT
-        // If AUDIO_SUPPORT is enabled, 'scratchBufferHip' needed to run RNNT training successfully
-        // are larger. Current max allocation size = sizeof(Rpp32f) * 372877312, which is based on
-        // Spectrogram requirements
+        // Audio support requires larger scratch buffers for RNNT training.
+        // Current max allocation size = sizeof(Rpp32f) * 372877312, which is based on
+        // Spectrogram requirements:
         // 1. Spectrogram requirements:
         //      - 372877312 = (512 * 3754 * 192) + (512 * 3754 * 2)
         //      - Above is the maximum scratch memory required for Spectrogram HIP kernel used in
@@ -167,10 +158,6 @@ struct HandleImpl {
         //      - 192 is the size required for storing cutOffDB values for batch size 192
         auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
                                 sizeof(Rpp32f) * 372877312);
-#else
-        auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
-                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
-#endif
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipMalloc failed for scratchBufferHip");
         status = hipHostMalloc(&(this->initHandle->mem.mgpu.scratchBufferPinned.floatmem),
@@ -193,8 +180,6 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
 
     this->SetAllocator(nullptr, nullptr, nullptr);
 
-#ifdef AUDIO_SUPPORT
-#ifdef RPP_USE_ROCFFT
     // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on
     // failure). rocFFT increments its global usage count before some setup failures, so balance
     // it with rocfft_cleanup() before throwing to keep a later handle from skipping init.
@@ -208,12 +193,6 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
         rocfft_cleanup();
         throw;
     }
-#else
-    impl->PreInitializeBuffer();
-#endif
-#else
-    impl->PreInitializeBuffer();
-#endif
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
@@ -235,8 +214,6 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 void Handle::rpp_destroy_object_gpu() {
     this->rpp_destroy_object_host();
 
-#ifdef AUDIO_SUPPORT
-#ifdef RPP_USE_ROCFFT
     // Destroy all cached rocFFT plans
     for (auto& cache_entry : this->impl->rocfft_plan_cache) {
         rocfft_plan_destroy(cache_entry.second.first);
@@ -247,8 +224,6 @@ void Handle::rpp_destroy_object_gpu() {
     // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction to
     // proceed)
     rocfft_cleanup();
-#endif
-#endif
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
@@ -342,8 +317,6 @@ std::size_t Handle::GetMaxComputeUnits() {
     return result;
 }
 
-#ifdef AUDIO_SUPPORT
-#ifdef RPP_USE_ROCFFT
 // Get or create a cached rocFFT plan for the given nfft size and batch count
 // Cache key combines nfft and batchCount to handle different workload sizes
 RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
@@ -396,7 +369,5 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan*
 
     return RPP_SUCCESS;
 }
-#endif
-#endif
 
 }  // namespace rpp

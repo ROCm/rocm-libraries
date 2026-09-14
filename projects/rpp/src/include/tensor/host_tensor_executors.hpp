@@ -112,7 +112,6 @@ RppStatus subtract_scalar_f32_f32_host_tensor(Rpp32f* srcPtr, RpptGenericDescPtr
 /**************************************** AUDIO AUGMENTATIONS
  * ****************************************/
 
-#ifdef AUDIO_SUPPORT
 
 // -------------------- down_mixing --------------------
 
@@ -179,7 +178,6 @@ RppStatus audio_tensor_mul_scalar_host(Rpp32f* srcPtr, Rpp32f scalarValue, RpptD
                                        Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
                                        Rpp32s* srcLengthTensor, rpp::Handle& handle);
 
-#endif  // AUDIO_SUPPORT
 
 /**************************************** BITWISE OPERATIONS
  * ****************************************/

@@ -22,8 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifdef AUDIO_SUPPORT
-
 #include "rppt_tensor_audio_augmentations.h"
 
 #include "host_tensor_executors.hpp"
@@ -444,5 +442,3 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
 }
-
-#endif  // AUDIO_SUPPORT

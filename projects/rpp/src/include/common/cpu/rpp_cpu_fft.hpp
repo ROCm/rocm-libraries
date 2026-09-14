@@ -25,10 +25,9 @@ SOFTWARE.
 #ifndef RPP_CPU_FFT_HPP
 #define RPP_CPU_FFT_HPP
 
-// In-house forward FFT (float32, unnormalized) used as a drop-in replacement for the FFTS
-// library in the CPU spectrogram kernel. It computes the forward DFT
+// In-house forward FFT (float32, unnormalized) for the CPU spectrogram kernel.
+// Computes the forward DFT:
 //     X[k] = sum_{n=0}^{N-1} x[n] * exp(-2*pi*i*k*n/N)
-// with the same (unnormalized) scaling FFTS uses, so downstream magnitude/power output matches.
 //
 // Arbitrary transform sizes are supported:
 //   - power-of-two N: iterative radix-2 Cooley-Tukey
