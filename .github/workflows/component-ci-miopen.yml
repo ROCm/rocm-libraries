@@ -188,7 +188,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-tidy-23
           # Prepare MIOpen deps for clang-tidy
-          pip install 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
+          pip install --break-system-packages 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
           cp projects/miopen/requirements.txt /tmp/requirements.txt
           cp projects/miopen/rbuild.ini /tmp/rbuild.ini
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
