@@ -443,6 +443,7 @@ ROCFFT_EXPORT rocfft_status
  *
  *  ::rocfft_execution_info_set_store_callback_data can optionally be
  *  used to set the `cbdata` value received by the callback function.
+ *  rocFFT will pass nullptr for `cbdata` by default.
  *
  *  Currently, `shared_mem_bytes` must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
@@ -648,10 +649,14 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_mode( rocfft_execution_inf
 
 /*! @brief Set stream in execution info
  *  @details Associates an existing compute stream to a plan.  This
- * must be called before the call to ::rocfft_execute.
+ *  must be called before the call to ::rocfft_execute.
  *
  *  Once the association is made, execution of the FFT will run the
  *  computation through the specified stream.
+ *
+ *  The device for the stream is determined from the stream itself.
+ *  If the FFT plan uses multiple devices then this function can be
+ *  called repeatedly with streams for each of those devices.
  *
  *  The stream must be of type hipStream_t. It is an error to pass
  *  the address of a hipStream_t object.
@@ -803,9 +808,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_store_callback(rocfft_exec
  *  used at plan creation.
  *
  *  The provided data pointers replace any previously-specified
- *  store callback data for this execution info handle.  `cb_data` may be
- *  nullptr, to indicate that all store callbacks should receive
- *  nullptr for their `cbdata` parameters.
+ *  store callback data for this execution info handle.  `cb_data` may
+ *  be nullptr along with a count of zero, to indicate that all store
+ *  callbacks should receive nullptr for their `cbdata` parameters.
  *
  *  @param[in] info execution info handle
  *  @param[in] cb_data callback function data, passed to the JIT-compiled store callback when it is called

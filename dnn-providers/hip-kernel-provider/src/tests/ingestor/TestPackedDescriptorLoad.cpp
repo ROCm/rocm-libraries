@@ -15,6 +15,8 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "TestDescriptorRoot.hpp"
+
 /**
  * @file TestPackedDescriptorLoad.cpp
  * @brief The packer/loader seam: real packer OUTPUT read by the real loader.
@@ -54,9 +56,7 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog;
 using hipdnn_plugin_sdk::ingestor::resolveDescriptorSets;
 
-/// Where this build stages what it packed, one subdirectory per arch. The same define
-/// `TestKpackKernelLoader.cpp` reads; CMake sets it from `HIPDNN_DESCRIPTOR_BUILD_DIR`.
-constexpr const char* PACKED_DESCRIPTOR_ROOT = HIPDNN_TEST_DESCRIPTOR_DIR;
+using hip_kernel_provider::testing::unitKpackRoot;
 
 /// Every per-arch shard this build produced.
 ///
@@ -69,7 +69,7 @@ std::vector<std::filesystem::path> packedArchShards()
     std::vector<std::filesystem::path> shards;
 
     std::error_code ec;
-    const std::filesystem::path root(PACKED_DESCRIPTOR_ROOT);
+    const std::filesystem::path& root = unitKpackRoot();
     if(!std::filesystem::is_directory(root, ec))
     {
         return shards;
@@ -77,8 +77,7 @@ std::vector<std::filesystem::path> packedArchShards()
 
     for(const auto& entry : std::filesystem::directory_iterator(root, ec))
     {
-        // A shard is a directory holding a kpack/ sibling; the flat per-engine descriptor
-        // folders staged from the source tree are not packer output and are not in scope.
+        // A shard is an arch directory holding a kpack/ child.
         std::error_code inner;
         if(entry.is_directory(inner)
            && std::filesystem::is_directory(entry.path() / "kpack", inner))
@@ -97,15 +96,25 @@ std::vector<std::filesystem::path> packedArchShards()
 /// source root unset. Once a shard exists everything below is an assertion: a staged tree
 /// that cannot be loaded is the defect this file exists to catch, never a reason to pass
 /// quietly.
-#define REQUIRE_PACKED_SHARDS(shards)                                                      \
-    const auto shards = packedArchShards();                                                \
-    if((shards).empty())                                                                   \
-    {                                                                                      \
-        GTEST_SKIP() << "no packed arch shard under " << PACKED_DESCRIPTOR_ROOT            \
-                     << " -- the packaging rule did not run. Configure with "              \
-                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON, a discoverable hipcc, and a " \
-                        "HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT.";                       \
-    }                                                                                      \
+///
+/// A root that is not a directory fails. The probe below reads the children of one fixed
+/// level, so a tree the build lays out somewhere else answers "nothing was packed" and
+/// skips every case in this file.
+#define REQUIRE_PACKED_SHARDS(shards)                                                     \
+    std::error_code missingRoot;                                                          \
+    ASSERT_TRUE(std::filesystem::is_directory(unitKpackRoot(), missingRoot))              \
+        << "the packed set root " << unitKpackRoot()                                      \
+        << " is not a directory. The staged tree sits elsewhere, or this binary holds a " \
+           "stale offset to it.";                                                         \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) declarator name, not an expression */   \
+    const auto shards = packedArchShards();                                               \
+    if((shards).empty())                                                                  \
+    {                                                                                     \
+        GTEST_SKIP() << "no packed arch shard under " << unitKpackRoot()                  \
+                     << " -- the packaging rule did not run. Configure with "             \
+                        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON and a discoverable hipcc, "   \
+                        "then build the descriptor staging targets.";                     \
+    }                                                                                     \
     static_assert(true, "swallow the trailing semicolon")
 
 } // namespace
@@ -381,13 +390,16 @@ TEST(TestPackedDescriptorLoad, PackedKernelsCarryCompleteKpackCoordinates)
     }
 }
 
-/// Nothing reaches the staged tree still claiming a producer-side source kind.
+/// Nothing in this root reaches the staged tree still claiming a producer-side source kind.
 ///
-/// The packer's whole job on a UKD is to REPLACE the authored producer form -- `hip` with
-/// its source file, `rocke` with its builder and spec -- with the `kpack` coordinates of
-/// the code object it produced. A descriptor that arrives still naming `embedded_source`
-/// means the rewrite silently did not happen for it, and the runtime would try to compile
-/// a source file the shard does not carry.
+/// The packer's job on a `hip` or `rocke` UKD is to REPLACE the authored producer form --
+/// `hip` with its source file, `rocke` with its builder and spec -- with the `kpack`
+/// coordinates of the code object it produced. A descriptor arriving in this root still
+/// naming a producer-side kind means the rewrite silently did not happen for it, and the
+/// runtime would try to compile a source file the shard does not carry.
+///
+/// `embedded_source` is not producer-side in that sense: the packer passes it through as
+/// authored, and those descriptors are staged in a different set.
 ///
 /// This also pins the rocKE path specifically: `kind: "rocke"` is a PACKAGING vocabulary
 /// the runtime loader does not accept at all, so a rocKE descriptor that failed to be

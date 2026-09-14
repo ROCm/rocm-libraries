@@ -35,10 +35,14 @@ from .gfx950.attention_tiled_2d import (  # noqa: F401
     UnifiedAttention2DTiledSpec,
 )
 
-# Dense flash-attention prefill (gfx950-only): productized CK-1 persistent kernel.
-# See ``kernels/gfx950/attention_dense.py``.
+# Dense flash-attention prefill. ``AttentionDenseSpec`` remains the historical
+# gfx950 alias; new cross-arch code should use the explicit concrete type.
+from .common.attention_dense_spec import (  # noqa: F401
+    AttentionDenseSpec as AttentionDenseBaseSpec,
+)
 from .gfx950.attention_dense import (  # noqa: F401
     AttentionDenseSpec,
+    Gfx950AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
     attention_dense_signature,

@@ -48,6 +48,21 @@ void _rocsparse_sptrsv_descr::set_shared_csrsv_info(std::shared_ptr<_rocsparse_c
     this->m_csrsv_info = value;
 }
 
+void _rocsparse_sptrsv_descr::set_ellsv_info(rocsparse_ellsv_info value)
+{
+    this->m_ellsv_info = std::shared_ptr<_rocsparse_ellsv_info>(value);
+}
+
+rocsparse_ellsv_info _rocsparse_sptrsv_descr::get_ellsv_info()
+{
+    return this->m_ellsv_info.get();
+}
+
+void _rocsparse_sptrsv_descr::set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value)
+{
+    this->m_ellsv_info = value;
+}
+
 _rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
 {
     m_stage            = ((rocsparse_sptrsv_stage)-1);
@@ -57,6 +72,7 @@ _rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
     m_compute_datatype = ((rocsparse_datatype)-1);
     m_analysis_policy  = ((rocsparse_analysis_policy)-1);
     this->m_csrsv_info.reset();
+    this->m_ellsv_info.reset();
     this->m_scalar_alpha = nullptr;
 }
 
@@ -138,6 +154,28 @@ void _rocsparse_sptrsv_descr::set_compute_datatype(rocsparse_datatype value)
 {
     this->m_compute_datatype = value;
 }
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+rocsparse_solve_mode _rocsparse_sptrsv_descr::get_solve_mode() const
+{
+    return this->m_solve_mode;
+}
+
+void _rocsparse_sptrsv_descr::set_solve_mode(rocsparse_solve_mode value)
+{
+    this->m_solve_mode = value;
+}
+
+rocsparse_diagonal_modifier _rocsparse_sptrsv_descr::get_diagonal_modifier() const
+{
+    return this->m_diagonal_modifier;
+}
+
+void _rocsparse_sptrsv_descr::set_diagonal_modifier(rocsparse_diagonal_modifier value)
+{
+    this->m_diagonal_modifier = value;
+}
+#endif
 
 extern "C" rocsparse_status rocsparse_create_sptrsv_descr(rocsparse_sptrsv_descr* descr)
 try

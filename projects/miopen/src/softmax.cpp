@@ -104,12 +104,14 @@ miopenStatus_t SoftmaxForward(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "Null pointer for tensor.");
     }
 
-    const auto problem = softmax::ProblemDescription{alpha, beta, xDesc, yDesc, algorithm, mode};
+    const auto problem =
+        softmax::ProblemDescription{alpha, beta, xDesc, yDesc, algorithm, mode, x_offset, y_offset};
     const auto invoke_params =
-        softmax::InvokeParams{alpha, beta, xDesc, x, yDesc, y, algorithm, mode, x_offset, y_offset};
-    const auto algo = AlgorithmName{"Softmax"};
-    const auto solvers =
-        solver::SolverContainer<solver::softmax::AttnSoftmax, solver::softmax::Softmax>{};
+        softmax::InvokeParams{alpha, beta, xDesc, x, yDesc, y, x_offset, y_offset};
+    const auto algo    = AlgorithmName{"Softmax"};
+    const auto solvers = solver::SolverContainer<solver::softmax::AttnSoftmax,
+                                                 solver::softmax::Softmax,
+                                                 solver::softmax::SoftmaxNoncontiguous>{};
     solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
 
     return miopenStatusSuccess;
@@ -135,23 +137,13 @@ miopenStatus_t SoftmaxBackward(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "Null pointer for tensor.");
     }
 
-    const auto problem =
-        softmax::ProblemDescription{alpha, beta, yDesc, dyDesc, dxDesc, algorithm, mode};
-    const auto invoke_params = softmax::InvokeParams{alpha,
-                                                     beta,
-                                                     yDesc,
-                                                     y,
-                                                     dyDesc,
-                                                     dy,
-                                                     dxDesc,
-                                                     dx,
-                                                     algorithm,
-                                                     mode,
-                                                     y_offset,
-                                                     dy_offset,
-                                                     dx_offset};
-    const auto algo          = AlgorithmName{"Softmax"};
-    const auto solvers       = solver::SolverContainer<solver::softmax::Softmax>{};
+    const auto problem = softmax::ProblemDescription{
+        alpha, beta, yDesc, dyDesc, dxDesc, algorithm, mode, y_offset, dy_offset, dx_offset};
+    const auto invoke_params = softmax::InvokeParams{
+        alpha, beta, yDesc, y, dyDesc, dy, dxDesc, dx, y_offset, dx_offset, dy_offset};
+    const auto algo = AlgorithmName{"Softmax"};
+    const auto solvers =
+        solver::SolverContainer<solver::softmax::Softmax, solver::softmax::SoftmaxNoncontiguous>{};
     solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
 
     return miopenStatusSuccess;

@@ -88,6 +88,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     BF16,
+    F16,
     F32,
     I32,
     IRBuilder,
@@ -313,6 +314,29 @@ class WgradConvSpec:
 
     lds_layout: Optional[LdsLayout] = None
 
+    # Store the A/B tiles K-outer -- ``LDS[k][m]`` / ``LDS[k][n]`` -- instead of
+    # the default M-outer ``LDS[m][k]``, and feed the MFMA with gfx950
+    # ``ds_read_b64_tr_b16`` transpose reads.
+    #
+    # Why: wgrad's stride-1 global axis is the GEMM *free* axis (k_out for dY,
+    # inner C for X), never the reduction axis K_wg. The M-outer tile therefore
+    # forces a transpose *on store*: one ``ds_write_b16`` per element, 32 of them
+    # per K-step per wave, and -- because the M-outer row stride is a multiple of
+    # the 32-dword bank period -- every one of them bank-conflicts. The forward
+    # conv runs the identical machinery with no bank conflicts at all, because
+    # its reduction axis is stride-1 in global and it needs no transpose.
+    #
+    # K-outer removes the transpose from the store side entirely: the 8 elements
+    # a thread loads along the free axis are LDS-contiguous, so one
+    # ``ds_write_b128`` replaces eight ``ds_write_b16``. The transpose then
+    # happens for free inside the read instruction: the store side becomes a few
+    # wide vector writes with no cross-lane permutes, and the transpose cost
+    # moves into the ds_read_b64_tr_b16 operand fetch.
+    #
+    # Default False: the flag is strictly additive, so every existing config
+    # emits byte-identical IR.
+    lds_k_outer: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -333,6 +357,22 @@ class WgradConvSpec:
     #      Caller must zero-init dW before launch.
     # ABI for 0 and >1: dW is not writeonly; K_wg is padded as needed.
     split_k: int = 1
+    # Two-stage deterministic mode (requires split_k > 1).
+    # When True, Stage 1 writes f32 partial sums to a workspace buffer
+    # (ws_ptr) instead of atomic-adding into dW.  The caller must launch a
+    # separate Stage 2 reduce kernel (conv_wgrad_workspace_reduce) afterwards
+    # on the same stream to accumulate workspace slices into dW.
+    # Workspace size: groups * split_k * wg_M * wg_N * 4 bytes (always f32).
+    # Automatically set to True by the builder when force_deterministic=True
+    # and split_k > 1; callers should prefer force_deterministic over setting
+    # this directly.
+    two_stage: bool = False
+    # Semantic determinism intent flag.  When True and split_k > 1 (or
+    # split_k=-1 auto), the builder forces two_stage=True so the kernel uses
+    # the workspace-store epilogue instead of atomic adds.  For split_k == 1
+    # the output is already deterministic (plain store) and this flag is a
+    # no-op.
+    force_deterministic: bool = False
 
     @property
     def block_size(self) -> int:
@@ -400,8 +440,18 @@ class WgradConvSpec:
             self.acc_epilogue.tag(),
             flags={
                 "async": self.async_dma,
+                "kouter": self.lds_k_outer,
+                # An explicit lds_k_pad changes the LDS row stride and so the
+                # emitted code, but nothing else in the name reflects it. Two
+                # pads would otherwise collide on one symbol and the compile
+                # cache -- which keys on kernel.name -- would hand every pad the
+                # same binary, silently making a pad sweep measure one kernel
+                # N times. Only tagged when set explicitly, so a spec that
+                # leaves it None keeps its historical name and golden.
+                f"pad{self.lds_k_pad}": self.lds_k_pad is not None,
                 f"spk{self.split_k}": self.split_k > 1,
                 "spkauto": self.split_k == -1,
+                "twostage": self.two_stage,
                 "spkrt": self.split_k == 0,
             },
         )
@@ -428,6 +478,11 @@ class WgradConvSpec:
                 f"split_k must be -1 (auto), 0 (runtime atomic), 1 (disabled), "
                 f"or >1 (fixed); got {self.split_k}"
             )
+        if self.two_stage and self.split_k == 1:
+            raise ValueError(
+                "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
+                "with split_k=1 there is nothing to reduce and two_stage is a no-op"
+            )
         if self.split_k == 0 or self.split_k > 1:
             if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
                 raise ValueError(
@@ -441,12 +496,94 @@ class WgradConvSpec:
                     f"position; the packed dW inner dim is cpg=C/groups); "
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
-        if self.data.dtype_d in ("bf16", "fp16") and self.epilogue == "default":
+        # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
+        # requirement only applies to atomic split-K paths (not two_stage).
+        _needs_atomic = (self.split_k == 0 or self.split_k > 1) and not self.two_stage
+        if (
+            _needs_atomic
+            and self.data.dtype_d in ("bf16", "fp16")
+            and self.epilogue == "default"
+        ):
             raise ValueError(
                 f"split_k atomic with dtype_d={self.data.dtype_d!r} requires "
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
+        if self.async_dma and not self.lds_k_outer:
+            # Direct global->LDS load is only correct on the K-outer tile.
+            # `raw_ptr_buffer_load_lds` moves N *contiguous global* elements into
+            # N *contiguous LDS* elements, so the LDS axis that is contiguous has
+            # to be the global stride-1 axis. On the M-outer tile the loader is
+            # driven with (row=m, col=k_wg), but wgrad's reduction axis K_wg is
+            # stride-K in dY (NHWK) and stride-C in X (NHWC) -- never stride-1.
+            # Each lane would deposit `elems_per_chunk` consecutive *channels*
+            # where consecutive *spatial positions* were required, and the
+            # boundary pad predicate would be lost as well, because one
+            # buffer_load...lds carries a single predicate for elements that
+            # have different (hi, wi) validity.
+            #
+            # The K-outer tile fixes both: a chunk then runs along the FREE axis
+            # at a fixed (n, ho, wo, y, x), which is contiguous in global and
+            # shares one predicate.
+            raise ValueError(
+                "wgrad async_dma requires lds_k_outer=True: the direct "
+                "global->LDS load needs a stride-1 reduction axis, which wgrad "
+                "only has once the tile is stored K-outer"
+            )
+        if self.split_k == 0 and (
+            self.async_dma or self.unroll_k or self.pipeline == "basic"
+        ):
+            # split_k == 0 means the split degree is a launch-time kernel
+            # argument, so the K-slice length is not known at build time. The
+            # async and unrolled k-loops both need a compile-time trip count to
+            # lay out their pipeline, and wg_K_padded() cannot supply one for a
+            # runtime degree. Reject here with the reason rather than let the
+            # builder raise a confusing ValueError deep in the k-loop, which the
+            # sweep drivers swallow into a silent skip.
+            raise ValueError(
+                "wgrad split_k=0 (runtime degree) is incompatible with "
+                "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+                "compile-time "
+                "iteration count. Use a fixed split_k >= 1."
+            )
+        if self.lds_k_outer:
+            # ds_read_b64_tr_b16 is a gfx950 MFMA-class instruction operating on
+            # 16-bit lanes. The fragment formula is derived per 16-lane group
+            # over a 16- or 32-wide atom edge; it carries the per-lane fragment
+            # length (4 for 16x16x16, 8 for 16x16x32 and 32x32x16) rather than
+            # assuming 8, so every 16-bit atom on those edges is covered.
+            if self.data.dtype_a not in ("bf16", "fp16") or self.data.dtype_b not in (
+                "bf16",
+                "fp16",
+            ):
+                raise ValueError(
+                    "lds_k_outer requires 16-bit A/B dtypes (ds_read_b64_tr_b16 "
+                    f"is a 16-bit transpose read); got dtype_a={self.data.dtype_a!r} "
+                    f"dtype_b={self.data.dtype_b!r}"
+                )
+            if self.warp_tile_m not in (16, 32) or self.warp_tile_n not in (16, 32):
+                raise ValueError(
+                    "lds_k_outer requires warp_tile_m/n in (16, 32) -- the "
+                    "transpose-read lane mapping is derived per 16-lane group "
+                    f"over the atom edge; got {self.warp_tile_m}x{self.warp_tile_n}"
+                )
+            if self.wave_size != 64:
+                raise ValueError(
+                    "lds_k_outer requires wave_size=64 (ds_read_b64_tr_b16 is a "
+                    f"wave64 instruction); got {self.wave_size}"
+                )
+            if self.lds_k_pad is not None:
+                # The K-outer tile derives its row stride from _KOUTER_PAD in
+                # the builder, not from effective_lds_layout(), so an explicit
+                # pad never reaches the emitted body. It would still fork the
+                # kernel name and change the LDS budget is_valid_wgrad_spec
+                # charges, i.e. change which specs are admissible without
+                # changing any of them. Reject rather than ignore.
+                raise ValueError(
+                    "lds_k_outer does not honour an explicit lds_k_pad: the "
+                    "K-outer row stride is fixed by the transpose-read bank "
+                    f"analysis, not by the layout; got lds_k_pad={self.lds_k_pad}"
+                )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -479,7 +616,7 @@ class WgradConvSpec:
 
     @staticmethod
     def default_vector_sizes(
-        C: int, K: int, dtype: str, split_k: int = 1
+        C: int, K: int, dtype: str, split_k: int = 1, dtype_d: "Optional[str]" = None
     ) -> "Tuple[int, int, int]":
         """Return ``(vec_a, vec_b, vec_c)`` for a wgrad problem.
 
@@ -488,22 +625,79 @@ class WgradConvSpec:
           B (X):   NHWC → last dim C → vec_b
           D (dW):  KYXC → last dim C → vec_c
 
+        ``dtype`` is the compute (A/B) dtype and sizes vec_a/vec_b only.
+        ``dtype_d`` is the dW dtype and sizes vec_c only; it defaults to
+        ``dtype``. They are separate because the element width sets the
+        candidate ladder, so folding an fp32 dW into ``dtype`` would clamp the
+        reported A/B widths to 4 while the kernel still loads 8 wide.
+
         When ``split_k != 1`` (including ``split_k == 0`` for runtime selection)
         the epilogue is ``default`` (direct scalar store), which does not support
         vec_c > 1, so vec_c is forced to 1.
         """
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
 
-        def _vec(n: int) -> int:
+        def _vec(n: int, dt: str) -> int:
+            sizes = [8, 4, 2, 1] if dt != "fp32" else [4, 2, 1]
             return next(v for v in sizes if n % v == 0)
 
-        vec_c = 1 if split_k != 1 else _vec(C)
-        return _vec(K), _vec(C), vec_c
+        vec_c = 1 if split_k != 1 else _vec(C, dtype_d or dtype)
+        return _vec(K, dtype), _vec(C, dtype), vec_c
+
+    @staticmethod
+    def default_lds_k_outer(
+        *,
+        arch: str,
+        dtype_a: str,
+        dtype_b: str,
+        warp_tile_m: int,
+        warp_tile_n: int,
+        wave_size: int = 64,
+    ) -> bool:
+        """Whether a wgrad spec should default to the K-outer LDS layout.
+
+        Selection policy only -- it never touches the frozen kernel body, and
+        the ``lds_k_outer`` field itself still defaults to ``False`` so the
+        goldens stay layout-stable. Callers that build specs for dispatch (as
+        opposed to for a golden) ask this what to pass.
+
+        The M-outer tile transposes on *store*: one ``smem_store_vN`` per
+        free-axis element, so a ``load_vec``-wide global load becomes
+        ``load_vec`` narrow LDS writes plus their address arithmetic. The
+        K-outer tile is contiguous in LDS along the same axis the global load
+        is contiguous in, so that store collapses to a single wide write and
+        the transpose moves to the ``ds_read_b64_tr_b16`` operand fetch. It is
+        a strict instruction-count win wherever the transpose read exists,
+        which is the whole of the gate below; there is no shape regime where
+        the scatter is preferable. Because the answer is a pure function of
+        arch/dtype/atom with nothing shape-dependent in it, this is the single
+        selection point: there is no benchmark flag and no env override, and
+        both the sweep driver and dispatch call this rather than keeping their
+        own copies.
+        """
+        # Mirrors the validate() gate: a 16-bit wave64 transpose read over a
+        # 16- or 32-wide atom edge, which today is gfx950 only.
+        if arch != _LDS_K_OUTER_ARCH:
+            return False
+        if dtype_a not in ("bf16", "fp16") or dtype_b not in ("bf16", "fp16"):
+            return False
+        if warp_tile_m not in (16, 32) or warp_tile_n not in (16, 32):
+            return False
+        return wave_size == 64
 
 
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
 # ---------------------------------------------------------------------
+
+
+# The K-outer LDS tile is fed by ds_read_tr16_b64, a CDNA4 transpose read.
+# Emitting it for an older target produces IR the assembler will reject, so
+# this gates both the selection policy and the arch-aware validator.
+_LDS_K_OUTER_ARCH = "gfx950"
+
+# Cap on the K-iteration count of the Python-unrolled loops
+# (pipeline='basic' and async_dma). Mirrors ROCKE_MAX_UNROLLED_K_ITERS.
+_MAX_UNROLLED_K_ITERS = 128
 
 
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
@@ -568,12 +762,111 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"position; the packed dW inner dim is cpg=C/groups); "
             f"got cpg={spec.problem.cpg}"
         )
-    if spec.data.dtype_d in ("bf16", "fp16") and spec.epilogue == "default":
+    # two_stage writes to f32 workspace (not atomic dW), so the cshuffle
+    # requirement only applies to atomic split-K paths (not two_stage).
+    _atomic_not_two_stage = _is_atomic and not spec.two_stage
+    if (
+        _atomic_not_two_stage
+        and spec.data.dtype_d in ("bf16", "fp16")
+        and spec.epilogue == "default"
+    ):
         return False, (
             f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
         )
+
+    if spec.split_k == 0 and (
+        spec.async_dma or spec.unroll_k or spec.pipeline == "basic"
+    ):
+        return False, (
+            "wgrad split_k=0 (runtime degree) is incompatible with "
+            "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+            "compile-time iteration "
+            "count. Use a fixed split_k >= 1."
+        )
+    if spec.lds_k_outer and spec.lds_k_pad is not None:
+        # Mirror of the validate() gate: the K-outer row stride comes from
+        # _KOUTER_PAD in the builder, so an explicit pad changes the kernel name
+        # and the LDS budget charged here without changing a single emitted op.
+        return False, (
+            "lds_k_outer does not honour an explicit lds_k_pad: the K-outer row "
+            "stride is fixed by the transpose-read bank analysis, not by the "
+            f"layout; got lds_k_pad={spec.lds_k_pad}"
+        )
+    if spec.lds_k_outer and arch != _LDS_K_OUTER_ARCH:
+        # validate() covers the dtype/atom/wave_size half of the gate, but it
+        # has no arch to check against. Without this an older target builds
+        # cleanly and emits ds_read_tr16_b64, which only exists on CDNA4.
+        return False, (
+            f"lds_k_outer requires {_LDS_K_OUTER_ARCH} (ds_read_tr16_b64 is a "
+            f"CDNA4 transpose read); got {arch}"
+        )
+    if spec.async_dma and not spec.lds_k_outer:
+        # Mirror of the WgradConvSpec.validate() gate: the async intrinsic maps
+        # contiguous-global to contiguous-LDS, and wgrad only has a stride-1
+        # reduction axis once the tile is stored K-outer.
+        return False, (
+            "wgrad async_dma requires lds_k_outer=True: the direct global->LDS "
+            "load needs a stride-1 reduction axis, which wgrad only has once "
+            "the tile is stored K-outer"
+        )
+    if spec.async_dma:
+        # Soft mirror of the validate() gate. An explicit ``lds_layout`` object
+        # beats the scalar ``lds_k_pad`` field in effective_lds_layout(), and
+        # xor_swizzled has no scalar analogue at all, so the pad check above
+        # cannot stand in for this. Without it the sweep drivers turn the
+        # builder's late ValueError into a silent skip with no reason string.
+        try:
+            spec.effective_lds_layout().validate_for_async()
+        except ValueError as e:
+            return False, str(e)
+
+    for _nm, _v, _chan in (
+        ("vector_size_a", spec.vector_size_a, spec.problem.kpg),
+        ("vector_size_b", spec.vector_size_b, spec.problem.cpg),
+    ):
+        if _v is None:
+            continue
+        # The A/B load widths are a cap on the free-axis auto-selection, so an
+        # inadmissible request must be rejected rather than silently downgraded
+        # by choose_vec -- otherwise the knob looks like it took effect and did
+        # not.
+        if spec.async_dma:
+            return False, (
+                f"{_nm} is not honoured on the async_dma path (the direct "
+                "global->LDS intrinsic derives its own width); leave it None"
+            )
+        _cap = 4 if spec.data.dtype_a == "fp32" else 8
+        if _v < 1 or _v > _cap:
+            return False, f"{_nm}={_v} out of range 1..{_cap} for this dtype"
+        if _chan % _v:
+            return False, (
+                f"{_nm}={_v} must divide the stride-1 channel run ({_chan}); a "
+                "wider vector would read across the contiguous boundary"
+            )
+
+    if spec.pipeline == "basic" and spec.async_dma:
+        return False, "pipeline='basic' is incompatible with async_dma=True"
+
+    if spec.pipeline == "basic" or spec.async_dma:
+        # Both loops are unrolled in Python, one full load+mfma body per K
+        # iteration, so a deep reduction explodes compile time and code size.
+        # The cap is a build-practicality bound, not a hardware one.
+        #
+        # This used to guard 'basic' only, which left async uncapped. A deep
+        # reduction at a low split-K degree then unrolled five figures of
+        # bodies into one kernel; a sweep that reached those specs exhausted
+        # host memory during the IR build rather than failing validation.
+        _label = "pipeline='basic'" if spec.pipeline == "basic" else "async_dma"
+        _slice_k = spec.wg_K_padded() // max(spec.split_k, 1)
+        _k_iters = (_slice_k + spec.tile_k - 1) // spec.tile_k
+        if _k_iters > _MAX_UNROLLED_K_ITERS:
+            return False, (
+                f"{_label} would unroll to {_k_iters} K iterations "
+                f"(slice_k={_slice_k}, tile_k={spec.tile_k}), over the "
+                f"{_MAX_UNROLLED_K_ITERS} limit; raise split_k or tile_k"
+            )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
@@ -605,7 +898,13 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    # Only async_dma and unroll_k reach a K-loop that actually alternates between
+    # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
+    # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
+    # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
+    # scheduling hints -- so charging it for a second A/B tile rejected specs for
+    # LDS the kernel never allocates.
+    _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
@@ -724,6 +1023,13 @@ def build_implicit_gemm_conv_wgrad(
         )
         spec = _dc_replace(spec, split_k=decision.split_k)
 
+    # Promote to two-stage when the caller requested deterministic output and
+    # split_k > 1 (split_k == 1 is already deterministic; no workspace needed).
+    if spec.force_deterministic and spec.split_k > 1 and not spec.two_stage:
+        from dataclasses import replace as _dc_replace  # noqa: F811
+
+        spec = _dc_replace(spec, two_stage=True)
+
     spec.validate()
     ok, why = is_valid_wgrad_spec(spec, arch=arch)
     if not ok:
@@ -739,6 +1045,7 @@ def build_implicit_gemm_conv_wgrad(
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
     _is_split_k = spec.split_k > 1 or spec.split_k == 0
+    _is_two_stage = spec.split_k > 1 and spec.two_stage
     _split_k_runtime = spec.split_k == 0  # ks passed as kernel arg at launch
     _grouped = p_load.groups > 1
 
@@ -756,8 +1063,10 @@ def build_implicit_gemm_conv_wgrad(
     )
     # dW (weight gradient): output D.
     # split_k=1: normal writeonly store.
-    # split_k>1: atomic-add into caller-zero-init dW; writeonly dropped because
-    #            atomicrmw is read+modify+write (dtype_d in fp32/bf16/fp16).
+    # split_k>1 atomic: atomic-add into caller-zero-init dW; writeonly dropped.
+    # split_k>1 two_stage: dW is still the final output written by Stage 2;
+    #   Stage 1 (this kernel) never touches dW, but we keep it in the ABI so
+    #   the signature is identical between the atomic and two-stage variants.
     _dw_writeonly = not _is_split_k
     dW = b.param(
         "dW",
@@ -769,6 +1078,15 @@ def build_implicit_gemm_conv_wgrad(
     dY_bytes = b.param("dY_bytes", I32)
     X_bytes = b.param("X_bytes", I32)
     dW_bytes = b.param("dW_bytes", I32)
+    # Two-stage only: workspace buffer that receives f32 partial sums.
+    # Size = split_k * wg_M * wg_N * 4.  Not present in the atomic-add ABI.
+    if _is_two_stage:
+        ws_ptr = b.param(
+            "ws_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+        )
+        _ws_bytes = b.param(
+            "ws_bytes", I32
+        )  # noqa: F841  (side-effect: adds param to kernel signature)
     # Runtime split-K: ks = slice width per CTA, computed and passed by the launcher.
     # Only present when split_k == 0; fixed-degree kernels bake ks as a constant.
     # ks_count = number of slices; only needed when grouped+runtime so the kernel
@@ -889,20 +1207,41 @@ def build_implicit_gemm_conv_wgrad(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(
-        ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
-    )
-    B_smem = b.smem_alloc(
-        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
-    )
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+
+    if spec.lds_k_outer:
+        # K-outer: rows are K, columns are the free axis (M for A, N for B).
+        #
+        # The row stride must NOT be a multiple of the 32-dword LDS bank period,
+        # or the transpose read degenerates. Lane l reads 8 bytes at
+        #   (k_base + ((l%16)//4)) * stride + mn_base + ((l%MN)//16)*16 + (l%4)*4
+        # so the ((l%16)//4) term -- the only term that walks rows -- contributes
+        # zero bank spread whenever (stride_elems * 2 / 4) % 32 == 0, i.e. exactly
+        # the pathology the M-outer tile already has. A pad of 8 elements makes
+        # the stride 36 dwords for a 64-wide tile (36 % 32 == 4), which spreads
+        # the four row-groups across banks. 8 elements also keeps the row 16-byte
+        # aligned, which the b128 store side needs.
+        # Direct load deposits lane-contiguous *packed* bytes and cannot skip a
+        # row pad, so the async path must use a pad of 0. The transpose read is
+        # insensitive to the row stride, so dropping the pad costs nothing here.
+        _KOUTER_PAD = 0 if spec.async_dma else 8
+        a_kouter_stride = block_m + _KOUTER_PAD
+        b_kouter_stride = block_n + _KOUTER_PAD
+        _a_shape = (block_k, a_kouter_stride)
+        _b_shape = (block_k, b_kouter_stride)
+    else:
+        a_kouter_stride = b_kouter_stride = 0
+        _a_shape = lds_layout.storage_shape(block_m)
+        _b_shape = lds_layout.storage_shape(block_n)
+
+    A_smem = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem")
+    B_smem = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem")
+    # See the LDS budget note in is_valid_*_spec: "compv4" alone does not reach a
+    # buffer-alternating K-loop, so allocating a second tile for it produced a
+    # dead allocation that the LDS pool then stripped anyway.
+    double_buffer = spec.async_dma or spec.unroll_k
     if double_buffer:
-        A_smem2 = b.smem_alloc(
-            ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
-        )
-        B_smem2 = b.smem_alloc(
-            ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem2"
-        )
+        A_smem2 = b.smem_alloc(ir_dtype_a, _a_shape, name_hint="A_smem2")
+        B_smem2 = b.smem_alloc(ir_dtype_b, _b_shape, name_hint="B_smem2")
     else:
         A_smem2 = A_smem
         B_smem2 = B_smem
@@ -945,22 +1284,31 @@ def build_implicit_gemm_conv_wgrad(
     load_vec_b = 1
     if not spec.async_dma:
 
-        def _free_axis_vec(chan: int, dtype: str) -> int:
+        def _free_axis_vec(chan: int, dtype: str, override: "int | None" = None) -> int:
+            """Auto free-axis load width, clamped by an explicit spec override.
+
+            ``vector_size_a`` / ``vector_size_b`` are a cap, not a replacement:
+            a wider request than the channel run allows would read across a
+            stride-1 boundary (wrong data), so the divisibility rule still
+            wins. The forward and dgrad instances honour the same two fields;
+            wgrad was the only conv family that declared and ignored them.
+            """
             widths = (8, 4, 2, 1) if dtype != "fp32" else (4, 2, 1)
-            return next(v for v in widths if chan % v == 0)
+            auto = next(v for v in widths if chan % v == 0)
+            return auto if override is None else min(auto, override)
 
         va = CoalescedTileLoader.choose_vec(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a),
+            max_vec=_free_axis_vec(p_load.kpg, spec.data.dtype_a, spec.vector_size_a),
             vector_axis="row",
         )
         vb = CoalescedTileLoader.choose_vec(
             tile_rows=block_n,
             tile_cols=block_k,
             block_size=threads,
-            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b),
+            max_vec=_free_axis_vec(p_load.cpg, spec.data.dtype_b, spec.vector_size_b),
             vector_axis="row",
         )
         if va > 1:
@@ -1029,40 +1377,82 @@ def build_implicit_gemm_conv_wgrad(
         return X_desc.offset(b_, m=m_val, k=k_val)
 
     if spec.async_dma:
+        # K-outer: rows are K_wg, columns are the free axis. A chunk is then a
+        # run along the free axis at one k_wg, which is contiguous in global for
+        # both operands -- exactly what the intrinsic requires.
+        # contig_cols: a chunk must stay inside one contiguous global run. For dY
+        # (NHWK) the free axis is k_out, dense over kpg; for X (NHWC) it is the
+        # inner c of N_wg=(y,x,c), dense only over cpg -- a wider chunk would
+        # cross a filter position and silently fetch the wrong elements.
         a_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_m,
-            tile_cols=block_k,
+            tile_rows=block_k,
+            tile_cols=block_m,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_a,
+            contig_cols=p_load.kpg,
         )
         b_loader = AsyncTileLoader.from_tile(
-            tile_rows=block_n,
-            tile_cols=block_k,
+            tile_rows=block_k,
+            tile_cols=block_n,
             block_size=threads,
             wave_size=spec.wave_size,
             elem_dtype=ir_dtype_b,
+            contig_cols=p_load.cpg,
         )
         a_sync_loader = None
         b_sync_loader = None
     else:
         a_loader = None
         b_loader = None
+        if spec.lds_k_outer:
+            # K-outer tile: rows are K_wg, columns are the free axis (M for dY,
+            # inner-C of N_wg for X). The free axis is stride-1 in global AND
+            # contiguous in LDS, so the classic vector_axis="col" loader applies
+            # directly and its store collapses to a single wide smem_store_vN --
+            # no transpose-on-store, no per-element scatter.
+            a_tile_rows, a_tile_cols = block_k, block_m
+            b_tile_rows, b_tile_cols = block_k, block_n
+            a_axis = b_axis = "col"
+            a_vec = CoalescedTileLoader.choose_vec(
+                tile_rows=a_tile_rows,
+                tile_cols=a_tile_cols,
+                block_size=threads,
+                max_vec=_free_axis_vec(
+                    p_load.kpg, spec.data.dtype_a, spec.vector_size_a
+                ),
+                vector_axis="col",
+            )
+            b_vec = CoalescedTileLoader.choose_vec(
+                tile_rows=b_tile_rows,
+                tile_cols=b_tile_cols,
+                block_size=threads,
+                max_vec=_free_axis_vec(
+                    p_load.cpg, spec.data.dtype_b, spec.vector_size_b
+                ),
+                vector_axis="col",
+            )
+        else:
+            a_tile_rows, a_tile_cols = block_m, block_k
+            b_tile_rows, b_tile_cols = block_n, block_k
+            a_axis, b_axis = axis_a, axis_b
+            a_vec, b_vec = load_vec_a, load_vec_b
+
         a_sync_loader = CoalescedTileLoader(
-            tile_rows=block_m,
-            tile_cols=block_k,
+            tile_rows=a_tile_rows,
+            tile_cols=a_tile_cols,
             block_size=threads,
-            load_vec=load_vec_a,
+            load_vec=a_vec,
             elem_dtype=ir_dtype_a,
-            vector_axis=axis_a,
+            vector_axis=a_axis,
         )
         b_sync_loader = CoalescedTileLoader(
-            tile_rows=block_n,
-            tile_cols=block_k,
+            tile_rows=b_tile_rows,
+            tile_cols=b_tile_cols,
             block_size=threads,
-            load_vec=load_vec_b,
+            load_vec=b_vec,
             elem_dtype=ir_dtype_b,
-            vector_axis=axis_b,
+            vector_axis=b_axis,
         )
 
     schedule = SchedulePolicy.for_pipeline(
@@ -1073,6 +1463,21 @@ def build_implicit_gemm_conv_wgrad(
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
         k_off_capture[0] = k_off
 
+        if spec.lds_k_outer:
+            # The K-outer tile is indexed (k, free); the descriptors take
+            # (free, k). Swap the two coordinates -- the descriptors themselves
+            # are unchanged, so the global addressing stays byte-identical.
+            # Shared by the synchronous and the direct-load paths.
+            def _dy_kouter(b_, row, col):
+                return dy_descriptor(b_, col, row)
+
+            def _x_kouter(b_, row, col):
+                return x_descriptor(b_, col, row)
+
+            a_desc_fn, b_desc_fn = _dy_kouter, _x_kouter
+        else:
+            a_desc_fn, b_desc_fn = dy_descriptor, x_descriptor
+
         if spec.async_dma:
             from ...core.ir import CACHE_STREAM
 
@@ -1081,21 +1486,78 @@ def build_implicit_gemm_conv_wgrad(
                 b,
                 tid=tid,
                 rsrc=dy_rsrc,
-                descriptor=dy_descriptor,
+                descriptor=a_desc_fn,
                 coherency=CACHE_STREAM,
             )
             b_slot = b_loader.bind(b, smem_dst=B_dst, wave_id=warp_id)
             b_slot.issue(
-                b, tid=tid, rsrc=x_rsrc, descriptor=x_descriptor, coherency=CACHE_STREAM
+                b, tid=tid, rsrc=x_rsrc, descriptor=b_desc_fn, coherency=CACHE_STREAM
             )
             return
 
         a_sync_loader.load(
-            b, tid=tid, smem_dst=A_dst, descriptor=dy_descriptor, rsrc=dy_rsrc
+            b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc
         )
         b_sync_loader.load(
-            b, tid=tid, smem_dst=B_dst, descriptor=x_descriptor, rsrc=x_rsrc
+            b, tid=tid, smem_dst=B_dst, descriptor=b_desc_fn, rsrc=x_rsrc
         )
+
+    def _split_desc_fns():
+        """The (A, B) descriptor callbacks for the split global-read path.
+
+        Mirrors the ``lds_k_outer`` coordinate swap inside
+        :func:`emit_load_phase`: the K-outer tile is indexed ``(k, free)`` while
+        the descriptors take ``(free, k)``. Emits no IR, so hoisting it out of
+        the loader call cannot perturb SSA numbering.
+        """
+        if spec.lds_k_outer:
+
+            def _dy_kouter(b_, row, col):
+                return dy_descriptor(b_, col, row)
+
+            def _x_kouter(b_, row, col):
+                return x_descriptor(b_, col, row)
+
+            return _dy_kouter, _x_kouter
+        return dy_descriptor, x_descriptor
+
+    def emit_global_read(k_off: Value) -> tuple:
+        """Issue only the global reads (buffer_load_vN) for one K tile.
+
+        Returns ``(k_off, a_staged, b_staged)`` -- the tile offset plus the two
+        lists of ``(row, col, v)`` triples from
+        :meth:`CoalescedTileLoader.load_global`. The caller commits them later
+        with :func:`emit_lds_write`. Sync path only; this is what lets the
+        CK pipeline_basic loop overlap VMEM latency with MFMA compute.
+
+        ``k_off`` is carried in the tuple because wgrad's offsets are
+        ``add(k_lo, const)`` -- a real emitted op, unlike the forward conv's
+        cached ``const_i32`` -- so re-deriving it in :func:`emit_lds_write`
+        would strand an extra add after the barrier.
+        """
+        k_off_capture[0] = k_off
+        a_desc_fn, b_desc_fn = _split_desc_fns()
+        a_staged = a_sync_loader.load_global(
+            b, tid=tid, descriptor=a_desc_fn, rsrc=dy_rsrc
+        )
+        b_staged = b_sync_loader.load_global(
+            b, tid=tid, descriptor=b_desc_fn, rsrc=x_rsrc
+        )
+        return k_off, a_staged, b_staged
+
+    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
+        """Commit previously staged VGPR values to LDS.
+
+        Restores ``k_off_capture`` so any descriptor consulted here sees the
+        offset the values were read at, even though the read and the write sit
+        in different loop positions. ``store_lds`` funnels through the same
+        ``_store_tile`` as the fused loader, so ``vector_axis="row"`` replays
+        the transpose-on-store scatter unchanged.
+        """
+        k_off, a_staged, b_staged = staged_tuple
+        k_off_capture[0] = k_off
+        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
+        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
 
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
@@ -1146,6 +1608,54 @@ def build_implicit_gemm_conv_wgrad(
                     flat += 1
         return new_accs
 
+    # ---- K-outer transpose-read fragment feed -------------------------------
+    # For a K-outer tile ``T[k][mn]`` the MFMA operand of lane ``l`` is obtained
+    # with ``n//4`` ``ds_read_b64_tr_b16`` at
+    #     row(r) = k_base + (l // MN)*n + ((l % 16)//4) + 4*r   r in [0, n//4)
+    #     col    = mn_base + ((l % MN)//16)*16 + (l % 4)*4
+    # after which lane ``l`` holds ``T[k_base .. k_base+n-1][mn_base + l % MN]``
+    # -- exactly the ``n`` K-contiguous elements the atom wants for its column.
+    #
+    # ``n`` is the per-lane operand length, which is what sets the k-stride
+    # between lane groups: MFMA lane ``l`` owns ``k = (l // MN)*n .. +n-1``.
+    # It is 8 for 32x32x16 and 16x16x32, and 4 for 16x16x16. Hardcoding the
+    # stride at 8 made the 16x16x16 atom read k rows 8..27 of a 16-row tile --
+    # past the end of the K-outer tile, so the fragment was garbage. The
+    # emitted IR is unchanged for the two 8-element atoms.
+    # test_lds_k_outer_matches_default pins the mapping against the M-outer path.
+    # These are only materialised on the K-outer path: emitting them
+    # unconditionally would add IR ops to every existing config and move the
+    # golden. Guarded so the default path stays byte-identical.
+    if spec.lds_k_outer:
+        _tr_lane_mod4 = b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4))
+        _tr_grp16 = b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4))
+
+    def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
+        """One MFMA operand fragment from a K-outer tile via transpose reads."""
+        c_mn = b.const_i32(mn_atom)
+        col = b.add(
+            mn_base,
+            b.add(
+                b.mul(b.div(b.mod(lane, c_mn), b.const_i32(16)), b.const_i32(16)),
+                _tr_lane_mod4,
+            ),
+        )
+        row0 = b.add(k_base, b.add(b.mul(b.div(lane, c_mn), b.const_i32(n)), _tr_grp16))
+        # ``_smem_dtype`` is None for fp16 (the legacy "default is F16"
+        # convention used by _emit_smem_load); ds_read_tr16_b64 needs a concrete
+        # element type, so resolve it here.
+        tr_dtype = _smem_dtype if _smem_dtype is not None else F16
+        parts = [
+            b.ds_read_tr16_b64(
+                smem, b.add(row0, b.const_i32(4 * r)), col, dtype=tr_dtype
+            )
+            for r in range(n // 4)
+        ]
+        out = parts[0]
+        for pt in parts[1:]:
+            out = b.vec_concat(out, pt)
+        return out
+
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1168,6 +1678,17 @@ def build_implicit_gemm_conv_wgrad(
             )
             a_rows = []
             for mi in range(mfmas_m):
+                if spec.lds_k_outer:
+                    a_rows.append(
+                        _tr_frag(
+                            A_src,
+                            b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m)),
+                            b.const_i32(kk * spec.warp_tile_k),
+                            spec.warp_tile_m,
+                            a_per_lane,
+                        )
+                    )
+                    continue
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                 )
@@ -1179,6 +1700,17 @@ def build_implicit_gemm_conv_wgrad(
 
             b_cols = []
             for ni in range(mfmas_n):
+                if spec.lds_k_outer:
+                    b_cols.append(
+                        _tr_frag(
+                            B_src,
+                            b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
+                            b.const_i32(kk * spec.warp_tile_k),
+                            spec.warp_tile_n,
+                            b_per_lane,
+                        )
+                    )
+                    continue
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
@@ -1230,6 +1762,51 @@ def build_implicit_gemm_conv_wgrad(
             b.sync()
 
         final_accs = current_accs
+    elif spec.pipeline == "basic":
+        # CK pipeline_basic: single LDS buffer, global-read/compute overlap.
+        #
+        # The buffer_load_vN for tile it+1 is issued BEFORE the sync+mfma for
+        # tile it, so the VMEM latency hides behind the MFMA stream. The LDS
+        # write is deferred past the second sync -- once every ds_read for tile
+        # it has drained -- which is what makes one buffer sufficient: the tile
+        # it+1 data waits in VGPRs, not in a second LDS tile. unroll_k needs
+        # A_smem2/B_smem2 precisely because it moves the *store* inside the
+        # read window; this does not.
+        #
+        # Per iteration:
+        #   emit_global_read(k_lo + (it+1)*block_k)   buffer_load, in flight
+        #   sync()      drain the previous ds_write   -> tile it RAW-safe
+        #   k_off_capture = k_lo + it*block_k         descriptors address tile it
+        #   emit_mfma_phase                           ds_read + mfma
+        #   sync()      drain the ds_reads            -> buffer WAR-safe
+        #   emit_lds_write(staged it+1)               ds_write
+        #
+        # Each k offset is materialised once and carried in the staged tuple:
+        # wgrad's offsets are add(k_lo, const), so re-deriving one in
+        # emit_lds_write would emit a stray add after the barrier.
+        slice_k = wg_K if k_hi is None else (spec.wg_K_padded() // spec.split_k)
+        K_iters = (slice_k + block_k - 1) // block_k
+        current_accs = [v for _, v in accs]
+
+        # Prologue: read tile 0 and commit it immediately -- no prior ds_read
+        # exists to drain, so the write needs no barrier in front of it.
+        emit_lds_write(emit_global_read(k_lo), A_smem, B_smem)
+
+        pending_staged = None
+        for it in range(K_iters):
+            if it + 1 < K_iters:
+                pending_staged = emit_global_read(
+                    b.add(k_lo, b.const_i32((it + 1) * block_k))
+                )
+            b.sync()
+            k_off_capture[0] = b.add(k_lo, b.const_i32(it * block_k))
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            b.sync()
+            if pending_staged is not None:
+                emit_lds_write(pending_staged, A_smem, B_smem)
+                pending_staged = None
+
+        final_accs = current_accs
     elif not spec.async_dma:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
@@ -1273,7 +1850,23 @@ def build_implicit_gemm_conv_wgrad(
     # ---- epilogue ----
     final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
 
-    if _is_split_k and op.family == "wmma":
+    if _is_two_stage:
+        # Two-stage deterministic: plain f32 store to per-k workspace slice.
+        # ws_ptr is defined above only when _is_two_stage=True.
+        _emit_wgrad_workspace_store_epilogue(
+            b,
+            spec,
+            atom,
+            final_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off_v,
+            block_n_off_v,
+            ws_ptr,
+            c_per_lane,
+        )
+    elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
         _emit_wgrad_split_k_epilogue_wmma(
             b,
@@ -1502,6 +2095,92 @@ def _emit_wgrad_split_k_epilogue(
                     c_m_i = b.add(atom_m_base, rows[i])
                     c_n_i = b.add(atom_n_base, cols[i])
                     _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_workspace_store_epilogue(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    atom: MfmaAtom,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    ws_ptr: Value,
+    c_per_lane: int,
+) -> None:
+    """Two-stage Stage 1 epilogue: plain f32 store to workspace slice.
+
+    Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`
+    but replaces every ``global_atomic_add`` with a ``global_store`` (f32).
+    The workspace slice for this CTA is at:
+
+        ws_ptr + k_id * wg_M * wg_N + c_m * wg_N + c_n
+
+    where ``k_id = blockIdx.z``.  The output is always f32 regardless of
+    ``dtype_d``; the dtype conversion happens in Stage 2 (workspace reduce).
+    Out-of-bounds elements are guarded by ``scf_if`` — a plain ``global_store``
+    to a sentinel offset would compute a real address and fault on AMD GPUs.
+    """
+    p = spec.problem
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    wg_M = _wg_M(p)
+    wg_N = _wg_N(p)
+    wg_M_v = b.const_i32(wg_M)
+    wg_N_v = b.const_i32(wg_N)
+
+    # workspace slice index = blockIdx.z (always).
+    # Ungrouped:       z = k_id              → slices 0..split_k-1
+    # Grouped+split_k: z = group*split_k+k_id → slices 0..groups*split_k-1
+    # Each (group, k_id) pair gets a unique z and thus a unique workspace region.
+    # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
+    k_id = b.to_sgpr_u32(b.block_id_z())
+    slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
+
+    # Per-warp M/N offsets (same as the atomic epilogue).
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+    block_warp_m_off = b.add(block_m_off, warp_m_off)
+    block_warp_n_off = b.add(block_n_off, warp_n_off)
+
+    # Decode C-fragment layout (same as atomic epilogue).
+    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding
+    from ...helpers.distribution import make_static_tile_distribution
+
+    _, __, kc_m1, kc_nlane = c_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+    c_nlane = b.const_i32(kc_nlane)
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    rows: List[Value] = []
+    cols: List[Value] = []
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        rows.append(x_row)
+        cols.append(x_col)
+
+    flat = 0
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+            for i in range(c_per_lane):
+                c_m = b.add(atom_m_base, rows[i])
+                c_n = b.add(atom_n_base, cols[i])
+                val_f32 = b.vec_extract(acc, i)
+                # OOB guard via conditional — global_store to a sentinel offset
+                # would compute a real address and fault; use scf_if instead.
+                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(in_bounds):
+                    ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
+                    b.global_store(ws_ptr, ws_off, val_f32, align=4)
 
 
 def _emit_wgrad_split_k_epilogue_wmma(

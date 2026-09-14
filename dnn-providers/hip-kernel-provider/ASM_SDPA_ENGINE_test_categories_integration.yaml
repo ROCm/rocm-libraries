@@ -83,6 +83,10 @@ test_categories:
     test_patterns:
       - "quick_*Sdpa*"
       - "Smoke/*Sdpa*"
+      # Mirrors the quick tier. No SDPA suite carries a "Quick/" prefix today,
+      # but keeping the shape consistent means one that adopts the tier prefixes
+      # is picked up rather than silently dropping out of fast feedback.
+      - "Quick/*Sdpa*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

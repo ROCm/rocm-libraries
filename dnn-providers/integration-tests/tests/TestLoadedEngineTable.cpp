@@ -5,6 +5,7 @@
 
 #include "harness/bundle/LoadedEngineTable.hpp"
 
+using hipdnn_integration_tests::bundle::LoadedEngine;
 using hipdnn_integration_tests::bundle::LoadedEngineTable;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -68,6 +69,30 @@ TEST_F(TestLoadedEngineTable, AllThrowsBeforeBuild)
 TEST_F(TestLoadedEngineTable, IsLoadedThrowsBeforeBuild)
 {
     EXPECT_THROW(LoadedEngineTable::get().isLoaded("anything"), std::runtime_error);
+}
+
+TEST_F(TestLoadedEngineTable, FindReturnsTheMatchingEngine)
+{
+    LoadedEngineTable::get().setForTesting({{42, "ENGINE_A"}, {7, "ENGINE_B"}});
+
+    const LoadedEngine* found = LoadedEngineTable::get().find("ENGINE_B");
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->id, 7);
+    EXPECT_EQ(found->name, "ENGINE_B");
+}
+
+TEST_F(TestLoadedEngineTable, FindReturnsNullptrForAnUnknownName)
+{
+    LoadedEngineTable::get().setForTesting({{42, "ENGINE_A"}});
+
+    EXPECT_EQ(LoadedEngineTable::get().find("ENGINE_C"), nullptr);
+}
+
+TEST_F(TestLoadedEngineTable, FindReturnsNullptrOnAnEmptyTable)
+{
+    LoadedEngineTable::get().setForTesting({});
+
+    EXPECT_EQ(LoadedEngineTable::get().find("ANYTHING"), nullptr);
 }
 
 // NOLINTEND(readability-identifier-naming)
