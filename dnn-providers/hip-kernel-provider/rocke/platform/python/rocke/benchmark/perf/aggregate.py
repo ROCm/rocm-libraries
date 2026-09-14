@@ -133,17 +133,23 @@ def _aggregate_verification(records: Sequence[Mapping[str, Any]]) -> dict:
 
 
 def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
-    """Reduce K same-identity records to one median+spread record.
+    """Reduce K same-identity, same-timing-source records to one median+spread.
 
-    Raises ValueError on an empty input or on mixed identities (aggregating across
-    kernels/shapes/arches is always a caller bug). The run/kernel metadata is taken
-    from the first record (identical by construction).
+    Raises ValueError on an empty input, mixed identities, or mixed timing sources.
+    Averaging unlike timing sources (launcher-reported time vs profiler dispatch
+    duration) would manufacture a meaningless median. The run/kernel metadata is
+    taken from the first record (identical by construction).
     """
     if not records:
         raise ValueError("aggregate() needs at least one record")
     ids = {_schema.identity(r) for r in records}
     if len(ids) != 1:
         raise ValueError(f"records span multiple identities: {sorted(ids)}")
+    timing_sources = {str(r.get("timing_source") or "legacy") for r in records}
+    if len(timing_sources) != 1:
+        raise ValueError(
+            f"records span multiple timing sources: {sorted(timing_sources)}"
+        )
 
     base = records[0]
     counters = _median_counters(records)

@@ -436,5 +436,116 @@ class TestProfileDegradation(unittest.TestCase):
         self.assertNotIn("l2_hit_rate", rec["derived"])
 
 
+class TestDurationMsMedian(unittest.TestCase):
+    def test_median_of_dispatch_durations_in_ms(self):
+        samples = [
+            {"dispatch_id": 1, "counter_pass": "pmc_0", "duration_ns": 1_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_0", "duration_ns": 3_000_000},
+            {"dispatch_id": 3, "counter_pass": "pmc_0", "duration_ns": 2_000_000},
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, 0), 2.0)
+
+    def test_warmup_dropped_per_pass_like_counters(self):
+        # Two passes, warmup=1: the leading dispatch of EACH pass is dropped, so the
+        # duration describes the same dispatches the counter medians do.
+        samples = [
+            {"dispatch_id": 1, "counter_pass": "pmc_0", "duration_ns": 9_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_0", "duration_ns": 1_000_000},
+            {"dispatch_id": 1, "counter_pass": "pmc_1", "duration_ns": 9_000_000},
+            {"dispatch_id": 2, "counter_pass": "pmc_1", "duration_ns": 1_000_000},
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, 1), 1.0)
+
+    def test_none_without_timestamps(self):
+        self.assertIsNone(
+            harness._duration_ms_median([{"dispatch_id": 1, "busy_cycles": 5}], 0)
+        )
+
+
+class TestProfileTimingSource(unittest.TestCase):
+    """A launcher with no PerfJSON is measured from the profiler's own timestamps."""
+
+    _ROWS = [
+        {
+            "Kernel_Name": "gemm",
+            "Dispatch_Id": "1",
+            "Counter_Name": "GRBM_GUI_ACTIVE",
+            "Counter_Value": "1000",
+            "Start_Timestamp": "0",
+            "End_Timestamp": "2000000",
+        },
+        {
+            "Kernel_Name": "gemm",
+            "Dispatch_Id": "2",
+            "Counter_Name": "GRBM_GUI_ACTIVE",
+            "Counter_Value": "1000",
+            "Start_Timestamp": "0",
+            "End_Timestamp": "4000000",
+        },
+    ]
+
+    def setUp(self):
+        self._orig_disc = harness._counters.discover
+        self._orig_run = harness._run_rocprofv3
+        self._orig_wall = harness._wall
+        self._orig_read = harness._read_counter_csvs
+        self._orig_passes = harness._count_passes
+        self.wall_calls = []
+
+        def _wall(cmd, env, timeout):
+            self.wall_calls.append(cmd)
+            return {"ms_median": 1.0}, {}
+
+        harness._counters.discover = lambda arch: {"busy_cycles": "GRBM_GUI_ACTIVE"}
+        harness._count_passes = lambda outdir: 1
+        harness._read_counter_csvs = lambda outdir: list(self._ROWS)
+        harness._wall = _wall
+
+    def tearDown(self):
+        harness._counters.discover = self._orig_disc
+        harness._run_rocprofv3 = self._orig_run
+        harness._wall = self._orig_wall
+        harness._read_counter_csvs = self._orig_read
+        harness._count_passes = self._orig_passes
+
+    def test_no_perfjson_falls_back_to_dispatch_duration(self):
+        harness._run_rocprofv3 = lambda *a, **k: (True, "kernel ran, no PerfJSON\n")
+        warns = []
+        rec = harness.profile(
+            ["x"], "gfx950", op="gemm", shape={"M": 1}, warn=warns.append
+        )
+        self.assertEqual(rec["timing_source"], "rocprofv3_duration")
+        self.assertEqual(rec["profiled"]["ms_median"], 3.0)  # median(2ms, 4ms)
+        self.assertEqual(rec["wall"], {})  # un-profiled run skipped: unmeasurable
+        self.assertEqual(rec["counters"], {"busy_cycles": 1000})  # still the metric
+        self.assertEqual(self.wall_calls, [])
+        self.assertTrue(any("no PerfJSON line" in w for w in warns))
+
+    def test_perfjson_still_wins_and_keeps_the_wall_run(self):
+        harness._run_rocprofv3 = lambda *a, **k: (True, 'PerfJSON: {"ms": 2.5}\n')
+        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        self.assertEqual(rec["timing_source"], "perfjson")
+        self.assertEqual(rec["profiled"]["ms_median"], 2.5)  # not the 3.0 duration
+        self.assertEqual(rec["wall"]["ms_median"], 1.0)
+        self.assertEqual(self.wall_calls, [["x"]])
+
+    def test_no_perfjson_and_no_timestamps_still_requires_the_wall_run(self):
+        # Nothing measurable from the profiler -> the wall run is the only source,
+        # so it must run (and _wall raises on its own if it yields no timing).
+        harness._read_counter_csvs = lambda outdir: [
+            {
+                "Kernel_Name": "gemm",
+                "Dispatch_Id": "1",
+                "Counter_Name": "GRBM_GUI_ACTIVE",
+                "Counter_Value": "1000",
+            }
+        ]
+        harness._run_rocprofv3 = lambda *a, **k: (True, "no PerfJSON\n")
+        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        self.assertEqual(rec["timing_source"], "perfjson")
+        self.assertEqual(rec["wall"]["ms_median"], 1.0)
+        self.assertEqual(self.wall_calls, [["x"]])
+
+
 if __name__ == "__main__":
     unittest.main()

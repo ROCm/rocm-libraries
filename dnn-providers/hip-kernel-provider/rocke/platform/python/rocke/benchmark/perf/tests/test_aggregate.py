@@ -155,6 +155,14 @@ class TestAggregate(unittest.TestCase):
         with self.assertRaises(ValueError):
             aggregate.aggregate([_rec(op="gemm"), _rec(op="conv")])
 
+    def test_mixed_timing_sources_raise(self):
+        first = _rec(prof_ms=1.0)
+        first["timing_source"] = "perfjson"
+        second = _rec(prof_ms=1.0)
+        second["timing_source"] = "rocprofv3_duration"
+        with self.assertRaisesRegex(ValueError, "multiple timing sources"):
+            aggregate.aggregate([first, second])
+
     def test_empty_raises(self):
         with self.assertRaises(ValueError):
             aggregate.aggregate([])
