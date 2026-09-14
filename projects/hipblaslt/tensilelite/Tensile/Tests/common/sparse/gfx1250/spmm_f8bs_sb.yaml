@@ -64,7 +64,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [128, 256]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [true]
         - LdsPadA: [-1]
@@ -72,7 +73,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         # - VectorWidthA: [1, 4]
         # - VectorWidthB: [1, 4]
         - GlobalReadVectorWidthA: [-1]

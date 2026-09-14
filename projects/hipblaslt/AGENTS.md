@@ -104,7 +104,7 @@ JIRA ID : <JIRA key or N/A>
 <outcome of the test plan: passing suites, benchmark numbers, before/after>
 
 ## Submission Checklist
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md#pull-requests.
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
