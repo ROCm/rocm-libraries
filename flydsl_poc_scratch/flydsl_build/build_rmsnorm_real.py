@@ -20,7 +20,15 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _SCRATCH = _HERE.parent
-_FLYDSL_REPO = Path("/home/AMD/brpepers/FlyDSL")
+# The FlyDSL checkout (https://github.com/ROCm/FlyDSL) that provides the `kernels`
+# package. Taken from FLYDSL_REPO, then from a sibling of this repository, before
+# falling back to the author's original path -- which exists on exactly one machine
+# and made this script unrunnable for everyone else.
+_FLYDSL_REPO = Path(os.environ.get("FLYDSL_REPO")
+                    or next((str(candidate) for candidate in
+                             (_SCRATCH.parent.parent / "FlyDSL", Path.home() / "FlyDSL")
+                             if (candidate / "kernels").is_dir()),
+                            "/home/AMD/brpepers/FlyDSL"))
 sys.path.insert(0, str(_SCRATCH))
 sys.path.insert(0, str(_FLYDSL_REPO))  # so `import kernels.norm...` resolves
 
