@@ -209,11 +209,18 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     @property
     def runtime_shape(self) -> bool:
-        """Aligned dense path emits batch/seqlen_q/seqlen_kv as runtime kernel
-        params so ONE compiled kernel serves every shape -- this is what collapses
-        the AOT batch x seqlen instance explosion. Sub-modes that still bake seqlen
-        into the body (ragged / varlen / paged / persistent / sliding_window) keep
-        per-shape identity and are byte-identical to before."""
+        """Whether the body reads the problem shape *only* from its kernel params,
+        baking it nowhere -- so ONE compiled kernel serves every shape and the three
+        fields drop out of the cache key. This is what collapses the AOT
+        batch x seqlen instance explosion.
+
+        Not the same as having the params: every non-persistent body takes them (see
+        ``_has_shape_params``). The sub-modes excluded here take them too, and use
+        them for the q/k/o base offsets, but still bake seqlen somewhere else -- the
+        paged K/V bound, the ragged k-tail mask and OOB store predicate, the
+        non-runtime k-tile trip count -- so they must keep per-shape identity.
+        ``persistent`` is excluded for a stronger reason: it is a separate body that
+        declares no shape params at all."""
         return not (
             self.persistent
             or self.ragged
@@ -224,16 +231,17 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
-        """The three shape fields this body emits as kernel params when
-        ``runtime_shape`` holds -- see ``build_attention_dense``, which appends
-        ``batch`` / ``seqlen_q`` / ``seqlen_kv`` to the signature and reads them
-        for the K/V buffer bound and the k-tile trip count.
+        """The shape fields this body reads *only* from its kernel params, and so
+        the fields ``attention_dense_cache_key`` may drop.
 
-        Kept in sync with that signature by hand. A future per-batch
-        specialization would narrow this (bake ``batch``, keep the seqlens
-        runtime) -- the cache key follows automatically, but the body's
-        ``runtime_shape`` branches and the symbol name would have to derive from
-        this tuple first. Neither does today.
+        Gated on ``runtime_shape``, not on ``_has_shape_params``: taking a field as
+        a kernarg is necessary but not sufficient: a sub-mode that also bakes the
+        field elsewhere would be a cache collision if it declared it here.
+
+        Kept in sync with the body by hand. A future per-batch specialization would
+        narrow this (bake ``batch``, keep the seqlens runtime) -- the cache key
+        follows automatically, but the symbol name would have to derive from this
+        tuple first. It does not today.
         """
         return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
 
@@ -371,17 +379,21 @@ def build_attention_dense(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
-    # Runtime problem shape: on the aligned dense path batch/seqlen_q/seqlen_kv are
-    # kernel params so ONE compiled kernel serves every shape. Declared right after
-    # scale to fix their ABI position (mirrored in attention_dense_signature). The
-    # baked sub-modes leave these None and keep their compile-time consts, so their
-    # emitted IR is unchanged.
-    if spec.runtime_shape:
-        batch_p = b.param("batch", I32)
-        seqlen_q_p = b.param("seqlen_q", I32)
-        seqlen_kv_p = b.param("seqlen_kv", I32)
-    else:
-        batch_p = seqlen_q_p = seqlen_kv_p = None
+    # Problem shape as kernel params. Unconditional here: every spec reaching this
+    # body takes them, so the base offsets below read params with no baked
+    # alternative. Declared right after scale to fix their ABI position (mirrored in
+    # attention_dense_signature, gated there by _has_shape_params because that
+    # function also serves the persistent body, which returned above and declares
+    # none of these).
+    #
+    # Taking the shape as params is an ABI fact and is NOT the same as
+    # ``spec.runtime_shape``, which is the narrower claim that the body bakes the
+    # shape *nowhere* and so can drop it from the cache key. Sub-modes still bake it
+    # elsewhere -- the paged K/V bound below, the ragged k-tail mask, the non-runtime
+    # k-tile trip count -- and keep per-shape identity via runtime_param_fields.
+    batch_p = b.param("batch", I32)
+    seqlen_q_p = b.param("seqlen_q", I32)
+    seqlen_kv_p = b.param("seqlen_kv", I32)
     if use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
@@ -446,17 +458,11 @@ def build_attention_dense(
         )
     else:
         q_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_q_p if seqlen_q_p is not None else b.const_i32(Sq)),
-                b.const_i32(stride_q_tok),
-            ),
+            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_kv_p if seqlen_kv_p is not None else b.const_i32(Skv)),
-                b.const_i32(stride_k_tok),
-            ),
+            b.mul(b.mul(bt, seqlen_kv_p), b.const_i32(stride_k_tok)),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -536,15 +542,29 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    # Emit a SEPARATE b.const_i32 per buffer_rsrc (NOT a shared IR node): develop
-    # emits two consts here, so sharing one silently breaks paged=False byte-identity
-    # (the attention_dense representative-IR golden). ``_kv_cache_elems`` is a plain
-    # Python int; paged widens the bound to the whole cache, contiguous keeps B*Skv.
-    if spec.runtime_shape:
-        # One kernel serves every seqlen, so the buffer num_records must track THIS
-        # launch's real K/V extent -- a baked bound would drop valid reads for a
-        # larger seqlen. batch * seqlen_kv * (Hkv*D*2) bytes; a separate product per
-        # rsrc mirrors the two-node note above.
+    # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
+    # develop emits two here, so sharing one silently breaks byte-identity (the
+    # attention_dense representative-IR golden).
+    #
+    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
+    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
+    # batch/seqlen param declaration was.
+    if spec.paged:
+        # The paged bound is the WHOLE page cache. Pages are addressed through
+        # block_tables at page_id*block_size, so any page id the table can name must
+        # be in range -- batch*seqlen_kv is only the logical KV length of one
+        # request and is <= (usually <<) the cache extent. Bounding by it would put
+        # legitimately-high page ids past num_records, where buffer loads return 0
+        # with no fault. ``num_kv_blocks`` is not a kernel param, so this stays baked.
+        _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    else:
+        # Contiguous K/V: num_records must track THIS launch's real extent, since
+        # under runtime_shape one kernel serves every seqlen and a baked bound would
+        # drop valid reads for a larger one. For the baked sub-modes the product is
+        # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
+        # params from the same spec -- so only the emitted IR changes.
         _kv_elem_bytes = Hkv * D * 2
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
@@ -552,15 +572,6 @@ def build_attention_dense(
         v_rsrc = b.buffer_rsrc(
             v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
         )
-    else:
-        _kv_cache_elems = (
-            (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv)
-            * Hkv
-            * D
-            * 2
-        )
-        k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
-        v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
         # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
@@ -1042,10 +1053,7 @@ def build_attention_dense(
         )
     else:
         o_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_q_p if seqlen_q_p is not None else b.const_i32(Sq)),
-                b.const_i32(stride_q_tok),
-            ),
+            b.mul(b.mul(bt, seqlen_q_p), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
@@ -2051,6 +2059,22 @@ def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     return (spec.num_waves * 64, 1, 1)
 
 
+def _has_shape_params(spec: AttentionDenseSpec) -> bool:
+    """Whether the body for ``spec`` takes batch/seqlen_q/seqlen_kv as kernargs.
+
+    ``build_attention_dense`` declares them unconditionally;
+    ``_build_attention_dense_persistent`` declares none, since its work-item space
+    ``NP = spec.num_persistent`` is validated against ``nqb*Hkv*B`` at spec
+    construction and is itself baked -- the shape cannot become a param there
+    without ``num_persistent`` following it.
+
+    This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
+    question (does the body bake the shape *anywhere*), and the two differ for
+    paged / ragged / varlen / sliding-window.
+    """
+    return not spec.persistent
+
+
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
     plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
@@ -2065,9 +2089,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
-    if spec.runtime_shape:
+    if _has_shape_params(spec):
         # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
-        # build_attention_dense (aligned dense path is shape-generic).
+        # build_attention_dense.
         sig = (
             sig.scalar("batch", "i32")
             .scalar("seqlen_q", "i32")
@@ -2264,7 +2288,7 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
-    if spec.runtime_shape:
+    if _has_shape_params(spec):
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
