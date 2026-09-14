@@ -1,0 +1,3 @@
+PyYAML>=6.0
+# The test suite is the only gate this tool has; a venv that cannot run it is useless.
+pytest>=7.0

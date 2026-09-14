@@ -1,0 +1,100 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# First flow: generate a HIP RTC kernel for a hipDNN graph, then have a second,
+# independent agent review it. Critical issues feed back into the generator and the
+# cycle repeats; a clean review ends the run.
+#
+# Nothing is built or executed here -- this is generate-and-review only. Build,
+# ingest and integration-test validation are the next flow (see DESIGN.md section 5).
+#
+#   python orchestrate.py run configs/flows/rtc-kernel-review.yaml \
+#       --input graph=<path-to-graph.json>
+version: 1
+name: rtc-kernel-review
+description: Generate a HIP RTC kernel for a graph and repair it until review is clean.
+
+inputs:
+  graph:
+    description: hipDNN graph JSON the kernel must satisfy
+    type: path
+    required: true
+  arch:
+    description: Target GPU architecture the kernel is written for
+    default: gfx1151
+  notes:
+    description: Extra constraints for the generator (use =@file.md for a long brief)
+    default: ""
+
+vars:
+  # Per-run scratch. The generator writes the kernel here and edits it in place on
+  # later iterations, so "fix the existing kernel" is a real file, not a retelling.
+  kernel_dir: "${run.dir}/kernel"
+
+steps:
+  - id: review_cycle
+    loop:
+      max_iterations: 3
+      until: "${steps.review.outputs.critical_count} == 0"
+      on_exhausted: fail
+      feedback_from: "${steps.review.outputs.feedback}"
+    steps:
+
+      - id: generate
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/generate_kernel.md
+        result_file: "${loop.attempt_dir}/generate.json"
+        result_schema:
+          required: [kernel_path, entry_point, launch_config, assumptions]
+        retries: 2
+        timeout: 3600
+        outputs:
+          kernel_path: { json_file: result, path: "$.kernel_path", type: path }
+          entry_point: { json_file: result, path: "$.entry_point" }
+          assumptions: { json_file: result, path: "$.assumptions", type: json }
+
+      # Deliberately a fresh session, not --resume: a reviewer that shares the
+      # generator's context inherits its blind spots and rubber-stamps them.
+      - id: review
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/review_kernel.md
+        result_file: "${loop.attempt_dir}/review.json"
+        result_schema:
+          required: [verdict, critical_count, critical_issues, feedback]
+        retries: 2
+        timeout: 3600
+        outputs:
+          verdict: { json_file: result, path: "$.verdict" }
+          critical_count: { json_file: result, path: "$.critical_count", type: int }
+          feedback: { json_file: result, path: "$.feedback" }
+        assert:
+          # A self-inconsistent review is worse than a failing one: it ends the loop
+          # on a kernel nobody approved.
+          - that: "${steps.review.outputs.verdict} == pass or ${steps.review.outputs.verdict} == changes_required"
+            message: "verdict must be exactly 'pass' or 'changes_required'"
+          - that: "${steps.review.outputs.critical_count} == 0 or ${steps.review.outputs.verdict} == changes_required"
+            message: "review listed critical issues but returned verdict 'pass'"
+          - that: "${steps.review.outputs.critical_count} > 0 or ${steps.review.outputs.verdict} == pass"
+            message: "review returned verdict 'changes_required' with zero critical issues"
