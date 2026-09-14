@@ -124,7 +124,11 @@ protected:
     void TearDown() override
     {
         // Removes exactly the directory this invocation created, and nothing else.
-        _root.reset();
+        // ScopedDirectory's destructor removes the tree with the throwing overload, and a
+        // throwing destructor terminates: a test that failed before releasing its backend
+        // leaves the library mapped, and on Windows a mapped file cannot be unlinked.
+        // Reporting that as a failure keeps the remaining tests' results.
+        EXPECT_NO_THROW(_root.reset());
     }
 
     std::filesystem::path directory(const std::string& name)
