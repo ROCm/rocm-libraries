@@ -35,6 +35,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
     auto cases = std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        TestCase{{2, 8, 11, 9}, {12, 4, 3, 3}, {1, 1}, {2, 1}, {1, 1}, 2, datatype, miopenTensorNHWC},
+        TestCase{{1, 4, 7, 8, 9}, {6, 4, 3, 2, 3}, {1, 0, 1}, {1, 2, 1}, {1, 1, 2}, datatype, datatype, datatype, miopenTensorNDHWC, miopenTensorNDHWC},
         // clang-format on
     };
 

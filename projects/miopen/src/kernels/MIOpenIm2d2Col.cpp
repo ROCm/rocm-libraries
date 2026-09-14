@@ -156,8 +156,8 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
     data_t* im_off = im + im_offset;
 
     // One column per output pixel: rows = wei_h * wei_w * num_ch
-    const int patch_size           = WEI_H * WEI_W * channels_per_group;
-    const int col_group_total_size = patch_size * out_h * out_w;
+    const int patch_size               = WEI_H * WEI_W * channels_per_group;
+    const index_t col_group_total_size = (index_t)patch_size * out_h * out_w;
 
     const int base_oh = tile_h * TILE_OUT_H;
     const int base_ow = tile_w * TILE_OUT_W;
@@ -222,7 +222,7 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
                     const index_t col_idx            = patch_offset +
                                             ((index_t)kh * WEI_W + kw) * channels_per_group +
                                             group_relative_channel;
-                    col[(col_group_total_size * current_group) + col_idx] = v;
+                    col[col_group_total_size * current_group + col_idx] = v;
                 }
             }
         }
@@ -337,12 +337,12 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
                                        data_t* col)
 {
     const int lid        = threadIdx.x;
-    const int grp_id     = blockIdx.x; // patch id (one output pixel)
+    const index_t grp_id = blockIdx.x; // patch id (one output pixel)
     const int local_size = blockDim.x;
 
     data_t* im_off = im + im_offset;
 
-    const int output_size = out_h * out_w;
+    const index_t output_size = (index_t)out_h * out_w;
     if(grp_id >= output_size)
         return;
 
@@ -365,8 +365,8 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
 
         const int current_group            = c / channels_per_group;
         const int channel_in_current_group = c % channels_per_group;
-        const int group_offset             = current_group * (output_size * patch_size_per_group);
-        const int patch_offset             = grp_id * patch_size_per_group;
+        const index_t group_offset = (index_t)current_group * output_size * patch_size_per_group;
+        const index_t patch_offset = (index_t)grp_id * patch_size_per_group;
 
         const int src_h = oh * stride_h + kh * dilation_h - pad_h;
         const int src_w = ow * stride_w + kw * dilation_w - pad_w;
@@ -375,12 +375,13 @@ extern "C" __global__ void Im2d2Col_v2(const int data_size_off,
         data_t v = (data_t)0;
         if(ok)
         {
-            const int input_idx = ((src_h * w + src_w) * CHANNELS) + c;
-            v                   = im_off[input_idx];
+            const index_t input_idx = ((index_t)src_h * w + src_w) * CHANNELS + c;
+            v                       = im_off[input_idx];
         }
 
-        const int col_idx = group_offset + patch_offset + (kh * WEI_W + kw) * channels_per_group +
-                            channel_in_current_group;
+        const index_t col_idx = group_offset + patch_offset +
+                                ((index_t)kh * WEI_W + kw) * channels_per_group +
+                                channel_in_current_group;
         col[col_idx] = v;
     }
 }

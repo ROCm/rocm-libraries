@@ -566,18 +566,8 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
-    if(GetWorkspaceSize(context, problem) != 0)
-    {
-        if(problem.GetSpatialDims() > 2)
-        {
-            return true;
-        }
-        else
-        {
-            return !GemmWrw1x1_stride1{}.IsApplicable(context, problem);
-        }
-    }
-    return false;
+    return GetWorkspaceSize(context, problem) != 0 &&
+           !GemmWrw1x1_stride1{}.IsApplicable(context, problem);
 #else
     std::ignore = context;
     std::ignore = problem;
