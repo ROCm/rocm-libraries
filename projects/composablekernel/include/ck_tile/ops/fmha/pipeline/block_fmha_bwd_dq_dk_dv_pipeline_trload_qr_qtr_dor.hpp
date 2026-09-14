@@ -787,10 +787,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR
         main_body(std::false_type{}, std::true_type{});
         seqlen_kv_step += kN0;
 
-        // The bound is seqlen_k, which lives on the bottom tensor view -- not on
-        // get_window_lengths(), which is the tile extent kN0 as the static_assert
-        // above states. With kN0 the loop was dead and every kv block past the
-        // causal diagonal kept whatever dK/dV was already in memory.
+        // The bound is seqlen_k, which lives on the bottom tensor view, not on
+        // get_window_lengths() -- that is the tile extent kN0. With kN0 this loop
+        // was dead and kv blocks past the causal diagonal kept stale dK/dV.
         const auto seqlen_kv_length =
             k_dram_block_window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_length(
                 number<0>{});
