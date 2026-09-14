@@ -450,6 +450,56 @@ public:
         return values;
     }
 
+    /// The integer that addresses @p value for metadata field @p field, or nullopt when the
+    /// value is not one this engine's kernels carry.
+    ///
+    /// An `INT` field addresses itself; every other type is addressed by its index in the
+    /// field's ordinal domain (see buildOrdinalDomains). Nullopt rather than a fallback
+    /// number: a value outside the domain names no kernel, and inventing an index for it
+    /// would silently address the neighbour that happens to sit there.
+    std::optional<int64_t> knobOrdinal(const std::string& field, const MetadataValue& value) const
+    {
+        if(const auto* intValue = std::get_if<int64_t>(&value))
+        {
+            return *intValue;
+        }
+
+        const auto domain = _ordinalDomains.find(field);
+        if(domain == _ordinalDomains.end())
+        {
+            return std::nullopt;
+        }
+        const auto position = std::find(domain->second.begin(), domain->second.end(), value);
+        if(position == domain->second.end())
+        {
+            return std::nullopt;
+        }
+        return static_cast<int64_t>(std::distance(domain->second.begin(), position));
+    }
+
+    /// Does @p kernel's value for @p field carry the pinned ordinal?
+    ///
+    /// The comparison a knob filter needs: a kernel that does not carry the field at all
+    /// cannot be addressed by it and does not match.
+    bool knobMatches(const KernelDefinition& kernel, const std::string& field, int64_t pinned) const
+    {
+        const auto value = kernel.tryGetMetadata(field);
+        if(!value.has_value())
+        {
+            return false;
+        }
+        const auto ordinal = knobOrdinal(field, *value);
+        return ordinal.has_value() && *ordinal == pinned;
+    }
+
+    /// Is @p field addressed by an ordinal rather than by its own value? True exactly for a
+    /// non-integer field some kernel carries -- what a knob's description must say, so a
+    /// caller reading `dtype in {0,1}` knows those are indices and not values.
+    bool isOrdinalKnob(const std::string& field) const
+    {
+        return _ordinalDomains.find(field) != _ordinalDomains.end();
+    }
+
 private:
     /// One memoized full-catalog calibrated ranking. The model id travels with it because
     /// the ranking is meaningless without the provenance the caller reports alongside it,
@@ -580,6 +630,57 @@ private:
             // position, so skipping one entry would bind every later pack's definitions to
             // the wrong pack and run the last index out of range.
             _definitions.push_back(std::move(packDefinitions));
+        }
+
+        buildOrdinalDomains();
+    }
+
+    /// The value set of every non-integer metadata field, in the order that numbers it.
+    ///
+    /// RFC 0019 §13.2 wants the knob tuple to equal the metadata tuple, so that every catalog
+    /// entry is individually addressable. A knob value is an int64 end to end, so only an
+    /// `INT` field addresses itself; the other four types are addressed by an INDEX into this
+    /// set. Two kernels differing solely in, say, `dtype` were previously indistinguishable
+    /// through the knob surface and collided as one candidate.
+    ///
+    /// Built here, over completed metadata, for two reasons. Defaults are already filled in,
+    /// so the set holds the values the catalog will actually carry rather than the authored
+    /// subset. And it spans every pack the engine owns rather than one device's catalog: a
+    /// per-catalog set would give one integer different meanings on different graphs, so a
+    /// recorded pin would replay against a different kernel.
+    ///
+    /// `std::variant`'s ordering is the specification: same-type values compare by the
+    /// underlying type -- `false` before `true`, numbers numerically, strings by byte (which
+    /// is code-point order in UTF-8), and `int_list` lexicographically. The generation tool
+    /// derives the same indices from the same descriptors without a table being shipped
+    /// (`uhd_gen/addressing.py`), so the two sides agree by construction rather than by
+    /// exchange.
+    void buildOrdinalDomains()
+    {
+        for(const auto& field : _schema.fields)
+        {
+            if(field.type == MetadataType::INT)
+            {
+                continue;
+            }
+
+            std::set<MetadataValue> observed;
+            for(const auto& packDefinitions : _definitions)
+            {
+                for(const auto& definition : packDefinitions)
+                {
+                    const auto it = definition.metadata.find(field.name);
+                    if(it != definition.metadata.end())
+                    {
+                        observed.insert(it->second);
+                    }
+                }
+            }
+            if(!observed.empty())
+            {
+                _ordinalDomains.emplace(
+                    field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
+            }
         }
     }
 
@@ -1143,6 +1244,10 @@ private:
     /// One entry per pack, parallel to _packs: its kernels' context-independent
     /// definitions, completed once at construction.
     std::vector<std::vector<KernelDefinition>> _definitions;
+    /// Per non-integer metadata field, its value set in index order: the table that makes a
+    /// string, bool, float or int_list field addressable by an int64 knob. Fixed at
+    /// construction, like _definitions, because the engine's kernels are.
+    std::map<std::string, std::vector<MetadataValue>> _ordinalDomains;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;

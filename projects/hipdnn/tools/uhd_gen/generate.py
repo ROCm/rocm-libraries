@@ -329,7 +329,7 @@ def run_generate(args: argparse.Namespace) -> int:
             # four KMD types are addressed by an ordinal over their value set (addressing.py).
             # Exposing `int` alone made two kernels differing only in e.g. `dtype` share a tuple
             # and abort the run on the collision at _knob_tuple.
-            ordinals = addressing.encodings(kmd, addressing.engine_kernels(tree, provenance["ued"]["id"], args.arch))
+            ordinals = addressing.encodings(kmd, addressing.engine_kernels(tree, provenance["ued"]["id"]))
             exposed["knobs"] = addressing.exposable(kmd, ordinals)
             unaddressable = addressing.unaddressable(kmd, ordinals)
             if unaddressable:

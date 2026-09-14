@@ -428,13 +428,18 @@ public:
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
 
+            // A non-integer value is advertised as its ordinal, which is what a caller must
+            // pin to select that kernel (RFC 0019 §13.2). Dropping those values instead --
+            // as this did while only INT was addressable -- advertised a knob whose valid set
+            // omitted most of the kernels it selects between.
             std::vector<int64_t> choices;
             choices.reserve(values.size());
             for(const auto& value : values)
             {
-                if(const auto* intValue = std::get_if<int64_t>(&value))
+                if(const auto ordinal = _stateManager.knobOrdinal(knobName, value);
+                   ordinal.has_value())
                 {
-                    choices.push_back(*intValue);
+                    choices.push_back(*ordinal);
                 }
             }
             if(choices.empty())
@@ -444,8 +449,11 @@ public:
 
             KnobT knob;
             knob.knob_id = knobName;
-            knob.description
-                = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
+            knob.description = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name
+                               + "'"
+                               + (_stateManager.isOrdinalKnob(knobName)
+                                      ? " (ordinal: an index into the field's value set)"
+                                      : "");
 
             IntValueT defaultValue;
             defaultValue.value = choices.front();
@@ -636,8 +644,7 @@ public:
         // other and a scorer that threw only on an excluded candidate degraded the unpinned
         // prediction while the pinned one scored normally. RFC 0019 §9.2 and §5 step 8; see
         // KernelIngestorStateManager::calibratedRanking().
-        const auto ranking
-            = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        const auto ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
         catalog.entries = filtered;
         result.reason = "No calibrated configuration prediction is available";
         for(const auto& scored : ranking)
@@ -775,13 +782,17 @@ private:
         for(const auto& name : _engine.knobs)
         {
             const auto it = kernel.metadata.find(name);
-            // getCustomKnobs advertises only integer metadata today. Non-integer
-            // fields must not be invented as unsupported knobs during enumeration.
+            // The enrolled tuple must ADDRESS this kernel: an enumerated candidate is
+            // replayed by pinning exactly these values, so a field left out of the tuple is a
+            // field the replay does not constrain. Non-integer values enter as their ordinal
+            // (RFC 0019 §13.2); while they were dropped, two kernels differing only in such a
+            // field enrolled the same tuple and enumeration refused both as ambiguous.
             if(it != kernel.metadata.end())
             {
-                if(const auto* value = std::get_if<int64_t>(&it->second))
+                if(const auto ordinal = _stateManager.knobOrdinal(name, it->second);
+                   ordinal.has_value())
                 {
-                    tuple.emplace(name, *value);
+                    tuple.emplace(name, *ordinal);
                 }
             }
         }
@@ -931,12 +942,13 @@ private:
         filtered.reserve(catalog.size());
         for(const auto& kernel : catalog)
         {
+            // A pin is matched through the engine's ordinal domain, so a string, bool, float
+            // or int_list field selects the kernel carrying the value that index names. The
+            // int64-only comparison this replaces made those fields unpinnable: a filter
+            // naming one matched nothing and the request failed as unsatisfiable.
             const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
-                      const auto value = kernel.tryGetMetadata(setting.first);
-                      const auto* intValue
-                          = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
-                      return intValue != nullptr && *intValue == setting.second;
+                = std::all_of(filter.begin(), filter.end(), [this, &kernel](const auto& setting) {
+                      return _stateManager.knobMatches(kernel, setting.first, setting.second);
                   });
             if(matchesEverySetKnob)
             {
