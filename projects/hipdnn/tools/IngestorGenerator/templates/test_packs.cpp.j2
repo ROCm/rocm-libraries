@@ -38,18 +38,23 @@
  *
  * The caller supplies HIPDNN_TEST_EXPECTED_ARCH explicitly, never from a detected
  * device or the descriptors under test (a bundle cannot be its own expectation).
-{% if emitted.source_kind == 'kpack' %}
- * CMake registers hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs
- * as a fresh native process for each configured packaging arch. It supplies
- * HIPDNN_DESCRIPTOR_DIR for that arch's shard and
- * HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs.
- * The native guard requires an existing explicit root and every registered case
- * to execute and pass without skipping in every iteration; at least one
- * iteration must complete. Merely listing or selecting some cases is not proof.
-{% else %}
- * This direct-load engine uses ordinary host tests, not the packaged-shard census.
- * Supply its descriptor root in HIPDNN_DESCRIPTOR_DIR when running this suite.
-{% endif %}
+ * A census entry is registered by one hkp_register_census_tests(TARGET ... PACK_NAME
+ * ... SUITES Test{{ config.engine.pascal_name }}Packs) call, in src/tests/CMakeLists.txt beside
+ * hkp_verify_embedded_sources(). PACK_NAME selects the pack target whose own OUT_ROOT
+ * and recorded arch list the entries address; CMake then registers
+ * hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs as a fresh native
+ * process for each arch in that list, supplying HIPDNN_DESCRIPTOR_DIR for that pack
+ * target's own shard and HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs.
+ * The native guard requires an existing explicit root and every registered case to
+ * execute and pass without skipping in every iteration; at least one iteration must
+ * complete. Merely listing or selecting some cases is not proof.
+ *
+ * Eligibility follows the shard count, not the authored dialect: an entry hands the
+ * binary exactly one directory, so a suite qualifies only where every case reads one
+ * pack target's shard. An embedded_source bundle is censused on the same terms as a
+ * packaged one. A suite reading two shards is censused nowhere and states its
+ * inventory through its ordinary host run, supplying HIPDNN_DESCRIPTOR_DIR and an
+ * explicit expected arch itself.
  *
  * This proves registration, loading and inventory. It proves nothing about dispatch.
  *

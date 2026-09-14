@@ -4,9 +4,14 @@ A minimal but **real** authored source root for `hkp_pack`. Both producers are
 exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
-This tree drives the production packaging path, which the presets and CI lanes
-otherwise leave dormant: without a source root set, the pack step ships nothing
-and says nothing.
+This is a **test fixture** tree, not a production one. It is read by the packaging
+suite's real-bundle regressions and is no longer wired as a production source root.
+The shipped root is `src/engines/kernel_ingestor_engine/descriptors/`, the default of
+the `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` cache variable, and it is populated:
+production packaging is wired whenever that root holds at least one non-hidden
+`*.kdp.json`. A consumer meets the dormant path only by overriding the variable at a
+root holding none, where the pack step ships nothing, removes any stale product tree
+and reports neither as an error.
 
 ## Layout
 
@@ -73,11 +78,20 @@ for every nested one.
 
 ## Why this rocKE builder
 
-`build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both
-carry the `(spec, *, arch)` signature the packer requires, and each has a
+`build_unified_attention_2d_tiled` rather than `build_attention_dense`. **Both are
+accepted.** `build_attention_dense` was once this corpus's one genuine refusal — it
+took a keyword-only `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no descriptor
+could set, so packing it would have silently frozen a performance knob — but PR
+#11237 folded that parameter into the spec dataclass, and it now satisfies
+`(spec, *, arch)` like every other builder. The gate itself has not weakened:
+`tests/test_hkp_pack_producer_guards.py` still covers all four rejection shapes
+synthetically (a keyword-only extra, a `**kwargs`, a second positional, and the
+accepting case).
+
+So both carry the `(spec, *, arch)` signature the packer requires, and each has a
 regression test holding it there (`test_real_gfx942_tiled_2d_is_accepted`,
-`test_real_gfx942_attention_dense_is_accepted`), so the choice is about which
-one models a shipped descriptor. The tiled builder's spec is compile-time
+`test_real_gfx942_attention_dense_is_accepted`), which makes the choice here about
+which one models a shipped descriptor. The tiled builder's spec is compile-time
 shape only — head size, KV block size, head counts, dtype, feature flags — with
 sequence count and lengths arriving at runtime through `cu_q` and the block
 tables, so one authored descriptor covers every problem size. `AttentionDenseSpec`

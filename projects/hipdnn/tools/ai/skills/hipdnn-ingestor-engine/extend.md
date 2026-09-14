@@ -40,21 +40,63 @@ production source root and are repacked; a packed descriptor cannot be edited an
 paired with its old descriptor/schema/arch/payload-bound evidence.
 
 A new pack under an existing engine reuses its engine registration row. Append
-only required source/test/registration work. Packaged authored descriptors never
-enter `HIPDNN_DESCRIPTOR_FILES` or `HIPDNN_INGESTOR_PACK_KERNELS`; direct-load
-embedding is keyed by source-file stem, not exported entry point. The selected-path
-placeholder check and all splice commands are in RUNBOOK stage 3.
+only required source/test/registration work. The selected-path placeholder check and
+all splice commands are in RUNBOOK stage 3.
+
+## Authoring a direct-load bundle
+
+**Descriptors get no registration, because there is none.** The packer walks a
+`SOURCE_ROOT` recursively and no descriptor is ever named in CMake. Adding one is
+dropping files in a folder — `test_descriptors/<set>/<slug>/` for a test bundle,
+`descriptors/<producer>/<bundle>/` for a shipped one. The set is the whole mechanism:
+each is a separate pack target walked by directory, so a bundle written into the
+wrong set installs cleanly and is then invisible to the binary meant to read it.
+
+Two packer rules govern what that walk accepts:
+
+- **Hidden paths are skipped, and said so.** Any dot-prefixed path segment or
+  dot-prefixed filename is warned and skipped, as is a `*.json` whose name carries no
+  type token, so an incidental file or a `.git/` under a user-supplied root is
+  tolerated rather than aborting the pack — and nothing the walk passes over is
+  invisible. The production content gate applies the same rule, so a KDP under a
+  hidden path does not wire packaging.
+- **An `embedded_source` `source_file` must be able to act as an identity.** It is
+  never normalised, so a `..` segment is rejected (one file would take two identities
+  under two spellings) and an absolute path is rejected (it names a location on one
+  machine, while the emitted key must be the same on every machine). Write it
+  relative to the descriptor's own folder, for example `kernels/MyKernel.cpp`.
+
+The one registration a generated engine does need is the **kernel source**, and only
+for `kernel_source.kind == "embedded_source"`:
+
+```cmake
+# In P/src/tests/CMakeLists.txt, beside base's existing calls. Required ONLY for
+# kernel_source.kind == "embedded_source": that kind resolves source_file against a
+# key table the build compiles into the binary. hip / rocke / hsaco / kpack lower at
+# pack time and need nothing here.
+set(_my_kernel_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/<set>/<slug>/kernels")
+add_kernels_for_embedding(
+    TARGET hip_kernel_provider_tests
+    FILES "${_my_kernel_dir}/MyKernel.cpp"
+    KEYS  kernels/MyKernel.cpp)
+```
+
+Each `KEYS` entry must equal the `source_file` string the descriptor authors, because
+`hkp_verify_embedded_sources` compares staged descriptors against exactly this
+manifest. The runtime reads `source_file` as a key into that table and opens no file
+for this kind; the packer copies none of these sources into the staged tree.
 
 ## Addition-specific evidence
 
 Whole-engine checks include shared KMDs and unchanged variants, plus the new
-inventory. The packaged per-arch census and direct-load unit inventory are different
-gates; a packaged addition must run its
-`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for every requested packaging
-arch, and a direct-load addition runs its ordinary host suites instead. See
-[native-pack.md](native-pack.md). Device proof must explicitly select and
-numerically verify the new candidate. Passing the unchanged default is not
-extension acceptance.
+inventory. An addition whose suite is censused must run its
+`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for **every** arch the owning
+pack target was wired for; census eligibility follows the shard count, not the
+authored dialect, so an `embedded_source` addition can be censused and a multi-shard
+suite cannot. An addition under an uncensused suite states its inventory through that
+suite's ordinary host run instead. See [native-pack.md](native-pack.md). Device proof
+must explicitly select and numerically verify the new candidate. Passing the
+unchanged default is not extension acceptance.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK

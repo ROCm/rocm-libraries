@@ -31,11 +31,15 @@ source according to workspace policy.
 | | `direct_load` | `packaged` |
 |---|---|---|
 | Authored source | `embedded_source` | `rocke` or `hip` |
-| Runtime descriptors | Authored direct-load tree | Lowered per-arch tree, `kind: kpack` |
-| Source staging | Provider embedding/descriptor lists | Production packager's authored source root |
+| Authored under | `test_descriptors/<set>/<slug>/` | `descriptors/<producer>/<bundle>/` |
+| Runtime descriptors | Per-arch shard, kind unchanged (passthrough) | Per-arch shard, rewritten to `kind: kpack` |
+| Kernel source | `add_kernels_for_embedding()` key table, compiled into the binary | Lowered at pack time into one archive per arch |
 
-rocKE is always packaged. Direct-load engines need neither a fictitious rocKE
-profile nor a compiled-specialization claim their path cannot supply.
+Both dialects are packed, both stage per architecture, and **neither registers a
+descriptor in CMake** — the packer walks a source root by directory, so the authored
+subpath is the whole mechanism. Only `embedded_source` needs a kernel-source
+registration. rocKE is always packaged. Direct-load engines need neither a fictitious
+rocKE profile nor a compiled-specialization claim their path cannot supply.
 
 ## Completion and handoff
 
@@ -48,10 +52,14 @@ Completion requires:
 - Implemented referenced hooks, no reachable placeholders, applied source/test/CMake
   splices, and preserved extension identities and unchanged inventory.
 - Separately stated structural, applicable compiler/artifact, real native-loading and
-  packaged-census results; direct-load inventory is covered by its unit suites.
-  Packaged census is the direct native per-suite/per-arch obligation in RUNBOOK
-  stage 4; tests built OFF or no declared suite is absence of evidence, not evidence.
-  Preserve every `NOT VERIFIED HERE` limitation. Host loading does not prove dispatch.
+  census results. The census is the direct native per-suite/per-arch obligation in
+  RUNBOOK stage 4, and eligibility follows the shard count, not the dialect: a suite
+  confined to one pack target's shard is censused whichever dialect authored it, and
+  a multi-shard suite states its inventory through its ordinary host run. Tests built
+  OFF or an empty `SUITES` is absence of evidence, not evidence. A green
+  embedded-source verification is not reachability evidence — name the shard that
+  appeared under the pack's `OUT_ROOT`. Preserve every `NOT VERIFIED HERE`
+  limitation. Host loading does not prove dispatch.
 - Exact-engine quick/standard numerics and required negative cases, with selected,
   served, skipped and failed counts. Zero selected, all-skipped or another engine's
   work is not correctness evidence. An extension must dispatch its new candidate.

@@ -2,7 +2,7 @@
 
 Generates a hipDNN generic-kernel-ingestor descriptor bundle -- KMD/UED/UMD/UHD/UDD/KDP
 JSON, a native-symbol stub, complete pack-shape census tests, a matcher-test stub, and
-six CMake/registration text fragments -- from a YAML config. Modeled on
+five CMake/registration text fragments -- from a YAML config. Modeled on
 `projects/hipdnn/tools/DescriptorGenerator`'s conventions, with two deliberate
 deviations: `undefined=StrictUndefined` on the Jinja2 environment (an unset UUID
 cross-reference fails loudly at generation time, not as a confusing empty-string
@@ -58,9 +58,16 @@ Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
 
 ## Output
 
+The descriptor directory mirrors the authored root the bundle is written into, so the
+emitted tree can be copied across verbatim. A `direct_load` bundle emits under
+`test_descriptors/<set>/<slug>/`, where `<set>` is the `authored_subpath` the config
+is required to name; a `packaged` bundle emits under `descriptors/<producer>/<bundle>/`,
+defaulting the subpath to `<kernel_source_kind>/<slug>`.
+
 ```
 <output-dir>/
-  descriptors/<engine_slug>/
+  <descriptor-dir>/                 # test_descriptors/<set>/<slug>/ (direct_load)
+                                    # descriptors/<producer>/<bundle>/ (packaged)
     <slug>.kmd.json                 # KMD -- the engine's per-kernel metadata schema
     <slug>.ued.json                 # UED -- the engine descriptor
     <slug>.udd.json                 # UDD -- dispatch symbol
@@ -75,7 +82,7 @@ Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
                                      # score/dispatch bodies are all `// TODO`)
   tests/Test<Name>Packs.cpp         # COMPLETE pack-shape census -- not a stub
   tests/Test<Name>Matchers.cpp      # matcher-test stub (fixture shape only)
-  fragments/*.txt                   # 6 CMake/registration fragments, see below
+  fragments/*.txt                   # 5 CMake/registration fragments, see below
 ```
 
 ### UMD policy
@@ -117,15 +124,26 @@ pack/kernel identities, counts, SDK version and runtime source kind derive from 
 actual output, after normalization and deduplication. Packaged runtime source kind
 is KPACK, not its authored builder kind.
 
-For packaged engines, append the literal `Test<Name>Packs` suite from
-`cmake_test_sources.txt` to `HKP_CENSUS_TEST_SUITES`. CMake registers a separate
-`hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` for every configured packaging
-architecture. Each runs `hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*`
-directly, without a Python launcher, with:
+Declare the literal `Test<Name>Packs` suite in one `hkp_register_census_tests()` call
+in `.../src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and after
+the test target exists:
+
+```cmake
+hkp_register_census_tests(
+    TARGET hip_kernel_provider_tests
+    PACK_NAME <the pack target holding this bundle's shard>
+    SUITES Test<Name>Packs)
+```
+
+`PACK_NAME` selects the wired pack target whose own `OUT_ROOT` and recorded arch list
+the entries address. CMake registers a separate
+`hip-kernel-provider-hkp-census-<arch>-Test<Name>Packs` for every arch in that list.
+Each runs `hip_kernel_provider_tests --gtest_filter=Test<Name>Packs.*` directly,
+without a Python launcher, with:
 
 - `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
-- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (configured, not detected or read from descriptors)
-- `HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`
+- `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the wired list, not detected or read from descriptors)
+- `HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` -- its own shard, not a shared stage tree
 
 Run the registered obligation from the build-tree provider CTest directory:
 
@@ -142,11 +160,17 @@ disable flags or sharding. Listing only, zero iterations, partial repeated runs 
 missing suites fail; complete repeated iterations pass. Wrong-arch data and
 missing/extra identities fail in the generated inventory checks.
 
-Direct-load engines retain ordinary host suites; do not add them to the packaged
-census list. Supply their expected arch and direct-load descriptor root explicitly.
-Normal invocations without the census-suite variable keep ordinary GoogleTest
-filtering and skip behavior. Host registration/loading does not prove graph dispatch
-or numerical device correctness.
+**Eligibility follows the shard count, not the dialect.** A census entry hands the
+binary exactly one directory and the guard requires every case to pass, so a suite is
+declarable only where it reads exactly one pack target's shard. A `direct_load`
+bundle is eligible on the same terms as a packaged one -- the shipped
+`TestPointwisePacks` is censused although `unit/pointwise/` is `embedded_source` --
+while a suite reading two shards is censused nowhere and states its inventory through
+its ordinary host run. Declaring one suite at two pack targets is fatal: the entry
+name carries arch and suite alone, so the second registration would silently take the
+first one's shard. Normal invocations without the census-suite variable keep ordinary
+GoogleTest filtering and skip behavior. Host registration/loading does not prove
+graph dispatch or numerical device correctness.
 
 ## The five CMake/registration splice points
 
@@ -156,12 +180,29 @@ in a leading comment:
 
 | Fragment | Splices into |
 |---|---|
-| `cmake_descriptor_files.txt` | `dnn-providers/hip-kernel-provider/CMakeLists.txt`'s `HIPDNN_DESCRIPTOR_FILES` list |
-| `cmake_ingestor_kernels.txt` | `.../kernel_ingestor_engine/IngestorKernels.cmake`'s `HIPDNN_INGESTOR_PACK_KERNELS` list |
+| `cmake_descriptor_files.txt` | Nothing -- see below. It is a **statement** that no CMake edit installs descriptors |
 | `cmake_target_sources.txt` | `.../kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_impl ...)` block |
 | `ingestor_packs.hpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.hpp` -- the `register<Name>Symbols` declaration |
 | `ingestor_packs.cpp.txt` | `.../kernel_ingestor_engine/IngestorPacks.cpp` -- the `s_packs` table row |
 | `cmake_test_sources.txt` | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt`'s `target_sources(hip_kernel_provider_tests ...)` block |
+
+**`cmake_descriptor_files.txt` names no splice target because there is none.** The
+packer discovers descriptors by walking a source root recursively and no descriptor
+is ever named in CMake, so installing a bundle is placing its files under the right
+root: `test_descriptors/<set>/<slug>/` for a direct-load bundle, where `<set>` is one
+of the four authored sets, and `descriptors/<producer>/<bundle>/` for a packaged one.
+Each set is a separate pack target walked by directory, so a bundle written into the
+wrong set installs cleanly and is then invisible to the binary meant to read it. The
+only two roots an author ever repoints are the cache variables
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` and
+`HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT`; they do not add CMake.
+
+One registration the fragments do **not** carry, because it belongs to the kernel
+source rather than to the bundle: a `kernel_source.kind == "embedded_source"` engine
+needs an `add_kernels_for_embedding(TARGET … FILES … KEYS …)` entry in
+`.../src/tests/CMakeLists.txt`, each `KEYS` value equal to the `source_file` string
+its descriptor authors. The `hip`, `rocke`, `hsaco` and `kpack` kinds lower at pack
+time and need nothing there.
 
 **Both `IngestorPacks.hpp` and `IngestorPacks.cpp` edits are required.** A pack
 registered in the header but missing from the `.cpp` table's `s_packs` vector silently
@@ -180,9 +221,11 @@ per-architecture output, never unlowered rocKE authoring input.
 # 1. Generate a bundle.
 .venv/bin/python generate.py --config configs/scale_add.yaml --output-dir /tmp/scale-add
 
-# 2. Validate it structurally, with no GPU and no linked provider.
+# 2. Validate it structurally, with no GPU and no linked provider. The path is the
+#    bundle's own descriptor directory, which mirrors the authored root: scale_add
+#    is direct_load with authored_subpath `unit`.
 <build-dir>/bin/hipdnn_validate_descriptors \
-    /tmp/scale-add/descriptors \
+    /tmp/scale-add/test_descriptors/unit/scale_add \
     --expect-engine hipkernel:ScaleAdd \
     --json
 ```
@@ -393,8 +436,18 @@ graph_match:                      # documentation of shape, not consumed by temp
   shape: shared_shape | disjoint_attributes
   discriminator: none | field_value | disjoint_topology
 
+dialect: direct_load | packaged   # optional, default "direct_load"
 kernel_source_kind: embedded_source   # direct-load example; packaged sources use
                                         # their build-time source kind
+authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
+                                    # authored sets: shared | unit | integration |
+                                    # archive_fixture. Each is a separate pack target
+                                    # reaching a different binary, so nothing in the
+                                    # config implies the answer and there is no
+                                    # default that is merely conservative -- a wrong
+                                    # set shows up as an engine that loads nothing.
+                                    # Optional for packaged, where it defaults to
+                                    # <kernel_source_kind>/<slug>.
 workspace_policy: none | fixed | derived
 delegates_to_existing_plan: false
 

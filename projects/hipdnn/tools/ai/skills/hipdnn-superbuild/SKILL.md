@@ -80,11 +80,18 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
    | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
-   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE engine/dependency readiness; distinct from production lowering switches. |
-   | `HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE` / `HIPKERNELPROVIDER_PRODUCTION_ENABLE_HIP` | OFF | Enable the corresponding authored source producer. Read current CMake guards for required wheel/compiler/kpack inputs. |
-   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | unset | Finalized authored descriptor tree consumed by production packaging; use the configured relative staging layout. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE engine/dependency readiness; a separate question from what the packer lowers. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging compiles from. Packaging is wired only while that root holds at least one non-hidden `*.kdp.json`; with none it is dormant and any stale product tree is removed, neither being an error. Set but not a directory is fatal. |
    | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
    | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+
+   **There is no per-producer production switch.** Producer selection is per-UKD on
+   `kernel_source.kind`, so one source root feeds every producer, and what gets built
+   is decided by the descriptors under the root rather than by a cache variable per
+   producer. rocKE is resolved once for *every* root, test roots included, so an
+   unresolvable comgr is fatal at configure even in a hip-only build;
+   `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names an explicit `libamd_comgr` where a
+   System32 copy would otherwise shadow the ROCm one.
 
    For an ingestor create/extend task, [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md)
    owns the full sequence. Early device/workspace feasibility has no installation

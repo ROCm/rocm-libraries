@@ -4,6 +4,53 @@ Build-time UKD/KMD/KDP -> kpack packaging. Provider-internal (`tools/hkp_pack.py
 see `python/hkp_pack/` for the pipeline itself and `examples/descriptors/` for a
 real, minimal authored source root.
 
+## Source roots and what the walk accepts
+
+Each wired root is walked recursively and packs straight into **its own** `OUT_ROOT`;
+no two invocations share a destination and there is no shared stage tree. Each
+descriptor's authored subpath is preserved verbatim into the staged and installed
+trees. Producer selection is per-UKD on `kernel_source.kind`, never per-folder, so
+one root feeds every producer into one kpack per arch. Nothing is registered in
+CMake: adding a descriptor is dropping files in a folder.
+
+The provider wires six: the production root, plus five over the four authored test
+sets (`shared` packs twice, once into each test binary's discovery root).
+
+| Root | Source | Ships |
+|---|---|---|
+| Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
+| Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+
+Production wiring is gated on the root holding at least one non-hidden `*.kdp.json`,
+since a KDP is what arch pruning consumes. With none, packaging is **dormant**, any
+stale product tree is removed, and neither is an error; a KDP that is present but
+pruned on every arch stays a hard failure, which is what separates "nothing to ship"
+from "something to ship that did not". A root that is set but is not a directory is
+fatal at configure.
+
+Two rules govern the walk itself:
+
+- **Hidden paths are skipped, and said so.** Any dot-prefixed path segment or
+  dot-prefixed filename is warned and skipped, as is a `*.json` whose name carries no
+  type token — an incidental file or a `.git/` under a user-supplied root is
+  tolerated rather than aborting the pack, and nothing passed over is silent. The
+  production content gate drops the same segments, so a KDP under a hidden path does
+  not wire packaging. A type-tagged descriptor that is malformed, missing a field, of
+  an unknown type or carrying a dangling reference still fails.
+- **An `embedded_source` `source_file` must be able to act as an identity.** The
+  value is never normalised, so a `..` segment is rejected (one file would take two
+  identities under two spellings) and an absolute path is rejected (it names a
+  location on one machine, while the emitted key must be the same on every machine).
+
+`embedded_source` is a **passthrough** kind: the descriptor is emitted exactly as
+authored, no producer runs for it, and it contributes no code object and no archive
+entry. The packer stamps the shard architecture and records the authored values in a
+provenance block. A root of only passthrough kinds therefore legitimately produces
+descriptors and **no** archive, and a shard with no compiled variant holds no
+`kpack/` directory. Descriptors but no archive is legal; no descriptors never is.
+Compiled-specialization obligations are scoped to the compiling kinds they are
+defined for, and stay mandatory for every one of those.
+
 ## Compiler-bound specialization agreement
 
 Generic descriptor generation is toolchain-free and supplies declarations, not
@@ -92,20 +139,77 @@ agreement with actual builder decisions and artifact integrity, not formal
 equivalence of arbitrary machine code or correctness of native dispatch.
 
 The runtime consumes packed per-architecture descriptors with source kind KPACK,
-not unlowered rocKE/HIP authoring descriptors. Native proof separately executes
-actual typed provider registration/loading and a finalized emitted-bundle census;
-source-text symbol matching is not certification. For each literal suite in
-`HKP_CENSUS_TEST_SUITES` and configured packaging arch, CMake registers
-`hip-kernel-provider-hkp-census-<arch>-<suite>`. This invokes
+not unlowered rocKE/HIP authoring descriptors. A packed `kernel_source` carries
+**five mandatory keys**; the packager emits them together and an adapter needs every
+one of them to name a code object and vouch for it:
+
+```json
+{
+  "kind": "kpack",
+  "library": "../../kpack/hip_kernel_provider_gfx942.kpack",
+  "toc_key": "pointwise_add_f32",
+  "symbol": "pointwise_add_f32",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "signature": [
+    {"kind": "global_buffer", "size": 8, "offset": 0},
+    {"kind": "global_buffer", "size": 8, "offset": 8},
+    {"kind": "by_value", "size": 4, "offset": 16}
+  ]
+}
+```
+
+`signature` is required, not optional: an empty array is legal and means a kernel
+taking no arguments, which is exactly why the key itself must be present — absence
+would otherwise be indistinguishable from it. Per entry, `kind`, `size` and `offset`
+are mandatory and `name` is the one optional key, because clang emits argument names
+for some producers and omits them for HIP `extern "C" __global__` kernels; requiring
+it would make every HIP-compiled kernel unloadable. `sha256` is shape-checked as 64
+lowercase hex.
+
+Neither digest nor signature is hand-authored, and they catch different drift.
+`sha256` is byte identity of the **decompressed** code object: a TOC entry pointing
+at the wrong offset decompresses cleanly and hands back another entry's object, so
+without the digest the wrong kernel launches and nothing reports an error. The
+loader rehashes before `hipModuleLoadData` and raises `DIGEST_MISMATCH`.
+`kernel_signature.py` reads the argument list back out of the object the packer just
+compiled — sniffing a clang offload bundle or a bare ELF rather than assuming, and
+dropping compiler-appended `hidden_` arguments — which is what catches a kernel whose
+parameters changed while its bytes remain internally consistent. A hand-authored
+arity would restate the same assumption that drifted.
+
+Native proof separately executes actual typed provider registration/loading and a
+finalized emitted-bundle census; source-text symbol matching is not certification.
+Census registration is one call per packed target, made in
+`src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`:
+
+```cmake
+hkp_register_census_tests(
+    TARGET hip_kernel_provider_tests
+    PACK_NAME unit
+    SUITES TestPointwisePacks)
+```
+
+`PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
+entries address. Per declared suite and per arch in that list, CMake registers
+`hip-kernel-provider-hkp-census-<arch>-<suite>`, invoking
 `hip_kernel_provider_tests --gtest_filter=<suite>.*` directly, without Python, with
 `HIPDNN_TEST_CENSUS_SUITE=<suite>`, `HIPDNN_TEST_EXPECTED_ARCH=<arch>` and
-`HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`. Each entry is an independent
-process labeled `unit_test;hip-kernel-provider;host`.
+`HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` — its own shard, not a
+shared stage tree. Each entry is an independent process labeled
+`unit_test;hip-kernel-provider;host`.
 
 ```bash
 ctest --test-dir <build>/dnn-providers/hip-kernel-provider \
   --no-tests=error -V -R '^hip-kernel-provider-hkp-census-<arch>-<suite>$'
 ```
+
+A suite is declarable only where it reads **exactly one** pack target's shard,
+because an entry hands the binary one directory and the guard below requires every
+case to pass. The authored dialect does not decide this: `TestPointwisePacks` is
+censused at `unit` although that set is `embedded_source`, while `TestConvFwdPack`
+reads the `unit` and `unit_shared` shards and is censused nowhere. One suite declared
+at two pack targets is fatal — the entry name carries arch and suite alone, so the
+second registration would silently take the first one's shard.
 
 Strict mode is active only for a nonempty census-suite variable. Before default-root
 setup it rejects missing/empty/nonexistent explicit roots and empty expected arches;
@@ -115,12 +219,14 @@ in each iteration, with at least one completed iteration. Disabled, filtered-out
 sharded-out, failed or skipped cases, list-only and repeat-zero invocations cannot
 satisfy the census. Repeated partial runs cannot accumulate coverage.
 
-Registration is deferred until the test target exists and covers packaged shards
-only. Declared suites with a missing target or empty arch list are configuration
-errors. Tests OFF or no declared suites yields no census evidence. Direct-load
-engines use ordinary host tests; normal non-census invocations retain their filtering
-and skip behavior. Neither structural nor host loading proves numerical device
-behavior. The
+The call is made where the target is defined and after it exists; there is no
+deferral machinery. Each missing prerequisite is fatal rather than a silent drop,
+because a census that registers nothing is indistinguishable from one that passed: an
+unwired `PACK_NAME` (the message names the wired roots), an absent or nonexistent
+`TARGET`, an empty recorded arch list. Tests OFF and an empty `SUITES` register
+nothing, which is absence of evidence. Normal non-census invocations retain their
+filtering and skip behavior. Neither structural nor host loading proves numerical
+device behavior. The
 [ingestor RUNBOOK](../../../projects/hipdnn/tools/ai/skills/hipdnn-ingestor-engine/RUNBOOK.md)
 owns the complete create/extend sequence and post-regeneration gates.
 
@@ -147,6 +253,21 @@ One knob belongs to the packer itself:
 | Variable | Effect |
 |---|---|
 | `HKP_PACK_JOBS` | Prewarm worker count. Defaults to `min(32, ncpu)`; `1` forces the serial path for a clean traceback. |
+
+That statement is about a **direct child run** of `hkp_pack`, and it stays true there.
+Inside the build the cap is not an environment variable anyone exports: it is the
+`PACK_JOBS <n>` argument at the `hkp_wire_pack_target()` call site, and the wiring is
+what transports it to the tool as `HKP_PACK_JOBS`. **No wrapper needs to export it
+any more.**
+
+The argument exists per call site because every root is a separate custom target with
+no ordering edge between them, so the generator runs them at once and unbounded pools
+multiply. All six wire calls name a value: `1` selects the packer's serial path for
+the small roots, and `2` goes to the two roots with enough distinct variants to repay
+a pool — the production root and the `integration` test root, which is the one that
+exercises the parallel path in a real build. Omitting the argument lets the packer
+size itself against the machine, which fits only a root large enough to repay the
+startup cost.
 
 ## Running the tests
 
@@ -183,6 +304,14 @@ Constructor defaults, omitted policy and coupled effective accessors remain
 obligations. An authored tree without compiler evidence can receive only an
 explicit structural result; it cannot be labeled compiler-clean.
 
+The matcher field list is resolved in a fixed order of precedence: an explicit
+`--field` outranks everything; otherwise, when the bundle declares
+`specialization_contract.metadata_fields`, **that declaration is the field list**;
+`DEFAULT_MATCHER_FIELDS` is the last-resort fallback left for a bundle that declares
+no contract. Desk-checking a bundle against the fields it actually declares is the
+point — falling back to the generic list for a bundle that states its own would check
+a different set of columns and still print a result.
+
 `tools/hkp_desk_check.py --mode {full,structural} [--kpack-python-dir D]
 [--field F] [--drift-field F] <path/to/*.kdp.json>` selects the intended proof
 strength explicitly. `--mode` is required and has no default, because a default
@@ -206,6 +335,36 @@ identical.
 identity, real packed observations and tampered-evidence checks distinct from
 native registration and numerical tests; a synthetic predicate or controlled
 payload establishes only its specific boundary.
+
+### Embedded-source verification (`tools/hkp_verify_embedded_sources.py`)
+
+A staged tree holds descriptor JSON only, so an `embedded_source` descriptor resolves
+its `source_file` against a key table the build compiles into the binary, and nothing
+in the staged tree proves that table holds the named source. This build step reads
+that table and every `embedded_source` descriptor under the staged roots the binary
+serves, and compares the two: **presence** (each named `source_file` is a key) and
+**location** (the file registered under that key is the one at the authored location
+the descriptor's provenance records, joining the `provenance.source_label` root with
+`rel_dir` and `source_file`). `--pack-stamp` adds a separate rule: a pack root whose
+stamp is present holds at least one descriptor. A root whose pack is not wired — the
+dormant production root — contributes no stamp and is not checked.
+
+It runs over emitted JSON alone and imports no part of the packer, so it restates the
+contract instead of recomputing one side of it from the other.
+
+**The comparison runs one way, staged descriptor → table. Neither reverse direction
+is checked, so a pass is not evidence that a bundle is reachable.** A key the table
+holds that no descriptor names is not an error: most embedded kernels have no
+descriptor at all. And per the module's own docstring, *"a descriptor that never
+reaches a staged root is not an error either. Authored under a folder no pack is
+wired to, it is never staged, so this walk never sees it and passes while the runtime
+never receives it."* Catching that needs the authored tree as a second input, which
+provenance cannot supply, because the packer is what writes provenance. The check to
+state is *does a shard appear under that pack target's `OUT_ROOT`*, not *did the
+verifier pass*. An absent root, an empty root, a root with no `embedded_source`
+descriptor and an absent key table each pass — which is why a pass reports the two
+counts it compared, so a pass over nothing reads differently in the build log from a
+step that did not run.
 
 ### Real-corpus builder-signature guards (`tests/test_hkp_pack_rocke.py`)
 

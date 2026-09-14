@@ -51,6 +51,31 @@ uses real compile options. KPACK loads library/toc-key/symbol relative to descri
 origin within `treeRoot`. A layout-neutral stand-in is valid only on a path proven
 not to consume those compile options, never as an embedded-source workaround.
 
+A KPACK load is **digest-checked before the driver sees the bytes**. The descriptor's
+`sha256` is the digest of the decompressed code object, 64 lowercase hex, and the
+loader rehashes and compares it, raising `DIGEST_MISMATCH` on disagreement. The
+archive reader cannot catch this itself: a TOC entry pointing at the wrong offset
+decompresses cleanly and returns another entry's code object rather than an error.
+Every stage — archive missing, archive unreadable, arch mismatch, `toc_key` absent,
+decompress, digest mismatch, module load — raises its own distinct message, and a
+missing symbol is raised later by `KpackProgram::getKernel`, the only site that can
+see it.
+
+**The module cache is keyed by device ordinal, and the device is made current across
+the load.** The key is archive path, `toc_key`, the feature-stripped device arch, the
+ordinal, and the expected digest; `symbol` is deliberately excluded so one module is
+shared by kernels differing only by entry point. A device that cannot be made current
+fails the load rather than yielding a foreign module, because an entry cached under
+one ordinal and resident on another is a wrong answer every later dispatch reuses.
+
+**A malformed descriptor is a hard failure, not one fewer candidate.**
+`GenericPlanBuilder` rethrows `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` instead of
+absorbing it and trying the next candidate, in plan build, in the filtered path and
+in benchmarking alike. Falling past it would hide the fault and silently serve a
+different kernel than the one authored. Read the consequence when triaging: a
+descriptor bug presents as **no plan at all**, not as a thinner candidate list, so
+"the engine declined" and "the descriptor is broken" look nothing alike.
+
 Grid/block and workspace formulas must match current source and every deciding
 metadata field. A launch-surface declaration links Python source, C++ mirror,
 inputs, guard and test; its checker proves structure, not semantic equivalence.
@@ -73,26 +98,40 @@ Native proof executes real registrations and
 structural validator substitutes no-op native stubs and cannot establish this.
 Fresh processes are required because registration/discovery is memoized.
 
-The **packaged census covers packaged engines only** and is a direct native
-obligation: CMake registers one independent test
-`hip-kernel-provider-hkp-census-<arch>-<suite>` per declared suite and configured
-packaging arch, running `hip_kernel_provider_tests --gtest_filter=<suite>.*` with
-`HIPDNN_TEST_CENSUS_SUITE`, an explicit `HIPDNN_TEST_EXPECTED_ARCH` and the arch's
-own `HIPDNN_DESCRIPTOR_DIR` shard. There is no Python launcher and no XML census
-guard. Expected names/counts, runtime `KPACK` source kind and SDK version come from
-the finalized emitted inventory; the arch comes from packaging configuration, never
-from loaded descriptors or the host GPU — a bundle cannot be its own expectation.
+The census is a direct native obligation, registered one
+`hkp_register_census_tests(TARGET … PACK_NAME … SUITES …)` call per packed target in
+`src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and after the test
+target exists. Per declared suite and per arch in that pack target's own recorded
+list, CMake registers an independent test
+`hip-kernel-provider-hkp-census-<arch>-<suite>` running
+`hip_kernel_provider_tests --gtest_filter=<suite>.*` with
+`HIPDNN_TEST_CENSUS_SUITE`, an explicit `HIPDNN_TEST_EXPECTED_ARCH` and a
+`HIPDNN_DESCRIPTOR_DIR` of that pack target's **own** `OUT_ROOT` shard for the arch —
+not a shared stage tree. There is no Python launcher and no XML census guard.
+Expected names/counts, runtime source kind and SDK version come from the finalized
+emitted inventory; the arch comes from the wired arch list, never from loaded
+descriptors or the host GPU — a bundle cannot be its own expectation.
+
+**What may be censused is decided by shard count, not by dialect.** An entry hands
+the binary exactly one directory, so only a suite confined to one pack target's shard
+qualifies. `TestPointwisePacks` is censused at the `unit` target even though
+`unit/pointwise/` is authored in the `embedded_source` dialect, because every case in
+it reads that one shard; `TestConvFwdPack` reaches across the `unit` and
+`unit_shared` shards and is censused nowhere. Declaring one suite at two pack targets
+is fatal: the entry name carries arch and suite alone, so the second registration
+would silently take the first one's shard.
 
 The guard is active only for a nonempty census-suite variable, and it fails closed:
 an empty arch, a missing/empty/nonexistent explicit root, an absent or empty named
 suite, any case that skips or fails, list-only or zero-iteration invocations, and
 partial runs that never complete one full iteration. Ordinary invocations without
 the variable keep normal filtering and skip behavior, and the runtime's production
-descriptor-root fallback is unchanged. An empty `HKP_CENSUS_TEST_SUITES` registers
-nothing, and tests built OFF yields no census evidence at all — absence, not a pass.
-Direct-load engines use their ordinary unit/inventory suites against the
-arch-independent tree; a generated inventory suite invoked directly still requires
-an explicit expected arch and descriptor root.
+descriptor-root fallback is unchanged. An empty `SUITES` registers nothing, and tests
+built OFF yields no census evidence at all — absence, not a pass. Every other missing
+prerequisite is fatal at configure instead: an unwired `PACK_NAME`, a missing or
+absent `TARGET`, an empty recorded arch list. An uncensused suite states its
+inventory through its ordinary host run; invoked directly it still requires an
+explicit expected arch and descriptor root.
 
 Placeholder/audit, native inventory and numerical dispatch are distinct evidence.
 Neither a structural pass nor a loaded registry proves that a graph was served.

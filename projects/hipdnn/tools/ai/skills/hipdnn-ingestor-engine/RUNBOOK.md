@@ -134,24 +134,75 @@ edit packed evidence to match a changed descriptor; rebuild from authored inputs
 
 Apply fragments to their actual consumers, preserving unrelated entries:
 
-| Splice | Direct-load | Packaged |
+| Splice | Consumer | Required when |
 |---|---|---|
-| `HIPDNN_DESCRIPTOR_FILES` | Authored runtime descriptors | Never unlowered authored descriptors |
-| `HIPDNN_INGESTOR_PACK_KERNELS` | Actual source-file stems | Not applicable |
-| Engine `target_sources` | Native implementation | Native implementation |
-| `IngestorPacks.hpp` declaration and `.cpp` table | Both | Both |
-| Engine test `target_sources` | Applicable tests | Applicable tests/census |
-| `HKP_CENSUS_TEST_SUITES` in `hkp_register_census_tests()` | Not the direct-load inventory gate | Literal generated packaged census suite name |
+| Engine `target_sources` | `$PROVIDER/src/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the native implementation |
+| `IngestorPacks.hpp` declaration **and** `IngestorPacks.cpp`'s `s_packs` row | `$PROVIDER/src/engines/kernel_ingestor_engine/` | Always — both, or the pack vanishes from the static-archive binary |
+| Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
+| `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
+| `hkp_register_census_tests(TARGET … PACK_NAME … SUITES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
+| Descriptors themselves | — | **Never.** There is no descriptor splice |
 
-The census list lives in
-`dnn-providers/hip-kernel-provider/descriptor-packaging/cmake/HkpPackaging.cmake`.
-Appending the literal `Test<Name>Packs` suite is what creates the census obligation;
-an empty list registers none.
+**Descriptors need no CMake edit at all.** The packer walks a source root recursively
+and no descriptor is ever named in CMake, so installing one is dropping files in the
+right folder. Which folder is the whole mechanism — see **Descriptor placement**
+below. A `cmake_descriptor_files.txt` fragment is a statement of that fact, not a
+list to paste.
 
-Stage packaged authored descriptors under the configured
-`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, preserving their generated relative
-subpath. Update that staging after every regeneration and compare content/identities,
-not only counts. A fragment file is not evidence that its splice was applied.
+Census registration is one `hkp_register_census_tests()` call per packed target, made
+in `$PROVIDER/src/tests/CMakeLists.txt` beside `hkp_verify_embedded_sources()`, after
+the test target exists:
+
+```cmake
+hkp_register_census_tests(
+    TARGET hip_kernel_provider_tests
+    PACK_NAME unit
+    SUITES TestPointwisePacks)
+```
+
+`PACK_NAME` selects the wired pack target whose own `OUT_ROOT` and recorded arch list
+the entries address. A suite is declarable **only where it reads exactly one pack's
+shard**, because an entry hands the binary a single directory and the native guard
+requires every case to pass without skipping. `TestPointwisePacks` qualifies at the
+`unit` target; `TestConvFwdPack` reads both the `unit` and `unit_shared` shards and is
+censused nowhere. Declaring one suite at two pack targets is fatal — the entry name
+carries only arch and suite, so the two would collide.
+
+**Descriptor placement.** The authored subpath decides everything; there is no list
+to join.
+
+| Bundle | Authored under | Reached through |
+|---|---|---|
+| Shipped | `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>/` | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to that in-tree root |
+| Test | `$PROVIDER/src/engines/kernel_ingestor_engine/test_descriptors/<set>/<slug>/` | `HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT`, with `<set>` one of `shared`, `unit`, `integration`, `archive_fixture` |
+
+`descriptors/` **ships**; `test_descriptors/` does **not** — it is staged into the
+build tree and installed only under `HIPKERNELPROVIDER_ENABLE_TESTS`. Those two names
+are the entire convention. Overriding the production cache variable is how a consumer
+repoints the shipped root; neither root is ever repointed by adding CMake.
+
+Three packaging-time constraints, not conventions:
+
+- **One level of nesting in every set.** Each set is packed by its top-level folder,
+  so every descriptor lands in a *child* of its shard root while the archive is
+  written at the shard root itself. That climb out of a child folder is what the
+  runtime containment guard checks, and a set packed from its own leaf folder never
+  produces it.
+- **`archive_fixture` is a sibling of `integration`, not a child.** One source root
+  cannot contain another: packing the parent sweeps the child's descriptors into the
+  parent's archive. A set that must be able to fail on its own needs a top-level
+  folder and an `OUT_ROOT` of its own.
+- **No engine id in two dialects within one discovery root.** The two spellings
+  collide on the completed metadata tuple and the collision removes that engine from
+  the whole suite. `hipkernel:Pointwise` is authored twice for exactly this reason —
+  `unit/pointwise/` in the `embedded_source` dialect, `integration/pointwise/` in the
+  `hip` dialect — feeding two roots that never merge. The two sets are not a matched
+  pair; edit the one whose binary reads it.
+
+**There is no shared stage tree.** Each root packs straight to its own `OUT_ROOT`, so
+"stage the descriptors" means "author them under the right root". Re-emit after every
+regeneration and compare content and identities, not only counts. A fragment file is
+not evidence that its splice was applied.
 
 Set `SCHEMA` to the actual operation `.fbs` and `NATIVE_SOURCE` to its implementation;
 pass all relevant source files and repeat for each schema in a fusion:
@@ -168,21 +219,25 @@ separately. For an unspliced tree, check placeholders with:
   --output-dir "$GENERATED" --check-placeholders
 ```
 
-For a packaged splice, set `DESCRIPTOR_STAGING_ROOT` to the production tree holding
-the generated descriptor subpath, then check all destinations below. For direct-load,
-omit the third root: its descriptors already live under the engine root.
+Two roots cover **both** dialects, because `descriptors/` and `test_descriptors/` are
+siblings under the engine directory and each root is searched at the engine-specific
+relative path the bundle was emitted to. No separate staging root is needed:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" \
   --check-placeholders \
   --emitted-root "$PROVIDER/src/engines/kernel_ingestor_engine" \
-  --emitted-root "$PROVIDER/src/tests/engines/kernel_ingestor_engine" \
-  --emitted-root "$DESCRIPTOR_STAGING_ROOT"
+  --emitted-root "$PROVIDER/src/tests/engines/kernel_ingestor_engine"
 ```
 
-With `--emitted-root`, `--output-dir` is required but not searched. The check covers
-all emitted shippable files at engine-specific paths: nonexistent roots, missing
-files and ambiguous matches fail. An unrelated same-basename file cannot satisfy it.
+Add a third `--emitted-root` only when the production root was overridden away from
+its in-tree default. With `--emitted-root`, `--output-dir` is required but not
+searched. The check covers all emitted shippable files at engine-specific paths:
+nonexistent roots, missing files and ambiguous matches fail, and a file found at the
+same relative path under two roots is an error rather than a pick. An unrelated
+same-basename file cannot satisfy it. It reports how many of the engine's shippable
+files it located — read that count, because an unfilled-placeholder exit and a
+could-not-locate exit are both `1`.
 If the profile declares a launch-surface audit, also run:
 
 ```bash
@@ -198,10 +253,28 @@ native loading or numerical dispatch.
 Configure from `$REPO` using `hipdnn-superbuild`, with
 `CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
 `HIPKERNELPROVIDER_ENABLE_TESTS=ON`. SDPA needs `HIPDNN_ENABLE_SDPA=ON` consistently
-in SDK and provider. Packaged producers additionally need
-`HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE` and/or `..._HIP`, the authored source
-root, and the [packaging dependencies](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
-`HIPKERNELPROVIDER_ENABLE_ROCKE` does not replace the production producer switch.
+in SDK and provider. There is **no per-producer production switch**: producer
+selection is per-UKD on `kernel_source.kind`, so one root feeds every producer.
+
+Production packaging is wired on exactly one condition — the root named by
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` holds at least one **non-hidden
+`*.kdp.json`**. This branch supplies it in tree:
+`$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx942_attention_dense/`,
+six descriptors of kind `rocke`. Standalone UKDs, kernel sources and READMEs do not
+by themselves make a pack, because a KDP is what arch pruning consumes.
+
+With no KDP under the root, production packaging is **dormant**, any stale product
+tree from an earlier configure is removed, and neither is an error — a consumer sees
+that path only by overriding the cache variable at an empty directory. A KDP that
+*is* present but is pruned on every arch remains a **hard failure**: the gate
+separates "nothing to ship" from "something to ship that did not". A root that is set
+but is not a directory is fatal at configure.
+
+The [packaging dependencies](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md)
+are still required, and rocKE is resolved once for **every** root, test roots
+included, so an unresolvable comgr is fatal at configure even in a hip-only build.
+`HIPKERNELPROVIDER_ENABLE_ROCKE` gates the rocKE engine and its dependency
+readiness, which is a separate question from what the packer lowers.
 
 Build the provider, validator and required test targets through the configured
 superbuild. For packaged engines, run `hkp_packaging_product` after the full build
@@ -218,13 +291,42 @@ copying kernels into a build tree does not satisfy that path. Its explicit runti
 override is a separate test setup, not evidence of the final installation. Keep the
 configured prefix aligned with `$INSTALL`, rather than relocating only this command.
 
-Set `FINAL_DESCRIPTOR_ROOT` to the actual installed per-arch shard (or the
-arch-independent direct-load tree). Resolve `VALIDATOR` to the built
+Set `FINAL_DESCRIPTOR_ROOT` to the actual installed per-arch shard. Every root is
+staged per architecture, `embedded_source` included: the packer stamps the shard
+architecture onto a passthrough descriptor and records the authored values in its
+provenance block, so there is no arch-independent installed tree to point at.
+Resolve `VALIDATOR` to the built
 `hipdnn_validate_descriptors` executable and validate the runtime dialect:
 
 ```bash
 "$VALIDATOR" "$FINAL_DESCRIPTOR_ROOT" --expect-engine "$ENGINE" --json
 ```
+
+**The embedded-source invariant, and why its pass is not reachability.** A staged
+tree holds descriptor JSON only — the packer copies no kernel source into it — so an
+`embedded_source` descriptor resolves its `source_file` against a key table the build
+compiles into the binary. `descriptor-packaging/tools/hkp_verify_embedded_sources.py`, wired by
+`hkp_verify_embedded_sources()` beside the census registration, runs at build time
+over emitted JSON alone and checks two things: every named `source_file` is a key of that
+table (**presence**), and the file registered under that key is the file at the
+authored location the descriptor's provenance records (**location**, joining the
+`provenance.source_label` root with `rel_dir` and `source_file`). A separate
+stamp-keyed rule requires a pack root whose stamp file is present to hold at least one
+descriptor.
+
+Its walk runs **one way only**, staged descriptor → key table, and neither reverse
+direction is checked. Per its own docstring, *"a descriptor that never reaches a
+staged root is not an error either. Authored under a folder no pack is wired to, it is
+never staged, so this walk never sees it and passes while the runtime never receives
+it."* A key the table holds that no descriptor names is likewise not an error, because
+most embedded kernels have no descriptor at all.
+
+**A green verification step is therefore NOT evidence the bundle is reachable.** The
+check to state is *does a shard appear under that pack target's `OUT_ROOT`*, not *did
+the verifier pass*. An absent root, an empty root, a root holding no `embedded_source`
+descriptor and an absent key table each pass; a pass reports the two counts it
+compared, so read those counts rather than the exit status. The dormant production
+root contributes no stamp and is not checked at all.
 
 For packaged output, check each selected architecture using the producing-build
 record, not today's imported producer:
@@ -248,22 +350,46 @@ separately:
 - For declared specialization, the per-kernel record binds the current descriptor,
   schema, metadata, architecture and named payload bytes. Generation supplies the
   declaration, not that compiler-owned evidence; see [rocke-mining.md](rocke-mining.md).
+- **An `embedded_source` root legitimately produces descriptors and no archive.**
+  `embedded_source` is a packaging *passthrough* kind: it is emitted exactly as
+  authored, no producer runs for it, and it contributes no code object and no archive
+  entry. A shard with no compiled variant therefore holds no `kpack/` directory, and
+  that is not a packing failure. Compiled-specialization obligations are scoped to the
+  compiling kinds they are defined for and stay mandatory for every one of those.
+  "Descriptors but no archive" is legal; "no descriptors" never is.
+- **Two independent artifact checks bind a packed kernel to its binary, not one.**
+  `sha256` is byte identity of the *decompressed* code object, 64 lowercase hex, and
+  `kernel_signature.py` records the argument list read back out of the object the
+  packer just compiled. They fail on different drift: a TOC entry pointing at the
+  wrong offset decompresses cleanly and hands back another entry's code object, which
+  only the digest catches; a kernel whose parameters changed still hashes to whatever
+  it now is, which only the signature catches. Neither is hand-authored. Argument
+  *names* are producer-dependent — clang omits them for HIP `extern "C" __global__`
+  kernels and the ASM producers carry them — so a missing `name` is not drift.
 
 ### Packaged census: direct native CTest entries
 
 Run real provider registration/loading and inventory checks in fresh processes.
-The census **covers packaged engines only**, and it is a direct native obligation
-with no Python launcher and no XML guard. For each literal suite in
-`HKP_CENSUS_TEST_SUITES` and each configured packaging architecture, CMake registers
-an independent test `hip-kernel-provider-hkp-census-<arch>-<suite>` that invokes
+The census is a direct native obligation with no Python launcher and no XML guard.
+It covers a suite that reads exactly **one pack target's shard**; the authored
+dialect does not decide eligibility, the shard count does. `TestPointwisePacks` is
+censused although `unit/pointwise/` is `embedded_source`, because every one of its
+cases reads that single shard.
+
+Registration is one `hkp_register_census_tests(TARGET … PACK_NAME … SUITES …)` call
+per packed target. For each declared suite and each arch in that pack target's own
+recorded list, CMake registers an independent test
+`hip-kernel-provider-hkp-census-<arch>-<suite>` that invokes
 
 ```text
 hip_kernel_provider_tests --gtest_filter=<suite>.*
 ```
 
 with `HIPDNN_TEST_CENSUS_SUITE=<suite>`, `HIPDNN_TEST_EXPECTED_ARCH=<arch>` and
-`HIPDNN_DESCRIPTOR_DIR=<descriptor-build-dir>/<arch>`. The architecture comes from
-the configured packaging list, never from a detected device or from the descriptors
+`HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` — **that target's own
+output-root shard, not a shared stage tree** — labelled
+`unit_test;hip-kernel-provider;host`. The architecture comes from the arch list the
+pack target was wired with, never from a detected device or from the descriptors
 themselves. Set `CENSUS_SUITE` to the generated suite name and `PROVIDER_BUILD` to
 the provider's own binary directory (`$BUILD/dnn-providers/hip-kernel-provider` in
 the superbuild layout), then run every requested arch's entry:
@@ -295,14 +421,20 @@ repeated partial runs do not accumulate coverage. Normal invocations without the
 variable keep ordinary GoogleTest filtering and skip behavior, and the production
 runtime's descriptor-root fallback is unchanged.
 
-Declared suites with a missing test target or an empty configured architecture list
-are configuration errors. Tests built OFF, or no declared suite, yields **no census
-evidence**: that is absence, not a pass. Direct-load engines use their ordinary
-unit/inventory suites against their arch-independent descriptor tree and are not
-covered by a packaged-census pass; a generated inventory suite invoked directly
-still requires an explicit expected arch and descriptor root. Check retained
-extension inventory and heuristic-disabled score absence per
-[native-pack.md](native-pack.md).
+Each missing prerequisite is **fatal at configure**, never a silent drop, because a
+census that registers nothing is indistinguishable from one that passed: a
+`PACK_NAME` no `hkp_wire_pack_target()` call wired (the message names the wired
+roots), a `TARGET` that does not exist or was not given, and a recorded arch list
+that is empty. Declaring one suite at two pack targets is fatal for a different
+reason — the entry name carries arch and suite alone, so the second registration
+would silently take the first one's shard.
+
+Tests built OFF, and an empty `SUITES`, both register nothing at all: that is
+**absence of census evidence**, not a pass. A suite that reads more than one shard
+cannot be censused and must state its inventory through its ordinary host suite
+instead; that suite invoked directly still requires an explicit expected arch and
+descriptor root. Check retained extension inventory and heuristic-disabled score
+absence per [native-pack.md](native-pack.md).
 
 **Gate:** current installation, artifact checks at their stated strength, and real
 registration/loading plus applicable inventory/census checks. Report `NOT VERIFIED
