@@ -104,7 +104,8 @@ class TestBuildAndValidateSolution:
     def test_wavefront_minus1_resolved_to_32_when_has_wave32(self, monkeypatch):
         captured = {}
 
-        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map):
+        # sourceSwap is the trailing optional arg of the real signature.
+        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map, sourceSwap=False):
             captured["wavefront"] = wavefront
             return {}
 
@@ -119,7 +120,8 @@ class TestBuildAndValidateSolution:
     def test_wavefront_minus1_resolved_to_64_when_no_wave32(self, monkeypatch):
         captured = {}
 
-        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map):
+        # sourceSwap is the trailing optional arg of the real signature.
+        def fake_mi_params(mi, isa, wavefront, ptype, workgroup, isa_map, sourceSwap=False):
             captured["wavefront"] = wavefront
             return {}
 

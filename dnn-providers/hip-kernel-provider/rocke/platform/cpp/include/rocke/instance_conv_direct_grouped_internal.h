@@ -62,6 +62,12 @@ extern "C" {
  * ===================================================================== */
 #define ROCKE_DCONV16C_MAX_PASSES 16
 
+/* Bound on the per-thread DRAM-load passes (32c).
+ * cpg=32 and block_q up to 128 with KW=3 gives the worst case:
+ *   THREADS=256 (BG=4, wave=64), NUM_VEC4=(128+2)*4*32/4=4160, PASSES=17.
+ * ===================================================================== */
+#define ROCKE_DCONV32C_MAX_PASSES 17
+
 /* Bound on the per-block accumulator-tile fan-out (q_subtiles = block_q/16 for
  * 16c; q_tiles_per_wave = block_q/4 for 4c). block_q stays small (<=16 in the
  * covered space); 8 is generous. Each tile holds KH (=3) circular acc slots. */
@@ -357,6 +363,297 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx);
  * unconditionally reset it. Reads/updates ctx->acc_tiles. Returns the kernel
  * (ctx->b->kernel) on success, NULL on error. */
 rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  rocke_dconv_8c_ctx_t  --  shared state for build_direct_conv_8c.
+ *
+ *  Structurally identical to the 16c ctx except:
+ *    - No fold_k32 flag (8c always folds s=0 + s=1 into K=16 and handles s=2
+ *      as a zero-padded residual).
+ *    - ch_block_dim = 2 (cpg=8 → 2 vec4 blocks of 4 channels per group) in
+ *      the LDS chunk descriptor instead of 4.
+ *    - weights_main[KH]: one folded K=16 vec4 per filter row (both S positions).
+ *    - weights_s2[KH]: one zero-padded K=16 vec4 per filter row (S=2 residual).
+ *    - s_lane, ch_lane instead of s_lane_k32/ch_lane_k32/ch_lane_k16.
+ *    - lane_in_lo_half selects which K-lanes carry valid S=2 data.
+ *    - zero_acc is <4 x float> (same as 16c non-folded path).
+ *    - q_subtiles = block_q / 16.
+ * ===================================================================== */
+typedef struct rocke_dconv_8c_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_direct_conv_8c_spec_t* spec;
+    const char* arch;
+    rocke_direct_conv_problem_t p;
+
+    int BLOCK_Q;
+    int BLOCK_GROUPS;
+    int WAVE;
+    int THREADS;
+    int LDS_W;
+    int LDS_ROW_FP16;
+    int LOAD_VEC;
+    int NUM_VEC4;
+    int PASSES;
+    int lds_total_fp16;
+    int q_subtiles; /* BLOCK_Q / 16 */
+    int n_iters;
+
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+
+    rocke_value_t* c0;
+    rocke_value_t* c_wave;
+    rocke_value_t* c_BG;
+    rocke_value_t* c_BQ;
+    rocke_value_t* c_cpg;
+    rocke_value_t* c_kpg;
+    rocke_value_t* c_W;
+    rocke_value_t* c_BG_cpg;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* fp16x4_zero;
+    rocke_value_t* zero_acc; /* <4 x float> */
+
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+    rocke_value_t* c4; /* lane / 16 */
+    rocke_value_t* q_in_lane; /* lane % 16 */
+    rocke_value_t* s_lane; /* c4 / 2   (0,0,1,1 for c4 in {0,1,2,3}) */
+    rocke_value_t* ch_lane; /* (c4%2)*4 (0,4,0,4) */
+    rocke_value_t* lane_in_lo_half; /* cmp_lt(c4, 2) — selects valid S=2 lanes */
+
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* n;
+    rocke_value_t* g_tile;
+    rocke_value_t* g;
+    rocke_value_t* q_tile_start;
+
+    rocke_value_t* A_smem;
+    rocke_value_t* B_smem;
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc;
+
+    const rocke_tensor_descriptor_t* b_desc;
+    rocke_value_t* k_out_val;
+    rocke_value_t* weights_main[ROCKE_DCONV_MAX_ACC_SLOTS]; /* one per KH (s=0+s=1 folded) */
+    rocke_value_t* weights_s2[ROCKE_DCONV_MAX_ACC_SLOTS]; /* one per KH (s=2 residual) */
+    int n_weights; /* == KH */
+
+    const rocke_tensor_descriptor_t* chunk_desc;
+    struct
+    {
+        rocke_value_t* chunk_idx;
+        rocke_value_t* ch_block;
+        rocke_value_t* group_in_wg;
+        rocke_value_t* W_lds;
+        rocke_value_t* in_bounds;
+        rocke_value_t* abs_group;
+    } chunk_meta[ROCKE_DCONV16C_MAX_PASSES];
+    int n_chunk_meta;
+
+    const rocke_tensor_descriptor_t* a_desc;
+    const rocke_tensor_descriptor_t* d_desc;
+
+    rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+} rocke_dconv_8c_ctx_t;
+
+/* ===================================================================== *
+ *  rocke_dconv_32c_ctx_t  --  shared state for build_direct_conv_32c.
+ *
+ *  Uses mfma_f32_32x32x8_f16: M=32=kpg, N=BLOCK_Q, K=8.
+ *  Per (r,s): 4 consecutive MFMA calls (atom_idx=0..3, ch_start=0,8,16,24).
+ *  Accumulator: <16 x float> (32*32/64 = 16 slots per lane).
+ *  q_subtiles = BLOCK_Q / 32.
+ * ===================================================================== */
+#define ROCKE_DCONV32C_MAX_ATOMS 4 /* 4 atoms per (r,s) for cpg=32 */
+#define ROCKE_DCONV32C_MAX_KH 8
+#define ROCKE_DCONV32C_MAX_KW 8
+
+typedef struct rocke_dconv_32c_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_direct_conv_32c_spec_t* spec;
+    const char* arch;
+    rocke_direct_conv_problem_t p;
+
+    int BLOCK_Q;
+    int BLOCK_GROUPS;
+    int WAVE;
+    int THREADS;
+    int LDS_W;
+    int LDS_ROW_FP16;
+    int LOAD_VEC;
+    int NUM_VEC4;
+    int PASSES;
+    int N_CH_BLOCKS; /* cpg / 4 = 8 for cpg=32 */
+    int lds_total_fp16;
+    int q_subtiles; /* BLOCK_Q / 32 */
+    int n_iters;
+
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+
+    rocke_value_t* c0;
+    rocke_value_t* c_wave;
+    rocke_value_t* c_BG;
+    rocke_value_t* c_BQ;
+    rocke_value_t* c_cpg;
+    rocke_value_t* c_kpg;
+    rocke_value_t* c_W;
+    rocke_value_t* c_BG_cpg;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* fp16x4_zero;
+    rocke_value_t* zero_acc; /* <16 x float> */
+
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+    rocke_value_t* q_in_lane; /* lane % 32 */
+    rocke_value_t* k_blk; /* lane / 32 (0 or 1) */
+    rocke_value_t* ch_in_atom; /* k_blk * 4 */
+
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* n;
+    rocke_value_t* g_tile;
+    rocke_value_t* g;
+    rocke_value_t* q_tile_start;
+
+    rocke_value_t* A_smem;
+    rocke_value_t* B_smem;
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc;
+
+    const rocke_tensor_descriptor_t* b_desc;
+    rocke_value_t* k_out_val;
+    /* weights[r][s][atom]: KH x KW x 4 weight vec4s */
+    rocke_value_t* weights[ROCKE_DCONV32C_MAX_KH][ROCKE_DCONV32C_MAX_KW][ROCKE_DCONV32C_MAX_ATOMS];
+    int n_weight_r; /* KH */
+    int n_weight_s; /* KW */
+
+    const rocke_tensor_descriptor_t* chunk_desc;
+    struct
+    {
+        rocke_value_t* chunk_idx;
+        rocke_value_t* ch_block;
+        rocke_value_t* group_in_wg;
+        rocke_value_t* W_lds;
+        rocke_value_t* in_bounds;
+        rocke_value_t* abs_group;
+    } chunk_meta[ROCKE_DCONV32C_MAX_PASSES];
+    int n_chunk_meta;
+
+    const rocke_tensor_descriptor_t* a_desc;
+    const rocke_tensor_descriptor_t* d_desc;
+
+    /* acc_tiles[qt][slot]: <16 x float> per (q_subtile, circular slot) */
+    rocke_value_t* acc_tiles[ROCKE_DCONV_MAX_QTILES][ROCKE_DCONV_MAX_ACC_SLOTS];
+} rocke_dconv_32c_ctx_t;
+
+/* ===================================================================== *
+ *  rocke_dconv_dw_ctx_t  --  shared state for build_direct_depthwise.
+ *
+ *  No LDS, no MFMA.  Each lane owns one channel and accumulates
+ *  KH*KW scalar FMA products into a BLOCK_W * KH circular register array.
+ * ===================================================================== */
+#define ROCKE_DCONV_DW_MAX_BLOCK_W 64
+#define ROCKE_DCONV_DW_MAX_KH 8
+#define ROCKE_DCONV_DW_MAX_KW 8
+
+typedef struct rocke_dconv_dw_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_direct_depthwise_spec_t* spec;
+    const char* arch;
+    rocke_direct_conv_problem_t p;
+
+    int BLOCK_W;
+    int BLOCK_WAVES;
+    int WAVE;
+    int THREADS;
+    int BLOCK_CH;
+    int n_iters;
+
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+
+    rocke_value_t* c0;
+    rocke_value_t* c_wave;
+    rocke_value_t* c_W;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* zero_f32;
+
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* n;
+    rocke_value_t* q_tile_start;
+    rocke_value_t* ch; /* absolute channel: by*BLOCK_CH + wave_id*WAVE + lane */
+
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc;
+
+    const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,C] + 2 embeds */
+    const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,1] naive */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive */
+
+    /* weights_f32[r][s]: KH x KW preloaded f32 scalars */
+    rocke_value_t* weights_f32[ROCKE_DCONV_DW_MAX_KH][ROCKE_DCONV_DW_MAX_KW];
+
+    /* acc[w_out][slot]: BLOCK_W x KH f32 circular accumulators */
+    rocke_value_t* acc[ROCKE_DCONV_DW_MAX_BLOCK_W][ROCKE_DCONV_MAX_ACC_SLOTS];
+} rocke_dconv_dw_ctx_t;
+
+/* ===================================================================== *
+ *  8c PHASE FUNCTIONS
+ * ===================================================================== */
+bool rocke_dconv8c_prologue(rocke_dconv_8c_ctx_t* ctx);
+void rocke_dconv8c_load_weights(rocke_dconv_8c_ctx_t* ctx);
+void rocke_dconv8c_build_chunk_meta(rocke_dconv_8c_ctx_t* ctx);
+void rocke_dconv8c_build_descriptors(rocke_dconv_8c_ctx_t* ctx);
+void rocke_dconv8c_prologue_prefetch(rocke_dconv_8c_ctx_t* ctx);
+rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  32c PHASE FUNCTIONS
+ * ===================================================================== */
+bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx);
+void rocke_dconv32c_load_weights(rocke_dconv_32c_ctx_t* ctx);
+void rocke_dconv32c_build_chunk_meta(rocke_dconv_32c_ctx_t* ctx);
+void rocke_dconv32c_build_descriptors(rocke_dconv_32c_ctx_t* ctx);
+void rocke_dconv32c_prologue_prefetch(rocke_dconv_32c_ctx_t* ctx);
+rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  Depthwise PHASE FUNCTIONS
+ * ===================================================================== */
+bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx);
+void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx);
+void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx);
+rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

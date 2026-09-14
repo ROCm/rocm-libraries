@@ -31,24 +31,33 @@ add_executable(
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
 add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
 
-# Test binary needs its own copy of each pack's kernel (embedding is per-target).
-# Copied via configure_file: registering the same source for embedding in two
-# directories doubles its CMAKE_CONFIGURE_DEPENDS entry, which Ninja rejects as two
-# rules for one file. The list itself is the engine's, so a new pack adds its kernel
-# once and both binaries pick it up.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/IngestorKernels.cmake")
-    foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
-        configure_file(
-            ${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp
-            ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
-            COPYONLY
-        )
-        add_kernels_for_embedding(
-            TARGET hip_kernel_provider_tests
-            FILES ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
-        )
-    endforeach()
+    # The kernel sources the ingestor engine's unit descriptor set names. Each key is the
+    # `source_file` its descriptor authors, which is the string the runtime looks up.
+    # hkp_verify_embedded_sources() compares this list against the staged descriptors.
+    set(_ingestor_kernel_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/pointwise/kernels")
+    # The pointwise_model pack authors its own kernel beside its own descriptors. A packed
+    # root is validated whole: hkp_verify_embedded_sources() resolves a descriptor's authored
+    # location from the pack registry and requires the embedded source to come from inside
+    # that root, so this pack cannot share the unit set's file -- nor its key, which already
+    # belongs to another descriptor.
+    # The STAGED copy, not the authored one: hkp_verify_embedded_sources() resolves this
+    # pack's authored location through the pack registry, which names the staging root, and
+    # requires the embedded file to have come from inside it. HkpPackaging.cmake puts the
+    # kernel there at configure time, before this directory is added.
+    set(_model_kernel_dir "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/kernels")
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_tests
+        FILES "${_ingestor_kernel_dir}/PointwiseAdd.cpp"
+              "${_ingestor_kernel_dir}/PointwiseMul.cpp"
+              "${_ingestor_kernel_dir}/PointwiseSub.cpp"
+              "${_model_kernel_dir}/PointwiseModelAdd.cpp"
+        KEYS kernels/PointwiseAdd.cpp
+             kernels/PointwiseMul.cpp
+             kernels/PointwiseSub.cpp
+             kernels/PointwiseModelAdd.cpp
+    )
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests
@@ -73,7 +82,7 @@ target_link_libraries(
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
-target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_BINARY_DIR}/src/tests/engines)
+target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
 
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
@@ -100,18 +109,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # fixed offset. Same value the provider is compiled with, so the test cannot drift
     # into asserting a path the provider never builds.
     #
-    # The staged tree's own path rides along so main() can point this binary at the
-    # descriptors with no ctest in the loop -- see the note there.
+    # One define per descriptor set. A single define cannot serve both: the discovery set is
+    # the whole unit root, and the kpack cases need the one subtree under it that carries an
+    # archive.
+    #
+    # Binary-relative, never an absolute build path. The offset holds in the build tree and
+    # the install tree alike, so these cases read the descriptors beside whichever copy of
+    # the binary is running instead of reaching back into the tree that configured it -- an
+    # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
-        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+        # The production root the provider itself loads from, which TestShippedDescriptorSets
+        # walks. It was HIPDNN_DESCRIPTOR_BUILD_DIR before descriptor packaging replaced the
+        # staging variables; the packed root is the same tree under the new name.
+        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+        HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+        HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
+        HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
-    # here -- including the dispatch one, which sits under engines/ -- so all three sit
-    # between the two defines they read. Those are HIPDNN_TEST_DESCRIPTOR_DIR above, under
+    # here -- including the dispatch ones, which sit under engines/ -- so they sit between
+    # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
     # which the device cases find the archive this build packed for the local arch, and
-    # HIPDNN_TEST_KPACK_ARCHIVE below, which the parse-level cases open because they need
-    # a real container rather than a matching device.
+    # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE below, which the parse-level cases open because
+    # they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
@@ -125,17 +145,33 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # fetched source tree to take it from, and a 518-byte container is cheaper to carry
     # than a build-time dependency on one.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPDNN_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
+        HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
 
-    # The device cases above read the per-arch archive the packaging roots stage under
-    # HIPDNN_TEST_DESCRIPTOR_DIR, and that target is reachable only through ALL.
-    # Building this binary by name -- what `ninja check` does -- otherwise runs them
+    # This binary reads the per-arch descriptors and archives the packing roots stage under
+    # test_arch_content/, and each packing target is reachable only through ALL.
+    # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
     # against a directory that does not exist yet, and they skip rather than fail.
-    # Guarded for the same reason as the integration side: a root skips with a warning
-    # when hipcc is absent, and a hard dependency would make that fatal.
-    if(TARGET hkp_descriptor_staging)
-        add_dependencies(hip_kernel_provider_tests hkp_descriptor_staging)
-    endif()
+    # Each descriptor set has its own staging target. Name each one individually.
+    foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared
+                     hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
+                     hkp_pointwise_model_artifact)
+        if(TARGET ${_hkp_set})
+            add_dependencies(hip_kernel_provider_tests ${_hkp_set})
+        endif()
+    endforeach()
+
+    # The parent of the unit descriptor sets, and the only root this binary reads.
+    # A walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
+        # pointwise_model is packed into this root too. Its kernel is the same embedded
+        # PointwiseAdd.cpp the unit set uses, which is why it is staged here rather than
+        # beside the integration descriptors: an embedded_source descriptor needs a binary
+        # that carries the source, and only this one does.
+        PACK_NAMES unit unit_shared ${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
