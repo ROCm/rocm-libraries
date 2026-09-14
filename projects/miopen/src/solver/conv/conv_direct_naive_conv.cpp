@@ -114,6 +114,11 @@ bool IsOutputFp16(const ProblemDescription& problem) { return problem.IsFp16(); 
 
 bool IsOutputBfp16(const ProblemDescription& problem) { return problem.IsBfp16(); }
 
+bool IsFp8Kernel(const ProblemDescription& problem)
+{
+    return problem.IsFp8() || problem.IsTensorsCasted() || problem.IsBfp8();
+}
+
 bool IsOutputInt8(const ProblemDescription& problem)
 {
     return problem.GetInDataType() == miopenInt8 && problem.GetWeightsDataType() == miopenInt8 &&
@@ -494,9 +499,9 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     }
     // Spatial tiling: only tile when grid_size is too small to keep the GPU busy.
     // When grid_size is already large enough (e.g., NHWC with ho blocks), tiling
-    // adds overhead without benefit.
+    // adds overhead without benefit. Not implemented for fp8 kernels.
     size_t num_spatial_tiles = 1;
-    if(grid_size < 32)
+    if(!IsFp8Kernel(problem) && grid_size < 32)
         num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -725,7 +730,7 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
         MIOPEN_THROW("Unsupported layout");
     }
     size_t num_spatial_tiles = 1;
-    if(grid_size < 32)
+    if(!IsFp8Kernel(problem) && grid_size < 32)
         num_spatial_tiles = (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -876,11 +881,12 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // CAS-based atomicAdd (portable across all GPUs and ROCm versions).
     // half/hip_bfloat16 round the running sum to 16-bit precision after
     // every block's contribution, which can silently lose later contributions
-    // once the sum grows large — so those output types skip tiling.
+    // once the sum grows large — so those output types skip tiling. Not implemented for
+    // fp8 kernels either.
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
     if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
-       spatial > WRW_SPATIAL_TILING_THRESHOLD)
+       !IsFp8Kernel(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1041,7 +1047,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
     if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
-       spatial > WRW_SPATIAL_TILING_THRESHOLD)
+       !IsFp8Kernel(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1186,8 +1192,9 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
     // BWD-d kernel uses a single if(tid < thread_length) guard with no loop,
     // so tiling is required for correctness — unlike FWD which has a grid-stride
-    // loop and only tiles for occupancy.
-    size_t num_spatial_tiles = (thread_length + block_size - 1) / block_size;
+    // loop and only tiles for occupancy. Not implemented for fp8 kernels.
+    size_t num_spatial_tiles =
+        IsFp8Kernel(problem) ? 1 : (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
@@ -1343,8 +1350,9 @@ GetConv3DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     }
     // BWD-d kernel uses a single if(tid < thread_length) guard with no loop,
     // so tiling is required for correctness — unlike FWD which has a grid-stride
-    // loop and only tiles for occupancy.
-    size_t num_spatial_tiles = (thread_length + block_size - 1) / block_size;
+    // loop and only tiles for occupancy. Not implemented for fp8 kernels.
+    size_t num_spatial_tiles =
+        IsFp8Kernel(problem) ? 1 : (thread_length + block_size - 1) / block_size;
 
     KernelInfo kernel;
 
