@@ -548,64 +548,65 @@ class TestRenderWritesEveryFile:
 
 
 class TestFragmentsNameRealFiles:
-    """Every descriptor path a CMake fragment lists must exist on disk.
+    """Every descriptor file the CMake fragment names must exist on disk.
 
-    ``HIPDNN_DESCRIPTOR_FILES`` is the single list driving staging, install, and
-    the dependency edge. A fragment naming a file the generator did not write
-    installs nothing for that entry, and the engine loses the descriptor with no
-    build error -- the same silent-drop class the generator exists to prevent.
+    Installation is by DIRECTORY: the build walks the root the bundle targets and
+    picks up whatever is there. The fragment is what tells the author which files
+    belong at that path, so a name with no file behind it sends them somewhere the
+    build will never look, and the engine loses the descriptor with no build error
+    -- the same silent-drop class the generator exists to prevent.
 
     Regression: the fragment template hardcoded ``<slug>_<pack>.kdp.json`` while
     the writer uses ``kdp_stem()``, which is the BARE slug for a single-pack
-    engine. Every single-pack bundle therefore shipped a fragment pointing at a
-    nonexistent ``<slug>_<slug>.kdp.json``. Multi-pack happened to agree, which
-    is why the existing suite stayed green -- so the single-pack case below is
-    the one that actually defends the fix.
+    engine. Every single-pack bundle therefore named a nonexistent
+    ``<slug>_<slug>.kdp.json``. Multi-pack happened to agree, which is why the
+    existing suite stayed green -- so the single-pack case below is the one that
+    actually defends the fix.
     """
 
     @staticmethod
-    def _fragment_descriptor_paths(tmp_path):
+    def _fragment_descriptor_names(tmp_path):
         text = (tmp_path / "fragments" / "cmake_descriptor_files.txt").read_text()
-        return [
-            line.strip()
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
+        names = [line.strip().lstrip("#").strip() for line in text.splitlines()]
+        return [name for name in names if name.endswith(".json")]
 
-    def test_single_pack_fragment_paths_all_exist(
+    def test_single_pack_fragment_names_all_exist(
         self, generator, scale_add_config, tmp_path
     ):
         generator.render(scale_add_config, tmp_path)
-        listed = self._fragment_descriptor_paths(tmp_path)
-        assert listed, "fragment listed no descriptor files at all"
-        for rel in listed:
+        listed = self._fragment_descriptor_names(tmp_path)
+        assert listed, "fragment named no descriptor files at all"
+        ddir = tmp_path / scale_add_config.descriptor_dir
+        for name in listed:
             assert (
-                tmp_path / "descriptors" / rel
-            ).exists(), f"fragment names {rel}, which the generator never wrote"
+                ddir / name
+            ).exists(), f"fragment names {name}, which the generator never wrote"
 
-    def test_multi_pack_fragment_paths_all_exist(
+    def test_multi_pack_fragment_names_all_exist(
         self, generator, binary_ops_config, tmp_path
     ):
         generator.render(binary_ops_config, tmp_path)
-        listed = self._fragment_descriptor_paths(tmp_path)
-        assert listed, "fragment listed no descriptor files at all"
-        for rel in listed:
+        listed = self._fragment_descriptor_names(tmp_path)
+        assert listed, "fragment named no descriptor files at all"
+        ddir = tmp_path / binary_ops_config.descriptor_dir
+        for name in listed:
             assert (
-                tmp_path / "descriptors" / rel
-            ).exists(), f"fragment names {rel}, which the generator never wrote"
+                ddir / name
+            ).exists(), f"fragment names {name}, which the generator never wrote"
 
-    def test_fragment_lists_every_descriptor_written(
+    def test_fragment_names_every_descriptor_written(
         self, generator, binary_ops_config, tmp_path
     ):
-        """The converse: a descriptor written but not listed never ships."""
+        """The converse: a descriptor written but not named is one the author
+        never learns to place, so it never reaches the shard."""
         written = generator.render(binary_ops_config, tmp_path)
+        prefix = binary_ops_config.descriptor_dir + "/"
         on_disk = {
-            rel[len("descriptors/") :]
+            rel[len(prefix) :]
             for rel in written
-            if rel.startswith("descriptors/") and rel.endswith(".json")
+            if rel.startswith(prefix) and rel.endswith(".json")
         }
-        listed = set(self._fragment_descriptor_paths(tmp_path))
-        assert on_disk == listed
+        assert on_disk == set(self._fragment_descriptor_names(tmp_path))
 
 
 class TestSpecializationContractEmission:

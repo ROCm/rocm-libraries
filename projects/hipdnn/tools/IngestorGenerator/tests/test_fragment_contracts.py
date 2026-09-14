@@ -353,7 +353,7 @@ class TestPlaceholderScanSeesEveryEmittedFile:
             "the test stub is spliced under packs/ in the provider's test tree -- "
             f"the cmake_test_sources fragment says so: {sorted(located)}"
         )
-        assert all(m.startswith("descriptors/") for m in missing), missing
+        assert all(m.startswith("test_descriptors/") for m in missing), missing
 
     def test_a_root_that_does_not_exist_is_an_error_not_an_empty_search(
         self, generator, scale_add_config, tmp_path

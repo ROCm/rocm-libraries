@@ -8,20 +8,38 @@
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp
 
 {% if emitted.source_kind == 'kpack' %}
-## Splice point 5b: .../descriptor-packaging/cmake/HkpPackaging.cmake, the
-## HKP_CENSUS_TEST_SUITES list in hkp_register_census_tests(). Append this literal suite:
+## Splice point 5b: P/src/tests/CMakeLists.txt, beside the other per-pack-target
+## census calls that follow hkp_verify_embedded_sources(). Add this call:
+hkp_register_census_tests(TARGET hip_kernel_provider_tests
+                          PACK_NAME product
+                          SUITES Test{{ config.engine.pascal_name }}Packs)
 ##
-##     Test{{ config.engine.pascal_name }}Packs
+## `PACK_NAME product` resolves because the shipped root is non-empty on this branch.
+## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing
+## this call, or the registered census will run against a shard that does not contain
+## your descriptors.
 ##
-## Each configured packaging arch gets an independent direct native CTest entry:
-## hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs.
+## The call registers one CTest entry per arch the `product` pack target was wired
+## with: hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs.
 ## It runs hip_kernel_provider_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
 ## with HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs,
-## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR=<build-shard>/<arch>.
+## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR set to that pack
+## target's own out-root shard for <arch>, under the labels
+## unit_test;hip-kernel-provider;host. A suite name may be declared at one pack
+## target only -- the CTest name carries no pack component, so a second declaration
+## is a configure error rather than a rename.
 ## Every registered case must execute and pass without skipping in every iteration.
 ## Missing suites, filtered/disabled/sharded-out cases and zero iterations fail.
 {% else %}
-## This direct-load engine does not belong in HKP_CENSUS_TEST_SUITES, which covers
-## packaged shards only. Run its ordinary host suite with HIPDNN_TEST_EXPECTED_ARCH
-## set explicitly and HIPDNN_DESCRIPTOR_DIR pointing at its direct-load descriptors.
+## Splice point 5b: nothing is registered for this direct-load engine by default.
+##
+## A direct-load engine's suite is censused, if at all, by a hand-added
+## `hkp_register_census_tests(TARGET hip_kernel_provider_tests PACK_NAME <set>
+## SUITES Test{{ config.engine.pascal_name }}Packs)` call in
+## `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the authored
+## set this bundle writes into (`unit`, `integration`, `shared` or
+## `archive_fixture`). Census requires every case in the suite to execute without
+## skipping, so only declare a suite that reads this bundle's shard and no other.
+##
+## This bundle writes into: {{ config.authored_subpath }}
 {% endif %}

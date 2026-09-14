@@ -25,7 +25,7 @@ KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list"
 #: ``kind`` vocabulary, and who consumes the output.
 #:
 #: ``direct_load``: read straight by ``DescriptorLoader.hpp`` out of the
-#:   provider's installed ``descriptors/`` tree. ``kind: embedded_source``
+#:   provider's installed ``test_descriptors/`` tree. ``kind: embedded_source``
 #:   (``source_file``/``entry_point``); the provider compiles the kernel at
 #:   plan-build time.
 #: ``packaged``: read by the build-time packager ``hkp_pack``, which compiles
@@ -82,6 +82,20 @@ EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
 }
 
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
+
+#: The authored descriptor sets under the provider's ``test_descriptors/`` tree.
+#:
+#: Each is wired as its own pack target, so the set a direct-load bundle names
+#: decides which shard its descriptors reach and therefore which binary can read
+#: them. Nothing in a config implies the answer -- it is the CONSUMING binary's
+#: choice -- so ``authored_subpath`` states it and the loader refuses a bundle
+#: that leaves it open.
+AUTHORED_TEST_SETS: tuple[str, ...] = (
+    "shared",
+    "unit",
+    "integration",
+    "archive_fixture",
+)
 
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
 BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
@@ -301,7 +315,7 @@ class EngineSpec:
 
     @property
     def slug(self) -> str:
-        """Directory name under ``descriptors/`` -- snake_case of the local name."""
+        """The bundle's own directory name -- snake_case of the local name."""
         s = re.sub(r"(?<!^)(?=[A-Z])", "_", self.local_name)
         return s.lower()
 
@@ -349,10 +363,17 @@ class IngestorConfig:
     #: `workspace_policy` immediately above IS consumed (it branches in the native
     #: template); the two look alike and behave differently.
     delegates_to_existing_plan: bool = False
-    #: ``packaged`` only: the authored subpath under the packager's ONE source
-    #: root, e.g. ``rocKE/gfx950_attention_dense``. Preserved verbatim into the
-    #: staged and installed trees, so it is part of the shipped layout rather
-    #: than a scratch detail. Defaults to ``<kind>/<slug>``.
+    #: Where the bundle is authored, in whichever tree its dialect writes into.
+    #:
+    #: ``packaged``: the subpath under the packager's ONE source root, e.g.
+    #: ``rocKE/gfx950_attention_dense``. Preserved verbatim into the staged and
+    #: installed trees, so it is part of the shipped layout rather than a scratch
+    #: detail. Defaults to ``<kind>/<slug>``.
+    #:
+    #: ``direct_load``: the authored SET under ``test_descriptors/`` -- one of
+    #: `AUTHORED_TEST_SETS`, and REQUIRED, because the set is the consuming
+    #: binary's choice and no default can stand in for it. The config loader
+    #: rejects a direct-load bundle that omits it.
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
 
@@ -368,12 +389,15 @@ class IngestorConfig:
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir.
 
-        ``direct_load`` mirrors the provider's ``descriptors/<slug>/`` tree.
+        ``direct_load`` writes into the provider's ``test_descriptors/`` tree,
+        under the authored set the bundle belongs to. Each set is its own pack
+        target, walked by directory, so the set -- not a list edit -- is what puts
+        the descriptors in a shard some binary reads.
         ``packaged`` mirrors the packager's source root, where the authored
         subpath is meaningful and is carried through to the install layout.
         """
         if not self.is_packaged:
-            return f"descriptors/{self.engine.slug}"
+            return f"test_descriptors/{self.authored_subpath}/{self.engine.slug}"
         subpath = (
             self.authored_subpath or f"{self.kernel_source_kind}/{self.engine.slug}"
         )

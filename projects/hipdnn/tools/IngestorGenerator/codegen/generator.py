@@ -31,6 +31,13 @@ from .models import (
 )
 
 #: Two-line AMD copyright + SPDX header every emitted C++/CMake file opens with.
+#:
+#: It carries U+00A9, which is why every emitted file is written with an EXPLICIT
+#: ``encoding="utf-8"``. ``Path.write_text`` otherwise picks the platform's locale
+#: codec, and a copyright sign written as cp1252 is a lone ``0xa9`` byte that is not
+#: valid UTF-8. `unfilled_placeholders` reads UTF-8 and skips what it cannot decode,
+#: so on any non-UTF-8 locale the whole emitted set became undecodable and the
+#: placeholder gate reported an empty scan -- green because it read nothing.
 CPP_COPYRIGHT_HEADER = (
     "// Copyright \u00a9 Advanced Micro Devices, Inc., or its affiliates.\n"
     "// SPDX-License-Identifier:  MIT\n"
@@ -793,7 +800,7 @@ class IngestorGenerator:
 
     def render(self, config: IngestorConfig, output_dir: Path) -> list[str]:
         """Mint ids, write every descriptor JSON, the native/test C++ stubs,
-        and the six CMake/registration fragments. Returns the list of
+        and the five CMake/registration fragments. Returns the list of
         relative paths written.
 
         Every KDP is BUILT before anything is rendered, because the templates are
@@ -810,7 +817,7 @@ class IngestorGenerator:
 
         def write_json(rel: str, obj: dict) -> None:
             path = output_dir / rel
-            path.write_text(_dump(obj))
+            path.write_text(_dump(obj), encoding="utf-8")
             written.append(rel)
 
         kdp_documents = build_kdp_documents(config, ids)
@@ -843,13 +850,17 @@ class IngestorGenerator:
 
         native_rel = f"packs/{config.native_class_name}Native.cpp"
         (output_dir / native_rel).write_text(
-            self._render_template("native.cpp.j2", config, ids=ids, emitted=emitted)
+            self._render_template("native.cpp.j2", config, ids=ids, emitted=emitted),
+            encoding="utf-8",
         )
         written.append(native_rel)
 
         packs_test_rel = f"tests/Test{config.engine.pascal_name}Packs.cpp"
         (output_dir / packs_test_rel).write_text(
-            self._render_template("test_packs.cpp.j2", config, ids=ids, emitted=emitted)
+            self._render_template(
+                "test_packs.cpp.j2", config, ids=ids, emitted=emitted
+            ),
+            encoding="utf-8",
         )
         written.append(packs_test_rel)
 
@@ -857,7 +868,8 @@ class IngestorGenerator:
         (output_dir / matchers_test_rel).write_text(
             self._render_template(
                 "test_matchers.cpp.j2", config, ids=ids, emitted=emitted
-            )
+            ),
+            encoding="utf-8",
         )
         written.append(matchers_test_rel)
 
@@ -868,7 +880,7 @@ class IngestorGenerator:
             content = self._render_template(
                 template_name, config, ids=ids, emitted=emitted
             )
-            (fragments_dir / out_name).write_text(content)
+            (fragments_dir / out_name).write_text(content, encoding="utf-8")
             written.append(f"fragments/{out_name}")
 
         return written
@@ -889,9 +901,8 @@ class IngestorGenerator:
     #:     its own header that both files move there when spliced.
     #:
     #: Descriptors are handled separately below: they keep their authored subpath
-    #: (``cmake_descriptor_files`` preserves it verbatim in the packaged dialect
-    #: and lists ``<slug>/<file>`` relative to ``descriptors/`` in the direct-load
-    #: one), so both spellings of the same destination are accepted.
+    #: under whichever root their dialect targets, so both spellings of the same
+    #: destination are accepted.
     _SPLICE_DESTINATIONS: dict[str, tuple[str, ...]] = {
         "packs": ("packs",),
         "tests": ("tests", "packs"),
@@ -908,10 +919,13 @@ class IngestorGenerator:
         emitted layout cannot leave a transcribed destination list behind.
         """
         head, _, tail = rel.partition("/")
-        if head == "descriptors":
-            # The direct-load fragment lists descriptors relative to the provider's
-            # `descriptors/` directory, so a root pointed AT that directory sees the
-            # subpath alone; a root above it sees the whole thing.
+        if head in ("descriptors", "test_descriptors"):
+            # A descriptor bundle is authored under one of two roots -- the shipped
+            # `descriptors/` tree or the `test_descriptors/` one -- and a root
+            # pointed AT that tree sees the subpath alone, while a root above it
+            # sees the whole thing. Both spellings keep the authored subpath and the
+            # engine's own directory, which is what makes a hit evidence about THIS
+            # engine rather than about a file that shares a name.
             return (rel, tail)
         return tuple(
             f"{destination}/{tail}"
@@ -1074,7 +1088,6 @@ PLACEHOLDER_MARKER = "FILL THIS OUT"
 
 FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
     ("fragments/cmake_descriptor_files.j2", "cmake_descriptor_files.txt"),
-    ("fragments/cmake_ingestor_kernels.j2", "cmake_ingestor_kernels.txt"),
     ("fragments/cmake_target_sources.j2", "cmake_target_sources.txt"),
     ("fragments/cmake_test_sources.j2", "cmake_test_sources.txt"),
     ("fragments/ingestor_packs_hpp.j2", "ingestor_packs.hpp.txt"),
