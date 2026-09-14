@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
+#include <sstream>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 
@@ -19,6 +21,8 @@
 #include <origami/streamk.hpp>
 
 #include "FallbackTestUtils.hpp"
+#include "LogReporter.hpp"
+#include "SolutionIterator.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::testing;
@@ -900,6 +904,34 @@ namespace
             makeGfx942HardwareWithXcd(numXCD));
         return device;
     }
+
+    class TestSolutionIterator : public Client::SolutionIterator
+    {
+    public:
+        explicit TestSolutionIterator(std::shared_ptr<Hardware> hardware)
+            : SolutionIterator(nullptr, std::move(hardware), false)
+        {
+        }
+
+        bool accepts(ContractionSolution&    solution,
+                     ContractionProblemGemm& problem,
+                     bool                    reportResult)
+        {
+            return checkSolution(solution, problem, reportResult);
+        }
+
+        void postProblem() override {}
+        void preSolution(ContractionSolution* const) override {}
+        void postSolution() override {}
+        bool moreSolutionsInProblem() const override
+        {
+            return false;
+        }
+        std::shared_ptr<ContractionSolution> getSolution() override
+        {
+            return nullptr;
+        }
+    };
 } // namespace
 
 TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
@@ -998,6 +1030,34 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
         << "Non-StreamK solution must remain selectable on MI300A";
     EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
         << "SK3-static solution must remain selectable on MI300A";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamicQueue)
+{
+    auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
+    TestSolutionIterator iterator(mi300a);
+    auto                 problem = makeGemmProblem(512, 512, 512);
+    std::ostringstream   reportOutput;
+    auto reporter = std::make_shared<Client::LogReporter>(
+        Client::LogLevel::Terse,
+        std::initializer_list<std::string>{Client::ResultKey::Validation},
+        reportOutput,
+        false,
+        false);
+    iterator.setReporter(reporter);
+
+    ContractionSolution dynamicSolution;
+    initEquality512Solution(dynamicSolution, 4);
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true))
+        << "The explicit all-solutions client path must not launch an eight-queue "
+           "dynamic kernel on a six-XCD MI300A";
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, false))
+        << "Topology filtering must also apply during non-reporting prediction checks";
+
+    ContractionSolution staticSolution;
+    initEquality512Solution(staticSolution, 3);
+    EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
+        << "The topology guard must retain static StreamK coverage on MI300A";
 }
 
 // ===========================================================================
