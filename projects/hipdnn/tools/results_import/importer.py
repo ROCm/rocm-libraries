@@ -27,7 +27,7 @@ from typing import Iterable
 import pandas as pd
 
 from results_import.derive import derive_metrics
-from results_import.descriptor import MissingVocabularyEntry, expand
+from results_import.descriptor import ABSENT, expand, slots_used_by
 
 __all__ = [
     "ValidationError",
@@ -269,14 +269,24 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
 def expand_descriptors(
     frame: pd.DataFrame,
     columns: Iterable[str],
-    vocabularies: dict[str, dict[str, int]] | None = None,
-) -> tuple[pd.DataFrame, dict[str, dict[str, int]]]:
+    scope_by: str | None = None,
+) -> pd.DataFrame:
     """Replace opaque configuration strings with features a grouped model can select on.
 
     The source column is kept: it is the human-readable identity of a configuration, and every
-    report that names a winner wants it. Returns the frame and the vocabularies used, which the
-    caller must persist -- a corpus scored beside this one has to encode identically, and the
-    codes are assigned here.
+    report that names a winner wants it.
+
+    `<column>.variant` is emitted as the descriptor's *word shape*, a string. RFC 0019 §6.5
+    gives numbering to the training tool, which observes the values, ships the map in the UHD's
+    `categorical_encoding`, and has it covered by `features_hash` -- so a code cannot change
+    underneath a trained model without the contract check seeing it.
+
+    With `scope_by`, each group gets its own columns (`<column>.s<group>_f<n>`) instead of one
+    shared set of positions. A configuration schema that varies with the kernel makes a shared
+    position meaningless -- slot 3 a tile width for one group and a stage count for another --
+    and it is the *first* layer of a grouped model that pays, because it is the one that sees
+    every row. Which positions a group uses is observed from the corpus; nothing here consults
+    the library that produced the descriptors.
     """
     frame = frame.copy()
     produced: dict[str, dict[str, int]] = {}
@@ -286,13 +296,27 @@ def expand_descriptors(
                 f"--expand-descriptor names {column!r}, which this corpus does not carry "
                 f"(it has {', '.join(_kernel_columns(frame)) or 'no kernel.* columns'})"
             )
-        supplied = (vocabularies or {}).get(column)
-        rows, codes, vocabulary, slots = expand(frame[column].tolist(), vocabulary=supplied)
-        for index in range(slots):
-            frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
-        frame[f"{column}.variant"] = codes
-        produced[column] = vocabulary
-    return frame, produced
+        rows, shapes, slots = expand(frame[column].tolist())
+
+        if scope_by is None:
+            for index in range(slots):
+                frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
+        else:
+            if scope_by not in frame.columns:
+                raise ValidationError(
+                    f"--scope-by names {scope_by!r}, which this corpus does not carry"
+                )
+            groups = frame[scope_by].tolist()
+            for group, positions in sorted(slots_used_by(rows, groups).items(), key=str):
+                for index in positions:
+                    # A row outside this group takes the absent value, which is what a kernel
+                    # with no such field means -- the same state an unfilled slot already has.
+                    frame[f"{column}.s{group}_f{index}"] = [
+                        row[index] if member == group else ABSENT
+                        for row, member in zip(rows, groups)
+                    ]
+        frame[f"{column}.variant"] = shapes
+    return frame
 
 
 def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str) -> pd.DataFrame:
@@ -372,9 +396,11 @@ def main(argv: list[str] | None = None) -> int:
              "configurations against each other. Repeatable.",
     )
     parser.add_argument(
-        "--vocabulary", type=pathlib.Path, default=None,
-        help="reuse the variant codes from a previous run's <out>.vocabulary.json. Required "
-             "for any corpus scored beside another, which must encode identically.",
+        "--scope-by", default=None, dest="scope_by", metavar="COLUMN",
+        help="give each value of COLUMN (e.g. kernel.solver_id) its own expanded columns, for "
+             "an engine whose configuration schema varies by kernel. Without it one set of "
+             "positions is shared, and a position then means different things in different "
+             "groups.",
     )
     parser.add_argument(
         "--resolve-duplicates", default=None, dest="resolve_duplicates", metavar="COLUMN",
@@ -391,11 +417,6 @@ def main(argv: list[str] | None = None) -> int:
     with args.opmeta.open() as handle:
         opmeta = json.load(handle)
 
-    vocabularies = None
-    if args.vocabulary is not None:
-        with args.vocabulary.open() as handle:
-            vocabularies = json.load(handle)
-
     # The order is the point. Resolution happens first because it settles the very duplicates
     # validation would reject; expansion happens last so those checks see the producer's own
     # columns rather than this tool's derived ones.
@@ -411,21 +432,13 @@ def main(argv: list[str] | None = None) -> int:
         dataset = build_dataset(frame, opmeta)
         used: dict[str, dict[str, int]] = {}
         if args.expand_descriptor:
-            dataset, used = expand_descriptors(dataset, args.expand_descriptor, vocabularies)
-    except (ValidationError, MissingVocabularyEntry) as error:
+            dataset = expand_descriptors(dataset, args.expand_descriptor, args.scope_by)
+    except ValidationError as error:
         print(f"results_import: {error}", file=sys.stderr)
         return 1
 
     write_parquet(dataset, args.out)
     print(f"results_import: wrote {len(dataset)} rows to {args.out}")
-
-    # Beside the dataset rather than inside it: the codes are a property of the encoding, and a
-    # corpus scored against this one has to be given them explicitly to encode the same way.
-    if used:
-        vocabulary_path = args.out.with_suffix(".vocabulary.json")
-        with vocabulary_path.open("w", encoding="utf-8") as handle:
-            json.dump(used, handle, indent=2, sort_keys=True)
-        print(f"results_import: wrote vocabulary to {vocabulary_path}")
     return 0
 
 
