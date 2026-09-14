@@ -29,13 +29,24 @@ contract:
     read/write_indices : [B]                          i32
     state        : [pool, num_v_heads, head_v_dim, head_k_dim]  state_dtype
 
-**v1 mapping (correctness-first):** one workgroup per ``(sequence, value_head)``;
-``block_size = head_v_dim`` threads; thread ``t`` owns state row ``t`` (the full
+**Two emitters, one contract**, selected by ``GdnDecodeSpec.simple``.
+
+``simple=False`` -- the default, and the only path dispatch can reach -- is
+**warp-tiled**: ``num_warps * wave_size`` threads per workgroup and
+``blocks_per_v_dim`` workgroups per ``(sequence, value_head)``. Each warp splits
+the ``head_k_dim`` reduction across ``warp_threads_k`` lanes and recombines with
+an XOR butterfly (``quad_perm`` at offsets 1-2, ``ds_swizzle`` wider), so no LDS
+is allocated. The tile ``(num_warps, warp_threads_k, blocks_per_v_dim)`` is
+chosen per batch from the dispatcher's tuned table.
+
+``simple=True`` is the v1 reference: one workgroup per ``(sequence, value_head)``,
+``head_v_dim`` threads, thread ``t`` owning state row ``t`` (the full
 ``head_k_dim``-wide key vector for value-dim ``t``) in registers, so every dot
 product is thread-local and needs no cross-thread reduction. Q/K L2 norms and
-``dot(k,q)`` are recomputed per thread (redundant but simple). This is
-VGPR-heavy by design; the warp-tiled reduction is the first optimization pass,
-not part of the correctness baseline.
+``dot(k,q)`` are recomputed per thread -- redundant but simple -- which makes it
+VGPR-heavy by construction. It is **not reachable through dispatch**; it exists
+as the correctness baseline the warp-tiled path is validated against, and is
+selected only by naming the spec directly (see ``ALGORITHM.md`` section 4.7).
 
 Built for gfx950 (wave64) and placed alongside the KDA chunkwise kernel in
 ``kernels/gfx950/``; the ``arch`` argument is a validation/target hook, not a
