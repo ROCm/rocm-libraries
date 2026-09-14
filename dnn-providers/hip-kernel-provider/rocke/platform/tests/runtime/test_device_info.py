@@ -38,11 +38,11 @@ def test_device_target_id_and_base_arch_are_separate(
 
 
 @pytest.mark.parametrize(
-    ("target_id", "base_arch", "compiler_target", "revision"),
+    ("target_id", "base_arch", "compiler_target", "revision", "cluster_launch"),
     [
-        ("gfx1250-strict", "gfx1250", "gfx1250", 0),
-        ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1),
-        (None, None, None, 0),
+        ("gfx1250-strict", "gfx1250", "gfx1250", 0, 1),
+        ("gfx942:sramecc+:xnack-", "gfx942", "gfx942:sramecc+:xnack-", 1, 0),
+        (None, None, None, 0, 1),
     ],
 )
 def test_get_device_info(
@@ -50,9 +50,11 @@ def test_get_device_info(
     base_arch: str | None,
     compiler_target: str | None,
     revision: int,
+    cluster_launch: int,
 ) -> None:
     props = _props(target_id)
     props.asicRevision = revision
+    props.clusterLaunch = cluster_launch
     with mock.patch.object(device_info, "_device_props", return_value=props) as query:
         info = device_info.get_device_info(4)
 
@@ -62,6 +64,7 @@ def test_get_device_info(
     assert info.asic_revision == revision
     assert info.base_arch == base_arch
     assert info.compiler_target == compiler_target
+    assert info.cluster_launch is bool(cluster_launch)
 
 
 def test_runtime_exports_device_info_api() -> None:
@@ -118,7 +121,9 @@ def test_device_info_queries_again_after_failure_or_success(
             side_effect=AssertionError("DeviceInfo must use only the properties query"),
         ),
     ):
-        assert device_info.get_device_info(4) == device_info.DeviceInfo(None)
+        missing = device_info.get_device_info(4)
+        assert missing == device_info.DeviceInfo(None)
+        assert missing.cluster_launch is None
         expected = device_info.DeviceInfo(_props("gfx90a:sramecc+:xnack-"))
         first = device_info.get_device_info(4)
         second = device_info.get_device_info(4)
@@ -133,11 +138,29 @@ def test_device_info_queries_again_after_failure_or_success(
 def test_device_info_owns_snapshot_with_read_only_properties() -> None:
     props = _props("gfx90a:sramecc+:xnack-")
     props.asicRevision = 1
+    props.clusterLaunch = 1
     info = device_info.DeviceInfo(props)
     props.gcnArchName = b"gfx942"
     props.asicRevision = 0
+    props.clusterLaunch = 0
     assert info.target_id == "gfx90a:sramecc+:xnack-"
     assert info.asic_revision == 1
-    for name in ("target_id", "asic_revision", "base_arch", "compiler_target"):
+    assert info.cluster_launch is True
+    for name in (
+        "target_id",
+        "asic_revision",
+        "cluster_launch",
+        "base_arch",
+        "compiler_target",
+    ):
         with pytest.raises(AttributeError):
             setattr(info, name, None)
+
+
+def test_device_info_equality_accounts_for_cluster_launch() -> None:
+    props = _props("gfx1250")
+    without_cluster = device_info.DeviceInfo(props)
+    props.clusterLaunch = 1
+    with_cluster = device_info.DeviceInfo(props)
+    assert without_cluster != with_cluster
+    assert len({without_cluster, with_cluster}) == 2

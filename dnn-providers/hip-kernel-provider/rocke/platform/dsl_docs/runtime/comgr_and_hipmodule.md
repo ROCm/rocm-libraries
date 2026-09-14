@@ -103,6 +103,72 @@ options are not automatically validated or included in artifact identity.
 
 `runtime/hip_module.py` is the matching ctypes wrapper for `libamdhip64.so` (the HIP runtime). It exposes only what the DSL needs.
 
+### Device identity and capabilities
+
+`get_device_info(device)` reads the target ID, ASIC revision, and cluster-launch
+flag in one HIP query. `infer_device_capabilities(info)` reads that snapshot
+and applies the capability rules:
+
+```python
+from rocke.runtime import DeviceCapability, get_device_info, infer_device_capabilities
+
+info = get_device_info(0)
+caps = infer_device_capabilities(info)
+use_tdm_multicast = caps.support(DeviceCapability.TDM_MULTICAST) is True
+```
+
+`DeviceCapabilities` stores a copy of the feature results in an immutable
+mapping. `support(capability)` returns `True` for supported, `False` for
+unsupported, or `None` for unknown support. Use `is True` when selecting a
+feature, as shown above.
+
+| Capability | Source of support information |
+| --- | --- |
+| `WORKGROUP_CLUSTER_LAUNCH` | HIP's `clusterLaunch` property, exposed as `info.cluster_launch`. |
+| `TDM_MULTICAST` | gfx1250: `False` at revision 0, `True` at revision 1. |
+| `MX_WMMA_FP4_32X16` | gfx1250: `False` at revision 0, `True` at revision 1. |
+| `MX_BLOCK16_CONVERSION` | gfx1250: `False` at revision 0, `True` at revision 1. |
+
+HIP [reports cluster-launch support when the device's maximum cluster size exceeds one](https://github.com/ROCm/rocm-systems/blob/6f0fc55e9fcfd0ab110e519e2a1d8caf812f257a/projects/clr/hipamd/src/hip_device.cpp#L804-L807).
+The stored `clusterLaunch` flag determines this result for every architecture.
+It remains usable when the target name or ASIC revision is unknown. A failed
+properties query produces `None` for this capability.
+
+The multicast and WMMA rules follow hipBLASLt's
+[gfx1250 revision mapping](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp#L8-L18)
+and [capability overrides](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/hipblaslt/tensilelite/Tensile/Common/Architectures.py#L85-L110):
+the result is `False` for revision 0 and `True` for revision 1. Other revisions
+and architectures return `None` for these features. The lookup uses
+`info.base_arch` and `info.asic_revision`, including zero as a valid revision.
+
+The block16 conversion rule follows CK's
+[FP4 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/data_type/test_mx_fp4_pk4scale.cpp#L198-L204)
+and [FP8/BF8 tests](https://github.com/ROCm/rocm-libraries/blob/995f32afc9d47f5ab635edbd568460c7b7e08768/projects/composablekernel/test/ck_tile/data_type/test_mx_scale.cpp#L146-L175),
+which identify block16 conversion as unsupported on gfx1250 revision 0.
+These conversion modes share a scale across 16 elements: scale selectors 4-7
+for FP4 and 8-11 for FP8/BF8. rocKE reports `False` for revision 0, `True` for
+revision 1, and `None` for unlisted revisions.
+
+Each capability describes a specific operation. TDM multicast distributes a
+TDM load across a workgroup cluster. The WMMA capability describes a physical
+32 by 16 FP4 instruction; operand swapping determines its logical matrix
+dimensions. The block16 capability describes the packed-scale conversions
+listed above. TDM loads, cluster barriers, and other matrix instructions have
+their own support requirements.
+
+To add a capability, add a `DeviceCapability` member and document its source.
+Use a HIP property when the runtime reports the feature. Architecture rules
+live in `_CAPABILITY_POLICIES`, keyed by base architecture. Each policy has
+common values and overrides for exact ASIC revisions. Overrides can set either
+`True` or `False`. A missing or unlisted revision uses the common values.
+Common values need source evidence that applies when the revision is unknown.
+
+Runtime callers can combine these device reports with compiler checks and
+kernel selection. In the neighboring code, `core.arch.MemoryCapabilities`
+describes architecture-level memory operations, and `dispatch.Capability`
+describes the problems a kernel candidate covers. CPU-only builders use explicit
+target and feature choices to produce reproducible code.
+
 ### Library loading
 
 The HIP module loader follows the same `_candidate_lib_paths` order as
