@@ -1,34 +1,21 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
-# Loop-carried WAR with NO barrier: the annotation rides the tensor_load itself.
+# The same WAR as waitcnt_insertion_loop_carried_war_annotated.stir with NO
+# barrier to hang the annotation on, so it rides the tensor_load itself.
 #
-# At NumWaves=1 there is no cross-wave hazard, so TensileLite emits no barrier and
-# postMainLoopBarrierCheckAndReset bails out (it requires numWaves > 1). The
-# rotation is still there, though, and the fill still lands on a buffer the
-# previous trip was reading -- so the same-wave WAR survives with nothing to hang
-# the annotation on.
+# At NumWaves=1 nothing emits a barrier (postMainLoopBarrierCheckAndReset needs
+# numWaves > 1), yet the ring still rotates and the fill still lands on a buffer
+# the previous trip read. The scan is not gated on isBarrier, so tagging the
+# fill works with no backend change.
 #
-# Nothing in WaitDataflow gates the loop-carried scan on isBarrier: it fires for
-# whichever instruction carries mod.loopcarriedwar. Putting it on the fill needs
-# no backend change, and is arguably better than the barrier even in multi-wave --
-# the drain lands immediately before the write instead of ahead of the barrier,
-# leaving more in flight.
-#
-# Shape (ring 3, one step per trip):
-#
-#   A1  ds_load [0]   consumed by the wmma this trip
-#   A2  ds_load [0]   NOT consumed -- survives to the back edge
-#   B   ds_load [1]   next trip's data, prefetched
-#   fill tensor_load [2], guarding the buffer A-tagged reads used one trip ago
-#
+# Two token-[0] reads, one consumed and one not, plus a token-[1] prefetch.
 # Steady state at the fill, oldest first:
 #
 #   [ A2(k-1), B(k-1), A1(k), A2(k), B(k) ]
-#     ^^^^^^^ carried in, tagged [0] -- the only true partner
+#     ^^^^^^^ carried in and tagged [0] -- the only match
 #
-# A2(k-1) sits 5 from the tail, so the wait is 4: it retires the previous trip's
-# surviving read while leaving all three of this trip's in flight. B(k-1) is
-# carried in too but tagged [1], so it does not match.
+# 5 from the tail, so the wait is 4, leaving all three of this trip's reads in
+# flight. B(k-1) is carried in too, but tagged [1].
 #
 # CHECK-LABEL: @waitcnt_insertion_loop_carried_war_single_wave
 # CHECK: ^loop:

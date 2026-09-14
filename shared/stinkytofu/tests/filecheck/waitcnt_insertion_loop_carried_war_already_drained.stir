@@ -1,22 +1,14 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
-# The same annotated distance-1 WAR as
-# waitcnt_insertion_loop_carried_war_annotated.stir, in a loop that has already
-# discharged it. Both reads are consumed within the trip, so the second wmma's
-# drain is dlcnt = 0 and the DS queue is empty at the back edge. The next trip's
-# barrier therefore carries nothing in and needs no wait, even though the
-# annotation names a real hazard.
+# The WAR of waitcnt_insertion_loop_carried_war_annotated.stir, in a loop that
+# has already discharged it: both reads are consumed in-trip, so the trailing
+# drain is dlcnt = 0 and the DS queue is empty across the back edge. Nothing is
+# carried in, so the annotation must emit no wait -- conjuring one would cost a
+# full pipeline drain per trip to guard a read that has already retired.
 #
-# This is the shape production TDM kernels have today, and it is why the
-# triple-buffer WAR has not shown up as a miscompile: the hazard is real but the
-# trailing full drain retires the previous trip's reads before the fill issues.
-# Change the loop so a read outlives its trip -- deeper register buffering, or
-# hoisting the fill above the last wmma -- and the drain disappears while the
-# hazard remains. That variant is the other test.
-#
-# The pass must not conjure a wait here just because the annotation is present:
-# doing so would cost a full pipeline drain per trip for a hazard that no longer
-# has an outstanding read to guard.
+# This is the shape production TDM kernels have today, and why the triple-buffer
+# WAR has never surfaced as a miscompile: safe by accident of the schedule
+# rather than by construction.
 #
 # CHECK-LABEL: @waitcnt_insertion_loop_carried_war_already_drained
 # CHECK: ^loop:

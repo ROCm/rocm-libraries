@@ -2,16 +2,11 @@
 #
 # The emitted s_wait_dscnt records which loop-carried WAR it covers.
 #
-# Same loop as waitcnt_insertion_loop_carried_war_annotated.stir, checked at the
-# assembly level instead of the IR level: mod.loopcarriedwar does not survive
-# into the .s, so without this comment nothing in the output explains why a
-# rotating LDS buffer needs draining here. The reads being guarded carry a
-# different memtoken and ran a trip earlier, so a reader of the assembly alone
-# has no way to reconstruct the reason.
-#
-# The comment rides only the wait at the annotated anchor. The later
-# s_wait_dscnt 1, which exists for the wmma's operands, must stay bare -- see
-# the CHECK-NOT below.
+# Same loop as waitcnt_insertion_loop_carried_war_annotated.stir, checked as
+# assembly rather than IR: mod.loopcarriedwar does not survive into the .s, so
+# without this comment nothing explains why a rotating buffer is drained here.
+# Only the wait at the annotated anchor is tagged; the later one, which exists
+# for the wmma's operands, stays bare.
 #
 # CHECK: ds_load_b64
 # CHECK-NEXT: ds_load_b64
