@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -760,4 +761,201 @@ TEST_F(GreedyAllocatorTest, ARefusalSaysWhetherTheBlockersCouldHaveMoved) {
     // ordering had to be.
     EXPECT_TRUE(contains(error, "v blocks by width")) << error;
     EXPECT_TRUE(contains(error, "by freedom")) << error;
+}
+
+// ---------------------------------------------------------------------------
+// Soft pairings
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A one-row table wanting every destination on its first source's register.
+/// Stands in for a real pairing rule without depending on a shipped one.
+AllocationRules destPrefersFirstSource() {
+    AllocationRule rule;
+    rule.name = "DestPrefersFirstSource";
+    rule.description = "a destination would rather reuse its first source's register";
+    rule.status = RuleStatus::Active;
+    rule.satisfiedBy = [](RegKey a, RegKey b) { return a == b; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues& values,
+                             std::vector<Preference>& out) {
+        const std::span<const SSAValueID> dest = values(0, /*isDest=*/true);
+        const std::span<const SSAValueID> src = values(0, /*isDest=*/false);
+        if (dest.empty() || src.empty()) return;
+        out.push_back({dest[0], src[0], 0, 1.0});
+    };
+    return AllocationRules({rule});
+}
+
+/// `v[dest:dest+width-1] = ds_load_bN v<addr>` -- a vector tuple of a chosen
+/// width, so a pairing can relate members sitting at different offsets.
+StinkyInstruction* dsLoad(BasicBlock* bb, int dest, uint16_t width, int addr) {
+    AsmIRBuilder builder(*bb, kRaTestArch);
+    StinkyInstruction* load = builder.create(
+        getMCIDByUOp(width == 2 ? GFX::ds_load_b64 : GFX::ds_load_b128, kRaTestArch));
+    load->addDestReg(StinkyRegister("v", dest, width));
+    load->addSrcReg(StinkyRegister("v", addr, 1));
+    return load;
+}
+
+/// Wants a destination on its address register.
+///
+/// Contrived on purpose. What it buys over destPrefersFirstSource is a pairing
+/// between members at *different* offsets of their tuples, which is the only
+/// shape where folding produces a block wider than either end -- and so the
+/// only shape where folding can ask placement for something neither end did.
+AllocationRules destPrefersItsAddress() {
+    AllocationRule rule;
+    rule.name = "DestPrefersItsAddress";
+    rule.description = "a load destination would rather reuse its address register";
+    rule.status = RuleStatus::Active;
+    rule.satisfiedBy = [](RegKey a, RegKey b) { return a == b; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues& values,
+                             std::vector<Preference>& out) {
+        const std::span<const SSAValueID> dest = values(0, /*isDest=*/true);
+        const std::span<const SSAValueID> addr = values(0, /*isDest=*/false);
+        if (dest.empty() || addr.empty()) return;
+        out.push_back({dest[0], addr[0], 0, 1.0});
+    };
+    return AllocationRules({rule});
+}
+
+/// destPrefersItsAddress, plus a placement rule only a folded block can break.
+///
+/// Five registers wide is what the fold below produces and neither end is, so
+/// confining that width to one base leaves the fold legal to make and
+/// impossible to place -- which is the case the retry exists for.
+AllocationRules addressPairingWithOneWideBase() {
+    AllocationRule narrow;
+    narrow.name = "WideVBlocksStartAtZero";
+    narrow.description = "a V block five registers or wider must start at index 0";
+    narrow.status = RuleStatus::Active;
+    narrow.forbidsBase = [](RegType regClass, uint32_t base, uint32_t width) {
+        return regClass == RegType::V && width >= 5 && base != 0;
+    };
+    return AllocationRules({narrow, destPrefersItsAddress().all().front()});
+}
+
+}  // namespace
+
+TEST_F(GreedyAllocatorTest, FoldingProducesABlockWiderThanEitherEndOfThePair) {
+    // The address is DWORD 1 of a two-wide tuple and the destination is DWORD 0
+    // of a four-wide one, so putting them on one register leaves the tuple
+    // below the destination and the rest of the destination above it: five
+    // registers where neither end needed more than four.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* narrow = dsLoad(entry, /*dest=*/10, /*width=*/2, /*addr=*/50);
+    StinkyInstruction* wide = dsLoad(entry, /*dest=*/12, /*width=*/4, /*addr=*/11);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/61, /*src0=*/12, /*src1=*/13);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wide, 0);
+    const std::vector<StinkySSAValue*> address = ssaSourceUnits(*wide, 0);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(address.size(), 1u);
+    ASSERT_NE(address[0], nullptr);
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {}, destPrefersItsAddress());
+    CompactingGreedyAllocator allocator;
+    const AllocationResult coloured = colourWith(allocator, paired);
+
+    EXPECT_EQ(coloured.assignmentOf(dest->valueId()).idx,
+              coloured.assignmentOf(address[0]->valueId()).idx)
+        << coloured.toString();
+
+    // The width is the point, so count it rather than infer it. Six values,
+    // two of them sharing one register, leaves five in a row -- which is what
+    // the test below then finds nowhere to put.
+    std::set<uint32_t> occupied;
+    for (unsigned unit = 0; unit < 4; ++unit) {
+        const StinkySSAValue* value = ssaDefinedValue(*wide, unit);
+        ASSERT_NE(value, nullptr) << "wide unit " << unit;
+        occupied.insert(coloured.assignmentOf(value->valueId()).idx);
+    }
+    for (unsigned unit = 0; unit < 2; ++unit) {
+        const StinkySSAValue* value = ssaDefinedValue(*narrow, unit);
+        ASSERT_NE(value, nullptr) << "narrow unit " << unit;
+        occupied.insert(coloured.assignmentOf(value->valueId()).idx);
+    }
+    ASSERT_EQ(occupied.size(), 5u) << coloured.toString();
+    EXPECT_EQ(*occupied.rbegin() - *occupied.begin(), 4u) << "expected one run of five";
+}
+
+TEST_F(GreedyAllocatorTest, AFoldThatCannotBePlacedGivesWayRatherThanRefusing) {
+    // The same pair, with the one base its folded width may start at already
+    // held by a live-in. Folding is legal to make and impossible to place.
+    //
+    // This is the invariant the whole framework rests on: a soft rule may not
+    // decide whether a kernel colours. Placement refuses, the run is retried
+    // with folding off, and the two ends go back to separate registers -- four
+    // wide and two wide, which the rule above does not constrain.
+    BasicBlock* entry = block("entry");
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/60, /*src0=*/4, /*src1=*/4);
+    dsLoad(entry, /*dest=*/10, /*width=*/2, /*addr=*/50);
+    StinkyInstruction* wide = dsLoad(entry, /*dest=*/12, /*width=*/4, /*addr=*/11);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/61, /*src0=*/12, /*src1=*/13);
+    // Read again, so v4 is live across everything and base 0 stays unusable for
+    // any block reaching as far as index 4.
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/62, /*src0=*/4, /*src1=*/4);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wide, 0);
+    const std::vector<StinkySSAValue*> address = ssaSourceUnits(*wide, 0);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_EQ(address.size(), 1u);
+    ASSERT_NE(address[0], nullptr);
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {},
+                           addressPairingWithOneWideBase());
+    CompactingGreedyAllocator allocator;
+    Expected<AllocationResult> coloured = allocator.allocate(paired.context());
+
+    ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *coloured, paired.context()).ok());
+    EXPECT_NE(coloured->assignmentOf(dest->valueId()).idx,
+              coloured->assignmentOf(address[0]->valueId()).idx)
+        << coloured->toString();
+}
+
+TEST_F(GreedyAllocatorTest, APairingPullsABlockOffTheRegisterFirstFitWouldTake) {
+    // v300 is a live-in, so it is pinned up there and dies at the add. The
+    // destination could take its register, but packing from the bottom has no
+    // reason to: first-fit gives it v0. The pairing is what changes that, and
+    // the contrast against the same function with no rule is what makes this
+    // a test of the pairing rather than of the function being small.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/300,
+                                               /*src1=*/300);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const StinkySSAValue* dest = ssaDefinedValue(*add);
+    ASSERT_NE(dest, nullptr);
+
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup unpaired(*func, RegClassSet::only(RegType::V));
+    EXPECT_EQ(colourWith(allocator, unpaired).assignmentOf(dest->valueId()).idx, 0u);
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {}, destPrefersFirstSource());
+    EXPECT_EQ(colourWith(allocator, paired).assignmentOf(dest->valueId()).idx, 300u);
+}
+
+TEST_F(GreedyAllocatorTest, AnUnsatisfiablePairingIsSkippedRatherThanRefused) {
+    // The safety property. Here v300 is read again after the add, so it is
+    // still live where the destination would have to sit and the two cannot
+    // share. The preference simply goes unmet: scoring only ever reorders
+    // bases that placement had already accepted, so there is nothing it can
+    // refuse.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/300,
+                                               /*src1=*/300);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/41, /*src0=*/300, /*src1=*/40);
+    ASSERT_TRUE(liftForAllocation(*func));
+    const StinkySSAValue* dest = ssaDefinedValue(*add);
+    ASSERT_NE(dest, nullptr);
+
+    AllocationSetup paired(*func, RegClassSet::only(RegType::V), {}, destPrefersFirstSource());
+    CompactingGreedyAllocator allocator;
+    const AllocationResult coloured = colourWith(allocator, paired);
+
+    EXPECT_NE(coloured.assignmentOf(dest->valueId()).idx, 300u) << coloured.toString();
 }

@@ -688,6 +688,56 @@ TEST_F(AllocationRulesTest, OverridesRejectAnUnknownName) {
     EXPECT_EQ(unknown.front(), "EvenVBse");
 }
 
+TEST_F(AllocationRulesTest, OverridesDisableByName) {
+    // The counterpart to activate, for a rule the chip already ships Active:
+    // without it, measuring against a table without that rule needs a rebuild.
+    AllocationRules rules = twoPlacementRules(RuleStatus::Active, RuleStatus::Active);
+    RuleOverrides overrides;
+    overrides.disable.push_back(std::string(rules.all()[0].name));
+
+    EXPECT_TRUE(rules.unknownNames(overrides).empty());
+    rules.force(overrides);
+    EXPECT_EQ(rules.all()[0].status, RuleStatus::Off);
+    EXPECT_EQ(rules.all()[1].status, RuleStatus::Active) << "only the named rule";
+}
+
+TEST_F(AllocationRulesTest, DisableByNameOutranksActivateAll) {
+    // "everything on except this one" is the useful shape, and it only works
+    // if the named exception is applied last.
+    AllocationRules rules = twoPlacementRules(RuleStatus::Off, RuleStatus::Off);
+    RuleOverrides overrides;
+    overrides.activateAll = true;
+    overrides.disable.push_back(std::string(rules.all()[1].name));
+
+    rules.force(overrides);
+    EXPECT_EQ(rules.all()[0].status, RuleStatus::Active);
+    EXPECT_EQ(rules.all()[1].status, RuleStatus::Off);
+}
+
+TEST_F(AllocationRulesTest, OverridesRejectActivatingAndDisablingTheSameRule) {
+    // Whichever half wins, the other happens silently. Same reason a
+    // misspelling is an error: a run that did not do what was asked still
+    // passes, and nothing says so.
+    RuleOverrides overrides;
+    overrides.activate.push_back("EvenVBase");
+    overrides.disable.push_back("EvenVBase");
+
+    const std::vector<std::string> both = AllocationRules::contradictoryNames(overrides);
+    ASSERT_EQ(both.size(), 1u);
+    EXPECT_EQ(both.front(), "EvenVBase");
+    EXPECT_TRUE(AllocationRules::contradictoryNames(RuleOverrides{}).empty());
+}
+
+TEST_F(AllocationRulesTest, OverridesRejectAnUnknownNameToDisable) {
+    const AllocationRules rules = evenVBasesOnly(RuleStatus::Active);
+    RuleOverrides overrides;
+    overrides.disable.push_back("EvenVBse");
+
+    const std::vector<std::string> unknown = rules.unknownNames(overrides);
+    ASSERT_EQ(unknown.size(), 1u);
+    EXPECT_EQ(unknown.front(), "EvenVBse");
+}
+
 TEST_F(AllocationRulesTest, OverridesCanActivateOrAuditEverything) {
     AllocationRules activated = twoPlacementRules(RuleStatus::Off, RuleStatus::Off);
     RuleOverrides all;
@@ -721,4 +771,89 @@ TEST_F(AllocationRulesTest, DisableAllEmptiesTheTable) {
     EXPECT_TRUE(rules.empty());
     EXPECT_EQ(rules.forbidsBase(RegType::V, 3, 1), nullptr);
     EXPECT_FALSE(rules.prices());
+}
+
+// ---------------------------------------------------------------------------
+// Pairing rules: soft relations between two values
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A pairing rule wanting its two values on one register.
+AllocationRule coalescingRule(RuleStatus status = RuleStatus::Active) {
+    AllocationRule rule;
+    rule.name = "Coalesce";
+    rule.description = "two values would rather share a register";
+    rule.status = status;
+    rule.satisfiedBy = [](RegKey a, RegKey b) { return a == b; };
+    rule.addPreferences = [](const StinkyInstruction&, const OperandValues&,
+                             std::vector<Preference>& out) { out.push_back({1, 2, 0, 1.0}); };
+    return rule;
+}
+
+}  // namespace
+
+TEST_F(AllocationRulesTest, APairingRuleIsItsOwnKind) {
+    const AllocationRules rules({coalescingRule()});
+    ASSERT_EQ(rules.all().size(), 1u);
+    EXPECT_EQ(rules.all()[0].kind(), RuleKind::Pairing);
+    EXPECT_STREQ(ruleKindName(RuleKind::Pairing), "pairing");
+    EXPECT_TRUE(rules.pairs());
+    // Pairing and pricing are separate opinions; one does not imply the other.
+    EXPECT_FALSE(rules.prices());
+}
+
+TEST_F(AllocationRulesTest, APairingRuleWithoutItsPredicateIsReported) {
+    // It would collect pairs and then score none of them, which is the
+    // believed-enabled-and-inert failure the table checks exist to catch.
+    AllocationRule halfBuilt = coalescingRule();
+    halfBuilt.satisfiedBy = nullptr;
+
+    const AllocationRules rules({halfBuilt});
+    EXPECT_TRUE(rules.empty());
+    ASSERT_EQ(rules.problems().size(), 1u);
+    EXPECT_TRUE(contains(rules.problems()[0], "satisfiedBy")) << rules.problems()[0];
+}
+
+TEST_F(AllocationRulesTest, APredicateWithoutPairsIsReportedToo) {
+    // The other half: a predicate nothing ever calls.
+    AllocationRule stray;
+    stray.name = "StrayPredicate";
+    stray.status = RuleStatus::Active;
+    stray.forbidsBase = [](RegType, uint32_t, uint32_t) { return false; };
+    stray.satisfiedBy = [](RegKey a, RegKey b) { return a == b; };
+
+    const AllocationRules rules({stray});
+    EXPECT_TRUE(rules.empty());
+    ASSERT_EQ(rules.problems().size(), 1u);
+    EXPECT_TRUE(contains(rules.problems()[0], "satisfiedBy")) << rules.problems()[0];
+}
+
+TEST_F(AllocationRulesTest, APairingRuleHasNoAuditState) {
+    // Audit asks whether the input already violates a rule. A preference has no
+    // violation, so Audit here would be silently inert.
+    const AllocationRules rules({coalescingRule(RuleStatus::Audit)});
+    ASSERT_EQ(rules.all().size(), 1u);
+    EXPECT_EQ(rules.all()[0].status, RuleStatus::Off);
+    ASSERT_EQ(rules.problems().size(), 1u);
+    EXPECT_TRUE(contains(rules.problems()[0], "Audit")) << rules.problems()[0];
+}
+
+TEST_F(AllocationRulesTest, SatisfiedByAnswersOnlyForActiveRules) {
+    const AllocationRules active({coalescingRule()});
+    const Preference pref{1, 2, 0, 1.0};
+    const RegKey v4{RegType::V, 4, RegHalf::NONE};
+    const RegKey v5{RegType::V, 5, RegHalf::NONE};
+    EXPECT_TRUE(active.satisfiedBy(pref, v4, v4));
+    EXPECT_FALSE(active.satisfiedBy(pref, v4, v5));
+
+    // A colouring collected under one table must not be scored against a table
+    // where the rule has since been switched off.
+    const AllocationRules off({coalescingRule(RuleStatus::Off)});
+    EXPECT_FALSE(off.satisfiedBy(pref, v4, v4));
+    EXPECT_FALSE(off.pairs());
+
+    // And a preference naming a row that does not exist answers false rather
+    // than reading past the table.
+    EXPECT_FALSE(active.satisfiedBy(Preference{1, 2, 99, 1.0}, v4, v4));
 }

@@ -126,6 +126,27 @@ std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instru
     return groups;
 }
 
+/// SSA values behind every register operand of one instruction, both sides.
+///
+/// Computed once and shared: three collectors below want the same walk, and the
+/// walk is the part that is easy to get subtly wrong. Doing it per collector
+/// also meant paying for it three times on every instruction.
+struct OperandGroups {
+    std::vector<std::vector<SSAValueID>> dest;
+    std::vector<std::vector<SSAValueID>> src;
+
+    std::span<const SSAValueID> at(size_t operand, bool isDest) const {
+        const std::vector<std::vector<SSAValueID>>& groups = isDest ? dest : src;
+        if (operand >= groups.size()) return {};
+        return groups[operand];
+    }
+};
+
+OperandGroups operandGroupsOf(const StinkyInstruction& instruction, const RegClassSet& classes) {
+    return {valueGroups(instruction, classes, /*destinations=*/true),
+            valueGroups(instruction, classes, /*destinations=*/false)};
+}
+
 /// Tie a read-write destination to the source naming the same register.
 ///
 /// The hardware reads such a destination on the path where it does not write
@@ -142,17 +163,15 @@ std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instru
 /// of it -- read-write by position in the stream rather than by opcode.
 /// TieExecMaskedWritesPass is what puts the matching source there, so the lookup
 /// below finds it the same way.
-void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSet& classes,
+void collectReadWriteTies(const StinkyInstruction& instruction, const OperandGroups& groups,
                           bool execMasked, std::vector<AffinitySet>& sets) {
     const HwInstDesc* desc = instruction.getHwInstDesc();
     if (desc == nullptr || desc->operandFields.empty()) return;
 
     const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
     const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
-    const std::vector<std::vector<SSAValueID>> destGroups =
-        valueGroups(instruction, classes, /*destinations=*/true);
-    const std::vector<std::vector<SSAValueID>> srcGroups =
-        valueGroups(instruction, classes, /*destinations=*/false);
+    const std::vector<std::vector<SSAValueID>>& destGroups = groups.dest;
+    const std::vector<std::vector<SSAValueID>>& srcGroups = groups.src;
 
     // Only the destination side needs walking: the source that pairs with a
     // read-write destination is the one naming the same register, which is what
@@ -199,12 +218,10 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSe
 /// Combined by minimum, because a value has one ceiling per use and must
 /// satisfy all of them. Overwriting instead would let an unconstrained use
 /// erase a constrained one, with the outcome depending on visit order.
-void collectBankReachableCeilings(const StinkyInstruction& instruction, const RegClassSet& classes,
+void collectBankReachableCeilings(const StinkyInstruction& instruction, const OperandGroups& groups,
                                   std::vector<uint32_t>& maxIndexByValue) {
-    const std::vector<std::vector<SSAValueID>> destGroups =
-        valueGroups(instruction, classes, /*destinations=*/true);
-    const std::vector<std::vector<SSAValueID>> srcGroups =
-        valueGroups(instruction, classes, /*destinations=*/false);
+    const std::vector<std::vector<SSAValueID>>& destGroups = groups.dest;
+    const std::vector<std::vector<SSAValueID>>& srcGroups = groups.src;
 
     forEachVgprOperandField(
         instruction, [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
@@ -306,9 +323,21 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
             collectLiftedDestinations(*instruction, liftedClasses, constraints.tupleRuns_);
             collectLiftedSources(*instruction, liftedClasses, constraints.tupleRuns_);
-            collectReadWriteTies(*instruction, liftedClasses, execMasked.count(instruction) != 0,
+
+            const OperandGroups groups = operandGroupsOf(*instruction, liftedClasses);
+            collectReadWriteTies(*instruction, groups, execMasked.count(instruction) != 0,
                                  constraints.affinitySets_);
-            collectBankReachableCeilings(*instruction, liftedClasses, constraints.maxIndexByValue_);
+            collectBankReachableCeilings(*instruction, groups, constraints.maxIndexByValue_);
+
+            // Soft pairings, per instruction because that is where an operand
+            // pair means anything. Skipped entirely on a chip with no pairing
+            // rule, so nothing here costs a std::function on the common path.
+            if (rules.pairs()) {
+                const OperandValues values = [&groups](size_t operand, bool isDest) {
+                    return groups.at(operand, isDest);
+                };
+                rules.addPreferences(*instruction, values, constraints.preferences_);
+            }
         }
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {

@@ -28,10 +28,15 @@
 // saying what it forbids or what it prefers. Which function you fill in decides
 // what kind of rule it is, and that is the only decision to make:
 //
-//   forbidsBase   a value may not sit at some index          (hard)
-//   clobbersEarly an instruction writes before it reads      (hard)
-//   addRelations  two values sit at a fixed offset           (hard)
-//   baseCost      an index is legal but worse                (soft)
+//   forbidsBase    a value may not sit at some index         (hard)
+//   clobbersEarly  an instruction writes before it reads     (hard)
+//   addRelations   two values sit at a fixed offset          (hard)
+//   baseCost       an index is legal but worse               (soft)
+//   addPreferences two values would rather share a register  (soft)
+//
+// A pairing rule fills in addPreferences and, as its companion, satisfiedBy:
+// one collects the pairs and the other judges them, and a rule with only one of
+// them is a table mistake. Everything else is still exactly one function.
 //
 // To add a rule, append a row. Nothing else changes: the queries below walk the
 // table and skip rules that are not Active, so a rule never tests its own
@@ -57,6 +62,10 @@ namespace stinkytofu {
 class Function;
 struct StinkyInstruction;
 
+/// The SSA values behind one register operand, by printed operand position.
+/// Empty for an operand the lift did not cover.
+using OperandValues = std::function<std::span<const SSAValueID>(size_t operand, bool isDest)>;
+
 /// Deployment state, not strength.
 ///
 /// A rule cannot go straight to Active. verifyAllocation runs on every
@@ -80,6 +89,7 @@ enum class RuleKind : uint8_t {
     Interference,  ///< clobbersEarly
     Offset,        ///< addRelations
     Preference,    ///< baseCost
+    Pairing,       ///< addPreferences, with satisfiedBy
 };
 
 /// One architecture rule.
@@ -115,12 +125,36 @@ struct AllocationRule {
         addRelations;
 
     /// Relative penalty for starting a \p width -wide \p regClass block at
-    /// \p base. Lower is better; 0.0 means no opinion.
+    /// \p base. Lower is better, and 0.0 means no opinion.
+    ///
+    /// Must never be negative. Placement stops searching once a base costs
+    /// nothing, which is only correct while nothing can cost less than that.
+    /// Express a want as a penalty on the bases you do not want, not as a
+    /// bonus on the one you do.
     ///
     /// Only a cost that depends on `base % k` can change a colouring: ascending
     /// first-fit already returns the cheapest base for any cost that merely
     /// grows with the index. Alignment-shaped preferences are the useful space.
     std::function<double(RegType regClass, uint32_t base, uint32_t width)> baseCost;
+
+    /// Append the soft pairings this architecture would like, for one
+    /// instruction. \p values resolves a register operand to the SSA values
+    /// behind it, by printed operand position.
+    ///
+    /// Resolved rather than left to the rule, because pairing an operand with
+    /// its values is the step that is easy to get wrong and silently relates
+    /// the wrong registers -- the same reason forEachVgprOperandField is one
+    /// function. A rule that needs to pair across instructions has no hook yet.
+    std::function<void(const StinkyInstruction& inst, const OperandValues& values,
+                       std::vector<Preference>& preferences)>
+        addPreferences;
+
+    /// Is this pair of registers what the rule wanted? The companion to
+    /// addPreferences, and meaningless without it.
+    ///
+    /// Asked once per candidate base per preference, so it must be cheap. A
+    /// plain pointer rather than std::function to keep that obvious.
+    bool (*satisfiedBy)(RegKey a, RegKey b) = nullptr;
 
     RuleKind kind() const;
 };
@@ -133,6 +167,7 @@ struct RuleOverrides {
     bool auditAll = false;              ///< Every rule to Audit.
     bool activateAll = false;           ///< Every rule to Active.
     std::vector<std::string> activate;  ///< These rules, by name, to Active.
+    std::vector<std::string> disable;   ///< These rules, by name, to Off.
 };
 
 /// The rules one architecture imposes, as a value. No rules is an empty table,
@@ -183,11 +218,35 @@ class AllocationRules {
     /// Summed penalty from every Active preference. 0.0 when there are none.
     double baseCost(RegType regClass, uint32_t base, uint32_t width) const;
 
+    /// Append the pairings every Active rule would like for \p inst, tagging
+    /// each with the rule that asked so satisfiedBy() can find it again.
+    void addPreferences(const StinkyInstruction& inst, const OperandValues& values,
+                        std::vector<Preference>& preferences) const;
+
+    /// Does \p a paired with \p b satisfy what \p preference asked for?
+    ///
+    /// False for a preference naming a rule that is no longer Active, so a
+    /// colouring collected under one table cannot be scored against another.
+    bool satisfiedBy(const Preference& preference, RegKey a, RegKey b) const;
+
     /// True when any Active rule has a cost, so a policy can keep plain
     /// first-fit -- and today's colouring -- on a chip with no preference.
     bool prices() const {
         return prices_;
     }
+
+    /// True when any Active rule pairs values, for the same reason as prices().
+    bool pairs() const {
+        return pairs_;
+    }
+
+    /// Names \p overrides asks to activate and to disable at once. Refused for
+    /// the same reason a misspelling is: whichever wins, one half of what was
+    /// asked for happens silently, and a run that does nothing still passes.
+    ///
+    /// Static because it reads only the overrides. A contradiction is wrong
+    /// whatever the chip declares.
+    static std::vector<std::string> contradictoryNames(const RuleOverrides& overrides);
 
     /// Names in \p overrides this table does not declare. Checked separately so
     /// a misspelling is an error rather than a silent no-op: a test that
@@ -208,12 +267,13 @@ class AllocationRules {
     std::vector<AllocationRule> rules_;
     std::vector<std::string> problems_;
     bool prices_ = false;
+    bool pairs_ = false;
 };
 
 /// "off", "audit" or "active".
 STINKYTOFU_EXPORT const char* ruleStatusName(RuleStatus status);
 
-/// "placement", "interference", "offset", "preference" or "empty".
+/// "placement", "interference", "offset", "preference", "pairing" or "empty".
 STINKYTOFU_EXPORT const char* ruleKindName(RuleKind kind);
 
 /// \p base with every early-clobber destination made live from its
