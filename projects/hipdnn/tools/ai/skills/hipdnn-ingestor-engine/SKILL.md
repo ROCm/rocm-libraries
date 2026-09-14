@@ -19,6 +19,7 @@ These pages supply contracts, not alternate procedures:
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
 | [workloads.md](workloads.md) | Corpus identity, coverage and runtime accounting |
 | [Sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) | Python CLI, YAML, measurement and resume |
+| [hipdnn-kernel-authoring](../hipdnn-kernel-authoring/SKILL.md) | Upstream: authoring the kernel source and proving its numerics before integration |
 
 ## Entry contract
 
