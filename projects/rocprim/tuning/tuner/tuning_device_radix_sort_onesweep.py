@@ -34,7 +34,7 @@ from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALU
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
 BLOCK_SIZES = [128, 256, 512, 1024]
-IPT = [1, 4, 6, 8, 12, 16, 18, 22]
+IPT = [1, 4, 6, 8, 12, 16, 18, 22, 32]
 RADIX_BITS = [4, 5, 6, 7, 8]
 ALGOS = ['block_radix_rank_algorithm::basic', 'block_radix_rank_algorithm::match']
 
@@ -64,20 +64,23 @@ class CheckParam:
         """
 
     def find_max_params(self):
-        for bs in BLOCK_SIZES:
-            for rb in RADIX_BITS:
-                for algo in ALGOS:
-                    l, r, out = 0, len(IPT) - 1, -1
-                    while l <= r:
-                        m = (l + r) // 2
-                        if self.check_valid('rocprim::int128_t', 'rocprim::int128_t', bs, IPT[m], rb, f'rocprim::{algo}'):
-                            out = m
-                            l = m + 1
-                        else:
-                            r = m - 1
+        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
+        for key_type in COMMON_KEY_TYPES:
+            for value_type in VALUE_TYPES:
+                for bs in BLOCK_SIZES:
+                    for rb in RADIX_BITS:
+                        for algo in ALGOS:
+                            l, r, out = 0, len(IPT) - 1, -1
+                            while l <= r:
+                                m = (l + r) // 2
+                                if self.check_valid(key_type, value_type , bs, IPT[m], rb, f'rocprim::{algo}'):
+                                    out = m
+                                    l = m + 1
+                                else:
+                                    r = m - 1
 
-                    if out != -1:
-                        self.v_params[(bs, rb, algo)] = IPT[out] 
+                            if out != -1:
+                                self.v_params[(key_type, value_type, bs, rb, algo)] = IPT[out] 
 
     def check_valid(self, key, value, bs, ipt, rb, algo) -> bool:
         param = (key, value, bs, ipt, rb, algo)
@@ -133,8 +136,8 @@ class Tuner(BaseTuner):
             bs, rb, algo = params['block_size_x'], params['radix_bits'], params['algo']
             if bs != params['sort_block_size_x'] or  params['ipt'] != params['sort_ipt']:
                 return False
-            if (bs, rb, algo) in self.param_checker.v_params:
-                return params['ipt'] <= self.param_checker.v_params[(bs, rb, algo)]
+            if (key_type, val_type, bs, rb, algo) in self.param_checker.v_params:
+                return params['ipt'] <= self.param_checker.v_params[(key_type, val_type, bs, rb, algo)]
             else:
                 return False
 
