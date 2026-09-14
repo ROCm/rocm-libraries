@@ -97,6 +97,8 @@ jobs:
               -DMIOPEN_USE_MLIR=OFF
               -DMIOPEN_BACKEND=HIP
               -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-23
+              -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps"
+              -DROCM_PATH=/opt/rocm
             build_target: ""
 
     runs-on: azure-linux-scale-rocm
@@ -167,18 +169,6 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
-
-      - name: Configure build
-        run: |
-          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-          export CXX=/opt/rocm/llvm/bin/clang++
-          export CXXFLAGS=-Werror
-          rm -rf projects/miopen/install
-          mkdir projects/miopen/install
-          cmake -S projects/miopen -B build \
-          -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
-          ${{ matrix.cmake_extra_flags }}
-
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'
         run: |
@@ -198,6 +188,17 @@ jobs:
           sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
           cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m pip install -r requirements.txt
           cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m rbuild prepare -s develop -d /tmp/miopen-deps
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          export CXXFLAGS=-Werror
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+          -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+          ${{ matrix.cmake_extra_flags }}
+
       - name: Build
         if: matrix.job_id != 'clang-tidy'
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
