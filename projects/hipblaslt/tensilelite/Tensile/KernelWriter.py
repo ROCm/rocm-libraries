@@ -5906,8 +5906,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Kernarg order, which is what makes the default a contiguous run:
       allNames = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
                   "SKItersPerWG", "skGrid", "skTiles", "StreamKIdx"]
-      sel = plsinDebugEnv("TENSILE_PLSIN_SK_PARK",
-                          "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid")
+      # MT>256 fused store still peaks at 104 SGPRs with the 4-constant park
+      # (256x256 is 102). Park the two adjacent kernarg slots so the freed
+      # run stays contiguous; StreamKIdx stays in SGPR (most remaining reads).
+      largeTile = (int(kernel.get("MacroTile0", 0)) > 256
+                   or int(kernel.get("MacroTile1", 0)) > 256)
+      defaultPark = ("ItersPerTile,MagicNumberItersPerTile,MagicShiftItersPerTile,"
+                     "SKItersPerWG,skGrid,skTiles" if largeTile else
+                     "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid")
+      sel = plsinDebugEnv("TENSILE_PLSIN_SK_PARK", defaultPark)
       want = [n for n in allNames if n in sel.split(",")]
       if kernel["StreamK"] != 3:
         want = [n for n in want if n not in ("skGrid", "skTiles")]
@@ -7614,8 +7621,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.exclasses.activation.setAlt(kernel["ActivationAlt"])
 
     self.states.asmCaps  = ti.getAsmCaps()
-    self.states.archCaps = ti.getArchCaps()
+    self.states.archCaps = dict(ti.getArchCaps())
     self.states.regCaps  = ti.getRegCaps()
+    # gfx1250-only caps are absent from older rocisa builds. gfx950 does not
+    # implement XNACK replay; default False so TensileCreateLibrary can run.
+    self.states.archCaps.setdefault("EnableXnackReplay", False)
+    self.states.archCaps.setdefault("RequiresXCntForVolatileVMEM", False)
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the

@@ -443,7 +443,8 @@ Solutions:
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
-  PostLoopStoreInNll: false
+  PLSINStoreMode: Weave
+  PostLoopStoreInNll: true
   ScheduleGROverBarrier: 0
   StoreSwapAddr: false
   StoreVectorWidth: 4
@@ -968,7 +969,8 @@ Solutions:
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
-  PostLoopStoreInNll: false
+  PLSINStoreMode: Weave
+  PostLoopStoreInNll: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   StoreSwapAddr: true
@@ -1231,7 +1233,8 @@ Solutions:
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
-  PostLoopStoreInNll: false
+  PLSINStoreMode: Weave
+  PostLoopStoreInNll: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   StoreSwapAddr: true
@@ -1494,7 +1497,8 @@ Solutions:
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
-  PostLoopStoreInNll: false
+  PLSINStoreMode: Weave
+  PostLoopStoreInNll: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   StoreSwapAddr: true
