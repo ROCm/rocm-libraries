@@ -160,6 +160,22 @@ def test_gqa_ratio_must_divide():
         )
 
 
+def test_scan_is_refused_when_its_prep_cannot_build():
+    """Half a split path is not a selectable answer.
+
+    The scan reads tiles the prep writes, and the two halves validate on
+    different axes: ``head_k=32`` satisfies the scan's state-partition rules but
+    fails the prep, whose fused L2 normalization reduces a fixed 128-element
+    row. Admitting the scan alone would defer that failure to launch time, past
+    the gate whose job is to name the reason -- so the refusal must happen here,
+    and must say which half is at fault.
+    """
+    with pytest.raises(ValueError, match="tile builder for this scan is unbuildable"):
+        dispatch_gdn_prefill(
+            _req(head_k_dim=32, head_v_dim=128, algorithm="chunk_scan")
+        )
+
+
 def test_bf16_only():
     with pytest.raises(ValueError):
         dispatch_gdn_prefill(_req(dtype="f16", algorithm="chunk_scan"))

@@ -135,14 +135,37 @@ def _prep_spec(req: OperatorRequest) -> KdaChunkPrepSpec:
     )
 
 
-def _scan_validator(spec: KdaChunkScanSpec, arch: str) -> Tuple[bool, str]:
-    """A scan is selectable only if its standalone spec is valid on ``arch``.
+def _prep_validator(spec: KdaChunkPrepSpec, req: GdnPrefillRequest) -> Tuple[bool, str]:
+    return is_valid_spec(spec, arch=req.arch)
 
-    The paired raw prep's validity (GDN flags, GQA group) is the ``chunk_prep``
-    candidate's own gate; both halves must admit for the split path to serve a
-    request, so the scan need not re-validate the prep here.
+
+def _scan_validator(spec: KdaChunkScanSpec, req: GdnPrefillRequest) -> Tuple[bool, str]:
+    """A scan is selectable only if the tile builder that feeds it is too.
+
+    The scan validates the state partition and the staging copies; the raw prep
+    additionally validates the fused gate/L2/sigmoid path, whose rules the scan
+    has no equivalent of -- ``head_k=32`` passes here and fails there, because
+    ``fuse_qk_l2norm`` reduces a fixed 128-element row. A scan reads tiles it
+    does not produce, so admitting one whose prep cannot build hands the caller
+    half a split path and moves the failure to whoever launched the two halves
+    in order, well past the gate whose job was to name the reason.
+
+    Chaining matches the family's other composite validators --
+    ``dispatch/kda/gfx950.py``'s scan gate and ``is_valid_fused_spec`` -- but
+    those reach the prep through ``spec.prep``, and that derivation is *not*
+    usable here: it reconstructs a plain KDA prep with every GDN flag off
+    (``gate_kind='kda'``, ``fuse_qk_l2norm=False``, ``kv_group=1``), so the
+    GDN-only rules never fire on it. We validate the prep spec this dispatcher
+    would actually build for the same request instead, which is why the
+    validator takes the request rather than the spec alone.
     """
-    return is_valid_scan_spec(spec, arch=arch)
+    ok, why = is_valid_scan_spec(spec, arch=req.arch)
+    if not ok:
+        return False, why
+    ok, why = is_valid_spec(_prep_spec(req), arch=req.arch)
+    if not ok:
+        return False, f"tile builder for this scan is unbuildable: {why}"
+    return True, "ok"
 
 
 def _prep_grid(spec: KdaChunkPrepSpec, req: OperatorRequest):
@@ -202,7 +225,9 @@ def _make_candidate(
         ok, why = prefill_selector_matches(req, candidate)
         if not ok:
             return False, why
-        return validator(spec_for(req), arch=req.arch)
+        # Validators take the request, not just their own spec: the scan half
+        # has to check the prep spec this dispatcher would build alongside it.
+        return validator(spec_for(req), req)
 
     def select(req: OperatorRequest):
         ok, why = candidate.admits(req)
@@ -237,7 +262,7 @@ def _prep_candidate() -> KernelCandidate:
         spec_id="gfx950_gdn_chunk_prep",
         priority=10,
         spec_for=_prep_spec,
-        validator=is_valid_spec,
+        validator=_prep_validator,
         builder=build_kda_chunk_prep,
         grid_for=_prep_grid,
         signature_for=kda_chunk_prep_signature,
