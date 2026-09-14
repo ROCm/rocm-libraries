@@ -5,7 +5,9 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 
+#include <limits>
 #include <optional>
+#include <vector>
 
 #include "ContentCarryingTestGraph.hpp"
 
@@ -356,6 +358,38 @@ TEST(TestGraphContentKey, ADifferentPointwiseOperationComparesUnequal)
               keyFor(ContentCarryingTestGraph{multiplication}));
 }
 
+/// A float field hashes its raw bytes, so it must compare its raw bytes too. Under IEEE
+/// `!=` a NaN payload is unequal to itself: the two keys below would hash into the same
+/// bucket and then refuse to match, making that graph a permanent cache miss.
+TEST(TestGraphContentKey, TwoGraphsCarryingTheSameNanFloatComparePairwiseEqual)
+{
+    Spec first;
+    first.nodes[0].reluLowerClip = std::numeric_limits<float>::quiet_NaN();
+    const Spec second = first;
+
+    // Distinct keys over separately built buffers: `operator==`'s pointer fast path
+    // would answer a self-comparison without reaching the generated compare.
+    const auto left = keyFor(ContentCarryingTestGraph{first});
+    const auto right = keyFor(ContentCarryingTestGraph{second});
+
+    ASSERT_TRUE(left.isUsable());
+    EXPECT_EQ(left.hash(), right.hash());
+    EXPECT_EQ(left, right) << "identical NaN bits must key the same, or the graph can "
+                              "never be found in the cache it was written to";
+}
+
+/// A different NaN payload is different content, matching the raw-byte hash that
+/// already splits it.
+TEST(TestGraphContentKey, TwoGraphsCarryingDifferentNanPayloadsCompareUnequal)
+{
+    Spec quiet;
+    quiet.nodes[0].reluLowerClip = std::numeric_limits<float>::quiet_NaN();
+    Spec signaling;
+    signaling.nodes[0].reluLowerClip = std::numeric_limits<float>::signaling_NaN();
+
+    EXPECT_NE(keyFor(ContentCarryingTestGraph{quiet}), keyFor(ContentCarryingTestGraph{signaling}));
+}
+
 /// The graph-level data types are defaults: the frontend stamps them onto each node and
 /// tensor left unset (Attributes::fill_from_context), and those are compared. Folding
 /// them would split the key between an explicit type and the same type defaulted.
@@ -518,6 +552,36 @@ TEST(TestGraphContentKey, AGraphWithNoBytesYieldsAnUnusableKey)
     const UnkeyableGraph graph;
 
     EXPECT_FALSE(GraphContentKey{graph}.isUsable());
+}
+
+/// `bytes()` promises a verified buffer but nothing enforces it, and `root()` calls
+/// `GetRoot` on the retained copy. A malformed buffer must become an unusable key, not
+/// an out-of-bounds read through a fabricated vtable of offsets.
+class MalformedBytesGraph : public UnkeyableGraph
+{
+public:
+    bool isValid() const override
+    {
+        return true;
+    }
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
+    {
+        return {_garbage.data(), _garbage.size()};
+    }
+
+private:
+    // Non-empty and wrong: the leading word reads as a root offset far past the end.
+    std::vector<uint8_t> _garbage{0xFFU, 0xFFU, 0xFFU, 0x7FU, 0x01U, 0x02U, 0x03U, 0x04U};
+};
+
+TEST(TestGraphContentKey, AGraphWithMalformedBytesYieldsAnUnusableKey)
+{
+    const MalformedBytesGraph graph;
+    const GraphContentKey key{graph};
+
+    EXPECT_FALSE(key.isUsable());
+    EXPECT_EQ(key.hash(), 0U) << "an unverifiable buffer must not be filed under a live hash";
 }
 
 /// Hash 0, unusable, and matching nothing are one fact: a key with a live hash but no
