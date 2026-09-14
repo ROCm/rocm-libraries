@@ -7,7 +7,7 @@
 //   - 2D convolution, or a 3D convolution that reduces to one
 //   - packed tensors
 //   - fp16, bf16, or fp32 with tf32 compute enabled
-//   - architectures recognised by hipconv (gfx950)
+//   - architectures recognised by hipconv (gfx950, gfx1250)
 //   - the hipconv library must have a valid kernel for the (params, direction) tuple
 
 #include "unit_conv_solver.hpp"
@@ -49,7 +49,8 @@ auto GetConv3dSmokeTestCases(miopenDataType_t datatype, bool tf32 = false)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx950);
+        // gfx1250 has no CI test runner yet, so it skips there until one exists.
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx950 | Gpu::gfx125X);
         p.Tunable(5);
         return p;
     }();
