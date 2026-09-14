@@ -1,37 +1,26 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
-# Loop-carried WAR named by mod.loopcarriedwar, on a rotating triple-buffer ring.
+# Loop-carried WAR named by mod.loopcarriedwar. Canonical case; the other
+# waitcnt_insertion_loop_carried_war_* tests refer back here.
 #
-# Reduced from the gfx1250 TDM+LDS main loop. Each trip reads the buffer RP
-# points at and fills the buffer WP points at, both pointers advancing one step
-# per trip. Trip k writes blk(k+2)%3, which is blk(k-1)%3 -- the buffer trip k-1
-# was reading. That is a distance-1 WAR, and it is invisible to the ordinary
-# token-overlap scan: trip k-1 tagged its reads [0] and trip k tags its write
-# [2], because a memtoken names a physical buffer only for the trip it was
-# emitted from.
-#
-# The barrier guarding the fill carries the relation TensileLite already knows
-# from _ldsTokenBackEdgeMap:
-#
-#   mod.loopcarriedwar = { tokens = [0], distance = 1 }
-#
-# read: "reads tagged [0] one trip ago alias the write I guard". The barrier
-# supplies cross-wave ordering; the s_wait_dscnt derived from this drains this
-# wave's own reads still in flight from the previous trip.
+# Reduced from the gfx1250 TDM+LDS main loop: ring of 3, one step per trip. Trip
+# k fills blk(k+2)%3, which is blk(k-1)%3 -- the buffer trip k-1 was reading.
+# Plain token overlap cannot see it, because a memtoken names a physical buffer
+# only for the trip it was emitted from: trip k-1 tagged those reads [0] while
+# trip k tags the fill [2]. mod.loopcarriedwar supplies the missing tag, which
+# TensileLite derives from _ldsTokenBackEdgeMap.
 #
 # Steady state at the barrier, oldest first:
 #
-#   [ R2(trip k-1), R1(trip k), R2(trip k) ]
+#   [ R2(k-1), R1(k), R2(k) ]
+#     ^^^^^^^ carried in over the back edge, and the only entry that aliases
 #
-# Only R2(trip k-1) is carried in over the back edge, and only it aliases. It
-# sits 3 from the tail, so the wait is 2 -- draining the previous trip's read
-# while leaving BOTH of this trip's reads outstanding. A wait of 0 here would
-# drain the pipeline the third buffer exists to fill.
+# R2(k-1) sits 3 from the tail, so the wait is 2: the previous trip's read
+# retires and both of this trip's stay in flight. A wait of 0 would drain the
+# pipeline the third buffer exists to fill.
 #
-# R1 is consumed by the wmma each trip; R2 deliberately is not, so it survives
-# to the back edge and gives the next trip something to find. See
-# waitcnt_insertion_loop_carried_war_already_drained.stir for the same loop when
-# it does not.
+# R1 is consumed by the wmma each trip and R2 is not, so R2 survives the back
+# edge and gives the next trip something to find.
 #
 # CHECK-LABEL: @waitcnt_insertion_loop_carried_war_annotated
 # CHECK: ^loop:
