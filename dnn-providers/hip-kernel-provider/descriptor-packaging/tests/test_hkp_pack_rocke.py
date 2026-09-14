@@ -657,8 +657,8 @@ def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
 def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
     """The builder the example descriptor tree uses must pass the gate.
 
-    Pairs with the refusal above: the gate has to be narrow enough that real
-    kernels remain packageable, not just strict.
+    The gate has to be narrow enough that real kernels remain packageable, not
+    just strict.
     """
     from kernels.gfx942 import attention_tiled_2d as m
 

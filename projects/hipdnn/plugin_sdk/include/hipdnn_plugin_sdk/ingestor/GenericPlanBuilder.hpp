@@ -10,6 +10,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -204,10 +205,17 @@ public:
         // Coverage and orderability are checked against the knob-filtered candidates
         // here, independent of the same check against the full catalog in
         // sortedCatalog(): one can fail while the other passes.
-        const WinnerKey winnerKey{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
-            DeviceKey{context.deviceProperties}};
-        const auto record = _stateManager.winnerFor(winnerKey);
+        std::optional<WinnerKey> winnerKey;
+        std::optional<WinnerRecord> record;
+        if(settings.benchmarkingEnabled
+           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
+        {
+            winnerKey
+                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+                            DeviceKey{context.deviceProperties}};
+            record = _stateManager.winnerFor(*winnerKey);
+        }
+
         if(record.has_value())
         {
             if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
@@ -355,9 +363,9 @@ public:
         // about whether two rows came from the same device.
         // Hex so both values survive a log grep unambiguously.
         std::ostringstream benchmarkId;
-        benchmarkId << std::hex << winnerKey.graph.hash();
+        benchmarkId << std::hex << winnerKey->graph.hash();
         std::ostringstream deviceId;
-        deviceId << std::hex << winnerKey.device.hash();
+        deviceId << std::hex << winnerKey->device.hash();
 
         // A record that exists but did not serve this graph -- either it failed the coverage gate
         // or none of its ranked entries still resolved -- is being superseded, so its write must
@@ -367,7 +375,7 @@ public:
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            [&stateManager = _stateManager, winnerKey, cause](
+            [&stateManager = _stateManager, winnerKey = std::move(*winnerKey), cause](
                 const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking, cause);
             },
