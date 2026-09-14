@@ -139,6 +139,34 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     EXPECT_NEAR(treeResult.tflops, nativeResult.tflops, 1e-12);
 }
 
+/// RFC 0019 §7.2's digest is the adapter's to verify, and this is the L1 half of that.
+///
+/// The check used to live here, in the predictor, ahead of the factory call -- which is
+/// precisely why the kernel-ranking role, which has no such preamble, dlopen'ed the same
+/// library unverified. Moving it into CustomLibraryAdapter::load makes one implementation
+/// serve both roles, and this pins the L1 side of that move: a mismatched digest must still
+/// leave the engine without an estimate rather than quietly scoring through a substituted
+/// library.
+TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNoEstimate)
+{
+    auto custom = config(document());
+    custom.adapterType = "custom_library";
+    custom.modelArtifactPath
+        = std::filesystem::absolute(
+              std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
+              / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
+              .string();
+    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.modelHash = sha256(std::string("not this library"));
+
+    const auto result = predict(custom);
+    // INVALID, not UNAVAILABLE: §11.2 separates "I do not answer this question" from "I
+    // answer, and the answer is bad". A library present under a digest it does not match is
+    // the second, and reporting it as merely absent would hide a substituted artifact.
+    EXPECT_EQ(result.status, PredictionStatus::INVALID);
+    EXPECT_DOUBLE_EQ(result.tflops, 0.0);
+}
+
 TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
 {
     auto cfg = config(document());

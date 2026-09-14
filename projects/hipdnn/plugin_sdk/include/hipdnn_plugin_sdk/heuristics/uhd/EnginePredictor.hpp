@@ -87,17 +87,11 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
                 throw std::invalid_argument(
                     "UHD model artifact is unreadable or exceeds size bound");
             }
-            if(config.adapterType == "custom_library" && !config.modelHash.empty())
-            {
-                std::ifstream stream(config.modelArtifactPath, std::ios::binary);
-                std::vector<uint8_t> contents(static_cast<size_t>(size));
-                if(!stream.read(reinterpret_cast<char*>(contents.data()),
-                                static_cast<std::streamsize>(contents.size()))
-                   || sha256(contents.data(), contents.size()) != config.modelHash)
-                {
-                    throw std::invalid_argument("UHD custom library artifact hash mismatch");
-                }
-            }
+            // No custom_library digest check here: CustomLibraryAdapter::load verifies the
+            // bytes before it maps the image, for whichever role binds it. This copy ran
+            // only on the L1 path, which is how the kernel-ranking role ended up dlopening
+            // an unverified .so, and a second implementation of the same rule is what let
+            // the two drift apart in the first place.
         }
         else if(config.nativeSymbol.empty())
         {
