@@ -124,10 +124,12 @@ def test_numeric_only_corpus_derives_no_encoding(tmp_path):
     assert derive_categorical_encoding(frame, NUMERIC_FEATURES) == {}
 
 
-def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(tmp_path):
+# `evaluator` from here down: every test below either trains or recomputes a digest, and
+# RFC 0019 §6.3 leaves both with one definition, in the shared hipdnn_uhd_features binary.
+def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(tmp_path, evaluator):
     """The acceptance case for every model already in the field: no string column, so
     the descriptor and the hash are byte for byte what they were before the map
-    existed. compute_features_hash appends only a truthy encoding, and this is what
+    existed. The digest folds in only a truthy encoding, and this is what
     makes that matter."""
     output_dir = tmp_path / "model"
 
@@ -139,11 +141,11 @@ def test_numeric_only_descriptor_gains_no_key_and_does_not_move_its_hash(tmp_pat
     signature = build_features_signature(NUMERIC_FEATURES)
     assert descriptor["features_signature"] == signature
     # The hash as it was computed before the argument existed, character for character.
-    assert descriptor["features_hash"] == compute_features_hash(signature)
-    assert descriptor["features_hash"] == compute_features_hash(signature, {})
+    assert descriptor["features_hash"] == compute_features_hash(signature, executable=evaluator)
+    assert descriptor["features_hash"] == compute_features_hash(signature, {}, evaluator)
 
 
-def test_manifest_records_the_empty_map(tmp_path):
+def test_manifest_records_the_empty_map(tmp_path, evaluator):
     """Unlike the descriptor: the manifest is provenance, and "this corpus had no
     categorical column" is a fact about the run, not an absence to be inferred."""
     output_dir = tmp_path / "model"
@@ -259,7 +261,7 @@ def test_a_string_has_no_number_without_a_derived_encoding():
         encode_feature_value("$kernel.pipeline", "intrawave")
 
 
-def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path):
+def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path, evaluator):
     """Training succeeds where the global table would have raised, and the descriptor
     carries exactly the distinct values the column held -- no more (a vocabulary wider
     than the corpus claims codes nothing was fitted on) and no fewer (the runtime now
@@ -284,7 +286,7 @@ def test_string_column_trains_and_ships_its_own_vocabulary(tmp_path):
     assert _manifest(output_dir)["categorical_encoding"] == descriptor["categorical_encoding"]
 
 
-def test_encoding_is_folded_into_the_features_hash(tmp_path):
+def test_encoding_is_folded_into_the_features_hash(tmp_path, evaluator):
     """RFC 0019 §6.5: a changed map changes what the model reads while leaving the
     signature text identical, so the hash has to cover it."""
     output_dir = tmp_path / "model"
@@ -294,12 +296,12 @@ def test_encoding_is_folded_into_the_features_hash(tmp_path):
     descriptor = _descriptor(output_dir)
     signature = descriptor["features_signature"]
     assert descriptor["features_hash"] == compute_features_hash(
-        signature, descriptor["categorical_encoding"]
+        signature, descriptor["categorical_encoding"], evaluator
     )
-    assert descriptor["features_hash"] != compute_features_hash(signature)
+    assert descriptor["features_hash"] != compute_features_hash(signature, executable=evaluator)
 
 
-def test_evaluation_scores_through_the_shipped_encoding(tmp_path):
+def test_evaluation_scores_through_the_shipped_encoding(tmp_path, evaluator):
     """Changing shipped categorical codes invalidates the artifact's feature contract."""
     output_dir = tmp_path / "model"
     csv = _string_corpus(tmp_path / "bench.csv")
@@ -315,7 +317,7 @@ def test_evaluation_scores_through_the_shipped_encoding(tmp_path):
         load_model(output_dir)
 
 
-def test_a_value_outside_the_shipped_map_is_refused(tmp_path):
+def test_a_value_outside_the_shipped_map_is_refused(tmp_path, evaluator):
     """The runtime throws when a declared reference carries a value its map lacks, so
     the training-side scorer must not quietly hand LightGBM a NaN and return an
     ordinary leaf for it."""
@@ -334,7 +336,7 @@ def test_a_value_outside_the_shipped_map_is_refused(tmp_path):
     assert "$kernel.pipeline" in str(excinfo.value)
 
 
-def test_numeric_looking_json_categories_are_not_coerced_into_numbers(tmp_path):
+def test_numeric_looking_json_categories_are_not_coerced_into_numbers(tmp_path, evaluator):
     frame = pd.DataFrame({
         "kernel.block_size": _varying(64, 256),
         "kernel.pipeline": _varying("00", "0", period=2),

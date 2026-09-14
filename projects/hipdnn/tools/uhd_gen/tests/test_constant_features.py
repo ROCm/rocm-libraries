@@ -37,22 +37,24 @@ def _train(tmp_path, drop=False, constant=False):
     return main(args), output
 
 
+# Training stamps features_hash, and RFC 0019 §6.3 leaves that with one definition: the
+# shared hipdnn_uhd_features binary. Without it there is no digest to compare against.
 @pytest.mark.parametrize("drop", [False, True])
-def test_pruning_changes_only_the_trained_signature(tmp_path, drop):
+def test_pruning_changes_only_the_trained_signature(tmp_path, drop, evaluator):
     code, output = _train(tmp_path, drop)
     assert code == 0
     descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
     manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
     expected = ["$kernel.block_size"] if drop else ["$kernel.block_size", "$kernel.tile_m", "$device.cu_count"]
     assert descriptor["features_signature"] == expected
-    assert descriptor["features_hash"] == compute_features_hash(expected)
+    assert descriptor["features_hash"] == compute_features_hash(expected, executable=evaluator)
     assert descriptor["trained_against"] == manifest["trained_against"] == PROVENANCE
     assert manifest["device_coverage"]["fields"]["device.cu_count"]["varies"] is False
     assert manifest["dropped_constant_features"] == (["kernel.tile_m", "device.cu_count"] if drop else [])
 
 
 @pytest.mark.parametrize("drop", [False, True])
-def test_no_discriminating_feature_never_publishes_model(tmp_path, drop):
+def test_no_discriminating_feature_never_publishes_model(tmp_path, drop, evaluator):
     code, output = _train(tmp_path, drop, constant=True)
     assert code == 1
     assert not output.exists()

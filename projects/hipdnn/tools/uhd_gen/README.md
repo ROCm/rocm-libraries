@@ -150,7 +150,7 @@ it was dropped.
 | `--features` / `--feature-signature` | One | Exact published columns, or a JSON file containing inline feature expressions |
 | `--descriptor-tree` / `--provenance` | One | Descriptor snapshot used for collection, or its recorded identity/revision provenance |
 | `--engine` | If ambiguous | UED name or UUID in the descriptor tree |
-| `--feature-evaluator` | For expressions | Shared `hipdnn_uhd_features` executable; alternatively set `HIPDNN_UHD_FEATURE_EVALUATOR` or put it on PATH |
+| `--feature-evaluator` | Only if undiscoverable | Shared `hipdnn_uhd_features` executable. Every signature needs it, raw references included: it is the one implementation of `features_hash`. Looked up in this order — this flag, `HIPDNN_UHD_FEATURE_EVALUATOR`, `bin/` and `build/bin/` under the interpreter prefix or above this package, then PATH. All relative, so a checkout mounted at a different root inside a container resolves the same way |
 | `--target` | No | Target column name (default: `tflops`) |
 | `--objective` | No | `max` or `min` (default: `max`). Pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
 | `--score-units` | No | Units the score is expressed in (default: the `--target` column name) |
@@ -492,10 +492,14 @@ Pass `--feature-signature features.json` instead of `--features`:
 ]
 ```
 
-Build `hipdnn_uhd_features` and pass `--feature-evaluator` (or set
-`HIPDNN_UHD_FEATURE_EVALUATOR`). Training and runtime use the same compiled
-descriptor-expression evaluator. Expressions and categorical vocabularies are
-part of the feature hash; there is no separate named `derived` block.
+Build `hipdnn_uhd_features`. Training and runtime use the same compiled
+descriptor-expression evaluator, and it also owns `features_hash`: RFC 0019 §6.3
+gives that digest one definition, `FeatureExtractor::computeHash`, which the tool
+asks for rather than reimplements. So the binary is needed for every training run,
+not only for signatures containing expressions, and a run that cannot find it fails
+naming what to supply instead of stamping a digest nothing verified. Expressions and
+categorical vocabularies are part of the feature hash; there is no separate named
+`derived` block.
 
 An explicit computed expression using a device field that never varied in the
 training corpus is rejected. Automatic feature proposals omit such expressions

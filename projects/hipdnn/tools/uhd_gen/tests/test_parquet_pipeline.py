@@ -110,7 +110,7 @@ def _train(corpus: Path, output_dir: Path, provenance: Path) -> dict:
     return json.loads((output_dir / "train_manifest.json").read_text(encoding="utf-8"))
 
 
-def test_the_collected_csv_and_the_dataset_published_from_it_train_the_same_rows(tmp_path, matmul):
+def test_the_collected_csv_and_the_dataset_published_from_it_train_the_same_rows(tmp_path, matmul, evaluator):
     """The chain the README documents, run end to end.
 
     Both routes must drop the two candidates that never ran and fit the rest. The collector
