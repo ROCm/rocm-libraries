@@ -4,11 +4,12 @@
  * tests/parity/conv_direct_grouped_emit.c -- C-side emitter for the direct
  * grouped convolution parity harness. Selects one of N sampled spec configs by
  * argv[1] (the config index), builds the rocke_direct_conv_16c_spec_t /
- * rocke_direct_conv_4c_spec_t identically to the Python emitter
- * conv_direct_grouped_emit.py, builds the kernel via
- * rocke_build_direct_conv_16c_new / rocke_build_direct_conv_4c_new and lowers via
- * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll to
- * stdout so the two outputs can be byte-compared.
+ * rocke_direct_conv_4c_spec_t / rocke_direct_conv_8c_spec_t /
+ * rocke_direct_conv_32c_spec_t / rocke_direct_depthwise_spec_t identically to
+ * the Python emitter conv_direct_grouped_emit.py, builds the kernel via the
+ * matching rocke_build_direct_conv_*_new function and lowers via
+ * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
+ * to stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +24,10 @@
 enum
 {
     KIND_16C = 0,
-    KIND_4C = 1
+    KIND_4C = 1,
+    KIND_8C = 2,
+    KIND_32C = 3,
+    KIND_DW = 4
 };
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -32,6 +36,9 @@ static int make_cfg(int idx,
                     int* kind,
                     rocke_direct_conv_16c_spec_t* s16,
                     rocke_direct_conv_4c_spec_t* s4,
+                    rocke_direct_conv_8c_spec_t* s8,
+                    rocke_direct_conv_32c_spec_t* s32,
+                    rocke_direct_depthwise_spec_t* sdw,
                     const char** arch)
 {
     rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
@@ -126,6 +133,51 @@ static int make_cfg(int idx,
         *kind = KIND_4C;
         *arch = "gfx950";
         return 0;
+    case 6:
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 16;
+        p.cpg = 8;
+        p.kpg = 8;
+        *s8 = rocke_direct_conv_8c_spec_default();
+        s8->problem = p;
+        s8->block_q = 16;
+        s8->block_groups = 8;
+        s8->double_buffer = true;
+        *kind = KIND_8C;
+        *arch = "gfx950";
+        return 0;
+    case 7:
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 8;
+        p.cpg = 32;
+        p.kpg = 32;
+        *s32 = rocke_direct_conv_32c_spec_default();
+        s32->problem = p;
+        s32->block_q = 32;
+        s32->block_groups = 4;
+        s32->double_buffer = true;
+        *kind = KIND_32C;
+        *arch = "gfx950";
+        return 0;
+    case 8:
+        /* groups must be divisible by block_ch = block_waves * wave_size (2 * 64 = 128) */
+        p.N = 32;
+        p.H = 200;
+        p.W = 200;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        *sdw = rocke_direct_depthwise_spec_default();
+        sdw->problem = p;
+        sdw->block_w = 16;
+        sdw->block_waves = 2;
+        *kind = KIND_DW;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
@@ -144,8 +196,11 @@ int main(int argc, char** argv)
     int kind = KIND_16C;
     rocke_direct_conv_16c_spec_t s16;
     rocke_direct_conv_4c_spec_t s4;
+    rocke_direct_conv_8c_spec_t s8;
+    rocke_direct_conv_32c_spec_t s32;
+    rocke_direct_depthwise_spec_t sdw;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &arch) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -154,13 +209,15 @@ int main(int argc, char** argv)
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel = NULL;
     if(kind == KIND_16C)
-    {
         kernel = rocke_build_direct_conv_16c_new(&b, &s16, arch);
-    }
-    else
-    {
+    else if(kind == KIND_4C)
         kernel = rocke_build_direct_conv_4c_new(&b, &s4, arch);
-    }
+    else if(kind == KIND_8C)
+        kernel = rocke_build_direct_conv_8c_new(&b, &s8, arch);
+    else if(kind == KIND_32C)
+        kernel = rocke_build_direct_conv_32c_new(&b, &s32, arch);
+    else
+        kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);
