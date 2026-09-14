@@ -86,6 +86,153 @@ def test_plsin_capture_mapping_failure_does_not_mutate_loop():
     assert em.instructions == [mfma]
 
 
+def _mxmfma_stub():
+    from rocisa.instruction import MXMFMAInstruction
+    from rocisa.enum import InstType
+    from rocisa.container import vgpr, accvgpr
+    return MXMFMAInstruction(
+        instType=InstType.INST_F32,
+        accType=InstType.INST_F32,
+        variant=[16, 16, 128, 1],
+        acc=accvgpr(0, 4),
+        a=vgpr(8, 4),
+        b=vgpr(12, 4),
+    )
+
+
+def test_plsin_interleave_cvt_two_valu_between_gap_mfmas():
+    """Phase1 convert blob + 2 gap MFMAs become mfma, cvt, cvt, mfma, cvt, cvt."""
+    from rocisa.instruction import VCvtPkF32toBF16
+    from rocisa.container import vgpr
+    from rocisa.code import Module as IsaModule
+
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    woven = IsaModule("16bitSubtilePairedStoreWoven")
+    phase1 = IsaModule("16bitSubtilePairedStorePhase1")
+    for i in range(4):
+        phase1.add(VCvtPkF32toBF16(dst=vgpr(i), src0=vgpr(10 + i), src1=vgpr(20 + i)))
+    addr = SNop(0)
+    phase1.add(addr)
+    gap = IsaModule("PlsinGap_pair0")
+    m0, m1 = _mxmfma_stub(), _mxmfma_stub()
+    gap.add(m0)
+    gap.add(m1)
+    phase2 = IsaModule("16bitSubtilePairedStorePhase2")
+    phase2.add(SNop(1))
+    woven.add(phase1)
+    woven.add(gap)
+    woven.add(phase2)
+    store = IsaModule("store")
+    store.add(woven)
+
+    n = sched._interleaveStoreConvertIntoGapMfmas(store, valuPerGap=2)
+    assert n == 1
+    names = [getattr(c, "name", "") for c in woven.items()]
+    assert names == ["PlsinGap_pair0", "16bitSubtilePairedStorePhase2"]
+    seq = list(gap.items())
+    assert seq[0] is m0
+    assert isinstance(seq[1], VCvtPkF32toBF16) and isinstance(seq[2], VCvtPkF32toBF16)
+    assert seq[3] is m1
+    assert isinstance(seq[4], VCvtPkF32toBF16) and isinstance(seq[5], VCvtPkF32toBF16)
+    assert seq[6] is addr
+
+
+def test_plsin_interleave_cvt_disabled_is_noop():
+    from rocisa.instruction import VCvtPkF32toBF16
+    from rocisa.container import vgpr
+    from rocisa.code import Module as IsaModule
+
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    woven = IsaModule("16bitSubtilePairedStoreWoven")
+    phase1 = IsaModule("16bitSubtilePairedStorePhase1")
+    phase1.add(VCvtPkF32toBF16(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+    gap = IsaModule("PlsinGap_pair0")
+    gap.add(_mxmfma_stub())
+    woven.add(phase1)
+    woven.add(gap)
+    woven.add(IsaModule("16bitSubtilePairedStorePhase2"))
+    store = IsaModule("store")
+    store.add(woven)
+    assert sched._interleaveStoreConvertIntoGapMfmas(store, valuPerGap=0) == 0
+    assert [getattr(c, "name", "") for c in woven.items()] == [
+        "16bitSubtilePairedStorePhase1", "PlsinGap_pair0",
+        "16bitSubtilePairedStorePhase2"]
+
+
+def test_mt256x320_last_k_dead_tiles_are_k0_ab_and_unused_scale():
+    """After last-K MFMAs, K=0 A/B plus the n+1 scale half are dead."""
+    cfg = make_cfg_256x320_fp4(pgr=1)
+    sched = LogicalScheduler(cfg)
+    sched.build()
+    assert cfg.numMFMATilesM == 8 and cfg.numMFMATilesN == 10
+    assert cfg.numSubIterK == 2
+    assert sched.tile_peaks == {"A": 16, "B": 20, "SA": 8, "SB": 10}
+
+    dead0 = sched._deadOperandTileIds(0)
+    live0 = sched._lastKLiveTileIds(0)
+    assert dead0["A"] == set(range(8))
+    assert live0["A"] == set(range(8, 16))
+    assert dead0["B"] == set(range(10))
+    assert live0["B"] == set(range(10, 20))
+    assert dead0["SA"] == {4, 5, 6, 7}
+    assert live0["SA"] == {0, 1, 2, 3}
+    assert dead0["SB"] == {5, 6, 7, 8, 9}
+    assert live0["SB"] == {0, 1, 2, 3, 4}
+    for t in ("A", "B", "SA", "SB"):
+        assert not (dead0[t] & live0[t])
+        assert dead0[t] | live0[t] == set(range(sched.tile_peaks[t]))
+
+    dead1 = sched._deadOperandTileIds(1)
+    live1 = sched._lastKLiveTileIds(1)
+    assert dead1["A"] == dead0["A"] and live1["A"] == live0["A"]
+    assert dead1["B"] == dead0["B"] and live1["B"] == live0["B"]
+    assert dead1["SA"] == {0, 1, 2, 3}
+    assert live1["SA"] == {4, 5, 6, 7}
+    assert dead1["SB"] == {0, 1, 2, 3, 4}
+    assert live1["SB"] == {5, 6, 7, 8, 9}
+
+
+def test_mt256x320_weave_policy_lends_only_dead_k0_tiles():
+    """Weave on 256x320 lends K=0 holes; Lend lends every operand tile."""
+    kernel = create_kernel(256, 320, fp4=True)
+    writer, tiA, tiB, scaleTiA, scaleTiB, _d = make_writer_and_tileinfos(
+        kernel, fp4=True)
+    cfg = make_cfg_256x320_fp4(pgr=1)
+    sched = LogicalScheduler(cfg)
+    sched.build()
+    try:
+        sched.allocVgprTiles(writer, tiA, tiB, scaleTiA, scaleTiB)
+        kernel["PLSINStoreMode"] = "Weave"
+        weaveGroups, lend = sched._selectPlsinFusedStorePolicy(kernel, unroll_iter=0)
+        assert weaveGroups == {}
+        dead_vgprs = 8 * 4 + 10 * 4 + 4 * 1 + 5 * 1  # A + B + SA + SB
+        assert sum(sz for _base, sz in lend) == dead_vgprs
+        live_ids = sched._lastKLiveTileIds(0)
+        live_bases = set()
+        for t, tiles in (("A", sched.vgprTilesA), ("B", sched.vgprTilesB),
+                         ("SA", sched.vgprTilesSA), ("SB", sched.vgprTilesSB)):
+            for tid in live_ids[t]:
+                live_bases.add(tiles[tid].regList.indices[0])
+        assert not any(base in live_bases for base, _sz in lend)
+
+        kernel["PLSINStoreMode"] = "Lend"
+        wgLend, lendAll = sched._selectPlsinFusedStorePolicy(kernel, unroll_iter=0)
+        assert wgLend is None
+        all_vgprs = 16 * 4 + 20 * 4 + 8 * 1 + 10 * 1
+        assert sum(sz for _base, sz in lendAll) == all_vgprs
+    finally:
+        sched.deallocVgprTiles(writer)
+
+
+def test_small_tile_weave_policy_lends_nothing():
+    kernel = {"MacroTile0": 256, "MacroTile1": 256, "PLSINStoreMode": "Weave"}
+    sched = LogicalScheduler(make_cfg_256x256_fp4())
+    sched.build()
+    weaveGroups, lend = sched._selectPlsinFusedStorePolicy(kernel, unroll_iter=0)
+    assert weaveGroups == {}
+    assert lend == []
+
+
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
     fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
@@ -301,6 +448,35 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                              k=scaleTiA.localMMATileGrid[1] * grSA_k_gran),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0] * grSB_mn_gran,
                              k=scaleTiB.localMMATileGrid[1] * grSB_k_gran),
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
+        pgr=pgr,
+    )
+
+
+def make_cfg_256x320_fp4(pgr=1, partSizeM=0, partSizeN=0):
+    """MT256x320 fp4 (MIWT [8,10], two subIterK) — large-tile last-K weave target."""
+    kernel = create_kernel(256, 320, fp4=True)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=grA,
+        grB=grB,
+        lrSA=ReadGranularity(mn=2, k=2),
+        lrSB=ReadGranularity(mn=2, k=2),
+        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                             k=scaleTiA.localMMATileGrid[1]),
+        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                             k=scaleTiB.localMMATileGrid[1]),
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=pgr,

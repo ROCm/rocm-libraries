@@ -2121,6 +2121,12 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.vgprPool.size() > self.states.regCaps["MaxVgpr"]:
       self.states.overflowedResources = 1
+      if self.states.postLoopStoreInNll:
+        printExit("PostLoopStoreInNll kernel %s needs %u VGPRs against a cap of %u. "
+                  "It would be emitted as an empty shell and silently dropped from "
+                  "the library."
+                  % (self.states.kernelName, self.vgprPool.size(),
+                     self.states.regCaps["MaxVgpr"]))
     elif self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       self.states.overflowedResources = 2
       # An overflow is not a build failure: the kernel is emitted as an .if 0 /
@@ -14550,19 +14556,21 @@ class KernelWriterAssembly(KernelWriter):
         self.addSgprVarToPool(_name)
         lentSgprs.append(_name)
 
-    # --- lend main-loop-dead input VGPR tiles to the store (large macro tiles) ---
-    # For macro tiles > 256x256 the scheduler kept the terminal MFMAs in the loop
-    # (no weave), so every input VGPR tile (A/B/scaleA/scaleB) is dead at this
-    # terminal NLL point. The loop already peaks at 256 arch VGPRs; if the store's
-    # temporaries (valuC window / coord0/1 / element batch) checked out fresh
-    # registers on top, the high-water mark would exceed the single-wave occupancy
-    # budget and codegen would reject the kernel. Mark the dead tiles Available
-    # (addFromCheckOut is non-destructive: it frees the checked-out block WITHOUT
-    # reassigning its index) so the store batch first-fits into the freed holes and
-    # the watermark stays at the loop peak. We removeFromCheckOut (mark in-use
-    # again) after the store so the later-emitted PLAIN NLL arm and the end-of-kernel
-    # deallocVgprTiles see the exact original pool state. try/except guards tiles a
-    # tail path may have already released (already checked-in -> not lendable).
+    # --- lend main-loop-dead input VGPR tiles to the store ---
+    # The scheduler lists operand tiles that are dead at fused-store time:
+    #   Lend  — every A/B/scale tile (terminal MFMAs already ran in the loop).
+    #   Weave on MT>256x256 — K=0 A/B (+ unused scale); last-K sources stay live
+    #                         and are woven into the store gaps.
+    # The loop already peaks at 256 arch VGPRs; if the store's temporaries
+    # (valuC window / coord0/1 / element batch) checked out fresh registers on
+    # top, the high-water mark would exceed the single-wave occupancy budget.
+    # Mark the dead tiles Available (addFromCheckOut is non-destructive: it
+    # frees the checked-out block WITHOUT reassigning its index) so the store
+    # batch first-fits into the freed holes and the watermark stays at the loop
+    # peak. We removeFromCheckOut (mark in-use again) after the store so the
+    # later-emitted PLAIN NLL arm and the end-of-kernel deallocVgprTiles see
+    # the exact original pool state. try/except guards tiles a tail path may
+    # have already released (already checked-in -> not lendable).
     # Protected arch-VGPR set = every D-output tile register. For spill tiles
     # (MIWaveTile product > 64) the >256th accumulators are parked in these VGPRs
     # (which may alias dead input-tile VGPRs); a lent-then-reused register there
@@ -14838,13 +14846,15 @@ class KernelWriterAssembly(KernelWriter):
     # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
     # and, for StreamK, saves/restores the original Alpha around this call, so the later
     # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
-    # Arbitrary-alpha fused path: retain the normal per-element alpha multiply.
+    # Arbitrary-alpha fused path (default): retain the normal per-element alpha
+    # multiply. TENSILE_PLSIN_APPLY_ALPHA=0 drops it (alpha==1 skip).
     # beta==0 and full-tile are still guaranteed by the front guard, so no C-read or
     # edge path is added.
+    skipAlpha = self._plsinFusedFlagEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
-      noGSUBranch=True, applyAlpha=True, betas=[False], edge=False)
+      noGSUBranch=True, applyAlpha=(not skipAlpha), betas=[False], edge=False)
     self.states.subtileFusedWeave = savedWeave
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
@@ -16022,6 +16032,16 @@ class KernelWriterAssembly(KernelWriter):
   def _plsinFusedFlagEligible(self, kernel):
     """Whether this kernel uses the hoisted PostLoopFusedStore runtime flag."""
     return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
+
+  def _plsinApplyAlphaInFused(self, kernel):
+    """Apply the GEMM alpha scalar inside the fused NLL store.
+
+    ``1e63b8a518`` made this the production default so alpha!=1 can stay on the
+    fused path instead of falling back to PLAIN. ``TENSILE_PLSIN_APPLY_ALPHA=0``
+    restores the older skip-multiply fast path (correct only when alpha==1).
+    """
+    return self._plsinFusedFlagEligible(kernel) and \
+           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "1") != "0"
 
   def _plsinCanBypassEndSummation(self, kernel):
     """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit

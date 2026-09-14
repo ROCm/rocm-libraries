@@ -3358,13 +3358,14 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emit16bitSubtilePairedStoreWoven(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, pairIdx: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
-    """4d-3b weave variant of _emit16bitSubtilePairedStore: Phase1, then the NEXT
-    pairs' terminal MFMAs (to fill this pair's ds_bpermute LDS window), then Phase2.
+    """4d-3b weave variant of _emit16bitSubtilePairedStore: Phase1, then a gap
+    that later receives terminal MFMAs, then Phase2.
 
-    Phase2's s_waitcnt lgkmcnt(0) drains only this pair's 4 ds_bpermute; it does NOT
-    wait on MFMAs, so the MFMAs issued in the gap overlap the ~88-cycle latency.
-    Readiness (this pair's own MFMAs) is guaranteed by the caller emitting them
-    before the accvgpr_read; here we only pre-issue future pairs' MFMAs."""
+    After the planner fills the gap, LogicalScheduler._interleaveStoreConvertIntoGapMfmas
+    spreads Phase1's v_cvt_pk (2 VALU per MFMA) into that gap so the convert hides
+    v_mfma_scale issue latency the same way ds_read does in the main loop. Phase2
+    (permlane + buffer_store) stays after the convert has filled vPack.
+    """
     module = Module("16bitSubtilePairedStoreWoven")
     phase1 = self._emit16bitSubtilePairedStorePhase1(
       addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
