@@ -4,7 +4,7 @@ from typing import Mapping
 from rocisa.code import Module
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
-    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32
+    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
     scalarStaticRemainder
@@ -46,6 +46,13 @@ class GL2PrefetchLoad(GL2Prefetch):
         if isMX:
             coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
+        elif tp.get("isSwizzledTDM"):
+            # Swizzled buffer is [tileO, kO, kM, tileI, kI]: each row (tileO) is contiguous in K, so
+            # the coalesced run is MI_dim*DepthU (one DepthU slice per row) and the perpendicular
+            # dimension is the (mt/MI_dim) rows the cluster spans.
+            du: int = kernel["_DepthU%s" % subTc]
+            swzMi = kernel["MatrixInstM"] if tp["idx"] == 0 else kernel["MatrixInstN"]
+            coalescedDim, perpendicularDim = swzMi * du, (mt // swzMi) * numTileWGs
         else:
             du: int = kernel["_DepthU%s" % subTc]
             coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
@@ -66,6 +73,9 @@ class GL2PrefetchLoad(GL2Prefetch):
         if tc.startswith("MX"):
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
                 round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
+        elif tp.get("isSwizzledTDM"):
+            swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
+            mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(swzMi * du * bpe), comment="swizzle addr increment = MI*DepthU*bpe"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du * bpe), comment="addr increment"))
@@ -161,7 +171,10 @@ class GL2PrefetchLoad(GL2Prefetch):
                 mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
             else:
-                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
+                # Swizzle: one macro-tile step is (mt/MI) rows, later scaled by the MI*paddedK row
+                # stride below; normal path steps mt elements along the tile stride.
+                swzTileMul = (mt // (kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"])) if tp.get("isSwizzledTDM") else mt
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), swzTileMul, comment=f"clusterBaseTile * {swzTileMul}"))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
 
@@ -169,6 +182,14 @@ class GL2PrefetchLoad(GL2Prefetch):
             if isMX:
                 perpStride = sgpr(tmpSgprIdx2)
                 mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
+            elif tp.get("isSwizzledTDM"):
+                # swizzle row (perpendicular) stride = MI_dim * paddedK, paddedK = roundUp(SizeL, swzK)
+                swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
+                swzK = (kernel["WavefrontSize"] // swzMi) * (16 // int(bpe))
+                perpStride = sgpr(tmpSgprIdx2)
+                mod.add(SAddU32(perpStride, sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+                mod.add(SAndB32(perpStride, perpStride, hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+                mod.add(SMulI32(perpStride, perpStride, swzMi, "swizzle perp stride = MI*paddedK"))
             for i in range(nl):
                 vgprAddrName = f"{vgprAddrBaseName}_{i}"
                 vgprAddrNameHi = vgprAddrName + "+1"
