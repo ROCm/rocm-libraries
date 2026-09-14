@@ -40,7 +40,7 @@ from .ScheduleTypes import (
     PartitionSchedule,
 )
 from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
-    MFMAInstruction, MXMFMAInstruction
+    MFMAInstruction, MXMFMAInstruction, VCvtPkF32toBF16, VCvtPkF32toFP16
 
 from ...Common.GlobalParameters import globalParameters
 from ...Common import plsinDebugEnv
@@ -3738,7 +3738,81 @@ class LogicalScheduler:
         module.add(doneLabel)
         return module
 
-    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None):
+    def _lastKLiveTileIds(self, unroll_iter: int) -> Dict[str, set]:
+        """VGPR tile ids read by last-subIterK MFMAs at ``unroll_iter``.
+
+        Those tiles stay live while the fused store weaves last-K MFMAs.
+        K=0 A/B (and the n+1 scale ping-pong half) are the complement.
+        """
+        live = {t: set() for t in self.tensors}
+        last_k = self.config.numSubIterK - 1
+        if last_k < 0 or not self._partitions:
+            return live
+        for slots in self._partitions:
+            if last_k >= len(slots) or not slots[last_k].mfma:
+                continue
+            maps = slots[last_k].mfma.vgpr_tile_maps
+            for tensor in self.tensors:
+                mlist = maps.get(tensor, [{}])
+                ui = unroll_iter if unroll_iter < len(mlist) else 0
+                live[tensor].update(mlist[ui].values())
+        return live
+
+    def _deadOperandTileIds(self, unroll_iter: int) -> Dict[str, set]:
+        """Operand tile ids not read by last-K MFMAs (K=0 A/B + unused scale)."""
+        live = self._lastKLiveTileIds(unroll_iter)
+        peaks = getattr(self, "tile_peaks", {})
+        return {t: set(range(peaks.get(t, 0))) - live.get(t, set())
+                for t in self.tensors}
+
+    def _operandLendVgprs(self, tile_ids_by_tensor: Optional[Dict[str, set]] = None):
+        """``(base, size)`` for allocated A/B/SA/SB tiles.
+
+        ``tile_ids_by_tensor=None`` lends every allocated operand tile (full
+        Lend). Otherwise only the requested ids (last-K Weave holes).
+        """
+        tiles_by = {
+            "A":  getattr(self, "vgprTilesA", []),
+            "B":  getattr(self, "vgprTilesB", []),
+            "SA": getattr(self, "vgprTilesSA", []),
+            "SB": getattr(self, "vgprTilesSB", []),
+        }
+        lend = []
+        for tensor, tile_list in tiles_by.items():
+            wanted = None if tile_ids_by_tensor is None else tile_ids_by_tensor.get(tensor)
+            for tid, tile in enumerate(tile_list):
+                if wanted is not None and tid not in wanted:
+                    continue
+                if getattr(tile.regList, "is_vgpr", False) and tile.regList.indices:
+                    lend.append((tile.regList.indices[0], len(tile.regList.indices)))
+        return lend
+
+    def _selectPlsinFusedStorePolicy(self, kernel, unroll_iter: int = 0):
+        """Return ``(weaveGroups, lendTiles)`` for the fused NLL store.
+
+        * Lend (``PLSINStoreMode=Lend`` or env override): all terminal MFMAs
+          stay in the loop; lend every operand tile.
+        * Large-MT Weave (MT>256x256, default): last-K MFMAs move into store
+          gaps; lend K=0 A/B (+ unused scale) so store temps reuse those holes
+          while last-K sources stay live. Falls back to full Lend if there are
+          no A/B holes (single-K tiles).
+        * Small-MT Weave: planner weave, no lend (loop already has headroom).
+        """
+        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        paramLend = kernel.get("PLSINStoreMode", "Weave") == "Lend"
+        envLend = plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0"
+        if paramLend or envLend:
+            return None, self._operandLendVgprs(None)
+        if largeTile:
+            dead_ids = self._deadOperandTileIds(unroll_iter)
+            has_ab_holes = bool(dead_ids.get("A") or dead_ids.get("B"))
+            if self.config.numSubIterK >= 2 and has_ab_holes:
+                return {}, self._operandLendVgprs(dead_ids)
+            return None, self._operandLendVgprs(None)
+        return {}, []
+
+    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None,
+                           unroll_iter=0):
         """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
 
         Non-fused kernels: byte-identical to the stock single-NLL emission (early
@@ -3769,53 +3843,16 @@ class LogicalScheduler:
         # The woven store is generated in capture mode first. Its actual ACC-read
         # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
         fusedEmitted = copy.deepcopy(emitted_3d)
-        # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
-        # fused store's temporaries (valuC window, coord0/1, and the element batch)
-        # cannot coexist with the still-live input VGPR tiles without pushing the
-        # arch-VGPR high-water mark past the single-wave occupancy budget. For those
-        # tiles: (a) keep the terminal MFMAs IN the loop (no weave) so every input
-        # tile is dead before the store, and (b) hand the now-dead input-tile VGPRs
-        # to buildSubtileFusedStore to lend to the store pool (non-destructively) so
-        # the store batch reuses the freed holes instead of extending the watermark.
-        # Tiles <= 256x256 keep the existing weave (they already fit at occupancy).
-        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
-        # Store-bound small tiles (#1): on shapes where the terminal-MFMA drain is
-        # too small to hide the woven store (drain-MFMA cycles << store-epilogue
-        # cycles), weaving buys nothing but forces the store to run while the input
-        # VGPR tiles are still live -- the store's temp checkouts then collide with
-        # those live tiles and spill into extra register-shuffle VALU (v_mov / v_and
-        # / v_lshlrev / v_permlane). Opt such small tiles into the SAME strategy as
-        # large tiles: keep the terminal MFMAs IN the loop (every input tile dead
-        # before the store) and lend the now-dead input-tile VGPRs to the store pool
-        # so its temps reuse the freed holes instead of shuffling. Env-gated (default
-        # off) so compute-bound tiles, where the weave overlap is a net win, are
-        # unaffected. In production this is selected by the PLSINStoreMode solution
-        # parameter (Lend vs Weave), so the host can pick the lend-general kernel for
-        # store-bound shapes and the fused-general (weave) kernel for compute-bound
-        # shapes without a single-binary compromise. TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_SMALLTILE_LEND=1"
-        # remains a test-only override that forces Lend regardless of the parameter.
-        paramLend = kernel.get("PLSINStoreMode", "Weave") == "Lend"
-        envLend = plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0"
-        smallTileLend = (not largeTile) and (paramLend or envLend)
-        if largeTile or smallTileLend:
-            weaveGroups = None
-            # Carry (base, size) per input tile so buildSubtileFusedStore can skip
-            # any tile that overlaps the spilled-accumulator arch-VGPR region. For
-            # spill tiles (MIWaveTile product > 64) the loop parks the >256th
-            # accumulators in dead input-tile VGPRs; those must stay reserved so the
-            # store's accvgpr read (and the subsequent post-loop store) can recover
-            # them. Lending such a tile lets a store temp reuse it and clobber a live
-            # spilled accumulator -> wrong D. Non-overlapping input tiles are safe.
-            lendTiles = []
-            for _tl in (self.vgprTilesA, self.vgprTilesB,
-                        self.vgprTilesSA, self.vgprTilesSB):
-                for _t in _tl:
-                    if getattr(_t.regList, "is_vgpr", False) and _t.regList.indices:
-                        lendTiles.append((_t.regList.indices[0], len(_t.regList.indices)))
-            writer.states.subtileFusedLendVgprs = lendTiles
-        else:
-            weaveGroups = {}
-            writer.states.subtileFusedLendVgprs = []
+        # PLSINStoreMode selects the fused epilogue:
+        #   Weave — planner moves last-subIterK MFMAs into store gaps. Tiles
+        #           <=256x256 have occupancy headroom; MT>256x256 (e.g. 256x320)
+        #           first lends K=0 A/B (+ unused scale) so store temps reuse
+        #           those holes while last-K sources stay live.
+        #   Lend  — keep every terminal MFMA in the loop, then lend all operand
+        #           tiles. TENSILE_PLSIN_SMALLTILE_LEND=1 forces this.
+        # buildSubtileFusedStore still skips any lent tile that overlaps spilled D.
+        weaveGroups, lendTiles = self._selectPlsinFusedStorePolicy(kernel, unroll_iter)
+        writer.states.subtileFusedLendVgprs = lendTiles
         savedGroups = writer.states.subtileWeaveMfmaGroups
         savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
         savedCaptures = writer.states.subtileWeaveCaptureInstances
@@ -3842,6 +3879,10 @@ class LogicalScheduler:
                     fusedEmitted, writer.states.subtileWeaveCaptureInstances,
                     storeModule,
                     int(writer.states.archCaps.get("MfmaToAccReadLatency", 0)))
+                # Planner appends the gap MFMAs after Phase1 (mfma, mfma, step-1,
+                # mfma, mfma, step-2). Spread the convert VALU into those MFMA
+                # issue shadows (2 v_cvt_pk per gap), matching main-loop ds_read.
+                self._interleaveStoreConvertIntoGapMfmas(storeModule)
         finally:
             writer.states.subtileWeaveMfmaGroups = savedGroups
             writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
@@ -3921,6 +3962,93 @@ class LogicalScheduler:
                     mfmaEms.append((em, list(em.instructions)))
                     allInsts.extend(em.instructions)
         return mfmaEms, allInsts
+
+    @staticmethod
+    def _splitCvtValu(mod):
+        """Pull v_cvt_pk_* out of a Phase1 module; leave address/comments in rest."""
+        cvts, rest = [], []
+        for it in list(mod.items()):
+            if isinstance(it, (VCvtPkF32toBF16, VCvtPkF32toFP16)):
+                cvts.append(it)
+            elif isinstance(it, Module):
+                subC, subR = LogicalScheduler._splitCvtValu(it)
+                cvts.extend(subC)
+                rest.extend(subR)
+            else:
+                rest.append(it)
+        return cvts, rest
+
+    def _interleaveStoreConvertIntoGapMfmas(self, storeModule, valuPerGap=None):
+        """Rewrite each woven pair from Phase1-blob + Gap-MFMAs + Phase2 into
+
+            mfma, cvt, cvt, mfma, cvt, cvt, <Phase1 rest>, Phase2
+
+        so two convert VALU sit in each v_mfma_scale issue shadow (the main-loop
+        ds_read analogue). Phase2 (permlane + buffer_store) stays after the
+        convert has filled vPack. No-op when TENSILE_PLSIN_CVT_PER_GAP=0.
+        """
+        if valuPerGap is None:
+            valuPerGap = int(plsinDebugEnv("TENSILE_PLSIN_CVT_PER_GAP", "2"))
+        if valuPerGap <= 0 or storeModule is None:
+            return 0
+        rewritten = 0
+
+        def _rewrite(mod):
+            nonlocal rewritten
+            if not isinstance(mod, Module):
+                return
+            name = getattr(mod, "name", "") or ""
+            if name == "16bitSubtilePairedStoreWoven":
+                if self._rewriteOneWovenPair(mod, valuPerGap):
+                    rewritten += 1
+                return
+            for child in list(mod.items()):
+                _rewrite(child)
+
+        _rewrite(storeModule)
+        return rewritten
+
+    def _rewriteOneWovenPair(self, woven, valuPerGap):
+        """Interleave this pair's v_cvt_pk into its PlsinGap MFMAs. Returns True if rewritten."""
+        phase1 = gap = phase2 = None
+        others = []
+        for child in list(woven.items()):
+            cname = getattr(child, "name", "") or ""
+            if cname == "16bitSubtilePairedStorePhase1":
+                phase1 = child
+            elif cname.startswith("PlsinGap_"):
+                gap = child
+            elif cname == "16bitSubtilePairedStorePhase2":
+                phase2 = child
+            else:
+                others.append(child)
+        if phase1 is None or gap is None or phase2 is None:
+            return False
+        cvts, p1rest = self._splitCvtValu(phase1)
+        mfmas, gaprest = [], []
+        for it in list(gap.items()):
+            if isinstance(it, (MFMAInstruction, MXMFMAInstruction)):
+                mfmas.append(it)
+            else:
+                gaprest.append(it)
+        if not cvts or not mfmas:
+            return False
+        interleaved = []
+        ci = 0
+        for mfma in mfmas:
+            interleaved.append(mfma)
+            for _ in range(valuPerGap):
+                if ci < len(cvts):
+                    interleaved.append(cvts[ci])
+                    ci += 1
+        while ci < len(cvts):
+            interleaved.append(cvts[ci])
+            ci += 1
+        interleaved.extend(gaprest)
+        interleaved.extend(p1rest)
+        gap.setItems(interleaved)
+        woven.setItems(others + [gap, phase2])
+        return True
 
     def _planCapturedTerminalMfmas(self, emitted_3d, captures, storeModule,
                                    requiredCycles):
@@ -4506,7 +4634,8 @@ class LogicalScheduler:
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft]),
-                                  fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
+                                  fusedExitLabel=(plsinFusedExitLabel if plsin else None),
+                                  unroll_iter=nll_ft))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
@@ -4528,7 +4657,8 @@ class LogicalScheduler:
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
                                       inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx]),
-                                      fusedExitLabel=(plsinFusedExitLabel if plsin else None)))
+                                      fusedExitLabel=(plsinFusedExitLabel if plsin else None),
+                                      unroll_iter=nll_idx))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
                 if plsin:

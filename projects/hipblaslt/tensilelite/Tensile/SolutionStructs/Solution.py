@@ -1815,11 +1815,19 @@ class Solution(collections.abc.Mapping):
       )
       # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
       streamKAtomicFree = not (state["StreamK"] and state["StreamKAtomic"])
-      # Spill tiles: MIWaveTile product > 64 spills accumulators into arch VGPRs
-      # and overflows the occ-1 budget under the fused store. MIWaveTile is only
-      # present for EnableMatrixInstruction solutions; guard the lookup.
+      # Spill tiles: MIWaveTile product > 64 parks extra accumulators in arch
+      # VGPRs. Full Weave-without-lend cannot coexist with those spills (live
+      # A/B tiles + store temps + spilled accs exceed the occ-1 256 arch-VGPR
+      # budget). Large-MT Weave instead lends K=0 A/B after the last K=0 MFMA
+      # and weaves last-K MFMAs into the store using those holes. Lend keeps
+      # every terminal MFMA in-loop. Enable PLSIN for macrotiles larger than
+      # 256x256 (first target: MT256x320 / MIWT [8,10]).
+      # MIWaveTile is only present for EnableMatrixInstruction solutions.
       miwt = state.get("MIWaveTile")
-      spillFree = bool(miwt) and len(miwt) == 2 and (miwt[0] * miwt[1] <= 64)
+      largeTileLend = (int(state.get("MacroTile0", 0)) > 256
+                       or int(state.get("MacroTile1", 0)) > 256)
+      spillFree = bool(miwt) and len(miwt) == 2 and (
+          (miwt[0] * miwt[1] <= 64) or largeTileLend)
       # Store-footprint fit: large asymmetric tiles (min>=4 and max>=14) overflow
       # the arch-VGPR budget and emit out-of-range v>=256.
       storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
@@ -1858,6 +1866,9 @@ class Solution(collections.abc.Mapping):
     if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
       state["PostLoopStoreInNll"] = False
 
+    # Large-MT fused store weaves last-K MFMAs into the store after lending
+    # K=0 A/B (LogicalScheduler _selectPlsinFusedStorePolicy). Keep the YAML
+    # PLSINStoreMode (default Weave) so Lend remains an explicit opt-out.
     # PLSINStoreMode only matters when PLSIN is on; canonicalize when disabled so
     # non-PLSIN kernels are not split into spurious Weave/Lend name variants.
     if not state.get("PostLoopStoreInNll", False):
@@ -6302,8 +6313,7 @@ class Solution(collections.abc.Mapping):
     # PLSINStoreMode (Weave/Lend) only affects the fused store epilogue, so it is
     # meaningless once PLSIN is disabled. Canonicalize it to the default in that case
     # so a non-PLSIN kernel is not split into spurious Weave/Lend name variants (the
-    # parameter is in RequiredParameters and thus part of the kernel name). It is also
-    # inert for tiles > 256x256, which LogicalScheduler forces to Lend regardless.
+    # parameter is in RequiredParameters and thus part of the kernel name).
     if not state.get("PostLoopStoreInNll", False):
       state["PLSINStoreMode"] = "Weave"
 

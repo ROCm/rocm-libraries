@@ -1168,12 +1168,12 @@ validParameters = { # we need to make sure this matches develop
     # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
     # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
     "PostLoopStoreInNll": [False, True],
-    # PLSIN store-epilogue mode (only meaningful when PostLoopStoreInNll is True and
-    # the tile is <= 256x256; larger tiles are forced to Lend regardless):
-    #   "Weave" - terminal MFMAs interleaved with the fused store, input-tile VGPRs
-    #             stay live; hides store latency behind compute (compute-bound shapes).
-    #   "Lend"  - terminal MFMAs kept in the loop, dead input-tile VGPRs lent to the
-    #             fused store pool; removes register-shuffle VALU (store-bound shapes).
+    # PLSIN store-epilogue mode (only meaningful when PostLoopStoreInNll is True):
+    #   "Weave" - last-K MFMAs interleaved with the fused store. Tiles <=256x256
+    #             keep input VGPRs live (occupancy headroom). Larger tiles (e.g.
+    #             MT256x320) lend K=0 A/B so store temps reuse those holes.
+    #   "Lend"  - all terminal MFMAs kept in the loop, every dead input-tile VGPR
+    #             lent to the fused store pool.
     # Weave and Lend require incompatible static VGPR allocations, so this is a
     # kernel-generation (solution-selection) choice, not a runtime branch. Both
     # variants keep the plain-NLL fallback (fused-general / lend-general).

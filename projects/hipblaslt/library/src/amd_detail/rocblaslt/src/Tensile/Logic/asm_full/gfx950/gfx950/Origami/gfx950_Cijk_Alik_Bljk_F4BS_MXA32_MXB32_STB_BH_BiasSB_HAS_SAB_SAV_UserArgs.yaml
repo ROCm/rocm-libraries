@@ -570,10 +570,14 @@
     MIWaveTile:
     - 8
     - 10
+    MacroTile0: 256
+    MacroTile1: 320
     NonTemporalD: 4
     OptNoLoadLoop: 1
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
+    PostLoopStoreInNll: true
+    PLSINStoreMode: Weave
     ScheduleIterAlg: 3
     SolutionIndex: 2
     StaggerU: 0
