@@ -90,8 +90,8 @@ def _spec_to_dict(spec: UniversalGemmSpec) -> Dict[str, object]:
     }
 
 
-def _spec_hash(spec: UniversalGemmSpec) -> str:
-    d = _spec_to_dict(spec)
+def _spec_hash(spec: UniversalGemmSpec, *, arch: str = "gfx950") -> str:
+    d = {"arch": arch, "spec": _spec_to_dict(spec)}
     blob = json.dumps(d, sort_keys=True).encode()
     return hashlib.sha1(blob).hexdigest()[:12]
 
@@ -101,31 +101,26 @@ def _spec_hash(spec: UniversalGemmSpec) -> str:
 # ---------------------------------------------------------------------
 
 
-def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
+def _extract_elf_meta(hsaco_path: Path, *, arch: str = "gfx950") -> Dict[str, int]:
     """Pull VGPR/SGPR/LDS bytes from the HSA kernel descriptor.
 
-    HSA-style code objects encode this in `.note` and `.rodata`; the
-    most portable way without depending on `pyelftools` is to call
-    `llvm-objdump` (installed alongside the ROCm toolchain) and grep
-    the result. We keep this best-effort: if the tool isn't present
-    the metadata stays empty (sweeping still proceeds).
+    HSA-style code objects encode this in the AMDGPU metadata ELF note.
+    Read that note with ``llvm-readelf`` rather than disassembling: current
+    code objects no longer reproduce the ``.amdhsa_*`` assembly directives
+    in objdump output. We keep this best-effort so sweeping still proceeds
+    when the ROCm inspection tools are unavailable.
     """
     import shutil
     import subprocess
 
-    od = shutil.which("llvm-objdump") or shutil.which("/opt/rocm/llvm/bin/llvm-objdump")
-    if not od:
+    readelf = shutil.which("llvm-readelf") or shutil.which(
+        "/opt/rocm/llvm/bin/llvm-readelf"
+    )
+    if not readelf:
         return {}
     try:
         r = subprocess.run(
-            [
-                od,
-                "--disassemble-symbols=",
-                "--mcpu=gfx950",
-                "--triple=amdgcn-amd-amdhsa",
-                "-S",
-                str(hsaco_path),
-            ],
+            [readelf, "--notes", str(hsaco_path)],
             capture_output=True,
             text=True,
             timeout=10,
@@ -133,24 +128,24 @@ def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
         out = r.stdout + r.stderr
     except Exception:
         return {}
+    keys = {
+        ".vgpr_count": "vgprs",
+        ".sgpr_count": "sgprs",
+        ".group_segment_fixed_size": "lds_bytes",
+        ".vgpr_spill_count": "vgpr_spills",
+        ".sgpr_spill_count": "sgpr_spills",
+    }
     meta: Dict[str, int] = {}
     for line in out.splitlines():
         line = line.strip()
-        if line.startswith(".amdhsa_next_free_vgpr"):
+        for prefix, name in keys.items():
+            if not line.startswith(prefix):
+                continue
             try:
-                meta["vgprs"] = int(line.split()[-1])
-            except ValueError:
+                meta[name] = int(line.split(":", 1)[1].strip())
+            except (IndexError, ValueError):
                 pass
-        elif line.startswith(".amdhsa_next_free_sgpr"):
-            try:
-                meta["sgprs"] = int(line.split()[-1])
-            except ValueError:
-                pass
-        elif line.startswith(".amdhsa_group_segment_fixed_size"):
-            try:
-                meta["lds_bytes"] = int(line.split()[-1])
-            except ValueError:
-                pass
+            break
     return meta
 
 
@@ -159,13 +154,13 @@ def _extract_elf_meta(hsaco_path: Path) -> Dict[str, int]:
 # ---------------------------------------------------------------------
 
 
-def _build_one(args: Tuple[str, Dict[str, object], str, str]) -> Dict[str, object]:
+def _build_one(args: Tuple[str, Dict[str, object], str, str, str]) -> Dict[str, object]:
     """Build worker. Runs in the calling process or in a pool worker.
 
-    args = (spec_hash, spec_dict, cache_dir, isa)
+    args = (spec_hash, spec_dict, cache_dir, isa, arch)
     Returns the BuildRecord as a dict (so it survives a fork/spawn).
     """
-    spec_hash, spec_dict, cache_dir_str, isa = args
+    spec_hash, spec_dict, cache_dir_str, isa, arch = args
     cache_dir = Path(cache_dir_str)
     cache_dir.mkdir(parents=True, exist_ok=True)
     spec = _spec_from_dict(spec_dict)
@@ -187,14 +182,14 @@ def _build_one(args: Tuple[str, Dict[str, object], str, str]) -> Dict[str, objec
         rec.ok = True
         rec.hsaco_path = str(out_path)
         rec.hsaco_bytes = out_path.stat().st_size
-        rec.elf_meta = _extract_elf_meta(out_path)
+        rec.elf_meta = _extract_elf_meta(out_path, arch=arch)
         return asdict(rec)
 
     try:
         t0 = time.perf_counter()
-        kernel = build_universal_gemm(spec)
+        kernel = build_universal_gemm(spec, arch=arch)
         t1 = time.perf_counter()
-        ll = lower_kernel_to_llvm(kernel)
+        ll = lower_kernel_to_llvm(kernel, arch=arch)
         t2 = time.perf_counter()
         hsaco, ct = build_hsaco_from_llvm_ir(ll, isa=isa)
 
@@ -205,7 +200,7 @@ def _build_one(args: Tuple[str, Dict[str, object], str, str]) -> Dict[str, objec
         rec.ir_build_ms = (t1 - t0) * 1000.0
         rec.ir_lower_ms = (t2 - t1) * 1000.0
         rec.comgr_ms = ct.total * 1000.0
-        rec.elf_meta = _extract_elf_meta(out_path)
+        rec.elf_meta = _extract_elf_meta(out_path, arch=arch)
     except Exception as e:
         rec.error = f"{type(e).__name__}: {e}"
 
@@ -235,6 +230,7 @@ def build_all_instances(
     specs: Iterable[UniversalGemmSpec],
     *,
     cache_dir: Path,
+    arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     parallel: Optional[int] = None,
 ) -> List[BuildRecord]:
@@ -251,7 +247,15 @@ def build_all_instances(
     if not specs:
         return []
 
-    work = [(_spec_hash(s), _spec_to_dict(s), str(cache_dir), isa) for s in specs]
+    if arch is None:
+        from .core.arch import arch_from_isa
+
+        arch = arch_from_isa(isa)
+
+    work = [
+        (_spec_hash(s, arch=arch), _spec_to_dict(s), str(cache_dir), isa, arch)
+        for s in specs
+    ]
 
     if parallel == 1:
         out_dicts = [_build_one(w) for w in work]
@@ -313,6 +317,7 @@ def write_sweep_manifest(
 def build_default_dispatcher_set(
     *,
     cache_dir: Path,
+    arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     parallel: Optional[int] = None,
     pipelines: Sequence[str] = ("compv3", "compv4"),
@@ -326,10 +331,21 @@ def build_default_dispatcher_set(
     """
     from .instances import all_dispatcher_configs
 
+    if arch is None:
+        from .core.arch import arch_from_isa
+
+        arch = arch_from_isa(isa)
+
+    from .core.arch import ArchTarget
+
     specs = list(
         all_dispatcher_configs(
             pipeline=pipelines,  # type: ignore[arg-type]
             epilogue=epilogues,  # type: ignore[arg-type]
+            arch=arch,
+            wave_size=ArchTarget.from_gfx(arch).wave_size,
         )
     )
-    return build_all_instances(specs, cache_dir=cache_dir, isa=isa, parallel=parallel)
+    return build_all_instances(
+        specs, cache_dir=cache_dir, arch=arch, isa=isa, parallel=parallel
+    )
