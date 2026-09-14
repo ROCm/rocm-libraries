@@ -23,7 +23,10 @@ struct arch_cdna4
 
     using buffer_t = __amdgpu_buffer_rsrc_t;
 
-    template <fpfmt Fmt, int Rows, int Cols, use Use>
+    // Batch is the independent MFMA blocks a wave runs at once, 1 for full-wave shapes.
+    //
+    // Rows/Cols stay per-block and the map flattens the block into the batched axis.
+    template <fpfmt Fmt, int Rows, int Cols, use Use, int Batch = 1>
     struct map_fun;
     template <>
     struct map_fun<fpfmt::e4m3, 16, 128, use::A>
@@ -52,7 +55,7 @@ struct arch_cdna4
         }
     };
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt>) struct map_fun<Fmt, 16, 32, use::A>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct map_fun<Fmt, 16, 32, use::A>
     {
         __device__ __host__ static constexpr auto
         map(std::array<int, 2> const& x) -> std::array<int, 2>
@@ -61,7 +64,7 @@ struct arch_cdna4
         }
     };
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt>) struct map_fun<Fmt, 32, 16, use::B>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct map_fun<Fmt, 32, 16, use::B>
     {
         __device__ __host__ static constexpr auto
         map(std::array<int, 2> const& x) -> std::array<int, 2>
@@ -95,8 +98,26 @@ struct arch_cdna4
             return {x[0] / 16 * 4 ^ x[1], x[0] % 16};
         }
     };
+    // V_MFMA_F32_4X4X4 (CDNA4 ISA 7.5.1.1): 16 batched 4x4x4 blocks, one per group of
+    // 4 lanes, so flattening the block into the batched axis makes that axis the lane.
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt>) struct map_fun<Fmt, 4, 4, use::A, 16>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[0], x[1]};
+        }
+    };
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt>) struct map_fun<Fmt, 4, 4, use::B, 16>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[1], x[0]};
+        }
+    };
 
-    template <fpfmt Fmt, int Rows, int Cols, use Use>
+    template <fpfmt Fmt, int Rows, int Cols, use Use, int Batch = 1>
     struct matrix
     {
         using arch                     = arch_cdna4;
@@ -104,7 +125,8 @@ struct arch_cdna4
         static constexpr int rows      = Rows;
         static constexpr int cols      = Cols;
         static constexpr use use_      = Use;
-        static constexpr int num_items = Rows * Cols / wave_size;
+        static constexpr int batch     = Batch;
+        static constexpr int num_items = Rows * Cols * Batch / wave_size;
 
         using base_storage_t = base_storage_type_t<fmt>;
         using storage_t      = storage_type_t<fmt, num_items>;
@@ -113,8 +135,23 @@ struct arch_cdna4
         __device__ __host__ static constexpr auto
         map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
-            return map_fun<Fmt, Rows, Cols, Use>::map(x);
+            return map_fun<Fmt, Rows, Cols, Use, Batch>::map(x);
         }
+    };
+
+    template <int Rows, int Cols, use Use>
+    struct matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use>
+    {
+        using arch                     = arch_cdna4;
+        static constexpr fpfmt fmt     = fpfmt::e8m10_e8m7x2split;
+        static constexpr int rows      = Rows;
+        static constexpr int cols      = Cols;
+        static constexpr use use_      = Use;
+        static constexpr int num_items = Rows * Cols / wave_size;
+
+        using storage_t = storage_type_t<fpfmt::e8m7, num_items>;
+        storage_t big;
+        storage_t small;
     };
 
     // A structured-sparse operand: compressed values plus their sparsity index.
@@ -215,6 +252,21 @@ struct arch_cdna4
         }
     }
 
+    inline __device__ static void
+    matrix_cast(matrix<fpfmt::e8m10_e8m7x2split, 16, 32, use::A>& dest,
+                matrix<fpfmt::e8m10, 16, 32, use::A> const& src)
+    {
+        dest.big   = packed_convert<bf16_t>(src.data);
+        dest.small = packed_convert<bf16_t>(src.data - packed_convert<fp32_t>(dest.big));
+    }
+    inline __device__ static void
+    matrix_cast(matrix<fpfmt::e8m10_e8m7x2split, 32, 16, use::B>& dest,
+                matrix<fpfmt::e8m10, 32, 16, use::B> const& src)
+    {
+        dest.big   = packed_convert<bf16_t>(src.data);
+        dest.small = packed_convert<bf16_t>(src.data - packed_convert<fp32_t>(dest.big));
+    }
+
     template <uint32_t flags = 0>
     struct mma
     {
@@ -233,6 +285,26 @@ struct arch_cdna4
             d.data = __builtin_amdgcn_mfma_f32_16x16x32_bf16(a.data, b.data, c.data, 0, 0, 0);
         }
         __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 16, 32, use::A>& a,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 32, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_mfma_f32_16x16x32_bf16(a.big, b.big, c.data, 0, 0, 0);
+            d.data = __builtin_amdgcn_mfma_f32_16x16x32_bf16(a.small, b.big, d.data, 0, 0, 0);
+            d.data = __builtin_amdgcn_mfma_f32_16x16x32_bf16(a.big, b.small, d.data, 0, 0, 0);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e8m10, 16, 32, use::A>& a,
+                                    matrix<fpfmt::e8m10, 32, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            matrix<fpfmt::e8m10_e8m7x2split, 16, 32, use::A> a_split;
+            matrix<fpfmt::e8m10_e8m7x2split, 32, 16, use::B> b_split;
+            matrix_cast(a_split, a);
+            matrix_cast(b_split, b);
+            wmma(d, a_split, b_split, c);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
                                     matrix<fpfmt::e4m3, 16, 128, use::A>& a,
                                     matrix<fpfmt::e4m3, 128, 16, use::B>& b,
                                     matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
@@ -240,6 +312,22 @@ struct arch_cdna4
             constexpr int scale = 0;
             d.data              = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
                 a.data, b.data, c.data, 0, 0, 0, scale, 0, scale);
+        }
+        // Batched 4x4x4. The 16 blocks are independent, so the batch carries whatever
+        // axis the caller has spare -- the channel, for depthwise, which needs no padding.
+        __device__ static void wmma(matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& d,
+                                    matrix<fpfmt::e5m10, 4, 4, use::A, 16>& a,
+                                    matrix<fpfmt::e5m10, 4, 4, use::B, 16>& b,
+                                    matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& c)
+        {
+            d.data = __builtin_amdgcn_mfma_f32_4x4x4f16(a.data, b.data, c.data, 0, 0, 0);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& d,
+                                    matrix<fpfmt::e8m7, 4, 4, use::A, 16>& a,
+                                    matrix<fpfmt::e8m7, 4, 4, use::B, 16>& b,
+                                    matrix<fpfmt::e8m23, 4, 4, use::Acc, 16>& c)
+        {
+            d.data = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a.data, b.data, c.data, 0, 0, 0);
         }
     };
 
@@ -406,9 +494,9 @@ struct arch_cdna4
         {
             return {lane, item};
         }
-        inline __device__ static void load(void* ptr, void* dest)
+        inline __device__ static void load(const void* ptr, void* dest)
         {
-            *reinterpret_cast<type*>(dest) = *reinterpret_cast<type*>(ptr);
+            *reinterpret_cast<type*>(dest) = *reinterpret_cast<const type*>(ptr);
         }
     };
     template <int BytesPerLane>

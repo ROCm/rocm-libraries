@@ -23,6 +23,7 @@
 #include "matrix_layout.h"
 #include "swizzle.h"
 #include "detail.h"
+#include "hip_util.h"
 #include "types.h"
 #include "mathutil.h"
 #include "launch_params.h"
@@ -794,7 +795,7 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_depthwise_1d_toeplitz
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -832,21 +833,6 @@ void launch_impl(const LaunchParams& lp,
         typed_launch.template operator()<DataType::bf16>();
     else
         typed_launch.template operator()<DataType::fp16>();
-}
-
-// Compute-unit count of the active device (cached), used to size H-tiling.
-inline int cu_count()
-{
-    static const int cu = [] {
-        int dev = 0;
-        if(hipGetDevice(&dev) != hipSuccess)
-            return 256;
-        hipDeviceProp_t props{};
-        if(hipGetDeviceProperties(&props, dev) != hipSuccess || props.multiProcessorCount <= 0)
-            return 256;
-        return props.multiProcessorCount;
-    }();
-    return cu;
 }
 
 class Depthwise_1D_Toeplitz_ConvKernel : public DepthwiseConvKernel
@@ -888,7 +874,7 @@ public:
         return s;
     }
 
-    void get_tolerance(const Conv2dParams& par, float& atol, float& rtol) const override
+    void get_tolerance(const ConvParams& par, float& atol, float& rtol) const override
     {
         get_mixed_precision_tolerance(par, atol, rtol);
         // A small atol floor keeps zero-upsampled Dgrad edges from tripping the check.
@@ -900,9 +886,12 @@ public:
         atol = std::max(atol, 1e-6f);
     }
 
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(!DepthwiseConvKernel::is_applicable(par))
+            return false;
+        // 16-bit only: the base admits tf32 for the CDNA5 1D path, which this has none.
+        if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
         // Dgrad (backward-data) is the rot180 correlation of dY; stride 1 runs it
         // directly, stride 2 runs it over a 2x-upsampled dY (zeros between samples).
@@ -927,14 +916,14 @@ public:
         // offset; the batch may push the full tensors past 2GB.
         if(par.n > 0)
         {
-            Conv2dSize sz(par);
+            ConvSize sz(par);
             if(sz.input_bytes() / par.n > INT32_MAX || sz.output_bytes() / par.n > INT32_MAX)
                 return false;
         }
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -990,7 +979,7 @@ public:
     // F=1 (halo re-read outweighs the tail reclaim). Prefer the smallest F (widest
     // sub-tile) that fills the tile with a majority-real tail, since wider sub-tiles
     // re-read less halo (F=2 beat F=4 at W=16).
-    static int preferred_wfold(const Conv2dParams& par)
+    static int preferred_wfold(const ConvParams& par)
     {
         // Applicable directions (Fprop/Dgrad) and stride_h==stride_w in {1,2} are
         // guaranteed by is_applicable.
@@ -1020,7 +1009,7 @@ public:
         return 1;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         // Folded W tiling: the w-tile is w_sub()-wide and the batch is enumerated in
         // n_groups slots of w_fold images.

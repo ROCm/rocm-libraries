@@ -53,7 +53,7 @@ constexpr int MAX_KW = 5;
 // Matches direction and filter, then applies the family-partitioning gates
 // (unfold / K256-vs-K128 overcompute / K-divisibility) that make exactly one enabled config
 // claim each problem so dispatch never ties.
-inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
+inline bool is_valid_config(const ConvParams& par, const Config& cfg)
 {
     if(par.direction != cfg.direction)
     {
@@ -338,7 +338,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 // K_padded x C_padded x Kh x Kw per group (K rounded to block_k, C to 64),
 // packed contiguously across groups. Computed at runtime since Kwg is not
 // compile-time here.
-inline size_t custom_weights_tensor_size(const Config& cfg, const Conv2dParams& par)
+inline size_t custom_weights_tensor_size(const Config& cfg, const ConvParams& par)
 {
     constexpr int elem_size = 2; // sizeof(f16)
     // Per-group, direction-mapped counts (dgrad swaps output/reduction).
@@ -361,7 +361,7 @@ inline size_t custom_weights_tensor_size(const Config& cfg, const Conv2dParams& 
 //
 // Self-formatting makes the transpose cost part of the timed launch; hipMalloc's
 // >= 256-B alignment covers the dwordx4 loads.
-inline size_t get_workspace_size(const Config& cfg, const Conv2dParams& par)
+inline size_t get_workspace_size(const Config& cfg, const ConvParams& par)
 {
     return custom_weights_tensor_size(cfg, par);
 }
@@ -376,7 +376,7 @@ struct BlockCounts
 };
 
 // Output-tile block counts along each axis (direction-mapped).
-inline BlockCounts get_block_counts(const Config& cfg, const Conv2dParams& par)
+inline BlockCounts get_block_counts(const Config& cfg, const ConvParams& par)
 {
     const bool is_dgrad    = (cfg.direction == Direction::Dgrad);
     const int output_per_g = is_dgrad ? par.channels_per_group() : par.filters_per_group();
@@ -403,7 +403,7 @@ inline BlockCounts get_block_counts(const Config& cfg, const Conv2dParams& par)
 // extent key on kparts*per_xcd_blocks, not the raw block_k count. Padding is enabled
 // only for k_divisible=false configs (their writer already guards pad blocks); a
 // k_divisible=true config gets padded == raw, so its buffer is unchanged.
-inline KPartition get_k_partition(const Config& cfg, const Conv2dParams& par)
+inline KPartition get_k_partition(const Config& cfg, const ConvParams& par)
 {
     const int blocks_k = get_block_counts(cfg, par).k_per_g;
     return plan_k_partition(blocks_k,
@@ -416,7 +416,7 @@ inline KPartition get_k_partition(const Config& cfg, const Conv2dParams& par)
 //
 // kparts*per_xcd_blocks blocks of block_k channels each; equals the plain block_k
 // rounding when no padding applies.
-inline int padded_output_channels(const Config& cfg, const Conv2dParams& par)
+inline int padded_output_channels(const Config& cfg, const ConvParams& par)
 {
     const KPartition kp = get_k_partition(cfg, par);
     return kp.kparts * kp.per_xcd_blocks * cfg.block_k();
@@ -1013,7 +1013,7 @@ __global__ __launch_bounds__(cfg.num_threads(),
 // ConvKernel.
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -1155,7 +1155,7 @@ public:
         return false;
     }
 
-    bool is_applicable(const Conv2dParams& par) const override
+    bool is_applicable(const ConvParams& par) const override
     {
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
@@ -1174,17 +1174,17 @@ public:
         return true;
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         return direct_l1::is_valid_config(par, cfg_);
     }
 
-    LaunchParams get_launch_params(const Conv2dParams&) const override
+    LaunchParams get_launch_params(const ConvParams&) const override
     {
         return direct_l1::get_launch_params(cfg_);
     }
 
-    size_t get_workspace_size(const Conv2dParams& par) const override
+    size_t get_workspace_size(const ConvParams& par) const override
     {
         return direct_l1::get_workspace_size(cfg_, par);
     }

@@ -3,9 +3,9 @@
 
 #include <array>
 
-using hipconv::Conv2dParams;
 using hipconv::ConvAlgorithm;
 using hipconv::ConvKernelSpan;
+using hipconv::ConvParams;
 
 extern const ConvKernelSpan pointwise_fp16bf16_kernels;
 
@@ -15,7 +15,7 @@ namespace
 // Coarse algorithm-level discriminator: pointwise handles 1x1 filters. The
 // authoritative constraints (unit stride, zero pad, single group, dtype,
 // layout, size limits) are enforced by PointwiseConvKernel::is_applicable.
-bool is_applicable(const Conv2dParams& par)
+bool is_applicable(const ConvParams& par)
 {
     return par.kh == 1 && par.kw == 1;
 }

@@ -6,6 +6,7 @@
 // the phase deadlines, and the drain placement the wavegroup tests below implement. Everything
 // outside those tests the two wavegroups run identically.
 
+#include <type_traits>
 #include "bunnies.hpp"
 #include "bunnies_cdna4.hpp"
 #include "config.h"
@@ -13,7 +14,7 @@
 #include "row_schedule.h"
 #include "workgroup_tiles.h"
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <hip/hip_runtime.h>
 
 namespace hipconv::cdna4::direct_wgrad
@@ -233,6 +234,36 @@ __device__ void run_main_loop(int wave_group,
     const int rows  = sched.iterations();
     const int whole = (rows / unroll) * unroll;
 
+    // A tiled config walks the rows a tile at a time, rebasing both loaders at each boundary.
+    //
+    // rows_per_tile is a multiple of the unroll, so a boundary is always a block boundary: no
+    // block spans two tiles, and the tail, being shorter than one block, cannot either. That is
+    // the whole reason the tile loop can wrap the block loop rather than split it. Untiled, the
+    // two names below are const references to the loaders passed in and nothing else changes.
+    constexpr bool tiled = cfg.rows_per_tile > 0;
+    static_assert(!tiled || cfg.rows_per_tile % unroll == 0,
+                  "rows_per_tile must be a multiple of the unroll, or a block would straddle a "
+                  "tile boundary and address half its rows through the wrong base");
+
+    std::conditional_t<tiled, SRowLoader<cfg, DT>, const SRowLoader<cfg, DT>&> s_cur = s_loader;
+    std::conditional_t<tiled, DeltaRowLoader<cfg, DT>, const DeltaRowLoader<cfg, DT>&> delta_cur =
+        delta_loader;
+
+    int loaded_tile  = 0; // the loaders enter holding tile 0
+    auto select_tile = [&](int base) {
+        if constexpr(tiled)
+        {
+            const int t = base / cfg.rows_per_tile;
+            if(t != loaded_tile)
+            {
+                loaded_tile      = t;
+                const int origin = sched.tile_origin(t);
+                s_cur            = s_loader.rebased(origin, sched.s_tile_rows());
+                delta_cur        = delta_loader.rebased(origin, sched.delta_tile_rows());
+            }
+        }
+    };
+
     auto run_at = [&](auto uu, auto zero_acc, auto tail, int base) {
         constexpr int u     = decltype(uu)::value;
         constexpr bool zero = decltype(zero_acc)::value && u == 0;
@@ -241,8 +272,8 @@ __device__ void run_main_loop(int wave_group,
                                                                item,
                                                                base,
                                                                sched,
-                                                               s_loader,
-                                                               delta_loader,
+                                                               s_cur,
+                                                               delta_cur,
                                                                s_ring,
                                                                delta_ring,
                                                                c_base,
@@ -252,11 +283,13 @@ __device__ void run_main_loop(int wave_group,
     };
 
     auto run_block = [&](auto zero_acc, int base) {
+        select_tile(base);
         bunnies::static_unroll<unroll>(
             [&](auto uu) { run_at(uu, zero_acc, std::false_type{}, base); });
     };
 
     auto run_tail = [&](auto zero_acc, int base) {
+        select_tile(base);
         run_positions<0, unroll, decltype(zero_acc)::value>(
             base, rows, [&](auto uu) { run_at(uu, zero_acc, std::true_type{}, base); });
     };

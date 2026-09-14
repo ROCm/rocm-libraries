@@ -19,33 +19,82 @@ namespace hipconv::cdna4::direct_wgrad
 //
 // The tile shrinks as the filter grows, against TILE_VGPR_BUDGET; prefetch_rows answers to the
 // main-loop unroll and to MFMA cover. See direct-wgrad-config-table.md.
+//
+// kw is named rather than taken from kh: a wave holds kh * kw accumulator tiles, so an oblong
+// filter frees the registers a wider tile spends. 3x1 is the one that uses it.
 struct WaveTile
 {
     int kh;
+    int kw;
     int wave_c16;
     int wave_k16;
     int prefetch_rows;
 };
 
-constexpr WaveTile TILE_2X2 = {.kh = 2, .wave_c16 = 2, .wave_k16 = 2, .prefetch_rows = 3};
-constexpr WaveTile TILE_3X3 = {.kh = 3, .wave_c16 = 2, .wave_k16 = 2, .prefetch_rows = 2};
-constexpr WaveTile TILE_4X4 = {.kh = 4, .wave_c16 = 2, .wave_k16 = 1, .prefetch_rows = 3};
-constexpr WaveTile TILE_5X5 = {.kh = 5, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 4};
+constexpr WaveTile TILE_2X2 = {.kh = 2, .kw = 2, .wave_c16 = 2, .wave_k16 = 2, .prefetch_rows = 3};
+constexpr WaveTile TILE_3X3 = {.kh = 3, .kw = 3, .wave_c16 = 2, .wave_k16 = 2, .prefetch_rows = 2};
+constexpr WaveTile TILE_4X4 = {.kh = 4, .kw = 4, .wave_c16 = 2, .wave_k16 = 1, .prefetch_rows = 3};
+constexpr WaveTile TILE_5X5 = {.kh = 5, .kw = 5, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 4};
 
 // A second tile at 2x2 and 3x3, carrying half the K of the one above.
 //
 // It serves exactly one channel block, C(32) x K(32), which the wide tile cannot reach at these
 // two filter sizes; every other block it could reach the wide tile already serves.
-constexpr WaveTile TILE_2X2_NARROW_K = {.kh = 2, .wave_c16 = 2, .wave_k16 = 1, .prefetch_rows = 3};
-constexpr WaveTile TILE_3X3_NARROW_K = {.kh = 3, .wave_c16 = 2, .wave_k16 = 1, .prefetch_rows = 2};
+constexpr WaveTile TILE_2X2_NARROW_K = {.kh            = 2,
+                                        .kw            = 2,
+                                        .wave_c16      = 2,
+                                        .wave_k16      = 1,
+                                        .prefetch_rows = 3};
+constexpr WaveTile TILE_3X3_NARROW_K = {.kh            = 3,
+                                        .kw            = 3,
+                                        .wave_c16      = 2,
+                                        .wave_k16      = 1,
+                                        .prefetch_rows = 2};
 
 // The tile a 16-channel group fits, at the three filter sizes that need one of their own.
 //
 // A grouped entry covers its group exactly on both axes, so 16 channels per group admits one
 // wave shape: C(16) x K(16), one whole group per wave. 5x5's own tile is that shape already.
-constexpr WaveTile TILE_2X2_GROUP16 = {.kh = 2, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 3};
-constexpr WaveTile TILE_3X3_GROUP16 = {.kh = 3, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 2};
-constexpr WaveTile TILE_4X4_GROUP16 = {.kh = 4, .wave_c16 = 1, .wave_k16 = 1, .prefetch_rows = 3};
+constexpr WaveTile TILE_2X2_GROUP16 = {.kh            = 2,
+                                       .kw            = 2,
+                                       .wave_c16      = 1,
+                                       .wave_k16      = 1,
+                                       .prefetch_rows = 3};
+constexpr WaveTile TILE_3X3_GROUP16 = {.kh            = 3,
+                                       .kw            = 3,
+                                       .wave_c16      = 1,
+                                       .wave_k16      = 1,
+                                       .prefetch_rows = 2};
+constexpr WaveTile TILE_4X4_GROUP16 = {.kh            = 4,
+                                       .kw            = 4,
+                                       .wave_c16      = 1,
+                                       .wave_k16      = 1,
+                                       .prefetch_rows = 3};
+
+// The tiles at 3x1, the one oblong filter the table serves.
+//
+// A third of the filter area frees the registers for twice the input channels: C(64) x K(32)
+// retires 24 MFMA per column block against 3x3's 36. C(64) x K(64) costs 256 VGPRs of a 192
+// budget, and C(96) x K(32) fits it but gives the swizzle a C4 of 24.
+//
+// The wider wave is paid for on the spatial axis, every waves_q = 4 spread over it reaching
+// 192 KiB against a 160 KiB budget. The narrow tiles carry those and the grouped entries.
+constexpr WaveTile TILE_3X1 = {.kh = 3, .kw = 1, .wave_c16 = 4, .wave_k16 = 2, .prefetch_rows = 2};
+constexpr WaveTile TILE_3X1_NARROW_C = {.kh            = 3,
+                                        .kw            = 1,
+                                        .wave_c16      = 2,
+                                        .wave_k16      = 2,
+                                        .prefetch_rows = 2};
+constexpr WaveTile TILE_3X1_NARROW_K = {.kh            = 3,
+                                        .kw            = 1,
+                                        .wave_c16      = 2,
+                                        .wave_k16      = 1,
+                                        .prefetch_rows = 2};
+constexpr WaveTile TILE_3X1_GROUP16  = {.kh            = 3,
+                                        .kw            = 1,
+                                        .wave_c16      = 1,
+                                        .wave_k16      = 1,
+                                        .prefetch_rows = 2};
 
 // One entry of the table before the packing crosses in: a wave tile and its wave spread.
 //
@@ -61,6 +110,9 @@ struct Spread
     // Unused since the block that needed it was pruned; the LDS budget against a widening block
     // will ask for it again. See direct-wgrad-config-table.md.
     int prefetch_rows = 0;
+
+    // Rows one buffer descriptor spans, or 0 for the whole image. See config.h.
+    int rows_per_tile = 0;
 
     constexpr int ring_depth() const
     {
@@ -127,6 +179,43 @@ constexpr auto spreads = std::array{
     Spread{TILE_3X3_GROUP16,
            {.waves_c = 1, .waves_k = 1, .waves_q = 2, .waves_g = 4}}, // C(64) K(64), 4 groups
 
+    // ---- 3x1, on the C(64) x K(32) wave tile ----
+    //
+    // Three more blocks are over the LDS budget: C(64) x K(128) at two spatial items is 168 KiB,
+    // C(256) x K(32) at two is 185 KiB, and every four-item spread is 192 KiB, against 160 KiB.
+    // A fourth, C(256) x K(64), fits at 137 KiB and the prune sweep dropped it: the model sends
+    // it no layer and it wins on none.
+    Spread{TILE_3X1, {.waves_c = 2, .waves_k = 4, .waves_q = 1}}, // C(128) K(128)
+    Spread{TILE_3X1, {.waves_c = 2, .waves_k = 2, .waves_q = 2}}, // C(128) K(64)
+
+    // ---- 3x1 row-tiled, for an image past 2 GiB ----
+    //
+    // Same two blocks as above with the tile's row origin folded into the base, so the 32-bit
+    // offset spans 18 rows rather than the whole image. They are complementary to the untiled
+    // pair -- addressing_fits gives a shape to one or the other, never both.
+    //
+    // 18 rather than 16: rows_per_tile has to be a multiple of unroll(), which is 3 here, or a
+    // block would straddle a boundary and address half its rows through the wrong base. At 18
+    // the window is 20 S rows and 21 delta rows, which on the widest shape this serves --
+    // a 57600-column row of 512 channels, 56.2 MiB -- is 1.18 GB against the 2 GiB limit.
+    Spread{TILE_3X1, {.waves_c = 2, .waves_k = 4, .waves_q = 1}, 0, 18}, // C(128) K(128)
+    Spread{TILE_3X1, {.waves_c = 2, .waves_k = 2, .waves_q = 2}, 0, 18}, // C(128) K(64)
+
+    // ---- 3x1's one narrow-tile entry, the four-item spread ----
+    //
+    // Halving C halves the block a spatial item costs, which is what buys waves_q = 4.
+    Spread{TILE_3X1_NARROW_C, {.waves_c = 1, .waves_k = 2, .waves_q = 4}}, // C(32) K(64)
+
+    // ---- 3x1 at 32 channels per group, on the K-narrow tile ----
+    Spread{TILE_3X1_NARROW_K,
+           {.waves_c = 1, .waves_k = 2, .waves_q = 1, .waves_g = 4}}, // C(128) K(128), 4 groups
+    Spread{TILE_3X1_NARROW_K,
+           {.waves_c = 1, .waves_k = 2, .waves_q = 2, .waves_g = 2}}, // C(64) K(64), 2 groups
+
+    // ---- 3x1 at 16 channels per group, one whole group to a wave ----
+    Spread{TILE_3X1_GROUP16,
+           {.waves_c = 1, .waves_k = 1, .waves_q = 1, .waves_g = 8}}, // C(128) K(128), 8 groups
+
     // ---- 4x4, on the C(32) x K(16) wave tile ----
     //
     // The wave gives up K rather than C so that the epilogue's drain stays a 128-byte run of
@@ -177,19 +266,35 @@ constexpr auto spreads = std::array{
 // count, so preferred_unfold_n decides it on the output width alone.
 constexpr auto packings = std::array{1, 2, 4};
 
-// Every spread crossed with every packing, in the order the two tie-breaks need.
+// Configs a tiled spread contributes: one, because it packs no images.
+//
+// A tiled loader leaves the packed-image term out of the address, that term being the int which
+// overflows on the shapes tiling exists for, so the entry is correct at a packing of one alone.
+// The dispatch gate says the same, and kernel_test runs a config without consulting it.
+constexpr std::size_t count_configs()
+{
+    std::size_t n = 0;
+    for(const Spread& spread : spreads)
+        n += spread.rows_per_tile > 0 ? 1 : packings.size();
+    return n;
+}
+
+// Every spread crossed with the packings it takes, in the order the two tie-breaks need.
 //
 // The spreads are filter-major already, so crossing the packings innermost keeps one filter
-// size's entries contiguous and leaves both rules reading the order they describe.
+// shape's entries contiguous and leaves both rules reading the order they describe.
 constexpr auto make_configs()
 {
-    std::array<Config, spreads.size() * packings.size()> configs{};
+    std::array<Config, count_configs()> configs{};
 
     std::size_t out = 0;
     for(const Spread& spread : spreads)
         for(const int unfold_n : packings)
+        {
+            if(spread.rows_per_tile > 0 && unfold_n != 1)
+                continue;
             configs[out++] = Config{.kh            = spread.tile.kh,
-                                    .kw            = spread.tile.kh,
+                                    .kw            = spread.tile.kw,
                                     .wave_c16      = spread.tile.wave_c16,
                                     .wave_k16      = spread.tile.wave_k16,
                                     .waves_c       = spread.waves.waves_c,
@@ -197,7 +302,9 @@ constexpr auto make_configs()
                                     .waves_q       = spread.waves.waves_q,
                                     .waves_g       = spread.waves.waves_g,
                                     .unfold_n      = unfold_n,
-                                    .prefetch_rows = spread.ring_depth()};
+                                    .prefetch_rows = spread.ring_depth(),
+                                    .rows_per_tile = spread.rows_per_tile};
+        }
     return configs;
 }
 
@@ -228,6 +335,15 @@ constexpr bool table_is_well_formed()
         // 64 channels of fp16 is 128 bytes on each operand. 5x5 is exempt, every window that
         // would fill the line spilling its row loop.
         if(cfg.waves_g > 1 && cfg.kh != 5 && (cfg.block_c() < 64 || cfg.block_k() < 64))
+            return false;
+
+        // A tile has to be a whole number of unrolled blocks, or one would straddle a boundary
+        // and address half its rows through the wrong base.
+        if(cfg.rows_per_tile > 0 && cfg.rows_per_tile % cfg.unroll() != 0)
+            return false;
+
+        // And it packs no images; see count_configs.
+        if(cfg.rows_per_tile > 0 && cfg.unfold_n != 1)
             return false;
     }
     return true;

@@ -1,6 +1,6 @@
-EMU version: v0.2.8-0-g4bec0aad
-EMU commit: 4bec0aad76eb76d0650c80be8a4502466e4c1f21
-Snapshot date: 2026-09-08
+EMU version: v0.3.0-0-g1b0e3e73
+EMU commit: 1b0e3e73bcf27bf72c17f73e8a6ed922f1842d6c
+Snapshot date: 2026-09-11
 Arches: cdna3,cdna4,cdna5
 Files:
   ./.clang-format
@@ -10,7 +10,7 @@ Files:
   ./cmake/libautoshard.hpp
   ./CMakeLists.txt
   ./HIPCONV_VERSION
-  ./include/hipconv/conv2d_params.hpp
+  ./include/hipconv/conv_params.hpp
   ./include/hipconv/export.hpp
   ./include/hipconv/hipconv.hpp
   ./include/hipconv/tolerance.hpp
@@ -28,6 +28,10 @@ Files:
   ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/kernel.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_table.h
   ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/kernel.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_desc.cpp
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_desc.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/config_table.h
+  ./src/arch/cdna4/depthwise/depthwise_wgrad_hankel/kernel.h
   ./src/arch/cdna4/direct_backend.cpp
   ./src/arch/cdna4/direct/direct/config.hpp
   ./src/arch/cdna4/direct/direct/config_matcher.cpp
@@ -86,6 +90,10 @@ Files:
   ./src/arch/cdna5/bunnies_mi400.hpp
   ./src/arch/cdna5/CMakeLists.txt
   ./src/arch/cdna5/depthwise_backend.cpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_matcher.cpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_matcher.hpp
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/config_table.h
+  ./src/arch/cdna5/depthwise/depthwise_1d_toeplitz/kernel.h
   ./src/arch/cdna5/direct_backend.cpp
   ./src/arch/cdna5/direct/config.hpp
   ./src/arch/cdna5/direct/config_matcher.cpp
@@ -105,10 +113,10 @@ Files:
   ./src/arch_registry.cpp.in
   ./src/arch_registry.h
   ./src/bunnies.hpp
-  ./src/conv2d_params.cpp
   ./src/conv_kernel.cpp
   ./src/conv_kernel.h
   ./src/conv_kernel_table.h
+  ./src/conv_params.cpp
   ./src/depthwise_algorithm_stub.h
   ./src/depthwise_conv_kernel.h
   ./src/detail.h

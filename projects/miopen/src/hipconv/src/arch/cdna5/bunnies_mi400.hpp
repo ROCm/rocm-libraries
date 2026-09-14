@@ -1,8 +1,10 @@
 #pragma once
 
 #include "bunnies.hpp"
+#include "detail.h"
 
 #include <bit>
+#include <cstddef>
 
 namespace bunnies
 {
@@ -18,8 +20,9 @@ concept has_num_items = requires(T t)
 
 struct arch_mi400
 {
-    static constexpr int wave_size = 32;
-    using buffer_t                 = __amdgpu_buffer_rsrc_t;
+    static constexpr int wave_size         = 32;
+    static constexpr std::size_t lds_bytes = 320 * 1024;
+    using buffer_t                         = __amdgpu_buffer_rsrc_t;
 
     template <fpfmt Fmt, int Rows, int Cols, use Use>
     struct layout_config;
@@ -56,23 +59,45 @@ struct arch_mi400
         }
     };
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt>) struct layout_config<Fmt, 16, 32, use::A>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct layout_config<Fmt, 16, 32, use::A>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16, x[0] / 16 * 8 ^ x[1] / 8 * 16 ^ x[1] % 8};
         }
     };
+    // 1:4 staging A is the 2:4 packed 16x32 layout above pulled back along item -> 2*item+1:
+    // each staging item carries the value that matrix_cast places in the odd slot of its pair.
+    // Its column is therefore the expanded K-group, so load_tile / store_tile address (row, group).
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt>) struct layout_config<Fmt, 32, 16, use::B>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct layout_config<Fmt, 16, 16, use::A>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[0] % 16, x[0] / 16 * 4 ^ x[1] / 4 * 8 ^ x[1] % 4};
+        }
+    };
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct layout_config<Fmt, 32, 16, use::B>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] / 16 * 8 ^ x[1] / 8 * 16 ^ x[1] % 8, x[0] % 16};
         }
     };
+    // Full B for swmmac_16x16x64 (32 items/lane), MI400 Shader Programming Guide 4.6.12.4:
+    // k = 32*(item/16) + 16*(lane/16) + item%16; n = lane%16.
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m23) struct layout_config<Fmt, 16, 16, use::Acc>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) struct layout_config<Fmt, 64, 16, use::B>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[1] / 16 * 32 ^ x[0] / 16 * 16 ^ x[1] % 16, x[0] % 16};
+        }
+    };
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10 ||
+             Fmt == fpfmt::e8m23) struct layout_config<Fmt, 16, 16, use::Acc>
     {
         __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
@@ -115,6 +140,160 @@ struct arch_mi400
             return cfg::map(x);
         }
     };
+
+    template <int Rows, int Cols, use Use>
+    struct matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use>
+    {
+        using arch                     = arch_mi400;
+        static constexpr fpfmt fmt     = fpfmt::e8m10_e8m7x2split;
+        static constexpr int rows      = Rows;
+        static constexpr int cols      = Cols;
+        static constexpr use use_      = Use;
+        static constexpr int num_items = Rows * Cols / wave_size;
+
+        using storage_t = storage_type_t<fpfmt::e8m7, num_items>;
+        storage_t big;
+        storage_t small;
+    };
+
+    // A structured-sparse operand: compressed values plus the swmmac Src2 index. As on CDNA4, the
+    // 1:4 staging form inherits a 16-column matrix and the hardware 2:4 form a 32-column matrix;
+    // private inheritance shares matrix machinery without allowing a sparse operand to bind wmma.
+    template <fpfmt Fmt, int Rows, int Cols, use Use, sparsity Sprs>
+    struct sparse_matrix
+        : private matrix<Fmt, Rows, Cols * live_per_group(Sprs) / sparsity_group_size(Sprs), Use>
+    {
+        static constexpr int live_per_grp    = live_per_group(Sprs);
+        static constexpr int group_size      = sparsity_group_size(Sprs);
+        static constexpr int compressed_cols = Cols * live_per_grp / group_size;
+        using base                           = matrix<Fmt, Rows, compressed_cols, Use>;
+        static constexpr int rows            = Rows;
+        static constexpr int cols            = Cols;
+
+        using base::data;
+        using base::fmt;
+        using base::num_items;
+        using typename base::arch;
+        using typename base::base_storage_t;
+
+        uint32_t idx;
+
+        // (lane,item) -> (row, expanded K-group) for the data slot. The 1:4 staging base already
+        // names groups; the 2:4 packed A has two columns per group.
+        __device__ static constexpr auto
+        group_map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            const auto coord = base::map(x);
+            if constexpr(Sprs == sparsity::n1of4)
+                return coord;
+            else
+                return {coord[0], coord[1] / 2};
+        }
+
+        // The 1:4 staging tile exposes one logical column per group to load_tile / store_tile.
+        __device__ static constexpr auto
+        map(std::array<int, 2> const& x) -> std::array<int, 2> requires(Sprs == sparsity::n1of4)
+        {
+            return group_map(x);
+        }
+
+        // In-group position of compressed item `item`. The fields sit at a group_size /
+        // live_per_grp bit stride: 2 for 2:4, sharing a nibble, 4 for 1:4, leaving one half empty.
+        __device__ auto position(int item) const -> int
+        {
+            return (idx >> (group_size / live_per_grp * item)) & 3;
+        }
+
+        // Fill every compressed slot. Data follows the packed 16x32 A layout above. Index does not:
+        // guide 4.6.12.4 assigns groups 0..7 to lanes 0..15 and groups 8..15 to lanes 16..31,
+        // independently of which lane holds the group's packed A values, so generate its eight
+        // lane-local nibbles separately.
+        template <typename Pos, typename Value>
+        __device__ void fill(Pos&& pos, Value&& value)
+        {
+            static_assert(Sprs == sparsity::n1of4, "fill places one live value per group");
+            const int lane = lane_id();
+            static_for<num_items>([&]<int item>() {
+                const auto coord = group_map({lane, item});
+                const int p      = pos(coord[0], coord[1]);
+                data[item]       = value(coord[0], coord[1] * group_size + p);
+            });
+            idx = 0;
+            static_for<num_items>([&]<int item>() {
+                const int row = lane % 16;
+                const int g   = 8 * (lane / 16) + item;
+                idx |= (uint32_t)pos(row, g) << (4 * item);
+            });
+        }
+    };
+
+    // The tf32 split of a 2:4 operand. Splitting is per-element, so both halves keep the source's
+    // pattern and its index: one `idx` serves all three MMAs. MMA-only, so no layout and no fill.
+    template <int Rows, int Cols, use Use>
+    struct sparse_matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use, sparsity::n2of4>
+    {
+        using arch                           = arch_mi400;
+        static constexpr fpfmt fmt           = fpfmt::e8m10_e8m7x2split;
+        static constexpr int live_per_grp    = live_per_group(sparsity::n2of4);
+        static constexpr int group_size      = sparsity_group_size(sparsity::n2of4);
+        static constexpr int compressed_cols = Cols * live_per_grp / group_size;
+        static constexpr int rows            = Rows;
+        static constexpr int cols            = Cols;
+        static constexpr use use_            = Use;
+        static constexpr int num_items       = Rows * compressed_cols / wave_size;
+
+        using storage_t = storage_type_t<fpfmt::e8m7, num_items>;
+        storage_t big;
+        storage_t small;
+        uint32_t idx;
+    };
+
+    // 1:4 -> 2:4: spread each live value into the odd slot of its 2:4 pair, lane-local because the
+    // 1:4 layout is the 2:4 one pulled back along item -> 2*item + 1. gfx1250 keeps the live value
+    // in the odd slot where CDNA4 uses the even one, so the index shifts up by one 2-bit field.
+    template <fpfmt Fmt, int Rows, int Cols, use Use>
+    inline __device__ static void
+    matrix_cast(sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n2of4>& dest,
+                sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n1of4> const& src)
+    {
+        using src_t  = sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n1of4>;
+        using elem_t = base_storage_type_t<Fmt>;
+        static_for<src_t::num_items>([&]<int item>() {
+            dest.data[2 * item]     = elem_t(0);
+            dest.data[2 * item + 1] = src.data[item];
+        });
+        dest.idx = src.idx << 2;
+    }
+
+    // A 2:4 fp32 operand to its split form; the pattern is untouched, so the index carries over.
+    template <int Rows, int Cols, use Use>
+    inline __device__ static void
+    matrix_cast(sparse_matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use, sparsity::n2of4>& dest,
+                sparse_matrix<fpfmt::e8m10, Rows, Cols, Use, sparsity::n2of4> const& src)
+    {
+        dest.big   = packed_convert<bf16_t>(src.data);
+        dest.small = packed_convert<bf16_t>(src.data - packed_convert<fp32_t>(dest.big));
+        dest.idx   = src.idx;
+    }
+
+    // The tf32 form of the spread above, straight to the split the MMA takes so the intermediate
+    // fp32 2:4 operand never occupies registers.
+    template <int Rows, int Cols, use Use>
+    inline __device__ static void
+    matrix_cast(sparse_matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use, sparsity::n2of4>& dest,
+                sparse_matrix<fpfmt::e8m10, Rows, Cols, Use, sparsity::n1of4> const& src)
+    {
+        using src_t = sparse_matrix<fpfmt::e8m10, Rows, Cols, Use, sparsity::n1of4>;
+        static_for<src_t::num_items>([&]<int item>() {
+            const fp32_t v           = src.data[item];
+            const bf16_t big         = static_cast<bf16_t>(v);
+            dest.big[2 * item]       = bf16_t(0);
+            dest.big[2 * item + 1]   = big;
+            dest.small[2 * item]     = bf16_t(0);
+            dest.small[2 * item + 1] = static_cast<bf16_t>(v - static_cast<fp32_t>(big));
+        });
+        dest.idx = src.idx << 2;
+    }
 
     // scales
     template <>
@@ -171,15 +350,33 @@ struct arch_mi400
         }
     };
 
+    // Every format except tf32 computes on its storage fragment, so a kernel that
+    // splits `data` (loaded) from a compute operand can cast unconditionally and
+    // only tf32 pays a real conversion; here the two coincide.
+    template <fpfmt Fmt, int Rows, int Cols, use Use>
+    inline __device__ static void matrix_cast(matrix<Fmt, Rows, Cols, Use>& dest,
+                                              matrix<Fmt, Rows, Cols, Use> const& src)
+    {
+        dest.data = src.data;
+    }
+
     template <fpfmt Fmt>
-    requires(is_16bit<Fmt>) inline __device__
+    requires(is_16bit<Fmt> || Fmt == fpfmt::e8m10) inline __device__
         static void matrix_cast(matrix<Fmt, 16, 16, use::Acc>& dest,
                                 matrix<fpfmt::e8m23, 16, 16, use::Acc> const& src)
     {
-        for(int item = 0; item < dest.matrix::num_items; ++item)
-        {
-            dest.data[item] = static_cast<base_storage_type_t<Fmt>>(src.data[item]);
-        }
+        dest.data = packed_convert<base_storage_type_t<Fmt>>(src.data);
+    }
+
+
+    // Shape-agnostic, so 16x32 A, 32x16 B and swmmac's 64x16 B share one definition.
+    template <int Rows, int Cols, use Use>
+    inline __device__ static void
+    matrix_cast(matrix<fpfmt::e8m10_e8m7x2split, Rows, Cols, Use>& dest,
+                matrix<fpfmt::e8m10, Rows, Cols, Use> const& src)
+    {
+        dest.big   = packed_convert<bf16_t>(src.data);
+        dest.small = packed_convert<bf16_t>(src.data - packed_convert<fp32_t>(dest.big));
     }
 
     template <uint32_t flags = 0>
@@ -214,6 +411,14 @@ struct arch_mi400
         {
             d.data = __builtin_amdgcn_wmma_bf16f32_16x16x32_bf16(
                 false, a.data, false, b.data, 0, c.data, A_reuse, B_reuse);
+            // workaround for the hazard. TODO: remove this once the hazard is fixed.
+            // Unlike the f32-output WMMAs, this one writes a D narrower than C instead of
+            // accumulating in place, so C dies at the MMA and the scheduler fills the MMA's
+            // shadow with VALU writes to C's registers. The hardware is still reading C's
+            // tail there, and clang 23.0.0git does not model that hazard: the write lands on
+            // the dword holding accumulator element 6, which then reads as zero. The barrier
+            // keeps the shadow empty.
+            __builtin_amdgcn_sched_barrier(0);
         }
         // f16 in, f32 accumulate, f16 output. No hardware mixed-CD f16 WMMA
         // exists, so this is the regular f32 WMMA plus an explicit f32->f16
@@ -230,6 +435,29 @@ struct arch_mi400
             acc.data = __builtin_amdgcn_wmma_f32_16x16x32_f16(
                 false, a.data, false, b.data, 0, c.data, A_reuse, B_reuse);
             matrix_cast(d, acc);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 16, 32, use::A>& a,
+                                    matrix<fpfmt::e8m10_e8m7x2split, 32, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+                false, a.small, false, b.big, 0, c.data, 0, 0);
+            d.data = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+                false, a.big, false, b.big, 0, d.data, 0, 1);
+            d.data = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+                false, a.big, false, b.small, 0, d.data, 1, 0);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    matrix<fpfmt::e8m10, 16, 32, use::A>& a,
+                                    matrix<fpfmt::e8m10, 32, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            matrix<fpfmt::e8m10_e8m7x2split, 16, 32, use::A> a_split;
+            matrix<fpfmt::e8m10_e8m7x2split, 32, 16, use::B> b_split;
+            matrix_cast(a_split, a);
+            matrix_cast(b_split, b);
+            wmma(d, a_split, b_split, c);
         }
         __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
                                     matrix<fpfmt::e4m3, 16, 128, use::A>& a,
@@ -292,6 +520,58 @@ struct arch_mi400
                                                                              B_reuse);
                 });
             });
+        }
+    };
+
+    // 2:4 structured-sparse WMMA (swmmac_f32_16x16x64). A is the compressed sparse
+    // operand carrying its own index; B is the full 64x16 operand; D/C are 16x16 f32.
+    template <uint32_t flags = 0>
+    struct smma
+    {
+        static constexpr bool A_reuse = test(flags, wmma_flag::A_reuse);
+        static constexpr bool B_reuse = test(flags, wmma_flag::B_reuse);
+
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    sparse_matrix<fpfmt::e5m10, 16, 64, use::A, sparsity::n2of4>& a,
+                                    matrix<fpfmt::e5m10, 64, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_swmmac_f32_16x16x64_f16(
+                false, a.data, false, b.data, c.data, static_cast<int>(a.idx), A_reuse, B_reuse);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    sparse_matrix<fpfmt::e8m7, 16, 64, use::A, sparsity::n2of4>& a,
+                                    matrix<fpfmt::e8m7, 64, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_swmmac_f32_16x16x64_bf16(
+                false, a.data, false, b.data, c.data, static_cast<int>(a.idx), A_reuse, B_reuse);
+        }
+        __device__ static void
+        wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+             sparse_matrix<fpfmt::e8m10_e8m7x2split, 16, 64, use::A, sparsity::n2of4>& a,
+             matrix<fpfmt::e8m10_e8m7x2split, 64, 16, use::B>& b,
+             matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            const int idx = static_cast<int>(a.idx);
+
+            d.data = __builtin_amdgcn_swmmac_f32_16x16x64_bf16(
+                false, a.small, false, b.big, c.data, idx, 0, 0);
+            d.data = __builtin_amdgcn_swmmac_f32_16x16x64_bf16(
+                false, a.big, false, b.big, d.data, idx, 0, 1);
+            d.data = __builtin_amdgcn_swmmac_f32_16x16x64_bf16(
+                false, a.big, false, b.small, d.data, idx, 1, 0);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    sparse_matrix<fpfmt::e8m10, 16, 64, use::A, sparsity::n2of4>& a,
+                                    matrix<fpfmt::e8m10, 64, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            sparse_matrix<fpfmt::e8m10_e8m7x2split, 16, 64, use::A, sparsity::n2of4> a_split;
+            matrix<fpfmt::e8m10_e8m7x2split, 64, 16, use::B> b_split;
+            matrix_cast(a_split, a);
+            matrix_cast(b_split, b);
+            wmma(d, a_split, b_split, c);
         }
     };
 

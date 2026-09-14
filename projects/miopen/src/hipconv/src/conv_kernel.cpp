@@ -7,7 +7,7 @@ namespace hipconv
 {
 
 void ConvKernel::launch(const LaunchParams& lp,
-                        const hipconv::Conv2dParams& par,
+                        const hipconv::ConvParams& par,
                         const void* in,
                         const void* wei,
                         void* out,

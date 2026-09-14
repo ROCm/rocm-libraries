@@ -7,12 +7,15 @@ cmake_minimum_required(VERSION 3.21)
 # why the stand-in must be a GPU hipconv declares.
 set(HIPCONV_BASELINE_GPU gfx942)
 
-# Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
+# Take the GPU list from GPU_TARGETS when nothing has already named the GPUs.
 #
-# Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
-# machine's own devices, so this has to precede project(). Entries that are not
-# offload targets are dropped: GPU_TARGETS also carries TheRock family names such as
-# gfx94X-dcgpu, and hipconv serves no generic target.
+# GPU_TARGETS is ROCm's GPU list, set by the consumer or filled from amdgpu-arch by
+# find_package(hip) when unset, and MIOpen enables no HIP language, so it names its
+# GPUs this way alone. CMake's HIP language reads CMAKE_HIP_ARCHITECTURES and fills
+# it from the build machine's own devices, so this has to precede project(). A
+# consumer that sets CMAKE_HIP_ARCHITECTURES itself, as TheRock's toolchain does,
+# skips this. Entries naming no offload target are dropped, hipconv serving no
+# generic target.
 if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     set(_hipconv_gpus "")
     foreach(_hipconv_gpu IN LISTS GPU_TARGETS)
@@ -87,6 +90,11 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
+option(HIPCONV_LINE_TABLES "Emit DWARF line tables for device code (-gline-tables-only)" OFF)
+if(HIPCONV_LINE_TABLES)
+    string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -115,7 +123,7 @@ set(_arch_registry "src/arch_registry.cpp")
 hipconv_make_arch_registry("${_arch_targets}" "${_arch_registry}")
 
 set(_hipconv_srcs
-    src/conv2d_params.cpp
+    src/conv_params.cpp
     src/conv_kernel.cpp
     src/kv_descriptor.cpp
     src/registry.cpp

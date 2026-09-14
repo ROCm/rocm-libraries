@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 #include <array>
 #include <cstddef>

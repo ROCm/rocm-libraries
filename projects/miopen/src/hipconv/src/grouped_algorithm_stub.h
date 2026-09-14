@@ -9,7 +9,7 @@
 
 namespace
 {
-bool stub_is_applicable(const hipconv::Conv2dParams&)
+bool stub_is_applicable(const hipconv::ConvParams&)
 {
     return false;
 }

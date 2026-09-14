@@ -12,7 +12,7 @@
 #include "grid.h"
 #include "mathutil.h"
 #include "persistent_grid.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <cmath>
 #include <cstdint>
 
@@ -36,13 +36,13 @@ constexpr double MACHINE_FILL_EXPONENT = 0.8;
 // The packing rule and the model's compute term both read this expression. It takes the packing
 // rather than a config because the column block's width follows unfold_n alone, which is what
 // lets the packing rule cost the three packings without walking the table.
-inline int packed_columns(const Conv2dParams& par, int unfold_n)
+inline int packed_columns(const ConvParams& par, int unfold_n)
 {
     const int w_unfold = MFMA_K / unfold_n;
     return divup(par.q, w_unfold) * w_unfold;
 }
 
-inline int packed_columns(const Conv2dParams& par, const Config& cfg)
+inline int packed_columns(const ConvParams& par, const Config& cfg)
 {
     return packed_columns(par, cfg.unfold_n);
 }
@@ -50,7 +50,7 @@ inline int packed_columns(const Conv2dParams& par, const Config& cfg)
 // Output pixels the machine runs, so the columns a packing leaves empty count as work.
 //
 // Rows pad by the same factor for every arrangement, so leaving them out moves no ranking.
-inline int64_t padded_pixels(const Conv2dParams& par, const Config& cfg)
+inline int64_t padded_pixels(const ConvParams& par, const Config& cfg)
 {
     const int64_t images = int64_t{divup(par.n, cfg.unfold_n)} * cfg.unfold_n;
     return images * par.p * packed_columns(par, cfg);
@@ -60,7 +60,7 @@ inline int64_t padded_pixels(const Conv2dParams& par, const Config& cfg)
 //
 // Built the way the kernel body builds it, so tiles(), items() and splits() cannot drift from the
 // launch's. The launch width is the persistent grid; only a test runs a narrower one.
-inline FlatGrid model_grid(const Conv2dParams& par, const Config& cfg)
+inline FlatGrid model_grid(const ConvParams& par, const Config& cfg)
 {
     return FlatGrid{.groups           = par.groups,
                     .c_per_group      = par.channels_per_group(),
@@ -129,7 +129,7 @@ inline double machine_fill(const FlatGrid& grid)
 // constructs, past a signed 64-bit integer. Returned as float, which is already wider than the
 // model is accurate: it is a two-coefficient fit over a measured corpus, so a pair it separates
 // only below float resolution it has not separated at all, and the table's order decides those.
-inline float estimated_cost(const Conv2dParams& par, const Config& cfg)
+inline float estimated_cost(const ConvParams& par, const Config& cfg)
 {
     const FlatGrid grid = model_grid(par, cfg);
 
@@ -164,7 +164,7 @@ inline float estimated_cost(const Conv2dParams& par, const Config& cfg)
 }
 
 // The FLOPs the gradient needs, before any config spends anything on top.
-inline double ideal_flops(const Conv2dParams& par)
+inline double ideal_flops(const ConvParams& par)
 {
     return 2.0 * par.n * par.p * par.q * par.groups * par.channels_per_group() *
            par.filters_per_group() * par.kh * par.kw;
@@ -176,7 +176,7 @@ inline double ideal_flops(const Conv2dParams& par)
 // peak in the sense that interface documents. It reaches 1 only for a config that pads nothing,
 // refetches nothing, sends no atomics and leaves no workgroup idle, and the compute term alone
 // keeps it under 1 everywhere else.
-inline float throughput_index(const Conv2dParams& par, const Config& cfg)
+inline float throughput_index(const ConvParams& par, const Config& cfg)
 {
     return static_cast<float>(ideal_flops(par) / estimated_cost(par, cfg));
 }
