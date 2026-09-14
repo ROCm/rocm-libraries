@@ -25,7 +25,9 @@
     "epilogues": ["default"],
     "waves_per_eu": [null, 1, 2, 4],
     "lds_swizzle": [false, true],
-    "lds_k_pad": [0, 16]
+    "lds_k_pad": [0, 16],
+    "direct_to_lds": [true],
+    "dtl_prefetch": [false, true]
   },
   "selection": {
     "tile_finalists": 12,
@@ -38,5 +40,5 @@
     "iters": 100,
     "attempts": 3
   },
-  "output_dir": "/home/jialuo12/OPT_Results/rocke_bf16_gfx1250_m1792_n2895_k2048"
+  "output_dir": "/home/jialuo12/OPT_Results/rocke_bf16_gfx1250_m1792_n2895_k2048_opt2"
 }

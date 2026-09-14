@@ -500,9 +500,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
     # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
     # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
-    # interleave, cshuffle LDS-staged C, DTLA, preshuffle) encode MFMA-shaped
-    # assumptions and are gated off until ported. CDNA MFMA keeps the full
-    # matrix.
+    # interleave, cshuffle LDS-staged C, and preshuffle) encode MFMA-shaped
+    # assumptions and are gated off until ported. gfx1250 additionally supports
+    # its native async direct-to-LDS instruction without prefetch. CDNA MFMA
+    # keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -524,13 +525,19 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
-            (spec.trait.direct_to_lds, "direct_to_lds"),
             (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
+        if spec.trait.direct_to_lds:
+            if arch != "gfx1250":
+                return False, f"WMMA path does not support direct_to_lds on {arch}"
+            if spec.trait.lds_k_pad:
+                return False, "gfx1250 WMMA direct_to_lds does not support lds_k_pad"
+            if spec.trait.lds_swizzle:
+                return False, "gfx1250 WMMA direct_to_lds does not support lds_swizzle"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -1215,15 +1222,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     a_lds_view = TensorView(base=A_smem, desc=_a_lds_desc, addr_space="lds")
     b_lds_view = TensorView(base=B_smem, desc=_b_lds_desc, addr_space="lds")
 
-    # DirectToLDS (DTLA/DTLB) plumbing. We issue
+    # DirectToLDS (DTLA/DTLB) plumbing. gfx9 issues
     # ``async_buffer_load_lds_addr`` directly because
     # :class:`AsyncTileLoader` assumes a tile shape where the row dimension
     # wraps at ``halves_per_chunk`` — that's an attention-specific layout
     # and does not match a [block_m, block_k] GEMM tile with block_k >>
     # halves_per_chunk.
     #
-    # The intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
-    # starting at the wave-uniform ``lds_dst``. For our tile we lay
+    # That intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
+    # starting at the wave-uniform ``lds_dst``. gfx1250 instead gives each lane
+    # an explicit global source and LDS destination through
+    # ``global_load_async_to_lds``. For our tile we lay
     # ``block_size`` lanes across the tile such that each lane covers one
     # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
     # remaining chunks_total / block_size iterations.
@@ -1349,15 +1358,25 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.add(k_off, _swz_col(col, row)),
                     ),
                 )
-                off_bytes = b.mul(off_elems, c2)
-                b.async_buffer_load_lds_addr(
-                    _dtl_a_rsrc,
-                    pass_lds_a,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_a,
-                )
+                if arch == "gfx1250":
+                    b.global_load_async_to_lds(
+                        A,
+                        off_elems,
+                        A_smem,
+                        [row, col],
+                        width_bytes=_DTL_BYTES_PER_LANE,
+                        coherency=spec.trait.dtl_cache_a,
+                    )
+                else:
+                    off_bytes = b.mul(off_elems, c2)
+                    b.async_buffer_load_lds_addr(
+                        _dtl_a_rsrc,
+                        pass_lds_a,
+                        off_bytes,
+                        _dtl_zero_soff,
+                        _DTL_DWORDS,
+                        coherency=spec.trait.dtl_cache_a,
+                    )
             for p in range(_dtl_b_passes):
                 pass_off_bytes = p * _dtl_pass_bytes + b_parity_bytes_static
                 pass_lds_b = (
@@ -1378,18 +1397,25 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.add(k_off, _swz_col(col, row)),
                     ),
                 )
-                off_bytes = b.mul(off_elems, c2)
-                b.async_buffer_load_lds_addr(
-                    _dtl_b_rsrc,
-                    pass_lds_b,
-                    off_bytes,
-                    _dtl_zero_soff,
-                    _DTL_DWORDS,
-                    coherency=spec.trait.dtl_cache_b,
-                )
-            # The following ``b.sync()`` (in the caller) lowers to
-            # ``s_waitcnt vmcnt(0) lgkmcnt(0) ; s_barrier``, which drains
-            # the in-flight DTLA writes before any wave reads LDS.
+                if arch == "gfx1250":
+                    b.global_load_async_to_lds(
+                        Bp,
+                        off_elems,
+                        B_smem,
+                        [row, col],
+                        width_bytes=_DTL_BYTES_PER_LANE,
+                        coherency=spec.trait.dtl_cache_b,
+                    )
+                else:
+                    off_bytes = b.mul(off_elems, c2)
+                    b.async_buffer_load_lds_addr(
+                        _dtl_b_rsrc,
+                        pass_lds_b,
+                        off_bytes,
+                        _dtl_zero_soff,
+                        _DTL_DWORDS,
+                        coherency=spec.trait.dtl_cache_b,
+                    )
             return
 
         a_global_tile = make_tile_window(
@@ -1938,6 +1964,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # end ``k_hi``. Computed lazily so the non-split path's SSA is unchanged.
     _k_upper = K if k_hi is None else k_hi
 
+    def _sync_after_load() -> None:
+        if spec.trait.direct_to_lds and arch == "gfx1250":
+            b.s_wait_asynccnt(0)
+            b.sync_lds_only()
+        else:
+            b.sync()
+
     def _emit_kloop_simple() -> None:
         for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
@@ -1947,7 +1980,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # instead routes through ``_emit_kloop_db``; the scheduler
             # hints in ``emit_mfma_phase`` carry the in-tile interleave.
             emit_load_phase(A_smem, B_smem, k0)
-            b.sync()
+            _sync_after_load()
 
             new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
 

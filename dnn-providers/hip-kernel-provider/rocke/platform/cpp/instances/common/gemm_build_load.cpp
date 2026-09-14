@@ -463,14 +463,30 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* a_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
             rocke_value_t* off_elems
                 = rocke_b_add(b, ctx->batch_off_a, rocke_b_add(b, a_row_term, a_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_a_rsrc,
-                                               pass_lds_a,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_a);
+            if(strcmp(ctx->arch, "gfx1250") == 0)
+            {
+                rocke_value_t* lds_indices[2] = {row, col};
+                rocke_b_global_load_async_to_lds(b,
+                                                 ctx->A,
+                                                 off_elems,
+                                                 ctx->A_smem,
+                                                 lds_indices,
+                                                 2,
+                                                 ctx->dtl_bytes_per_lane,
+                                                 spec->trait.dtl_cache_a,
+                                                 0);
+            }
+            else
+            {
+                rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+                rocke_b_async_buffer_load_lds_addr(b,
+                                                   ctx->dtl_a_rsrc,
+                                                   pass_lds_a,
+                                                   off_bytes,
+                                                   ctx->dtl_zero_soff,
+                                                   ctx->dtl_dwords,
+                                                   spec->trait.dtl_cache_a);
+            }
         }
         for(int p = 0; p < ctx->dtl_b_passes; ++p)
         {
@@ -493,14 +509,30 @@ void rocke_gemm_emit_load_phase(rocke_gemm_build_ctx_t* ctx,
             rocke_value_t* b_k_term = rocke_b_add(b, k_off, rocke_gemm_swz_col(ctx, col, row));
             rocke_value_t* off_elems
                 = rocke_b_add(b, ctx->batch_off_b, rocke_b_add(b, b_row_term, b_k_term));
-            rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
-            rocke_b_async_buffer_load_lds_addr(b,
-                                               ctx->dtl_b_rsrc,
-                                               pass_lds_b,
-                                               off_bytes,
-                                               ctx->dtl_zero_soff,
-                                               ctx->dtl_dwords,
-                                               spec->trait.dtl_cache_b);
+            if(strcmp(ctx->arch, "gfx1250") == 0)
+            {
+                rocke_value_t* lds_indices[2] = {row, col};
+                rocke_b_global_load_async_to_lds(b,
+                                                 ctx->Bp,
+                                                 off_elems,
+                                                 ctx->B_smem,
+                                                 lds_indices,
+                                                 2,
+                                                 ctx->dtl_bytes_per_lane,
+                                                 spec->trait.dtl_cache_b,
+                                                 0);
+            }
+            else
+            {
+                rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c2);
+                rocke_b_async_buffer_load_lds_addr(b,
+                                                   ctx->dtl_b_rsrc,
+                                                   pass_lds_b,
+                                                   off_bytes,
+                                                   ctx->dtl_zero_soff,
+                                                   ctx->dtl_dwords,
+                                                   spec->trait.dtl_cache_b);
+            }
         }
         return;
     }

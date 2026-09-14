@@ -584,19 +584,22 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
     /* WMMA coverage is narrower than CDNA's MFMA matrix. */
     if(strcmp(family, "wmma") == 0)
     {
-        if(!(atom_m == 16 && atom_n == 16 && atom_k == 16))
+        int expected_atom_k = strcmp(arch, "gfx1250") == 0 ? 32 : 16;
+        if(!(atom_m == 16 && atom_n == 16 && atom_k == expected_atom_k))
         {
-            CK_GEMM_REJECT("WMMA path supports only 16x16x16 (got (%d, %d, %d)) on %s",
+            CK_GEMM_REJECT("WMMA path supports only 16x16x%d (got (%d, %d, %d)) on %s",
+                           expected_atom_k,
                            atom_m,
                            atom_n,
                            atom_k,
                            arch);
         }
-        if(strcmp(spec->trait.pipeline, "mem") != 0)
+        if(strcmp(spec->trait.pipeline, "mem") != 0 && strcmp(spec->trait.pipeline, "wmma_v1") != 0)
         {
-            CK_GEMM_REJECT("WMMA path supports only the 'mem' pipeline (got '%s') on %s",
-                           spec->trait.pipeline,
-                           arch);
+            CK_GEMM_REJECT(
+                "WMMA path supports only the 'mem' or 'wmma_v1' pipeline (got '%s') on %s",
+                spec->trait.pipeline,
+                arch);
         }
         if(strcmp(spec->trait.epilogue, "default") != 0)
         {
@@ -610,10 +613,6 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support preshuffle_b on %s", arch);
         }
-        if(spec->trait.direct_to_lds)
-        {
-            CK_GEMM_REJECT("WMMA path does not support direct_to_lds on %s", arch);
-        }
         if(spec->trait.dtl_prefetch)
         {
             CK_GEMM_REJECT("WMMA path does not support dtl_prefetch on %s", arch);
@@ -625,6 +624,21 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.chiplet_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
+        }
+        if(spec->trait.direct_to_lds)
+        {
+            if(strcmp(arch, "gfx1250") != 0)
+            {
+                CK_GEMM_REJECT("WMMA path does not support direct_to_lds on %s", arch);
+            }
+            if(spec->trait.lds_k_pad != 0)
+            {
+                CK_GEMM_REJECT("gfx1250 WMMA direct_to_lds does not support lds_k_pad");
+            }
+            if(spec->trait.lds_swizzle)
+            {
+                CK_GEMM_REJECT("gfx1250 WMMA direct_to_lds does not support lds_swizzle");
+            }
         }
     }
 
