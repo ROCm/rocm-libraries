@@ -37,10 +37,12 @@ from pathlib import Path
 import pytest
 
 from hkp_pack.desk_check import (
+    DEFAULT_MATCHER_FIELDS,
     DeskCheckNoSpecFound,
     DeskCheckReport,
     duplicate_matcher_tuples,
     load_kernels,
+    load_variant_set,
     metadata_spec_drift,
     symbol_distinctness,
     toc_key_uniqueness,
@@ -386,13 +388,43 @@ class TestCliEndToEnd:
 # Real-bundle regressions. Every test above this line runs against a fixture
 # built for the test; all three defects below survived those 179 tests and a
 # careful reading, and appeared the moment the CLI was pointed at a REAL
-# shipped bundle. So these run against the real, git-tracked rocKE example
-# under `examples/descriptors/` -- no pack, no hipcc, no GPU, so they run
-# everywhere the suite does.
+# shipped bundle. So these run against every real, git-tracked bundle this
+# repository carries -- no pack, no hipcc, no GPU, so they run everywhere the
+# suite does.
+#
+# There are two such roots and both are read. `examples/descriptors` is the
+# documented sample tree; the root under the engine is what a consumer
+# actually loads. The two differ in ways that have each hidden a defect --
+# where the specialization contract is declared, how many kernels a shard
+# carries, which dtype spellings appear -- so a regression that reads one of
+# them is a regression against half the bundles that exist.
 # ---------------------------------------------------------------------------
-_EXAMPLES = Path(__file__).resolve().parent.parent / "examples" / "descriptors"
-_ROCKE_EXAMPLE = _EXAMPLES / "rocKE" / "gfx942_tiled_attention"
-_HIP_EXAMPLE = _EXAMPLES / "hip" / "pointwise_add"
+_PACKAGING = Path(__file__).resolve().parent.parent
+_EXAMPLES = [
+    _PACKAGING / "examples" / "descriptors",
+    _PACKAGING.parent / "src" / "engines" / "kernel_ingestor_engine" / "descriptors",
+]
+_ROCKE_EXAMPLE = [root / "rocKE" for root in _EXAMPLES]
+_HIP_EXAMPLE = [root / "hip" for root in _EXAMPLES]
+#: Case ids that name the tree, so a failure or a skip says WHICH root it was.
+_ROOT_IDS = [root.parent.name for root in _EXAMPLES]
+
+
+def _require_bundles(producer_root):
+    """Every `.kdp.json` under one producer subtree of one root, or a NAMED
+    skip when that subtree holds none.
+
+    A root a downstream checkout has overridden to an empty directory, and a
+    producer a given root simply does not carry, are both legitimately absent
+    -- but the skip has to say which root and which producer, or a root that
+    quietly stopped being read is indistinguishable from one that passed."""
+    kdps = sorted(producer_root.glob("*/*.kdp.json"))
+    if not kdps:
+        pytest.skip(
+            f"{producer_root.parent} carries no '{producer_root.name}' bundle "
+            f"-- nothing to check for this producer in this root"
+        )
+    return kdps
 
 
 @pytest.mark.quick
@@ -408,14 +440,16 @@ class TestRealBundleDtypeVocabulary:
     exactly why it shipped.
     """
 
-    def test_real_rocke_example_dtype_vocabularies_are_not_drift(self):
-        kernels = _kernels(_read(_ROCKE_EXAMPLE / "tiled_attention.kdp.json"))
-        spec = kernels[0]["kernel_source"]["spec"]
-        meta = kernels[0]["metadata"]
-        # The premise: two different spellings of one type. If this ever
-        # fails, the bundle changed and the regression needs re-grounding.
-        assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16")
-        assert metadata_spec_drift(kernels, ("dtype",)) == []
+    @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
+    def test_real_rocke_example_dtype_vocabularies_are_not_drift(self, rocke_root):
+        for kdp in _require_bundles(rocke_root):
+            kernels = _kernels(_read(kdp))
+            spec = kernels[0]["kernel_source"]["spec"]
+            meta = kernels[0]["metadata"]
+            # The premise: two different spellings of one type. If this ever
+            # fails, the bundle changed and the regression needs re-grounding.
+            assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
+            assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
 
     @pytest.mark.parametrize(
         "spec_dtype,meta_dtype",
@@ -623,19 +657,25 @@ class TestCliOnRealShippedBundles:
     against the real bundles this repository ships. The out-of-box run on a
     real bundle is the case that was never exercised."""
 
-    def test_real_rocke_example_passes_out_of_the_box(self):
-        proc = _run_cli(str(_ROCKE_EXAMPLE / "tiled_attention.kdp.json"))
-        assert proc.returncode == 0, proc.stdout + proc.stderr
-        assert "metadata/authored-spec drift: none" in proc.stdout
-        assert "duplicate matcher tuples: none" in proc.stdout
+    @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
+    def test_real_rocke_example_passes_out_of_the_box(self, rocke_root):
+        for kdp in _require_bundles(rocke_root):
+            proc = _run_cli(str(kdp))
+            assert proc.returncode == 0, str(kdp) + proc.stdout + proc.stderr
+            assert "metadata/authored-spec drift: none" in proc.stdout, kdp
+            assert "duplicate matcher tuples: none" in proc.stdout, kdp
 
-    def test_hip_producer_bundle_reports_could_not_check_not_a_false_clean(self):
+    @pytest.mark.parametrize("hip_root", _HIP_EXAMPLE, ids=_ROOT_IDS)
+    def test_hip_producer_bundle_reports_could_not_check_not_a_false_clean(
+        self, hip_root
+    ):
         """A non-rocKE producer has no authored spec anywhere. That is
         "nothing to check", and must exit non-zero rather than render
         identically to "checked, found nothing wrong"."""
-        proc = _run_cli(str(_HIP_EXAMPLE / "pointwise_add.kdp.json"))
-        assert proc.returncode == 1, proc.stdout + proc.stderr
-        assert "COULD-NOT-CHECK" in proc.stdout
+        for kdp in _require_bundles(hip_root):
+            proc = _run_cli(str(kdp))
+            assert proc.returncode == 1, str(kdp) + proc.stdout + proc.stderr
+            assert "COULD-NOT-CHECK" in proc.stdout, kdp
 
     def test_drift_field_flag_is_independent_of_field_flag(self, tmp_path):
         """End-to-end proof of the escape hatch that used to corrupt a
@@ -666,6 +706,75 @@ class TestCliOnRealShippedBundles:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "duplicate matcher tuples: none" in proc.stdout
+
+
+@pytest.mark.quick
+class TestMatcherFieldsComeFromTheBundlesOwnContract:
+    """The matcher-tuple identity is the bundle's OWN declaration of what the
+    producing compiler specialized on. A generic list standing in for that
+    declaration collapses genuinely distinct kernels onto one tuple: the
+    shipped 2733-kernel bundle declares fourteen fields, five of which the
+    generic list never carried, and it reported 661 false duplicate-matcher
+    collisions and exited 1 the first time the CLI was pointed at it."""
+
+    def _two_kernels_differing_only_in_a_declared_field(self):
+        return [
+            {
+                "id": f"waves-{waves}",
+                "name": f"waves-{waves}",
+                "kernel_source": {"spec": {"head_size": 64, "waves_per_eu": waves}},
+                "metadata": {"head_size": 64, "waves_per_eu": waves},
+            }
+            for waves in (1, 2)
+        ]
+
+    def _bundle(self, tmp_path, metadata_fields):
+        doc = {
+            "kernelDescriptors": self._two_kernels_differing_only_in_a_declared_field()
+        }
+        if metadata_fields is not None:
+            doc["provenance"] = {
+                "specialization_contract": {
+                    "schema_version": 1,
+                    "consumers": [{"metadata_fields": list(metadata_fields)}],
+                }
+            }
+        kdp = tmp_path / "declared.kdp.json"
+        kdp.write_text(json.dumps(doc))
+        return kdp
+
+    def test_declared_fields_distinguish_what_the_generic_list_collapses(
+        self, tmp_path
+    ):
+        kdp = self._bundle(tmp_path, ("head_size", "waves_per_eu"))
+        kernels, fields = load_variant_set(kdp)
+        assert fields == ("head_size", "waves_per_eu")
+        assert duplicate_matcher_tuples(kernels, fields) == {}
+        # The premise: waves_per_eu is not in the generic list, so the same
+        # two kernels are indistinguishable under it.
+        assert duplicate_matcher_tuples(kernels, DEFAULT_MATCHER_FIELDS) == {(64,): 2}
+        proc = _run_cli(str(kdp))
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "duplicate matcher tuples: none" in proc.stdout
+
+    def test_a_bundle_declaring_no_contract_keeps_the_generic_list(self, tmp_path):
+        """The fallback is what a bundle with nothing to say about its own
+        specialization still gets checked against -- removing it would leave
+        such a bundle with an empty matcher tuple, under which every kernel
+        collides with every other."""
+        kdp = self._bundle(tmp_path, None)
+        assert load_variant_set(kdp)[1] is None
+        proc = _run_cli(str(kdp))
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "duplicate matcher tuples: {(64,): 2}" in proc.stdout
+
+    def test_an_explicit_field_still_outranks_the_declaration(self, tmp_path):
+        """A caller who names the fields is answering a different question
+        than the bundle is, and must not be overruled by it."""
+        kdp = self._bundle(tmp_path, ("head_size", "waves_per_eu"))
+        proc = _run_cli(str(kdp), "--field", "head_size")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "duplicate matcher tuples: {(64,): 2}" in proc.stdout
 
 
 @pytest.mark.quick
