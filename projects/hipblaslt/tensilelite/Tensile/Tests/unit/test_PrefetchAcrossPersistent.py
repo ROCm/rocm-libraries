@@ -1456,7 +1456,7 @@ def _make_params(gfx1250_iim, mi=None, **overrides):
         "UseSubtileImpl": False, "StoreRemapVectorWidth": 0,
         "DirectToVgprA": False, "DirectToVgprB": False,
         "DirectToVgprSparseMetadata": False, "WorkGroupMapping": 1,
-        "TDMFuse": 0, "TDMSplit": False, "InitCIterWmma": 0,
+        "TDMFuse": 0, "TDMSplit": False, "TDMCross": 0, "InitCIterWmma": 0,
     }
     params.update(overrides)
     params.update(matrixInstructionToMIParameters(

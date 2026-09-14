@@ -1217,6 +1217,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # TDMSplit is orthogonal: halves each load without changing descriptor sharing.
     "TDMFuse": [0, 1, 2, 3],
+    # TDMCross -- which wave issues which member of a TDM descriptor group.
     # TDMFuse picks the grouping, this rearranges the waves over it. The two are
     # separable in principle but not free in combination: crossing needs two
     # groups split across waves, which only the default grouping leaves, and it
@@ -1231,7 +1232,12 @@ validParameters = { # we need to make sure this matches develop
     #
     # An int rather than a bool so a grouping with more than two partitioned
     # groups can name further arrangements without renaming existing solutions.
+    # Only these two are implemented: _arrangedGroups treats any nonzero as 1,
+    # so a third value needs that function taught to dispatch, not just a wider
+    # list here. Rejected wherever there are fewer than two groups to cross --
+    # see tdmCrossRejectReason, which derives that from group structure rather
     # than from a TDMFuse value.
+    "TDMCross": [0, 1],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
