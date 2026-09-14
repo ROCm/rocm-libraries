@@ -54,9 +54,9 @@ Fusion is the wrong tool — or a net loss — when:
   forcing them into one launch starves one of the two. Keep them separate.
 - **Register/LDS pressure that costs occupancy.** Holding the intermediate
   resident consumes the resource that lets many waves run concurrently. Past the
-  budget, fewer waves run and the fused kernel is slower than the pair. The
-  legalizer (`helpers/fusion_legalize.py`, `FusionLegalizer.legalize`) rejects
-  regions that exceed the LDS budget after staging for exactly this reason.
+  budget, fewer waves run and the fused kernel is slower than the pair. Nothing
+  checks this for you — make the occupancy argument from the resource counts
+  before committing (see the ISA/occupancy utilities in the runbook).
 - **A global sync or full-tensor reduction on the boundary.** If the consumer
   needs the whole producer output (a barrier or a reduction across the grid),
   the intermediate cannot stay resident, it must be materialized to a workspace
@@ -67,11 +67,18 @@ Fusion is the wrong tool — or a net loss — when:
 - **One-off shapes.** If the fused variant serves a single narrow shape, the
   instance-space, golden, and test cost (below) usually outweighs the win. Ship
   the composed unfused path instead.
+- **A fragile dtype boundary.** If the producer runs in a materially narrower
+  format than the consumer, welding them keeps the narrow format live across the
+  seam and couples two independent precision decisions. Keep the seam.
+- **Fusion that forces a harder algorithm.** If keeping the intermediate resident
+  means the consumer must be rewritten to stream (e.g. a streaming top-k instead
+  of one over a finished array), that rewrite is real new work, not a free
+  consequence of fusing — price it in.
 
-The legalizer also rejects unsupported dtype combinations, alignment /
-vector-width violations in the epilogue, and atomics in a non-atomic region.
-Treat a legalizer rejection as a signal the boundary is wrong, not as an obstacle
-to force past.
+The legalizer also rejects unsupported dtypes and layouts, op kinds outside
+`supported_ops`, side-effecting ops, and shape/rank violations (matmul K mismatch,
+mixed-dtype matmul, incompatible broadcast ranks). Treat a legalizer rejection as
+a signal the boundary is wrong, not as an obstacle to force past.
 
 ## How to fuse in rocKE
 
@@ -100,8 +107,8 @@ others consume, so the intermediate lives in LDS across the pipeline. Suited to
 stages that share a grid and tile-compatible shapes.
 
 - The realized pattern is the warp-specialized GEMM pipeline
-  (`instances/common/gemm_wsp3.py`, `wsp3`), with `Lds{Producer,Consumer}Layout`
-  buffers and `CK_WSP3_*` env flags.
+  (`instances/common/gemm_wsp3.py`, `wsp3`), where a subset of warps does the
+  global→LDS load and the rest consume, tuned via `CK_WSP3_*` env flags.
 - Composed from `MfmaAtom` / `WmmaAtom` (`helpers/atoms.py`), a `SchedulePolicy`
   (`helpers/schedule.py`), and a `SoftwarePipeline` (`helpers/pipeline.py`) — the
   same building blocks any instance uses.
@@ -116,9 +123,10 @@ fuse at the pipeline level rather than the kernel level.
   `fusion_memory.py` (workspace for intermediates that escape a region).
   Entry points `compile_fn` / `explain_fn`; use `explain_fn` first to see what
   the planner matched.
-- Launch-level: capture a multi-kernel pipeline into one replayable HIP graph
-  (`PipelineLauncher`) to remove per-dispatch overhead when kernels stay
-  distinct but always run together.
+- Launch-level: chain the stages on a single stream (`PipelineLauncher`) so they
+  run in FIFO order without host-side synchronization between them, when kernels
+  stay distinct but always run together. Note this does not eliminate per-dispatch
+  overhead — each stage is still its own dispatch.
 
 ### Mechanics every fused change must clear
 
@@ -162,22 +170,22 @@ large-throwaway-intermediate case from *Why fuse*.
 pay. Confirm on the target with a trace before committing.
 
 **Form and boundary.** Fuse the selection stage (indexer + top-k) as one unit
-and keep the sparse-attention consumer a separate kernel. Two entries from *When
-not to fuse* decide this seam:
+and keep the sparse-attention consumer a separate kernel. Two rules decide this
+seam:
 
-- **Dtype boundary.** The indexer runs in a low-precision format while the
-  consumer runs in a wider one; welding the low-precision scorer into the
-  attention consumer is the fragile-dtype-boundary case. Keep the seam between
-  them.
-- **Independent reuse/skip point.** A downstream feature may reuse a
-  previously-computed index set and skip selection entirely for some layers.
-  Drawing the fused boundary around indexer+top-k makes that a clean unit to skip
-  — the *natural boundary* rule.
+- **A fragile dtype boundary** (from *When not to fuse*). The indexer runs in a
+  low-precision format while the consumer runs in a wider one; welding the
+  low-precision scorer into the attention consumer keeps the narrow format live
+  across the seam. Keep the seam between them.
+- **Fuse at natural boundaries** (from *Maintainability and reusability*). A
+  downstream feature may reuse a previously-computed index set and skip selection
+  entirely for some layers; drawing the fused boundary around indexer+top-k makes
+  that a clean unit to skip.
 
 **Costs this incurs.** Because the score array never materializes, the top-k must
 run as a streaming top-k over scores as they are produced, not over a finished
-array — the "forces a streaming algorithm" cost from *When not to fuse*, and a
-real piece of new work rather than a free consequence of fusing. In the prefill
+array — the *fusion that forces a harder algorithm* case from *When not to fuse*,
+and real new work rather than a free consequence of fusing. In the prefill
 case the per-query top-k is also ragged (each query row selects a different
 subset), so the gather stays in the consumer, not in the fused selection stage.
 
