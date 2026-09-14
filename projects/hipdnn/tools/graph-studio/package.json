@@ -1,0 +1,35 @@
+{
+  "name": "hipdnn-graph-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Visual editor for hipDNN computation graphs. Web SPA, portable to Electron.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "build:native": "node electron/native/build-addon.cjs",
+    "electron:dev": "concurrently -k \"vite --port 5173\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 bunx electron .\"",
+    "electron:start": "bun run build && bunx electron .",
+    "electron:pack": "bun run build && bunx electron-builder"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.11.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  }
+}
