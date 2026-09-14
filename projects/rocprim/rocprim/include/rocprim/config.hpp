@@ -120,7 +120,7 @@
 #undef ROCPRIM_TARGET_UNKNOWN
 
 // See https://llvm.org/docs/AMDGPUUsage.html#instructions
-#if defined(__gfx1250__) || defined(__gfx1250-strict__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
     #define ROCPRIM_TARGET_CDNA5 1
 #elif defined(__gfx942__) || defined(__gfx9_4_generic__)
     #define ROCPRIM_TARGET_CDNA3 1
