@@ -342,6 +342,13 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
+        # Runtime-load mode is exercised only by this binary; without it DynamicBackendLibrary.hpp
+        # reports 244 lines / 42 branches instead of 264 / 48 (+17 covered lines, +4 covered
+        # branches). It also contributes TestRuntimeLoadBackendStaticCheck.cpp, a translation unit
+        # that exists to be linked and never run, so a small permanent uncovered remainder (+3
+        # missed lines) is expected here and is not a regression.
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_dynamic_load_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object

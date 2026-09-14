@@ -136,6 +136,7 @@ Both are read once, at the first backend call; later changes have no effect.
 Secure execution
 ================
 
-In a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
+On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
 Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath()`` override before the system loader's hardened search.
 Variables that do not select code, such as the logging variables above, are unaffected.
+Windows has no equivalent execution mode, so these three variables are always honored there.

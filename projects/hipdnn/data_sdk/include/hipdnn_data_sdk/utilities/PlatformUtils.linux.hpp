@@ -81,6 +81,8 @@ inline void unsetEnv(const char* var)
 /// Expands a leading `~` to HOME only when alone or followed by `/`; never expands `~user`.
 /// Returns @p path unchanged if no token qualifies or HOME is unset/empty.
 /// Never throws.
+/// Not secure-execution aware: HOME is read with getEnv(), not getSecureEnv(). Never use
+/// on a path that will subsequently be loaded as code.
 inline std::string expandUser(const std::string& path)
 {
     if(path.empty() || path.front() != '~')

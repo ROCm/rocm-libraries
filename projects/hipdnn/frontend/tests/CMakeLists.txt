@@ -126,6 +126,10 @@ add_hipdnn_test(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 # Link the shipped hipdnn_frontend_dynamic target without libhipdnn_backend.
 # A successful link proves runtime-load mode references no backend symbols directly.
+# This is a separate, deliberately small executable rather than a second configuration of
+# hipdnn_frontend_tests above: it has exactly the two sources below and links
+# hipdnn_frontend_dynamic alone, so nothing else in the suite can drag libhipdnn_backend
+# back in and mask the assertion.
 add_executable(
     hipdnn_frontend_dynamic_load_tests
     TestRuntimeLoadBackendFactory.cpp
@@ -138,6 +142,12 @@ target_link_libraries(
     hipdnn_frontend_dynamic_load_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
 )
+
+# HIPDNN_TEST_EXPECT_BACKEND_LIBRARY is defined only when the backend is actually part of
+# this build. With it, a backend that fails to load at run time is a test FAILURE; without
+# it -- a frontend-only build, where there is no backend to find -- its absence is
+# tolerated. Gating on the target rather than on what happens to be installed is what keeps
+# a genuinely missing backend from degrading into a silent skip.
 if(TARGET hipdnn_backend)
     add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_backend)
     target_compile_definitions(

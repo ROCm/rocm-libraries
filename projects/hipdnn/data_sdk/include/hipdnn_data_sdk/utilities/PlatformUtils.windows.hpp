@@ -45,35 +45,59 @@ using SharedLibraryHandle = HMODULE;
 
 inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
-    // The sizing call counts the terminator, the fetching call does not.
-    const DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
-    if(size == 0)
+    // The sizing call counts the terminator, the fetching call does not. Any process can
+    // replace the value between the two calls; when the new value no longer fits, the
+    // fetch writes nothing and returns the size it now requires, terminator included, so
+    // retry with that size until the fetch reports a length that fits.
+    DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
+    while(size != 0)
     {
-        return defaultValue != nullptr ? defaultValue : "";
+        std::string value(size, '\0');
+        const DWORD copied = GetEnvironmentVariableA(var, value.data(), size);
+        if(copied == 0)
+        {
+            break; // Unset or failed between the calls; same meaning as a zero sizing call.
+        }
+        if(copied < size)
+        {
+            value.resize(copied);
+            return value;
+        }
+        size = copied;
     }
 
-    std::string value(size, '\0');
-    value.resize(GetEnvironmentVariableA(var, value.data(), size));
-    return value;
+    return defaultValue != nullptr ? defaultValue : "";
 }
 
 /// Reads native UTF-16 without getEnv()'s lossy ANSI conversion.
 /// Use for native Windows paths.
 inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
 {
-    // The sizing call counts the terminator, the fetching call does not.
-    const DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
-    if(size == 0)
+    // Sized and retried exactly as getEnv() above; see that comment for the growth race.
+    DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
+    while(size != 0)
     {
-        return defaultValue != nullptr ? defaultValue : L"";
+        std::wstring value(size, L'\0');
+        const DWORD copied = GetEnvironmentVariableW(var, value.data(), size);
+        if(copied == 0)
+        {
+            break; // Unset or failed between the calls; same meaning as a zero sizing call.
+        }
+        if(copied < size)
+        {
+            value.resize(copied);
+            return value;
+        }
+        size = copied;
     }
 
-    std::wstring value(size, L'\0');
-    value.resize(GetEnvironmentVariableW(var, value.data(), size));
-    return value;
+    return defaultValue != nullptr ? defaultValue : L"";
 }
 
-/// Always false: Windows has no AT_SECURE-equivalent execution mode.
+/// Always false: an unprivileged invoker's environment does not survive into a privileged
+/// image on Windows. Elevation re-launches the image from the elevating shell and the new
+/// process inherits that shell's environment, so there is no equivalent of a set-user-ID
+/// execve where an attacker-controlled environment crosses a privilege boundary intact.
 inline bool isSecureExecution()
 {
     return false;
@@ -87,6 +111,16 @@ inline std::string getSecureEnv(const char* var, const char* defaultValue = null
         return defaultValue != nullptr ? defaultValue : "";
     }
     return getEnv(var, defaultValue);
+}
+
+/// Wide counterpart of getSecureEnv(); equivalent to getEnvW() on Windows.
+inline std::wstring getSecureEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
+{
+    if(isSecureExecution())
+    {
+        return defaultValue != nullptr ? defaultValue : L"";
+    }
+    return getEnvW(var, defaultValue);
 }
 
 inline void setEnv(const char* var, const char* value)
@@ -105,6 +139,8 @@ inline void unsetEnv(const char* var)
 /// Expands leading `~` or case-insensitive `%USERPROFILE%` to USERPROFILE only
 /// when alone or followed by a path separator. Returns @p path unchanged if no
 /// token qualifies or USERPROFILE is unset/empty. Never throws.
+/// Not secure-execution aware: USERPROFILE is read with getEnv(), not getSecureEnv().
+/// Never use on a path that will subsequently be loaded as code.
 inline std::string expandUser(const std::string& path)
 {
     const bool hasLeadingTilde = !path.empty() && path.front() == '~'
@@ -135,6 +171,7 @@ inline std::string expandUser(const std::string& path)
 
 /// UTF-16 expandUser() with the same leading-token and fallback rules.
 /// Use for native paths to preserve non-ASCII USERPROFILE values. Never throws.
+/// Not secure-execution aware, exactly as expandUser() above.
 inline std::wstring expandUserW(const std::wstring& path)
 {
     const bool hasLeadingTilde = !path.empty() && path.front() == L'~'

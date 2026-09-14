@@ -43,6 +43,11 @@ HIPDNN_HIDDEN inline hipdnn_data_sdk::utilities::SharedLibraryHandle backendLibr
 /// Empty or relative values are reported on stderr and ignored.
 constexpr const char* BACKEND_LIBRARY_PATH_ENV = "HIPDNN_BACKEND_LIBRARY_PATH";
 
+/// The wide form used for the native Windows read. It must name exactly the same variable
+/// as BACKEND_LIBRARY_PATH_ENV above; renaming one without the other silently disables the
+/// override on Windows while still compiling and still passing every Linux test.
+constexpr const wchar_t* BACKEND_LIBRARY_PATH_ENV_W = L"HIPDNN_BACKEND_LIBRARY_PATH";
+
 /// Production inputs come from @ref backendResolutionInputs(); tests use synthetic layouts.
 struct BackendResolutionInputs
 {
@@ -271,7 +276,7 @@ HIPDNN_HIDDEN inline BackendResolutionInputs backendResolutionInputs()
         // Distinguish an unset variable from an explicitly empty, invalid override.
 #ifdef _WIN32
         constexpr const wchar_t* UNSET = L"\x01unset";
-        const std::wstring value = utilities::getEnvW(L"HIPDNN_BACKEND_LIBRARY_PATH", UNSET);
+        const std::wstring value = utilities::getSecureEnvW(BACKEND_LIBRARY_PATH_ENV_W, UNSET);
 #else
         constexpr const char* UNSET = "\x01unset";
         const std::string value = utilities::getSecureEnv(BACKEND_LIBRARY_PATH_ENV, UNSET);

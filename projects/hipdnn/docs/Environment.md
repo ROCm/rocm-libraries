@@ -73,7 +73,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
 - Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
-- Ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded
+- On Linux, ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded. Windows has no equivalent execution mode, so this variable is always honored there.
 
 #### HIPDNN_HEURISTIC_PLUGIN_DIR
 
