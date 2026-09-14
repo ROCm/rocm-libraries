@@ -2553,14 +2553,6 @@ def is_valid_depthwise_spec(
     p = spec.problem
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
-    # Reject configs whose Python-level unroll would produce an impractically
-    # large IR.  The unroll count is (H + KH - 1) * block_w * KH * KW; cap
-    # at 200 000 FMA-equivalents so build time stays under a few seconds.
-    unroll = (p.H + p.KH - 1) * spec.block_w * p.KH * p.KW
-    if unroll > 50_000:
-        return False, (
-            f"unroll size {unroll} exceeds limit; reduce block_w for large H/KH/KW"
-        )
     return True, "ok"
 
 
@@ -2695,62 +2687,388 @@ def build_direct_depthwise(
         weights_f32.append(row)
 
     # ---- Accumulator array ----
-    # acc[w_out][slot]: one f32 per (output W position, circular pipeline slot).
     acc: List[List[Value]] = [[zero_f32] * p.KH for _ in range(BLOCK_W)]
 
-    # ---- H-streaming loop (Python-level unroll) ----
+    # ---- H-streaming loop ----
+    # Below _UNROLL_THRESH the loop is Python-unrolled (best codegen).
+    # Above it a runtime grouped-period scf.for is used: the outer loop
+    # runs n_groups = ceil(n_iters/KH) times; the inner KH steps are
+    # Python-unrolled with STATIC slot indices so preloaded weights are
+    # referenced directly (no scatter, no runtime weight loads).
+    _UNROLL_THRESH = 20_000
     n_iters = p.H + p.KH - 1
+    _use_unroll = n_iters * BLOCK_W * p.KH * p.KW <= _UNROLL_THRESH
 
-    for y in range(n_iters):
-        y_i = b.const_i32(y)
-
-        for r_const in range(p.KH):
-            p_idx = (y - r_const) % p.KH
-
+    if _use_unroll:
+        for y in range(n_iters):
+            y_i = b.const_i32(y)
             for w_out in range(BLOCK_W):
-                # Base output W position for this sub-tile element.
                 w_pos = b.add(q_tile_start, b.const_i32(w_out))
-
                 for s_const in range(p.KW):
-                    # Load A[n, y-PAD, w_tile_start+w_out+s-PAD, ch].
-                    # The descriptor embeds handle both h and w boundary checks.
                     a_off, valid = a_desc.offset(
-                        b,
-                        n=n,
-                        y_iter=y_i,
-                        wo=w_pos,
-                        s_off=b.const_i32(s_const),
-                        c=ch,
+                        b, n=n, y_iter=y_i, wo=w_pos, s_off=b.const_i32(s_const), c=ch,
                     )
                     safe_off = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
                     a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
                     a_f32 = b.select(valid, b.cast_to_f32(a_h), zero_f32)
+                    for r_const in range(p.KH):
+                        p_idx = (y - r_const + p.KH) % p.KH
+                        acc[w_out][p_idx] = b.fma(
+                            weights_f32[r_const][s_const], a_f32, acc[w_out][p_idx]
+                        )
 
-                    acc[w_out][p_idx] = b.fma(
-                        weights_f32[r_const][s_const], a_f32, acc[w_out][p_idx]
-                    )
-
-        # ---- Flush one output row ----
-        p_flush_val = y - (p.KH - 1)
-        P_FLUSH = p_flush_val % p.KH
-        if 0 <= p_flush_val < p.H and p_flush_val % c_stride_dw == 0:
-            ho_row = p_flush_val // c_stride_dw
+            p_flush_val = y - (p.KH - 1)
+            P_FLUSH = p_flush_val % p.KH
+            if 0 <= p_flush_val < p.H and p_flush_val % c_stride_dw == 0:
+                ho_row = p_flush_val // c_stride_dw
+                for w_out in range(BLOCK_W):
+                    out_q = b.add(q_tile_start, b.const_i32(w_out))
+                    out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
+                    d_off, _ = d_desc.offset(b, n=n, h=b.const_i32(ho_row), w=out_q, k=ch)
+                    safe_d = b.select(out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH]))
             for w_out in range(BLOCK_W):
-                out_q = b.add(q_tile_start, b.const_i32(w_out))
-                out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
-                d_off, _ = d_desc.offset(
-                    b,
-                    n=n,
-                    h=b.const_i32(ho_row),
-                    w=out_q,
-                    k=ch,
-                )
-                safe_d = b.select(out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                acc_h = b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
-                b.buffer_store_f16(d_rsrc, safe_d, c0, acc_h)
+                acc[w_out][P_FLUSH] = zero_f32
 
-        # Unconditional slot reset — prevents early-iter accumulator leaks.
-        for w_out in range(BLOCK_W):
-            acc[w_out][P_FLUSH] = zero_f32
+    else:
+        c1 = b.const_i32(1)
+        c_KH = b.const_i32(p.KH)
+        c_stride_rv = b.const_i32(c_stride_dw)
+        n_groups = (n_iters + p.KH - 1) // p.KH
+
+        dw_iter_args = [
+            (f"dw_acc_kh{kh}_w{w}", zero_f32)
+            for kh in range(p.KH)
+            for w in range(BLOCK_W)
+        ]
+        group_loop = b.scf_for_iter(
+            c0, b.const_i32(n_groups), c1, dw_iter_args,
+            iv_name="dw_grp",
+            elide_trailing_barrier=False,
+        )
+        with group_loop as (grp_iv, loop_accs):
+            new_accs = list(loop_accs)
+
+            for j in range(p.KH):
+                y_j = b.add(b.mul(grp_iv, c_KH), b.const_i32(j))
+                j_valid = b.cmp_lt(y_j, b.const_i32(n_iters))
+
+                for w_out in range(BLOCK_W):
+                    w_pos = b.add(q_tile_start, b.const_i32(w_out))
+                    for s_const in range(p.KW):
+                        a_off, valid = a_desc.offset(
+                            b, n=n, y_iter=y_j, wo=w_pos, s_off=b.const_i32(s_const), c=ch,
+                        )
+                        ok = b.land(valid, j_valid)
+                        safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
+                        a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                        a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
+                        for r_const in range(p.KH):
+                            p_idx = (j - r_const + p.KH) % p.KH  # STATIC slot
+                            idx = p_idx * BLOCK_W + w_out
+                            new_accs[idx] = b.fma(
+                                weights_f32[r_const][s_const], a_f32, new_accs[idx]
+                            )
+
+                P_FLUSH_j = (j + 1) % p.KH  # STATIC
+                p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+
+                if j >= p.KH - 1:
+                    flush_ge = j_valid
+                else:
+                    flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
+
+                if c_stride_dw == 1:
+                    should_flush = flush_ge
+                else:
+                    flush_stride = b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
+                    should_flush = b.land(flush_ge, flush_stride)
+
+                ho_row_j = b.div(p_flush_rv, c_stride_rv)
+
+                for w_out in range(BLOCK_W):
+                    out_q = b.add(q_tile_start, b.const_i32(w_out))
+                    out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
+                    store_ok = b.land(out_q_ok, should_flush)
+                    acc_val = new_accs[P_FLUSH_j * BLOCK_W + w_out]  # STATIC index
+                    d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
+                    safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+
+                for w_out in range(BLOCK_W):
+                    new_accs[P_FLUSH_j * BLOCK_W + w_out] = zero_f32
+
+            b.scf_yield(*new_accs)
+
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
+# Depthwise spatial kernel — groups ≤ wave_size: threads map to both
+# channel AND output W-position within one wavefront.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DirectDepthwiseSpatialSpec:
+    """Depthwise kernel for groups ≤ wave_size (small-group variant).
+
+    Thread layout within each wavefront:
+      ch        = t_in_wave % groups   → which channel this thread owns
+      w_in_wave = t_in_wave // groups  → W-position offset within the wave
+
+    Each wave covers ``n_w_per_wave = wave_size // groups`` output W
+    positions for ALL channels simultaneously.  Thread utilisation:
+    ``floor(wave_size/groups) * groups / wave_size``.
+
+    For groups=3, wave_size=64: n_w=21, utilisation 63/64 = 98.4%.
+
+    Block geometry:
+      ``threads_per_block = block_waves * wave_size``
+      ``block_w = block_waves * n_w_per_wave``
+      Grid: ``(ceil(Wo / block_w), 1, N)``  — no channel tile.
+    """
+
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_spatial"
+    block_waves: int = 1
+    wave_size: int = 64
+
+    @property
+    def n_w_per_wave(self) -> int:
+        return self.wave_size // self.problem.groups
+
+    @property
+    def block_w(self) -> int:
+        return self.block_waves * self.n_w_per_wave
+
+    @property
+    def threads_per_block(self) -> int:
+        return self.block_waves * self.wave_size
+
+    def kernel_name(self) -> str:
+        from ...helpers.spec import kernel_name_join
+
+        p = self.problem
+        return kernel_name_join(self.name, p.short(), f"bwv{self.block_waves}")
+
+    def validate(self) -> None:
+        p = self.problem
+        if p.cpg != 1 or p.kpg != 1:
+            raise ValueError(
+                f"DirectDepthwiseSpatialSpec requires cpg=kpg=1 "
+                f"(got cpg={p.cpg}, kpg={p.kpg})"
+            )
+        if p.groups > self.wave_size:
+            raise ValueError(
+                f"groups {p.groups} > wave_size {self.wave_size}: "
+                f"use DirectDepthwiseSpec instead"
+            )
+        if self.n_w_per_wave == 0:
+            raise ValueError(
+                f"groups={p.groups} == wave_size={self.wave_size}: no W positions per wave"
+            )
+
+
+def is_valid_depthwise_spatial_spec(
+    spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a :class:`DirectDepthwiseSpatialSpec`."""
+    from ...core.arch import ArchTarget
+
+    try:
+        ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+
+    p = spec.problem
+    if p.cpg != 1 or p.kpg != 1:
+        return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+    if p.groups > spec.wave_size:
+        return False, f"groups {p.groups} > wave_size {spec.wave_size}"
+    if spec.n_w_per_wave == 0:
+        return False, f"groups={p.groups} == wave_size: no W positions per wave"
+    return True, "ok"
+
+
+def build_direct_depthwise_spatial(
+    spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
+) -> KernelDef:
+    """Build the small-group depthwise spatial kernel.
+
+    Thread layout: ``ch = t % groups``, ``w_local = t // groups``.
+    Weights preloaded into registers.  Input loaded once per (j, s_const)
+    and reused across all KH filter rows — no redundant memory traffic.
+    """
+    spec.validate()
+    ok, why = is_valid_depthwise_spatial_spec(spec, arch)
+    if not ok:
+        raise ValueError(f"invalid DirectDepthwiseSpatialSpec for {arch}: {why}")
+
+    p = spec.problem
+    WAVE = spec.wave_size
+    BLOCK_WAVES = spec.block_waves
+    THREADS = spec.threads_per_block
+    n_w = spec.n_w_per_wave
+    BLOCK_W = spec.block_w
+    Ho = p.Ho
+    Wo = p.Wo
+    c_stride_dw = p.stride
+
+    n_iters = p.H + p.KH - 1
+    _use_unroll = n_iters * p.KH * p.KW <= 20_000
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+
+    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    B_bytes = b.param("B_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+
+    c0 = b.const_i32(0)
+    c_wave = b.const_i32(WAVE)
+    c_Wo = b.const_i32(Wo)
+    c_half_bytes = b.const_i32(2)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero_f32 = b.const_f32(0.0)
+
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    t_in_wave = b.mod(tid, c_wave)
+
+    ch = b.mod(t_in_wave, b.const_i32(p.groups))
+    w_in_wave = b.div(t_in_wave, b.const_i32(p.groups))
+
+    bx = b.block_id_x()
+    n = b.block_id_z()
+
+    q_out = b.add(
+        b.mul(bx, b.const_i32(BLOCK_W)),
+        b.add(b.mul(wave_id, b.const_i32(n_w)), w_in_wave),
+    )
+
+    # Guard: wasted threads when groups * n_w < wave_size
+    w_valid = b.cmp_lt(w_in_wave, b.const_i32(n_w))
+    q_ok = b.land(b.cmp_lt(q_out, c_Wo), w_valid)
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+
+    a_desc = TensorDescriptor.naive(
+        "A",
+        lengths=[p.N, p.H, p.W, p.total_c],
+        coord_names=("n", "h", "w", "c"),
+    ).transform(
+        embed(upper=("y_iter",), into="h", strides=(1,), offset=-p.PAD, lo=0, hi=p.H),
+        embed(upper=("wo", "s_off"), into="w", strides=(p.stride, 1), offset=-p.PAD, lo=0, hi=p.W),
+    )
+    b_desc = TensorDescriptor.naive(
+        "B", lengths=[p.total_k, p.KH, p.KW, 1], coord_names=("k", "r", "s", "c")
+    )
+    d_desc = TensorDescriptor.naive(
+        "D", lengths=[p.N, Ho, Wo, p.total_k], coord_names=("n", "h", "w", "k")
+    )
+
+    # Preload weights: KH * KW f32 per thread (one channel each).
+    weights_f32: List[List[Value]] = []
+    for r_const in range(p.KH):
+        row: List[Value] = []
+        for s_const in range(p.KW):
+            w_off, _ = b_desc.offset(
+                b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
+            )
+            safe_w = b.select(w_valid, b.mul(w_off, c_half_bytes), oob_sentinel)
+            w_h = b.buffer_load_f16(b_rsrc, safe_w, c0)
+            row.append(b.select(w_valid, b.cast_to_f32(w_h), zero_f32))
+        weights_f32.append(row)
+
+    if _use_unroll:
+        acc: List[Value] = [zero_f32] * p.KH
+
+        for y in range(n_iters):
+            y_i = b.const_i32(y)
+            for s_const in range(p.KW):
+                a_off, valid = a_desc.offset(
+                    b, n=n, y_iter=y_i, wo=q_out, s_off=b.const_i32(s_const), c=ch
+                )
+                ok = b.land(valid, q_ok)
+                safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
+                a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
+                for r_const in range(p.KH):
+                    p_idx = (y - r_const + p.KH) % p.KH
+                    acc[p_idx] = b.fma(weights_f32[r_const][s_const], a_f32, acc[p_idx])
+
+            p_flush_val = y - (p.KH - 1)
+            P_FLUSH = p_flush_val % p.KH
+            if 0 <= p_flush_val < p.H and p_flush_val % c_stride_dw == 0:
+                ho_row = p_flush_val // c_stride_dw
+                d_off, _ = d_desc.offset(b, n=n, h=b.const_i32(ho_row), w=q_out, k=ch)
+                safe_d = b.select(q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH]))
+            acc[P_FLUSH] = zero_f32
+
+    else:
+        c1 = b.const_i32(1)
+        c_KH = b.const_i32(p.KH)
+        c_stride_rv = b.const_i32(c_stride_dw)
+        n_groups = (n_iters + p.KH - 1) // p.KH
+
+        iter_args = [(f"sp_acc_{kh}", zero_f32) for kh in range(p.KH)]
+        group_loop = b.scf_for_iter(
+            c0, b.const_i32(n_groups), c1, iter_args,
+            iv_name="sp_grp",
+            elide_trailing_barrier=False,
+        )
+        with group_loop as (grp_iv, loop_accs):
+            new_accs = list(loop_accs)
+
+            for j in range(p.KH):
+                y_j = b.add(b.mul(grp_iv, c_KH), b.const_i32(j))
+                j_valid = b.cmp_lt(y_j, b.const_i32(n_iters))
+
+                for s_const in range(p.KW):
+                    a_off, valid = a_desc.offset(
+                        b, n=n, y_iter=y_j, wo=q_out, s_off=b.const_i32(s_const), c=ch
+                    )
+                    ok = b.land(b.land(valid, j_valid), q_ok)
+                    safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
+                    a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
+                    a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
+                    for r_const in range(p.KH):
+                        p_idx = (j - r_const + p.KH) % p.KH  # STATIC
+                        new_accs[p_idx] = b.fma(
+                            weights_f32[r_const][s_const], a_f32, new_accs[p_idx]
+                        )
+
+                P_FLUSH_j = (j + 1) % p.KH  # STATIC
+                p_flush_rv = b.add(y_j, b.const_i32(-(p.KH - 1)))
+
+                if j >= p.KH - 1:
+                    flush_ge = j_valid
+                else:
+                    flush_ge = b.land(b.cmp_lt(c0, grp_iv), j_valid)
+
+                if c_stride_dw == 1:
+                    should_flush = flush_ge
+                else:
+                    flush_stride = b.cmp_eq(b.mod(p_flush_rv, c_stride_rv), c0)
+                    should_flush = b.land(flush_ge, flush_stride)
+
+                ho_row_j = b.div(p_flush_rv, c_stride_rv)
+                store_ok = b.land(q_ok, should_flush)
+
+                acc_val = new_accs[P_FLUSH_j]  # STATIC index
+                d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
+                safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
+
+                new_accs[P_FLUSH_j] = zero_f32  # unconditional static reset
+
+            b.scf_yield(*new_accs)
 
     return b.kernel

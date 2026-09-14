@@ -414,12 +414,17 @@ def _run_depthwise_sweep(
     from rocke.helpers.manifest import conv_args_signature
     from rocke.instances.common.conv_direct_grouped import (
         DirectDepthwiseSpec,
+        DirectDepthwiseSpatialSpec,
         build_direct_depthwise,
+        build_direct_depthwise_spatial,
         is_valid_depthwise_spec,
+        is_valid_depthwise_spatial_spec,
     )
     from rocke.runtime.hip_module import HipError
 
     p = problem
+    # Use spatial kernel when groups fit in one wave (better thread utilisation).
+    _use_spatial = p.groups <= 64
 
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
@@ -450,18 +455,29 @@ def _run_depthwise_sweep(
     pending = []
     for combo in combos:
         block_w, block_waves = combo
-        spec = DirectDepthwiseSpec(
-            problem=p,
-            name="rocke_bench_direct_depthwise",
-            block_w=block_w,
-            block_waves=block_waves,
-        )
-        ok, _ = is_valid_depthwise_spec(spec, arch=arch)
+        if _use_spatial:
+            spec = DirectDepthwiseSpatialSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise_spatial",
+                block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
+        else:
+            spec = DirectDepthwiseSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise",
+                block_w=block_w,
+                block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_spec(spec, arch=arch)
         if not ok:
             n_skipped += 1
             continue
         try:
-            kernel = build_direct_depthwise(spec, arch=arch)
+            if _use_spatial:
+                kernel = build_direct_depthwise_spatial(spec, arch=arch)
+            else:
+                kernel = build_direct_depthwise(spec, arch=arch)
         except ValueError:
             n_skipped += 1
             continue
@@ -510,8 +526,12 @@ def _run_depthwise_sweep(
             )
             continue
 
-        q_tiles = math.ceil(p.Wo / block_w)
-        g_tiles = math.ceil(p.groups / spec.block_ch)
+        if _use_spatial:
+            q_tiles = math.ceil(p.Wo / spec.block_w)
+            g_tiles = 1  # all channels handled within each wavefront
+        else:
+            q_tiles = math.ceil(p.Wo / block_w)
+            g_tiles = math.ceil(p.groups / spec.block_ch)
         grid = (q_tiles, g_tiles, p.N)
         block = (spec.threads_per_block, 1, 1)
         stream = 0
