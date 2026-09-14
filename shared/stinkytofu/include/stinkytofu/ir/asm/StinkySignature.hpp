@@ -380,6 +380,17 @@ struct STINKYTOFU_EXPORT SignatureBase {
     void addArg(const std::string& name, SignatureValueKind kind, const std::string& type,
                 const std::string& addrSpaceQual = "");
 
+    /// Write \p totalVgprs to both places the count appears,
+    /// `.amdhsa_next_free_vgpr` and the metadata `.vgpr_count`. The count can
+    /// move either way: declaring too many costs occupancy, declaring too few
+    /// gives the wave fewer registers than the code names. Capping it at what
+    /// the architecture can address is the caller's job, not this layer's.
+    ///
+    /// Not setGprs, which would move originalTotalVgprs too and lose the
+    /// producer's figure. Does nothing when AGPRs share the register file,
+    /// where the count is `accumOffset + totalAgprs` instead.
+    void setDeclaredVgprs(int totalVgprs);
+
     void addDescriptionTopic(const std::string& text);
     void addDescriptionBlock(const std::string& text);
     void addDescription(const std::string& text);
