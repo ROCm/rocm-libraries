@@ -874,9 +874,13 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // Cross-block spatial tiling for WRW uses atomicAdd on the weight buffer.
     // float/double have native hardware atomicAdd; half/hip_bfloat16 use
     // CAS-based atomicAdd (portable across all GPUs and ROCm versions).
+    // half/hip_bfloat16 round the running sum to 16-bit precision after
+    // every block's contribution, which can silently lose later contributions
+    // once the sum grows large — so those output types skip tiling.
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
+       spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1036,7 +1040,8 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // Cross-block spatial tiling for WRW — see 2D WRW comment for details.
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
+       spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
