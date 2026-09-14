@@ -516,6 +516,7 @@ When a `clobbersEarly` rule is Active, the allocator and the verifier see the wi
 | `.maxVGPR`, `.maxSGPR`, `.maxAGPR` | indexes an operand can encode → `indexCount(class)` |
 | `.totalVgprPerSimd` | physical register file → `totalPerSimd(class)` |
 | `.vgprAllocGranule` | step occupancy is measured in → `allocationGranule(class)` |
+| `.maxWavesPerSimd` | wave slots per SIMD, the cap `getWavesPerSimd` applies once registers stop binding |
 
 Nothing is keyed on an architecture, so supporting a target means editing that target's `.def`.
 
