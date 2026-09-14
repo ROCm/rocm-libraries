@@ -342,11 +342,12 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
-        # Runtime-load mode is exercised only by this binary; without it DynamicBackendLibrary.hpp
-        # reports 244 lines / 42 branches instead of 264 / 48 (+17 covered lines, +4 covered
-        # branches). It also contributes TestRuntimeLoadBackendStaticCheck.cpp, a translation unit
-        # that exists to be linked and never run, so a small permanent uncovered remainder (+3
-        # missed lines) is expected here and is not a regression.
+        # Without this binary DynamicBackendLibrary.hpp reports 244 lines / 42 branch arms
+        # instead of 264 / 48: resolveSymbol and the resolveBackendSymbol<> instantiations are
+        # mapped only here (+17 covered lines, +4 covered branch arms). The three extra missed
+        # lines are resolveSymbol's null-handle early return, which nothing reaches while the
+        # backend loads -- not the never-run static-check translation unit, whose inline
+        # instantiations are COMDAT-folded onto counters the executed tests already increment.
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_dynamic_load_tests
         -object

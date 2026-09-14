@@ -485,6 +485,93 @@ TEST_F(TestBackendLibraryResolution, NonAsciiOverrideIsFoundOnDiskRatherThanRepo
 
 #if defined(__linux__)
 
+namespace
+{
+
+using hipdnn_frontend::detail::backendResolutionInputs;
+
+/// Sets and restores an environment variable, including its absence.
+/// ScopedEnvironmentVariableSetter cannot express the absent case: its constructor
+/// always sets, and it reads an originally-empty value as absent, so it can neither
+/// start a case with the variable unset nor restore one that began that way.
+class ScopedEnvironmentVariable
+{
+public:
+    ScopedEnvironmentVariable(const char* name, const char* value)
+        : _name(name)
+        , _previous(hipdnn_data_sdk::utilities::getEnv(name, ABSENT))
+    {
+        if(value != nullptr)
+        {
+            hipdnn_data_sdk::utilities::setEnv(name, value);
+        }
+        else
+        {
+            hipdnn_data_sdk::utilities::unsetEnv(name);
+        }
+    }
+
+    ~ScopedEnvironmentVariable()
+    {
+        if(_previous == ABSENT)
+        {
+            hipdnn_data_sdk::utilities::unsetEnv(_name);
+        }
+        else
+        {
+            hipdnn_data_sdk::utilities::setEnv(_name, _previous.c_str());
+        }
+    }
+
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable(ScopedEnvironmentVariable&&) = delete;
+    ScopedEnvironmentVariable& operator=(ScopedEnvironmentVariable&&) = delete;
+
+private:
+    /// A value no real override can hold, so an unset variable stays distinguishable
+    /// from a set one. This mirrors the sentinel the production read uses.
+    static constexpr const char* ABSENT = "\x01unset";
+
+    const char* _name;
+    std::string _previous;
+};
+
+} // namespace
+
+// Reading the override is not the one-shot: only the load is. These two cases call the
+// production input-gathering directly, which is what the environment read lives in.
+// It does close the programmatic setter for this process, and nothing here depends on
+// that staying open -- the setter's lifecycle is proven in a re-exec'd child above.
+
+// The documented environment knob has to reach the resolver at all. The source is what
+// proves it: an equal directory could just as well have arrived from a programmatic
+// override left behind by some earlier caller in this process.
+TEST_F(TestBackendLibraryResolution, EnvironmentOverrideIsReadIntoTheResolutionInputs)
+{
+    const std::filesystem::path overrideDirectory = directory("override");
+    const ScopedEnvironmentVariable variable("HIPDNN_BACKEND_LIBRARY_PATH",
+                                             overrideDirectory.c_str());
+
+    const BackendResolutionInputs inputs = backendResolutionInputs();
+
+    EXPECT_EQ(inputs.overrideSource, hipdnn_frontend::detail::BACKEND_LIBRARY_PATH_ENV);
+    ASSERT_TRUE(inputs.overrideDirectory.has_value());
+    EXPECT_EQ(*inputs.overrideDirectory, overrideDirectory);
+}
+
+// An absent variable is no override at all. Were it read as an engaged empty path, the
+// resolver would reject it on stderr on every ordinary run, with no override in sight.
+TEST_F(TestBackendLibraryResolution, AbsentEnvironmentOverrideIsNotAnEmptyOverride)
+{
+    const ScopedEnvironmentVariable variable("HIPDNN_BACKEND_LIBRARY_PATH", nullptr);
+
+    const BackendResolutionInputs inputs = backendResolutionInputs();
+
+    EXPECT_FALSE(inputs.overrideDirectory.has_value())
+        << "an unset variable became an override: " << pathForDiagnostic(*inputs.overrideDirectory);
+}
+
 TEST_F(TestBackendLibraryResolution, ExecutableAddressUsesTheExecutableDirectory)
 {
     namespace utilities = hipdnn_data_sdk::utilities;
