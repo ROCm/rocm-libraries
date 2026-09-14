@@ -200,7 +200,7 @@ _rocsparse_handle::_rocsparse_handle()
         // ASIC revision
         asic_rev = properties.asicRevision;
 #else
-        asic_rev = 0;
+        asic_rev  = 0;
 #endif
 
         // Layer mode

@@ -213,7 +213,7 @@ typedef enum
     HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - array of structures */
     HIPSPARSE_FORMAT_BLOCKED_ELL = 5, /**< Blocked ELL */
     HIPSPARSE_FORMAT_SLICED_ELL  = 6, /**< Sliced ELL */
-    HIPSPARSE_FORMAT_BSR = 7 /**< Block sparse row */
+    HIPSPARSE_FORMAT_BSR         = 7 /**< Block sparse row */
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12011)
