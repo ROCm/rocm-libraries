@@ -1,0 +1,125 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# First flow: generate a HIP RTC kernel for a hipDNN graph, then have a second,
+# independent agent review it. Critical issues feed back into the generator and the
+# cycle repeats; a clean review ends the run.
+#
+# Nothing is built or executed here -- this is generate-and-review only. Build,
+# ingest and integration-test validation are the next flow (see DESIGN.md section 5).
+#
+#   python orchestrate.py run configs/flows/rtc-kernel-review.yaml \
+#       --input graph=<path-to-graph.json>
+version: 1
+name: rtc-kernel-review
+description: Generate a HIP RTC kernel for a graph and repair it until review is clean.
+
+inputs:
+  graph:
+    description: hipDNN graph JSON the kernel must satisfy
+    type: path
+    required: true
+  arch:
+    description: Target GPU architecture the kernel is written for
+    default: gfx1151
+  notes:
+    description: Extra constraints for the generator (use =@file.md for a long brief)
+    default: ""
+
+vars:
+  # Per-run scratch. The generator writes the kernel here and edits it in place on
+  # later iterations, so "fix the existing kernel" is a real file, not a retelling.
+  kernel_dir: "${run.dir}/kernel"
+
+steps:
+  - id: review_cycle
+    loop:
+      max_iterations: 3
+      until: "${steps.review.outputs.critical_count} == 0"
+      on_exhausted: fail
+      # A failed step takes its whole iteration down and the cycle starts over with the
+      # reason recorded in feedback.md. Retrying one step in place re-asks a question
+      # whose inputs have not changed, at full cost.
+      on_step_failure: retry
+      feedback_from: "${steps.review.outputs.feedback}"
+    steps:
+
+      - id: generate
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/generate_kernel.md
+        result_file: "${loop.attempt_dir}/generate.json"
+        result_schema:
+          required: [kernel_path, entry_point, launch_config, assumptions]
+        timeout: 3600
+        outputs:
+          kernel_path: { json_file: result, path: "$.kernel_path", type: path }
+          # The one authoritative kernel path. `kernel_path` is what the agent says it
+          # wrote and is what the reviewer is pointed at; this is the file the integrity
+          # hash below actually watches. The assert makes them the same file.
+          expected_kernel: { file: "${vars.kernel_dir}/kernel.hip", type: path }
+          kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
+          entry_point: { json_file: result, path: "$.entry_point" }
+          assumptions: { json_file: result, path: "$.assumptions", type: json }
+        assert:
+          - that: "${steps.generate.outputs.kernel_path} == ${steps.generate.outputs.expected_kernel}"
+            message: "the kernel must be written to <run>/kernel/kernel.hip - the reviewer reads the reported path while the integrity check hashes the fixed one, so a kernel written elsewhere is reviewed but never hash-checked"
+
+      # Deliberately a fresh session, not --resume: a reviewer that shares the
+      # generator's context inherits its blind spots and rubber-stamps them. Write stays
+      # enabled because that is how it produces its own result file; the surgical edit
+      # tools are denied and the kernel is hash-checked below.
+      - id: review
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--disallowedTools"
+          - "Edit"
+          - "MultiEdit"
+          - "NotebookEdit"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/review_kernel.md
+        result_file: "${loop.attempt_dir}/review.json"
+        result_schema:
+          required: [verdict, critical_count, critical_issues, feedback]
+        timeout: 3600
+        outputs:
+          verdict: { json_file: result, path: "$.verdict" }
+          # Derived from the list, not taken from the agent's own tally. Of the two
+          # redundant fields a review writes, only the list can be checked against
+          # anything, so the loop's exit condition is measured from it.
+          critical_count: { json_file: result, path: "$.critical_issues", type: count }
+          reported_critical_count: { json_file: result, path: "$.critical_count", type: int }
+          kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
+          feedback: { json_file: result, path: "$.feedback" }
+        assert:
+          # A self-inconsistent review is worse than a failing one: it ends the loop
+          # on a kernel nobody approved.
+          - that: "${steps.review.outputs.reported_critical_count} == ${steps.review.outputs.critical_count}"
+            message: "critical_count disagrees with the number of entries in critical_issues"
+          - that: "${steps.review.outputs.verdict} == pass or ${steps.review.outputs.verdict} == changes_required"
+            message: "verdict must be exactly 'pass' or 'changes_required'"
+          - that: "${steps.review.outputs.critical_count} == 0 or ${steps.review.outputs.verdict} == changes_required"
+            message: "review listed critical issues but returned verdict 'pass'"
+          - that: "${steps.review.outputs.kernel_sha} == ${steps.generate.outputs.kernel_sha}"
+            message: "the kernel changed during review - the reviewer edited what it was reviewing"
+          - that: "${steps.review.outputs.critical_count} > 0 or ${steps.review.outputs.verdict} == pass"
+            message: "review returned verdict 'changes_required' with zero critical issues"

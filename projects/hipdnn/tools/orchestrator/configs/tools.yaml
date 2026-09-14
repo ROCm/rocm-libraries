@@ -1,0 +1,54 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# Tool registry -- MACHINE-LOCAL. It answers one question: given the name `claude`,
+# what do I exec on this box? Arguments, cwd, timeouts and stdin belong to the step
+# that invokes the tool, never here; the loader rejects them with a pointer to where
+# they go.
+#
+# Check what this resolves to on the current machine with:
+#     python orchestrate.py doctor
+#     python orchestrate.py doctor --flow configs/flows/rtc-kernel-review.yaml
+version: 1
+
+vars:
+  # This checkout. Every other path is derived from it.
+  repo_root: D:/develop/omp_workspace/worktrees/rocm-libraries/agent_kernel_integration_poc
+  hipdnn_root: "${vars.repo_root}/projects/hipdnn"
+  build_dir: "${vars.repo_root}/build"
+
+tools:
+  # Claude Code CLI. Verified present at this path on ADDICKIN-WS (2026-09).
+  claude:
+    exe:
+      windows: C:/Users/addickin/.local/bin/claude.exe
+      linux: claude
+
+  cmake:
+    exe:
+      windows: C:/Program Files/CMake/bin/cmake.exe
+      linux: cmake
+
+  ctest:
+    exe:
+      windows: C:/Program Files/CMake/bin/ctest.exe
+      linux: ctest
+
+  git:
+    exe:
+      windows: C:/Program Files/Git/cmd/git.exe
+      linux: git
+
+  python:
+    exe:
+      windows: C:/Python314/python.exe
+      linux: python3
+
+  # The cross-provider integration test binary. Only exists after a superbuild, so
+  # `doctor` reports it MISSING until one is built -- that is accurate, not a bug.
+  # path_prepend is load-bearing on Windows: without ROCm's bin directory the Win32
+  # loader cannot find amdhip64_7.dll and the process dies with 0xC0000135 before main.
+  integration_tests:
+    exe: "${vars.build_dir}/bin/hipdnn_integration_tests${platform.exe_suffix}"
+    path_prepend:
+      - "${vars.build_dir}/bin"
