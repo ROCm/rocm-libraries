@@ -517,9 +517,9 @@ class ToStinkyAsmPassImpl : public Pass {
                     // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
                     // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
                     if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
-                        legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSStoreB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
-                        legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSLoadB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
                         // gfx1250 has no plain s_barrier; it must split into
                         // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky

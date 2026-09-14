@@ -351,10 +351,10 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
             return legalizeVNop(inst, irBuilder, archId);
 
         case GFX::ds_load_b192:
-            return legalizeDSLoadB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSLoadB192(inst, irBuilder, archId);
 
         case GFX::ds_store_b192:
-            return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSStoreB192(inst, irBuilder, archId);
 
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
