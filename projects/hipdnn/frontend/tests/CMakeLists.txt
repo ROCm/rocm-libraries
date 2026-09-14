@@ -164,9 +164,18 @@ add_hipdnn_test(
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     add_library(hipdnn_frontend_runtime_load_header_cpp20 OBJECT TestRuntimeLoadHeaderCpp20.cpp)
     target_compile_features(hipdnn_frontend_runtime_load_header_cpp20 PRIVATE cxx_std_20)
+    # CXX_CLANG_TIDY is cleared because a superbuild sets CMAKE_CXX_CLANG_TIDY globally,
+    # which would otherwise lint this C++17 header as if it were C++20 source. Checks
+    # like modernize-use-ranges and modernize-use-constraints are gated on the standard,
+    # so they stay silent everywhere else and fire only here -- demanding std::ranges and
+    # requires in a header that must keep compiling as C++17. This target proves the
+    # header compiles at C++20; every other target lints it at the standard it ships as.
     set_target_properties(
         hipdnn_frontend_runtime_load_header_cpp20
-        PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+        PROPERTIES CXX_STANDARD 20
+                   CXX_STANDARD_REQUIRED ON
+                   CXX_EXTENSIONS OFF
+                   CXX_CLANG_TIDY ""
     )
     target_compile_options(
         hipdnn_frontend_runtime_load_header_cpp20 PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}

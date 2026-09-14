@@ -209,7 +209,7 @@ inline std::string pathForDiagnostic(const std::filesystem::path& path)
     {
 #ifdef __cpp_lib_char8_t
         const std::u8string utf8 = path.u8string();
-        return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+        return {reinterpret_cast<const char*>(utf8.data()), utf8.size()};
 #else
         // Already a std::string; returning it directly moves rather than copies.
         return path.u8string();
