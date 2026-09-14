@@ -143,12 +143,16 @@ def matrixInstructionToMIParameters(
     if ("MXBlockA" in problemType) and  problemType["MXBlockA"]:
       # work around for gfx950. Use duplicateFactor = 1
       duplicateFactor = 32 // result["MatrixInstM"] if not isgfx950 else 1
-      result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] // problemType["MXBlockA"] * duplicateFactor
+      # Multiply before dividing: at MXBlockA == 128 the per-thread input count is
+      # smaller than the block size, so dividing first truncates to 0. Values for
+      # MXBlockA 16/32 are unchanged.
+      result['MIInputPerThreadMXSA'] = result['MIInputPerThreadA'] * duplicateFactor // problemType["MXBlockA"]
     result['MIInputPerThreadB'] = result['MIInputPerThreadB'] if not sparseB else result['MIInputPerThreadB'] // 2
     if ("MXBlockB" in problemType) and problemType["MXBlockB"]:
       # work around for gfx950. Use duplicateFactor = 1
       duplicateFactor = 32 // result["MatrixInstN"] if not isgfx950 else 1
-      result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * duplicateFactor
+      # See MIInputPerThreadMXSA above for why the multiply precedes the divide.
+      result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] * duplicateFactor // problemType["MXBlockB"]
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
