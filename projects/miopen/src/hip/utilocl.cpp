@@ -507,8 +507,26 @@ float Im3d2ColGPU(const Handle& handle,
 
     auto&& kernels = handle.GetKernels("miopenIm3d2Col", network_config);
 
-    int im_offset_pack = im_offset;
-    int im_c_pack      = im_c;
+    const uint64_t im_offset_pack  = im_offset;
+    const uint64_t im_c_pack       = im_c;
+    const uint64_t im_d_pack       = im_d;
+    const uint64_t im_h_pack       = im_h;
+    const uint64_t im_w_pack       = im_w;
+    const uint64_t wei_d_pack      = wei_d;
+    const uint64_t wei_h_pack      = wei_h;
+    const uint64_t wei_w_pack      = wei_w;
+    const uint64_t out_d_pack      = out_d;
+    const uint64_t out_h_pack      = out_h;
+    const uint64_t out_w_pack      = out_w;
+    const uint64_t pad_d_pack      = pad_d;
+    const uint64_t pad_h_pack      = pad_h;
+    const uint64_t pad_w_pack      = pad_w;
+    const uint64_t stride_d_pack   = stride_d;
+    const uint64_t stride_h_pack   = stride_h;
+    const uint64_t stride_w_pack   = stride_w;
+    const uint64_t dilation_d_pack = dilation_d;
+    const uint64_t dilation_h_pack = dilation_h;
+    const uint64_t dilation_w_pack = dilation_w;
 
     if(!kernels.empty())
     {
@@ -516,24 +534,24 @@ float Im3d2ColGPU(const Handle& handle,
         kernel(im,
                im_offset_pack,
                im_c_pack,
-               im_d,
-               im_h,
-               im_w,
-               wei_d,
-               wei_h,
-               wei_w,
-               out_d,
-               out_h,
-               out_w,
-               pad_d,
-               pad_h,
-               pad_w,
-               stride_d,
-               stride_h,
-               stride_w,
-               dilation_d,
-               dilation_h,
-               dilation_w,
+               im_d_pack,
+               im_h_pack,
+               im_w_pack,
+               wei_d_pack,
+               wei_h_pack,
+               wei_w_pack,
+               out_d_pack,
+               out_h_pack,
+               out_w_pack,
+               pad_d_pack,
+               pad_h_pack,
+               pad_w_pack,
+               stride_d_pack,
+               stride_h_pack,
+               stride_w_pack,
+               dilation_d_pack,
+               dilation_h_pack,
+               dilation_w_pack,
                col);
     }
     else
@@ -546,10 +564,9 @@ float Im3d2ColGPU(const Handle& handle,
         add_params(" -DLAYOUT_NHWC=" + std::to_string(static_cast<int>(layoutNHWC)));
         add_params(" -DGROUPS=" + std::to_string(num_groups));
 
-        size_t global_threads = std::min(
-            256 * static_cast<std::size_t>(out_d * out_h * out_w * im_c * wei_d * wei_h * wei_w) /
-                8,
-            static_cast<std::size_t>(256) * 1024);
+        size_t global_threads = std::min(256 * static_cast<std::size_t>(out_d) * out_h * out_w *
+                                             im_c * wei_d * wei_h * wei_w / 8,
+                                         static_cast<std::size_t>(256) * 1024);
         const size_t local_threads = std::min(global_threads, static_cast<std::size_t>(256));
         if(global_threads % local_threads != 0)
         {
@@ -563,24 +580,24 @@ float Im3d2ColGPU(const Handle& handle,
             im,
             im_offset_pack,
             im_c_pack,
-            im_d,
-            im_h,
-            im_w,
-            wei_d,
-            wei_h,
-            wei_w,
-            out_d,
-            out_h,
-            out_w,
-            pad_d,
-            pad_h,
-            pad_w,
-            stride_d,
-            stride_h,
-            stride_w,
-            dilation_d,
-            dilation_h,
-            dilation_w,
+            im_d_pack,
+            im_h_pack,
+            im_w_pack,
+            wei_d_pack,
+            wei_h_pack,
+            wei_w_pack,
+            out_d_pack,
+            out_h_pack,
+            out_w_pack,
+            pad_d_pack,
+            pad_h_pack,
+            pad_w_pack,
+            stride_d_pack,
+            stride_h_pack,
+            stride_w_pack,
+            dilation_d_pack,
+            dilation_h_pack,
+            dilation_w_pack,
             col);
     }
 

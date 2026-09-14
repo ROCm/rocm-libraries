@@ -1066,8 +1066,7 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
        problem.GetWeights().GetType() != miopenInt8)
         return true;
 
-    // Everything below goes through Im2Col, which indexes x channel-major.
-    if(!problem.IsLayoutDefault())
+    if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
         return false;
 
     return GetWorkspaceSize(context, problem) > 0;
