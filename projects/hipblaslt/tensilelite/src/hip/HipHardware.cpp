@@ -29,13 +29,41 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace TensileLite
 {
     namespace hip
     {
+        namespace
+        {
+            // A copy of `prop` naming the base architecture instead of the
+            // silicon revision the runtime reported.
+            //
+            // Origami matches gcnArchName exactly against a table of base
+            // architectures, so a v0 part reporting gfx1250-strict matches
+            // nothing and leaves analyticalHardware null, which throws on the
+            // assert guarding every query that consults the analytical model.
+            // The base entry's machine constants are the closest model a
+            // revision has -- a deliberate approximation, since Origami
+            // consumes CU counts and clocks rather than the ISA.
+            //
+            // Rebuilt through toProcessor rather than trimmed as a string so
+            // the revisions folded here stay the ones Tensile recognises.
+            // Feature suffixes such as `:xnack-` need no handling; Origami
+            // drops everything past the first colon itself.
+            hipDeviceProp_t propNamingBaseArchitecture(hipDeviceProp_t const& prop)
+            {
+                hipDeviceProp_t   base = prop;
+                std::string const name = AMDGPU::toString(AMDGPU::toProcessor(prop.gcnArchName));
+                std::snprintf(base.gcnArchName, sizeof(base.gcnArchName), "%s", name.c_str());
+                return base;
+            }
+        } // namespace
+
         HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop,
                              int                    deviceId,
                              std::optional<int>     pciChipId)
@@ -46,14 +74,19 @@ namespace TensileLite
             , properties(prop)
             , deviceId(deviceId)
         {
-            if(origami::hardware_t::is_hardware_supported(prop))
+            // Both entry points read gcnArchName out of the properties they are
+            // handed, so the same renamed copy has to reach both: renaming only
+            // the support check would trade the null for a throw out of
+            // get_default_num_xcds when the lookup misses.
+            hipDeviceProp_t const analyticalProp = propNamingBaseArchitecture(prop);
+            if(origami::hardware_t::is_hardware_supported(analyticalProp))
             {
                 // Route analyticalHardware construction through Origami's device-id
                 // entry point so selection uses the runtime-queried XCC count
                 // (hipDeviceAttributeNumberOfXccs on HIP 7+) instead of the hardcoded
                 // per-architecture default in get_default_num_xcds().
                 //
-                // Pass the caller-provided `prop` so any adjustments made upstream
+                // Pass a copy of the caller-provided `prop` so any adjustments made upstream
                 // (e.g. overriding multiProcessorCount with
                 // hipDeviceAttributePhysicalMultiProcessorCount on multi-XCC
                 // architectures) are preserved. The int-only overload re-queries
@@ -61,8 +94,12 @@ namespace TensileLite
                 //
                 // Pass PCI chip ID when known (e.g. from hipDeviceAttributePciChipId upstream);
                 // Origami does not query PCI chip ID itself—nullopt selects gfx950 id75a0.
-                analyticalHardware = std::make_shared<origami::hardware_t>(
-                    origami::hardware_t::get_hardware_for_device(deviceId, prop, pciChipId));
+                analyticalHardware
+                    = std::make_shared<origami::hardware_t>(origami::hardware_t::
+                                                                get_hardware_for_device(
+                                                                    deviceId,
+                                                                    analyticalProp,
+                                                                    pciChipId));
             }
         }
 
