@@ -13149,6 +13149,23 @@ class KernelWriterAssembly(KernelWriter):
     if (not self.do["LocalRead%s" % tc]) or ((tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadInc (Empty)")
 
+    if tP.get("isSwizzledTDM"):
+      # Advance the swizzled-B local-read address by one WMMA-K worth of kO-blocks per K-sub-iteration
+      # (DepthU/MatrixInstK sub-iters read the same LDS tile at successive K). Contiguous off-order LDS:
+      #   inc = numKChunk * kOStride, kOStride = (wave//MI_N)*MI_N*innerK, innerK = 16//bpe (elems=bytes fp8).
+      module   = Module("localReadInc swizzledTDM")
+      innerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      miN      = kernel["MatrixInstN"]
+      kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
+      inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
+      numLra   = self.states.b.numVgprLocalReadAddr if tP["isB"] else self.states.a.numVgprLocalReadAddr
+      with self.allocTmpSgpr(1, tag="lrIncSwizTDM") as tmpSgprInfo:
+        module.add(SMovB32(dst=sgpr(tmpSgprInfo.idx), src=inc, comment="swizzledTDM K-sub-iter inc"))
+        for i in range(numLra):
+          module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+%u" % (tc, i)), dst1=VCC(), src0=sgpr(tmpSgprInfo.idx),
+                               src1=vgpr("LocalReadAddr%s+%u" % (tc, i)), comment="lr%s += %u (swizzledTDM)" % (tc, inc)))
+      return module
+
     module = Module("localReadInc")
 
     offsetInc = 0
