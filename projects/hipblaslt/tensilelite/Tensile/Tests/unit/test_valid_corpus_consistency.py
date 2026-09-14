@@ -624,3 +624,41 @@ def test_report_corpus_invariant_violations_writes_to_stderr(vcc, capsys):
     vcc.report_corpus_invariant_violations(["something went wrong"])
     err = capsys.readouterr().err
     assert "Error: something went wrong" in err
+
+
+# ===========================================================================
+# Tree identity (_arch_variant_key / _chip_id_dir_suffix)
+# ===========================================================================
+
+def test_chip_id_suffix_is_none_when_the_file_declares_no_arch(tmp_path, vcc):
+    # The arch comes from the file's own header and may be missing. Without a
+    # name to match, no ancestor can be recognized as either the default tree
+    # or a variant of it -- and an empty name would otherwise prefix-match a
+    # directory called "_id75a3", or every ancestor at once.
+    p = tmp_path / "gfx950_id75a3" / "Equality" / "logic.yaml"
+    assert vcc._chip_id_dir_suffix(p, "") is None
+    assert vcc._chip_id_dir_suffix(p, None) is None
+
+
+def test_an_unreadable_file_groups_with_others_that_are_unreadable(tmp_path, vcc):
+    # The key is read from the file, which may not be readable at all: the
+    # corpus is whatever the caller globbed, and a file can vanish between the
+    # glob and the read. A raised OSError here would abort the whole corpus
+    # check over one file, so each field falls back to None instead, leaving
+    # the file in a group of its own kind rather than merged into a real tree.
+    missing = tmp_path / "gone" / "logic.yaml"
+
+    key = vcc._arch_variant_key(missing)
+
+    assert key == vcc._arch_variant_key(tmp_path / "also_gone" / "logic.yaml")
+    real = _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "a.yaml")
+    assert key != vcc._arch_variant_key(real)
+
+
+def test_an_unreadable_file_does_not_fail_the_corpus_check(tmp_path, vcc):
+    # The aggregate is what callers run, so the fallback has to hold all the
+    # way out: one unreadable file must not turn a clean corpus into an error.
+    _write_header_yaml(tmp_path / "aquavanjaram" / "gfx942" / "Equality" / "a.yaml")
+
+    files = _all_yaml(tmp_path) + [tmp_path / "aquavanjaram" / "gfx942" / "gone.yaml"]
+    assert vcc.check_corpus_invariants(tmp_path, files=files) == []
