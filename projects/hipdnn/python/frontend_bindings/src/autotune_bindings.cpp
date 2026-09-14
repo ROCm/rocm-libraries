@@ -192,7 +192,12 @@ void autotuneBindings(nb::module_& m)
         .def_ro("supports_exhaustive", &AutotuneResult::supportsExhaustive)
         .def_ro("ran_exhaustive", &AutotuneResult::ranExhaustive)
         .def_ro("exhaustive_not_run_reason", &AutotuneResult::exhaustiveNotRunReason)
-        .def_ro("strategy_used", &AutotuneResult::strategyUsed);
+        .def_ro("strategy_used", &AutotuneResult::strategyUsed)
+        // How this candidate's time was measured. Results of differing quality are not
+        // comparable, so a caller that sorts or persists these must check it: a
+        // DEVICE_ONLY time excludes host submission overhead and a HOST_INCLUDED one
+        // does not.
+        .def_ro("timing_quality", &AutotuneResult::timingQuality);
 
     // Bind AutotuneStorageConfig: optional JSON heuristic-config output for Graph.autotune()
     nb::class_<AutotuneStorageConfig>(m, "AutotuneStorageConfig")

@@ -82,7 +82,7 @@ def test_stall_gate_raises_after_destroy() -> None:
         gate.release()
 
 
-# Runs in a child process: the watchdog latch that this test trips is process-wide and
+# Runs in a child process: the watchdog latch that this test trips is shared by this module and
 # has no Python reset, so tripping it in-process would silently unstall every later test.
 _TIMEOUT_SCRIPT = textwrap.dedent(
     """

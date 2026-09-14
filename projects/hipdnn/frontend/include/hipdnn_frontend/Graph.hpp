@@ -4764,7 +4764,7 @@ public:
      * - TimingQuality::DEVICE_ONLY: the stream was stalled, so elapsedMs excludes host
      *   submission overhead.
      * - TimingQuality::HOST_INCLUDED: stalling was declined (unsupported device, or
-     *   disabled process-wide after an earlier watchdog timeout), so elapsedMs includes
+     *   disabled for this shared object after an earlier watchdog timeout), so elapsedMs includes
      *   host submission overhead.
      * - TimingQuality::INVALID with an OK Error: the stall watchdog fired -- execution
      *   completed, but the measurement did not, so elapsedMs is empty. This call does not

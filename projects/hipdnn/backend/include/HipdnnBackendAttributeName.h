@@ -1475,7 +1475,7 @@ typedef enum
 
     /** @brief True when arm() actually stalled the stream for this measurement, not the
      *  current armed state (always false after release). False when STALL_ARM_EXT was never
-     *  set or arming declined (unsupported device, process-wide disabled, or a HIP failure).
+     *  set or arming declined (unsupported device, disabled for this shared object, or a HIP failure).
      *  Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
     HIPDNN_ATTR_PROFILING_STALL_USED_EXT = 60408,
 

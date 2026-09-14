@@ -220,7 +220,7 @@ protected:
 
     // libhipdnn_backend.so (the ProfilingControlDescriptor / StallGate that actually
     // arms and watches the stream) builds with CXX_VISIBILITY_PRESET hidden, so its
-    // copy of StallGate's process-wide latch is private to that shared object:
+    // copy of StallGate's sticky latch is private to that shared object:
     // resetStallingDisabledForTesting() called from this executable cannot reach
     // it, and once one run trips the watchdog it stays sticky for every later test
     // in this binary -- exactly the "no reset" problem
@@ -230,7 +230,11 @@ protected:
     // and keeps this test's self-inflicted trip from silently disabling stalling for
     // every later test in this binary. The child is this same test, selected by exact
     // name, so its own EXPECT/ASSERT failures are the ones that fail the parent.
-    void runIsolated(const char* testId, AutotuneStrategy strategy)
+    /// Re-runs the calling test in a fresh child process. The child is selected by this
+    /// test's own registered name rather than a literal, because GoogleTest exits 0 when
+    /// a --gtest_filter matches nothing: a stale literal after a rename would make the
+    /// parent report a pass for a child that never ran.
+    void runIsolated(AutotuneStrategy strategy)
     {
         // std::getenv is unavailable under Windows' -Werror (deprecated in favor of
         // _dupenv_s); getEnv() is the repo's existing cross-platform wrapper over
@@ -238,6 +242,11 @@ protected:
         // variable is never intentionally set to "".
         if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_STALL_RECOVERY_CHILD").empty())
         {
+            const ::testing::TestInfo* const info
+                = ::testing::UnitTest::GetInstance()->current_test_info();
+            ASSERT_NE(info, nullptr) << "runIsolated() must be called from a test body";
+            const std::string testId = std::string(info->test_suite_name()) + "." + info->name();
+
             if(!stallGateAvailable())
             {
                 GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
@@ -265,6 +274,11 @@ protected:
             // process's own environment, which std::system()'s child inherits regardless
             // of which shell it invokes.
             hipdnn_data_sdk::utilities::setEnv("HIPDNN_STALL_RECOVERY_CHILD", "1");
+            // The host-syncing engine is opt-in because it costs a full watchdog timeout
+            // and disables stalling afterwards. Only this child needs it; leaving it off
+            // in the parent keeps every other autotune test in this binary fast and
+            // stalled.
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE", "1");
             const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
             const int rc = std::system(command.c_str());
 
@@ -273,6 +287,7 @@ protected:
             // this same binary would see it already set, skip its own re-exec, and run
             // unisolated in this process instead of a fresh one.
             hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_STALL_RECOVERY_CHILD");
+            hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE");
 
             ASSERT_EQ(rc, 0) << "isolated child run of " << testId
                              << " failed (see its gtest output above)";
@@ -368,14 +383,12 @@ protected:
 
 TEST_F(IntegrationAutotuneStallRecovery, FixedAverageDiscardsMixedTimingSweep)
 {
-    runIsolated("IntegrationAutotuneStallRecovery.FixedAverageDiscardsMixedTimingSweep",
-                AutotuneStrategy::FIXED_AVERAGE);
+    runIsolated(AutotuneStrategy::FIXED_AVERAGE);
 }
 
 TEST_F(IntegrationAutotuneStallRecovery, RunUntilStableDiscardsMixedTimingSweep)
 {
-    runIsolated("IntegrationAutotuneStallRecovery.RunUntilStableDiscardsMixedTimingSweep",
-                AutotuneStrategy::RUN_UNTIL_STABLE);
+    runIsolated(AutotuneStrategy::RUN_UNTIL_STABLE);
 }
 
 } // namespace

@@ -677,7 +677,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
 }
 
 // Arming can decline for a reason other than device support: a prior timeout anywhere in
-// the process disables stalling process-wide, so a later arm() attempt must also read as
+// the descriptor disables stalling for this shared object, so a later arm() attempt must read as
 // unused. The fixture's TearDown() resets the flag this trips, so this test cannot poison
 // later suites in the same binary.
 TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
@@ -688,7 +688,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
     }
 
     // Trip the watchdog on a raw gate, exactly as WatchdogBreaksSelfInflictedDeadlock does,
-    // to flip the process-wide disabled flag without spending the descriptor's own 2 s
+    // to flip the shared object's disabled flag without spending the descriptor's own 2 s
     // default timeout twice in this file.
     {
         hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(300));
@@ -701,7 +701,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
-    ASSERT_NO_THROW(armStall(desc)); // declines: stalling is disabled process-wide
+    ASSERT_NO_THROW(armStall(desc)); // declines: stalling is disabled for this shared object
     ASSERT_NO_THROW(recordStart(desc));
     ASSERT_NO_THROW(recordStop(desc));
     ASSERT_NO_THROW(releaseStall(desc)); // no-op: never armed

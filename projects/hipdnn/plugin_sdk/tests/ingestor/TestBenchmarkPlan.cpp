@@ -533,28 +533,36 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutRemeasuresEveryCandidateInsteadO
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    // The latch is process-wide and sticky, so clear it first: an earlier case that timed
-    // out would otherwise leave this sweep unstalled and nothing would be proven.
+    // The latch is sticky and shared by everything linked into this module, so clear it
+    // first: an earlier case that timed out would otherwise leave this sweep unstalled
+    // and nothing would be proven.
     hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
 
     hipStream_t stream = nullptr;
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
     const BenchmarkTestHandle handle{stream};
 
-    std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back(
-        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
-    candidates.push_back(
-        {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
-
     std::vector<RankedEntry> recorded;
-    const TestBenchmarkPlan plan(
-        std::move(candidates),
-        handle,
-        TestBenchmarkPlan::Timer{},
-        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
 
-    plan.execute(handle, nullptr, 0U, nullptr);
+    // Scoped so the plan -- which owns the timer's StallGate -- is destroyed before the
+    // stream is. ~StallGate() synchronizes the stream it armed to keep a pending
+    // stream-wait from outliving the signal memory, which would be a use-after-destroy
+    // on an already-destroyed handle if these ran in declaration order instead.
+    {
+        std::vector<TestBenchmarkPlan::Candidate> candidates;
+        candidates.push_back(
+            {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+        candidates.push_back(
+            {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            TestBenchmarkPlan::Timer{},
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        plan.execute(handle, nullptr, 0U, nullptr);
+    }
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
         << "the watchdog never fired, so this case proved nothing";

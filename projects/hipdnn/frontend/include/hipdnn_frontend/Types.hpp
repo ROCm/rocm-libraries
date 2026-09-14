@@ -1769,7 +1769,7 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
 enum class TimingQuality
 {
     DEVICE_ONLY, ///< Stream was stalled: elapsed time excludes host submission overhead.
-    HOST_INCLUDED, ///< Stalling was declined (unsupported device or disabled process-wide);
+    HOST_INCLUDED, ///< Stalling was declined (unsupported device, or disabled for this shared object);
     ///< elapsed time includes host submission overhead.
     INVALID ///< No usable measurement: the stall watchdog fired, or execution did not
     ///< complete successfully.

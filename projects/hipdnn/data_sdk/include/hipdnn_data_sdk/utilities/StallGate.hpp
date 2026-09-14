@@ -182,10 +182,21 @@ public:
 
     /// Reset the signal, then enqueue a wait packet that holds every later item on
     /// `stream` until release() or the watchdog. Returns false when the gate is unusable,
-    /// when a previous timeout disabled stalling process-wide, or when a HIP call failed;
-    /// the gate is then not armed and the stream runs unstalled.
+    /// when a previous timeout disabled stalling for this shared object, or when a HIP
+    /// call failed; the gate is then not armed and the stream runs unstalled.
+    ///
+    /// After this returns, lastError() and lastOperation() describe this attempt only,
+    /// unless the gate is unusable -- then they still hold the constructor's diagnosis,
+    /// because nothing in this call replaced it.
     bool arm(hipStream_t stream)
     {
+        if(!isUsable())
+        {
+            // Returned before the per-attempt reset below, so the constructor's record of
+            // which acquisition failed survives for the caller to report.
+            return false;
+        }
+
         {
             // Cleared before every early return, so timedOut() describes this arm attempt
             // only. Leaving it set would make one timeout condemn every later sample from
@@ -194,7 +205,14 @@ public:
             _timedOut = false;
         }
 
-        if(!isUsable() || isStallingDisabled())
+        // Per-attempt for the same reason as _timedOut. A gate that once failed on an
+        // invalid stream keeps hipErrorInvalidHandle otherwise, and its next decline --
+        // for the unrelated reason that a watchdog timeout disabled stalling -- would
+        // report that stale error as the cause instead of the watchdog.
+        _lastError = hipSuccess;
+        _lastOperation = nullptr;
+
+        if(isStallingDisabled())
         {
             return false;
         }

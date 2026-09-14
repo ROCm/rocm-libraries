@@ -637,6 +637,12 @@ float elapsedMs = 0.0f;
 hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
                           HIPDNN_TYPE_FLOAT, 1, NULL, &elapsedMs);
 
+// 6. Read how it was measured. False means the stream was never stalled, so elapsedMs
+//    includes host submission overhead and is not comparable with a true result.
+bool stallUsed = false;
+hipdnnBackendGetAttribute(profiling, HIPDNN_ATTR_PROFILING_STALL_USED_EXT,
+                          HIPDNN_TYPE_BOOLEAN, 1, NULL, &stallUsed);
+
 hipdnnBackendDestroyDescriptor(profiling);
 ```
 
@@ -652,6 +658,13 @@ this sequence internally, so their reported times exclude host submission.
 - The stall needs `hipStreamWaitValue32` support. On a device without it, arming is silently
   skipped and logs one informational message; the measurement still succeeds, but it includes host
   submission overhead as it did before.
+- Always read `HIPDNN_ATTR_PROFILING_STALL_USED_EXT` after `hipdnnBackendFinalize`. It is the only
+  way to tell the two kinds of result apart. `HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT` does not
+  answer this: it stays false when arming never happened at all, which is the case on hardware
+  without `hipStreamWaitValue32` and after an earlier timeout disabled stalling. A false
+  `STALL_USED` result contains host submission overhead. Never compare one against a true result,
+  and never average the two: the difference between them is the submission gap, not engine speed.
+  Discard the whole comparison and re-measure it with a single method, as `Graph::autotune()` does.
 - `hipdnnBackendFinalize` releases the stall before it synchronizes, and destroying the descriptor
   releases and drains as well. An error path that skips `STALL_RELEASE` therefore cannot leave the
   stream stalled.

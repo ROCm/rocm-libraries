@@ -31,7 +31,7 @@ namespace hipdnn_frontend::autotune::detail
 // A watchdog release means the executed plan blocked the host on its own stream, which
 // the stall cannot coexist with. That is a property of the engine's code path, not a
 // transient fault, so the retry runs unstalled rather than re-arming. It terminates:
-// the first timeout disables stalling process-wide, so the retry cannot arm and cannot
+// the first timeout disables stalling for this shared object, so the retry cannot arm and
 // time out. The engine is measured, just the old way -- a timing method that cannot
 // measure an engine must not be allowed to reject it.
 //

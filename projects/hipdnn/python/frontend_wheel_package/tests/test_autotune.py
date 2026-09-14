@@ -304,6 +304,9 @@ def test_autotune_result_defaults():
     assert result.supports_exhaustive is False
     assert result.ran_exhaustive is False
     assert result.exhaustive_not_run_reason == ""
+    # INVALID until something actually measures this candidate, so a caller can tell a
+    # default-constructed or never-benchmarked result from a real measurement.
+    assert result.timing_quality == hipdnn.TimingQuality.INVALID
 
     with pytest.raises(AttributeError):
         result.engine_id = 5
@@ -699,6 +702,17 @@ class TestAutotuneGpu:
             assert winner.strategy_used == hipdnn.AutotuneStrategy.FIXED_AVERAGE
             assert winner.workspace_size <= workspace_size
             assert winner.estimated_workspace_size >= 0
+            # A benchmarked result must report how it was measured, never the
+            # never-benchmarked default.
+            assert winner.timing_quality in (
+                hipdnn.TimingQuality.DEVICE_ONLY,
+                hipdnn.TimingQuality.HOST_INCLUDED,
+            )
+        # One sweep must not mix measurement methods: a DEVICE_ONLY time excludes host
+        # submission overhead and a HOST_INCLUDED one does not, so ranking them against
+        # each other can pick a slower engine. Autotune re-measures the whole sweep
+        # unstalled rather than leave it mixed, which is what this pins.
+        assert len({r.timing_quality for r in winners}) == 1
         assert buffers  # keep device allocations alive across the call
 
     def test_autotune_tensor_keyed_variant_pack(self):

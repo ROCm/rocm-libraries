@@ -248,7 +248,7 @@ private:
             // A watchdog release means this plan blocked the host on its own stream, so
             // the span contains the timeout rather than a measurement. Drop the sample:
             // averaging it would swamp every good one. The first timeout also disables
-            // stalling process-wide, so later samples measure unstalled and succeed.
+            // stalling for this shared object, so later samples measure unstalled and succeed.
             if((*gate)->timedOut())
             {
                 return std::nullopt;
@@ -288,7 +288,7 @@ private:
         // region and so cannot be measured with the stream stalled. Dropping it would cache
         // a slower kernel, and keeping the earlier device-only scores would rank two
         // incomparable populations, so the whole sweep is discarded and re-measured
-        // unstalled. The timeout disables stalling process-wide, so the second pass cannot
+        // unstalled. The timeout disables stalling for this shared object, so the second pass cannot
         // arm, cannot time out, and this runs at most twice.
         bool stalledPass = !hipdnn_data_sdk::utilities::StallGate::isStallingDisabled();
         for(;;)

@@ -200,10 +200,13 @@ public:
         auto& gate = getChecked();
         if(!gate.arm(toHipStream(stream)))
         {
+            // Safe to read as this attempt's cause: arm() resets the error state on every
+            // attempt by a usable gate, and the constructor already rejected an unusable
+            // one, so this cannot be a leftover from an earlier arm().
             throwOnHipError(gate.lastError(), gate.lastOperation());
             // Reached only when no HIP call failed, so an earlier watchdog timeout
-            // disabled stalling for this process. Raising is the only way the caller can
-            // tell that the stream is unstalled and the next span includes host time.
+            // disabled stalling for this shared object. Raising is the only way the caller
+            // can tell that the stream is unstalled and the next span includes host time.
             throw std::runtime_error("HIP stall gate is disabled after a stall watchdog timeout");
         }
     }
