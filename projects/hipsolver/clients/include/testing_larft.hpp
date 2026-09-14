@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename Th>
 void larft_checkBadArgs(const hipsolverHandle_t     handle,
@@ -605,7 +606,7 @@ void larft_getPerfData(const hipsolverHandle_t     handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
@@ -629,7 +630,7 @@ void larft_getPerfData(const hipsolverHandle_t     handle,
                                        hw,
                                        size_w);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_larft(API,
                         handle,
                         params,
@@ -650,9 +651,9 @@ void larft_getPerfData(const hipsolverHandle_t     handle,
                         hWork.data(),
                         hlwork,
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
@@ -708,7 +709,7 @@ void testing_larft(Arguments& argus)
                                               bc),
                               HIPSOLVER_STATUS_NOT_SUPPORTED);
 
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             rocsolver_bench_inform(inform_not_implemented);
 
         return;
@@ -768,7 +769,7 @@ void testing_larft(Arguments& argus)
                                   HIPSOLVER_STATUS_NOT_SUPPORTED);
         }
 
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             rocsolver_bench_inform(inform_invalid_args);
 
         return;
@@ -840,7 +841,7 @@ void testing_larft(Arguments& argus)
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
 
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             rocsolver_bench_inform(inform_invalid_size);
 
         return;
@@ -913,7 +914,7 @@ void testing_larft(Arguments& argus)
                                               bc),
                               HIPSOLVER_STATUS_SUCCESS);
 
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             rocsolver_bench_inform(inform_quick_return);
 
         return;
@@ -947,7 +948,7 @@ void testing_larft(Arguments& argus)
                                         &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         larft_getPerfData<API, I, SIZE, T>(handle,
                                            params,
                                            direct,
@@ -981,7 +982,7 @@ void testing_larft(Arguments& argus)
         ROCSOLVER_TEST_CHECK(T, max_error, n);
 
     // output results for rocsolver test
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
     {
         if(!argus.perf)
         {
