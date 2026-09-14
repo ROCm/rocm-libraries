@@ -126,12 +126,18 @@ class TensorDataMoverLoad(TensorDataMover):
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
-                if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
-                elif tlu:
-                    unrollStride = writer.strideRef(tc, unrollSummation[-1])
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
+                if tp.get("isSwizzledTDM"):
+                    # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
+                    # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
+                    swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), round(swzMi * depthU * bpe), f"swizzle: gsuOffset = gsuIterOffset * MI({swzMi})*DepthU({depthU})*bpe({bpe})"))
+                else:
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
+                    if "MXS" in tc:
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    elif tlu:
+                        unrollStride = writer.strideRef(tc, unrollSummation[-1])
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
                 mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             mod.add(SAddU32(sgpr(sgprAddr), sgpr(tmpSgprIdx), sgpr(sgprAddr), "+= baseAddr(lo)"))
@@ -238,12 +244,18 @@ class TensorDataMoverLoad(TensorDataMover):
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
                 mod.add(self.gsuIterOffset(writer, kernel, tc, gsuOffsetSgprIdx))
-                mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
-                if "MXS" in tc:
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
-                elif tlu:
-                    unrollStride = writer.strideRef(tc, unrollSummation[-1])
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
+                if tp.get("isSwizzledTDM"):
+                    # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
+                    # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
+                    swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), round(swzMi * depthU * bpe), f"swizzle: gsuOffset = gsuIterOffset * MI({swzMi})*DepthU({depthU})*bpe({bpe})"))
+                else:
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
+                    if "MXS" in tc:
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    elif tlu:
+                        unrollStride = writer.strideRef(tc, unrollSummation[-1])
+                        mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
                 mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(gsuOffsetSgprIdx), "+= gsuOffset"))
                 mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= gsuOffset carry"))
             if dstGroup0 is not None:
