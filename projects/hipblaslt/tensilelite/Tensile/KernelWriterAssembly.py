@@ -19625,20 +19625,30 @@ class KernelWriterAssembly(KernelWriter):
     # outer = nO*(du/16) + kO*2 + kM.
     swizzledTDMB = bool(tP.get("isSwizzledTDM"))
     if swizzledTDMB:
-      # The host pre-swizzles B into off(n,k) order CONTIGUOUSLY. Describe the whole per-wave tile as a
-      # single 1-D contiguous row (tile_dim1=1) so tensor_load_to_lds does an unambiguous contiguous
-      # copy => LDS = off order (element counts; data_size handles the fp8 width). A multi-row 2-D tile
-      # gets hardware-expanded into an interleaved LDS layout we don't control (TDM spec: no per-thread
-      # LDS address control), so keep it 1-D.
-      swzTotal = mt * du // numWaves                     # whole per-wave B tile in elements
+      # Host pre-swizzles B into off(n,k) order [nO, kO, kM, nI, kI], contiguous over the FULL K.
+      # Describe a 2-D tile so tensor_load_to_lds gathers one DepthU K-slice across all N-tiles:
+      #   tile0 = MI_N*DepthU   (one nO's DepthU slice, contiguous)
+      #   tile1 = #nO per wave  (= MacroTile/MI_N / numWaves)
+      #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, swzK))
+      # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
+      # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
+      swzMiN    = kernel["MatrixInstN"]
+      swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
+      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
       with self.allocTmpSgpr(1, tag="swzTDM_desc") as swzTmp:
-        mod.add(SMovB32(sgpr(swzTmp.idx), swzTotal, "swizzled B: dim0 = stride0 = tile0 = whole tile"))
-        mod.add(comp.setTensorDim0(descSgprName(1), swzTmp.idx, self, 0))
-        mod.add(comp.setTensorStride0(descSgprName(1), swzTmp.idx, 0))
-        mod.add(SMovB32(sgpr(swzTmp.idx), 1, "swizzled B: dim1 = tile1 = 1 (single contiguous row)"))
-        mod.add(comp.setTensorDim1(descSgprName(1), swzTmp.idx, self, 0, False))
-      mod.add(comp.setTensorTile0(descSgprName(1), swzTotal, self, 0))
-      mod.add(comp.setTensorTile1(descSgprName(1), 1, self))
+        sIdx = swzTmp.idx
+        mod.add(SAddU32(sgpr(sIdx), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(sIdx), sgpr(sIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(sIdx), sgpr(sIdx), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(comp.setTensorStride0(descSgprName(1), sIdx, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
+        mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = tile1 = #nO"))
+        mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzRows, self))
     elif isMetadataML1:
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
