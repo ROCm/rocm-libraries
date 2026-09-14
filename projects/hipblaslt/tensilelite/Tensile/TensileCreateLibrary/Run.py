@@ -165,6 +165,33 @@ def buildTmpDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
     return buildTmpRoot(outputPath) / (f"{stem}-{steppings[0]}" if steppings else stem)
 
 
+def removeScratch(outputPath: Union[str, Path], buildTmpPath: Path) -> bool:
+    """Remove this run's scratch, taking no more than this run owns.
+
+    A fan-out child shares the scratch parent with a sibling still writing into
+    it and may only take its own subdirectory; the parent is left for whichever
+    of the two finishes last. Every other run owns the tree and clears it whole,
+    which also reclaims scratch an earlier build left under a different name.
+
+    The parent is named from outputPath rather than from buildTmpPath, so the
+    architecture list cannot move what gets removed.
+
+    Returns whether there was a scratch directory to remove, so a caller that
+    wants to report its absence can.
+    """
+    if not buildTmpPath.is_dir():
+        return False
+    if os.environ.get(_GROUP_BUILD_ENV):
+        shutil.rmtree(buildTmpPath)
+        try:
+            buildTmpRoot(outputPath).rmdir()
+        except OSError:
+            pass
+    else:
+        shutil.rmtree(buildTmpRoot(outputPath))
+    return True
+
+
 def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
     """The canonical TensileLibrary path for one base arch under outputPath.
 
@@ -667,21 +694,7 @@ def writeSolutionsAndKernels(
             )
 
     if removeTemporaries and not generateSourcesAndExit:
-        # Same rule as the other scratch cleanup: a fan-out child shares the
-        # parent with a sibling still writing into it and may only take its own
-        # subdirectory, while every other run owns the tree and clears it whole.
-        # The parent is named from outputPath rather than from this run's own
-        # scratch path, so no leaf name can move what gets removed.
-        scratchRoot = buildTmpRoot(outputPath)
-        if buildTmpPath.is_dir():
-            if os.environ.get(_GROUP_BUILD_ENV):
-                shutil.rmtree(buildTmpPath)
-                try:
-                    scratchRoot.rmdir()
-                except OSError:
-                    pass
-            else:
-                shutil.rmtree(scratchRoot)
+        removeScratch(outputPath, buildTmpPath)
 
     return codeObjectFiles, numKernels
 
@@ -1527,28 +1540,13 @@ def run():
         # it resolves onto the shared parent of this run's scratch, where a
         # concurrent group build may still be assembling into its own
         # subdirectory, so it is skipped rather than emptied.
-        # Named from outputPath rather than from this run's scratch path, so the
-        # architecture list cannot move what gets removed.
-        scratchRoot = buildTmpRoot(outputPath)
         legacyBuildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
-        if legacyBuildTmp.is_dir() and legacyBuildTmp.resolve() != scratchRoot.resolve():
+        if (
+            legacyBuildTmp.is_dir()
+            and legacyBuildTmp.resolve() != buildTmpRoot(outputPath).resolve()
+        ):
             shutil.rmtree(legacyBuildTmp)
-        if buildTmpPath.is_dir():
-            if os.environ.get(_GROUP_BUILD_ENV):
-                # A sibling group is building into its own subdirectory of the
-                # same parent right now, so only this run's scratch may go. The
-                # parent is left for whichever of us finishes last.
-                shutil.rmtree(buildTmpPath)
-                try:
-                    scratchRoot.rmdir()
-                except OSError:
-                    pass
-            else:
-                # Nothing else is writing here, so take the whole tree -- which
-                # also reclaims scratch left by an earlier build that named its
-                # own directory differently.
-                shutil.rmtree(scratchRoot)
-        else:
+        if not removeScratch(outputPath, buildTmpPath):
             printWarning(f"Cannot remove build_tmp")
 
     print("# Tensile Library Writer DONE")

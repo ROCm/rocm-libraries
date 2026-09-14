@@ -737,11 +737,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
-    # Imported directly by unit tests, so these generators must ship at the
+    # Imported or executed directly by unit tests, so these must ship at the
     # tensilelite root, not under scripts/.
     install(
         FILES
             "${_tensilelite_src}/AMaxGenerator.py"
+            "${_tensilelite_src}/SoftmaxGenerator.py"
             "${_tensilelite_src}/LayerNormGenerator.py"
         DESTINATION "${_tensilelite_install_dest}"
         COMPONENT tests
