@@ -49,8 +49,10 @@ html_theme_options = {
     "path_to_docs": "projects/hipfft/docs",
     "use_repository_button": True,
     "use_issues_button": True,
-    "use_source_button": True,
     "use_download_button": True,
 }
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
