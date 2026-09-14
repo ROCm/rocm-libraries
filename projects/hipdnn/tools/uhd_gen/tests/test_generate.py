@@ -30,9 +30,22 @@ def _timing(page):
                      "stddev_ms": 0.01, "iterations": 40}]}
 
 
-def _collect(monkeypatch, tmp_path, responses):
+def _sweep(page, *results):
+    """One response per graph carrying every candidate's row, as `--sweep --json` emits."""
+    return {key: copy.deepcopy(page[key]) for key in
+            ("engine_id", "graph_id", "device_id", "device_arch", "engine_descriptor_id",
+             "engine_name", "problem_features", "device_features")} | {"results": list(results)}
+
+
+def _collect(monkeypatch, tmp_path, responses, calls=None):
     iterator = iter(responses)
-    monkeypatch.setattr("uhd_gen.generate._run_json", lambda *args: next(iterator))
+
+    def _record(command, *args):
+        if calls is not None:
+            calls.append(command)
+        return next(iterator)
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", _record)
     return collect_graph(["hipdnn_bench", "--graph", "graph.json", "--engine-id", "7"], {}, tmp_path, [],
                          engine_descriptor_id="13ab344f-4818-4772-bb8e-8e1441fec82c")
 
@@ -114,13 +127,14 @@ def test_a_collected_corpus_activates_the_evaluate_noise_band(monkeypatch, tmp_p
     page = _page()
     second = {"id": "kernel-b", "knob_settings": {"tile_m": 64},
               "kernel_features": {"kernel.tile_m": 64}}
-    first_timing, second_timing = _timing(page), _timing(page)
-    second_timing["results"][0].update(candidate_id="kernel-b", knob_settings={"tile_m": 64},
-                                       kernel_features={"kernel.tile_m": 64},
-                                       robust_time_ms=2.51, min_time_ms=2.01, avg_time_ms=2.61)
+    first_result = _timing(page)["results"][0]
+    second_result = copy.deepcopy(first_result)
+    second_result.update(candidate_id="kernel-b", knob_settings={"tile_m": 64},
+                         kernel_features={"kernel.tile_m": 64},
+                         robust_time_ms=2.51, min_time_ms=2.01, avg_time_ms=2.61)
     page["candidates"].append(second)
     page["total_count"] = 2
-    rows, _ = _collect(monkeypatch, tmp_path, [page, first_timing, second_timing])
+    rows, _ = _collect(monkeypatch, tmp_path, [page, _sweep(page, first_result, second_result)])
 
     report = evaluate_corpus(
         pd.DataFrame(rows), lambda frame: frame["avgTimeMs"].to_numpy(dtype=float),
@@ -184,3 +198,47 @@ def test_a_benchmark_that_records_no_verdict_is_refused(monkeypatch, tmp_path, m
     timed["results"][0].pop(missing)
     with pytest.raises(ValueError, match="numerical-validation verdict"):
         _collect(monkeypatch, tmp_path, [page, timed])
+
+
+def test_every_candidate_is_timed_by_one_invocation_per_graph(monkeypatch, tmp_path):
+    """RFC 0019 §13.2: sweeping inside one process amortises load, build and compilation.
+
+    A process per candidate paid all three once per row. The row content is unchanged --
+    this pins the cost, which is the whole reason the sweep exists: two candidates, two
+    invocations (enumerate, then sweep), not three.
+    """
+    page = _page()
+    second = {"id": "kernel-b", "knob_settings": {"tile_m": 64},
+              "kernel_features": {"kernel.tile_m": 64}}
+    page["candidates"].append(second)
+    page["total_count"] = 2
+    first_result = _timing(page)["results"][0]
+    second_result = copy.deepcopy(first_result)
+    second_result.update(candidate_id="kernel-b", knob_settings={"tile_m": 64},
+                         kernel_features={"kernel.tile_m": 64})
+
+    calls = []
+    rows, _ = _collect(monkeypatch, tmp_path, [page, _sweep(page, first_result, second_result)], calls)
+
+    assert len(calls) == 2
+    assert [row["kernel"] for row in rows] == ["kernel-a", "kernel-b"]
+    assert "--sweep" in calls[1] and "--json" in calls[1]
+    # The collection pins restrict the sweep; they are not replaced by one candidate's tuple,
+    # which is what made the old protocol need one process per row.
+    assert "--knob" not in calls[1]
+
+
+def test_a_sweep_that_times_fewer_candidates_than_it_enumerated_is_not_a_corpus(monkeypatch, tmp_path):
+    """A subset is silent data loss: the rows are simply absent from the corpus.
+
+    Reachable now in a way it was not before -- one process holds every candidate, so a
+    crash or an early return takes the rest of the graph with it.
+    """
+    page = _page()
+    page["candidates"].append({"id": "kernel-b", "knob_settings": {"tile_m": 64},
+                               "kernel_features": {"kernel.tile_m": 64}})
+    page["total_count"] = 2
+    only_one = _timing(page)["results"][0]
+
+    with pytest.raises(ValueError, match="exactly the enumerated candidates"):
+        _collect(monkeypatch, tmp_path, [page, _sweep(page, only_one)])

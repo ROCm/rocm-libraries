@@ -196,25 +196,39 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
         raise ValueError(f"no matched candidates for graph {first['graph_id']}")
     rows = []
     published = set(_feature_map(first, "problem_features")) | set(_feature_map(first, "device_features"))
-    for candidate in candidates:
-        # Complete enrolled settings replace collection pins; no Cartesian combinations.
-        timing_command = list(command)
-        while "--knob" in timing_command:
-            index = timing_command.index("--knob")
-            del timing_command[index:index + 2]
-        for name, value in _knob_tuple(candidate):
-            timing_command.extend(["--knob", f"{name}={value}"])
-        measured = _run_json([*timing_command, "--json"], environment, log_dir, len(commands), commands)
-        if _identity(measured) != _identity(first):
-            raise ValueError("timing response belongs to another graph/device/engine")
-        for key in ("problem_features", "device_features"):
-            if _feature_map(measured, key) != _feature_map(first, key):
-                raise ValueError(f"timing changed the enumerated {key}")
-        results = measured.get("results", [])
-        if len(results) != 1:
+    # One invocation per graph, not per candidate. RFC 0019 §13.2: "Sweeping inside one
+    # process amortises" the plugin load, the graph build and the kernel compilation that a
+    # process per row pays once each. `--sweep` times every candidate the same pins
+    # enumerated, so the rows and the per-row stability loop are unchanged; what changes is
+    # that a 185-candidate graph costs one startup instead of 185.
+    #
+    # The trade this accepts: a kernel that CRASHES now takes the whole graph's rows with it
+    # rather than its own row. A kernel that merely fails to build or run does not -- autotune
+    # reports it as an unsucceeded result (makeCompileFailedResult and its siblings), so it
+    # still reaches the corpus as the failure it is.
+    measured = _run_json([*command, "--sweep", "--json"], environment, log_dir, len(commands), commands)
+    if _identity(measured) != _identity(first):
+        raise ValueError("timing response belongs to another graph/device/engine")
+    for key in ("problem_features", "device_features"):
+        if _feature_map(measured, key) != _feature_map(first, key):
+            raise ValueError(f"timing changed the enumerated {key}")
+    results = measured.get("results")
+    if not isinstance(results, list):
+        raise ValueError("sweep response lacks a results array")
+    by_id = {}
+    for result in results:
+        identity = result.get("candidate_id")
+        if identity in by_id:
             raise ValueError("one enrolled tuple must time exactly one candidate")
-        result = results[0]
-        if result.get("candidate_id") != candidate["id"] or _knob_tuple(result) != _knob_tuple(candidate):
+        by_id[identity] = result
+    # A bijection, checked both ways. Enumeration decided the candidate set, so a sweep that
+    # times a subset has silently dropped rows the corpus would then be missing without
+    # saying so, and one that times something else was not the catalog that was enumerated.
+    if set(by_id) != {candidate["id"] for candidate in candidates}:
+        raise ValueError("the sweep did not time exactly the enumerated candidates")
+    for candidate in candidates:
+        result = by_id[candidate["id"]]
+        if _knob_tuple(result) != _knob_tuple(candidate):
             raise ValueError("timed knobs did not resolve to the enrolled candidate")
         if _feature_map(result, "kernel_features") != _feature_map(candidate, "kernel_features"):
             raise ValueError("timing kernel metadata differs from enrolled candidate")
