@@ -66,16 +66,15 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          # rocm-systems develop HEAD (bumped 2026-09-11 from 8a43c008 / 2026-08-30).
-          # Picks up further rocjitsu perf work on top of the prior WMMA/MFMA
-          # native-SIMD + scaled-WMMA fixes, notably:
-          #   perf - functional dispatch controls (#10074, cdc975537): speeds up the
-          #          slow StreamK/MX GEMM kernels that hit the 45-min timeout cap.
-          # Pin must stay >= #9262 (0c7288aef8) for the hsa_hotswap_rocjitsu CMake
-          # target; all 3 build targets (rocjitsu_bin, rocjitsu_shared,
-          # hsa_hotswap_rocjitsu) exist on develop - re-verify the rocjitsu build at
-          # this SHA before trusting results.
-          ref: 3c2e86f8db1d81db44dd4114327f6bf8c9b3986f
+          # Track rocm-systems develop HEAD so the emulator always builds the LATEST
+          # rocjitsu (perf + fixes) instead of a frozen SHA that goes stale and needs a
+          # manual bump. Mirrors the from-source build the race-check sidecar uses, just
+          # unpinned. develop is well past #9262 (0c7288aef8), which added the
+          # hsa_hotswap_rocjitsu CMake target the build script requires.
+          # Trade-off: a moving ref is non-reproducible — a rocjitsu develop regression
+          # lands here directly, so check a fresh red run against develop before assuming
+          # it's ours.
+          ref: develop
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
