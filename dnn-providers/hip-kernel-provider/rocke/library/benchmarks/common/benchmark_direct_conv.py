@@ -187,7 +187,7 @@ def parse_miopen_cmd_direct(cmd: str):
             file=sys.stderr,
         )
 
-    from rocke.instances.common.conv_direct_grouped import DirectConvProblem
+    from kernels.common.conv_direct_grouped import DirectConvProblem
 
     problem = DirectConvProblem(
         N=N,
@@ -415,7 +415,7 @@ def _run_depthwise_sweep(
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_direct_grouped import (
+    from kernels.common.conv_direct_grouped import (
         DirectDepthwiseSpec,
         build_direct_depthwise,
         is_valid_depthwise_spec,
@@ -612,7 +612,7 @@ def _run_sweep(
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_direct_grouped import (
+    from kernels.common.conv_direct_grouped import (
         DirectConvSpec,
         build_direct_conv,
         is_valid_spec,
@@ -915,7 +915,7 @@ def main() -> int:
     import ctypes
 
     from rocke import compile_kernel
-    from rocke.instances.common.conv_direct_grouped import DirectConvProblem
+    from kernels.common.conv_direct_grouped import DirectConvProblem
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig

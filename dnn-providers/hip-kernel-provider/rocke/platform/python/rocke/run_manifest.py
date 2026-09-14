@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .instances.common.manifest_runner.conv import run_conv_manifest_problem
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
     run_gemm_iu8_manifest_problem,
@@ -106,6 +105,18 @@ _LIBRARY_RUNNER_MODULES: Dict[str, Tuple[str, str]] = {
         "kernels.gfx1151.deep_fused_conv_pool",
         "run_deep_fused_conv_pool_i8i4_manifest_problem",
     ),
+    "conv_fp16": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
+    "conv_bf16": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
+    "conv_fp32": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
 }
 
 
@@ -144,8 +155,6 @@ def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
 
 
 def _register_builtin_runners() -> None:
-    for kind in ("conv_fp16", "conv_bf16", "conv_fp32"):
-        register_manifest_runner(kind, run_conv_manifest_problem)
     for kind in (
         "elementwise_fp16",
         "reduce_fp16",
@@ -158,8 +167,9 @@ def _register_builtin_runners() -> None:
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
-    # deep_fused_conv_pool_* runners live in the library tree and are resolved
-    # lazily via _LIBRARY_RUNNER_MODULES in resolve_manifest_runner().
+    # deep_fused_conv_pool_* and conv_{fp16,bf16,fp32} runners live in the
+    # library tree and are resolved lazily via _LIBRARY_RUNNER_MODULES in
+    # resolve_manifest_runner().
 
 
 _register_builtin_runners()

@@ -40,19 +40,6 @@ from rocke.core.arch import ArchTarget  # noqa: E402
 from rocke.core.lower_hip import lower_kernel_to_hip  # noqa: E402
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
-from kernels.common.conv_implicit_gemm import (
-    ConvProblem,
-    ImplicitGemmConvSpec,
-    build_implicit_gemm_conv,
-)
-from kernels.common.conv_direct_grouped import (
-    DirectConv16cSpec,
-    DirectConv4cSpec,
-    DirectConvProblem,
-    build_direct_conv_16c,
-    build_direct_conv_4c,
-)
-from kernels.common.img2col import Img2ColSpec, build_img2col
 from rocke.instances import (
     AddRmsnorm2DRdquantSpec,
     BatchedContractionSpec,
@@ -158,7 +145,9 @@ def _base_gemm(name: str = "hip_audit_gemm") -> UniversalGemmSpec:
     return UniversalGemmSpec(name=name, tile=_base_tile(), trait=_base_trait())
 
 
-def _conv_problem() -> ConvProblem:
+def _conv_problem():
+    from kernels.common.conv_implicit_gemm import ConvProblem
+
     return ConvProblem(
         N=1,
         Hi=8,
@@ -180,6 +169,23 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
     base = _base_gemm()
     base_tile = _base_tile()
     base_trait = _base_trait()
+
+    # Conv builders live in `library/kernels`, which a standalone `platform`
+    # install does not have on sys.path. Import them here rather than at module
+    # scope so the other ~40 families in this audit stay runnable without it.
+    from kernels.common.conv_implicit_gemm import (
+        ImplicitGemmConvSpec,
+        build_implicit_gemm_conv,
+    )
+    from kernels.common.conv_direct_grouped import (
+        DirectConv16cSpec,
+        DirectConv4cSpec,
+        DirectConvProblem,
+        build_direct_conv_16c,
+        build_direct_conv_4c,
+    )
+    from kernels.common.img2col import Img2ColSpec, build_img2col
+
     convp = _conv_problem()
 
     # Thread the running arch's wavefront width into the wave-size-sensitive

@@ -377,6 +377,31 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=.:${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
+
+    # Library conv GPU numeric suites. These used to live under
+    # tests/instances/ and were collected by rocke_pytest above; moving them to
+    # the library tree took them out of its --ignore=tests/library scope, so
+    # they need their own entry or they run nowhere. They self-skip when
+    # get_device_arch(0) finds no device or torch is absent, so a host-only
+    # runner still passes -- the gpu label is for runners that want to select
+    # or exclude them explicitly.
+    set(_ROCKE_LIBRARY_CONV_GPU_TEST_RELPATHS
+        "tests/library/tests/test_conv_fwd_correctness.py"
+        "tests/library/tests/test_conv_wgrad_correctness.py"
+        "tests/library/tests/test_conv_dgrad_correctness.py"
+        "tests/library/tests/test_direct_conv_correctness.py")
+    set(_ROCKE_LIBRARY_CONV_GPU_TESTS "")
+    foreach(_rocke_conv_gpu_test ${_ROCKE_LIBRARY_CONV_GPU_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_CONV_GPU_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_conv_gpu_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_gpu_pytest python -m pytest${_ROCKE_LIBRARY_CONV_GPU_TESTS} -v)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_gpu_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;conv\\;gpu\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.:${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 1800)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

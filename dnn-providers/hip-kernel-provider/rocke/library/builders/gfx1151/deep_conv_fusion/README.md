@@ -130,7 +130,7 @@ PYTHONPATH=$(pwd) $VENV \
 # 4. Board-side interleaved A/B over prebuilt hsaco+manifest pairs (no toolchain needed).
 #    Each positional is name=hsaco[:manifest]; --rotate defeats first-position
 #    clock-ramp bias; --no-verify times only.
-$VENV rocke/examples/gfx1151/deep_conv_fusion/compare_prebuilt.py \
+$VENV rocke/library/builders/gfx1151/deep_conv_fusion/compare_prebuilt.py \
   --rounds 3 --iters 100 --warmup 200 --rotate \
   base=base.hsaco:manifest_base.json fuse=fuse.hsaco:manifest_fuse.json
 ```

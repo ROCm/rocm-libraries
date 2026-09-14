@@ -144,7 +144,7 @@ code. It accepts any `cpg` that is a positive multiple of 4 and builds a paramet
 kernel using `mfma_f32_16x16x16_f16` with a runtime K-atom loop.
 For the specialised fixed-`cpg` kernels (4/8/16/32), use the corresponding `DirectConv*cSpec` classes.
 ```python
-from rocke.instances.common.conv_direct_grouped import (
+from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConvSpec,
     build_direct_conv,
@@ -170,7 +170,7 @@ Tunable parameters common to all grouped specs:
 For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`:
 
 ```python
-from rocke.instances.common.conv_direct_grouped import (
+from kernels.common.conv_direct_grouped import (
     DirectDepthwiseSpec,
     build_direct_depthwise,
     is_valid_depthwise_spec,

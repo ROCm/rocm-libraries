@@ -3,7 +3,7 @@
 
 """Emit and verify the gfx1151 genuine-int8/int4 deep-fused conv + maxpool.
 
-Wave32/WMMA sibling of ``examples/gfx950/deep_conv_fusion``. The kernel computes
+Wave32/WMMA sibling of ``builders/gfx950/deep_conv_fusion``. The kernel computes
 
     conv0 3x3 (int8) -> Quant(i32->i8) -> ReLU -> Quant(i8->i4)
     -> conv1 1x1 (int4) -> Quant(i32->i4) -> ReLU

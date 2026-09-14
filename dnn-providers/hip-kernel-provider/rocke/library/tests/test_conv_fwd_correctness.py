@@ -14,7 +14,7 @@ Coverage:
 
 Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
-        rocke/platform/tests/instances/test_conv_fwd_correctness.py
+        rocke/library/tests/test_conv_fwd_correctness.py
 """
 
 from __future__ import annotations
@@ -28,6 +28,15 @@ from typing import List, Tuple
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+if _HAS_TORCH:
+    # Let torch claim the process HIP context before rocke's runtime binds it.
+    # Whichever initialises first wins; rocke-first leaves torch raising
+    # "No HIP GPUs are available" from the .cuda() calls in conv_reference.
+    import torch
+
+    torch.cuda.is_available()
+
 GPU_ARCH = get_device_arch(0)
 _IS_WMMA = GPU_ARCH == "gfx1250"  # wave32 / WMMA target
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets

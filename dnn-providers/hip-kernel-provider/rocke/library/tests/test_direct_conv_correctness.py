@@ -13,8 +13,8 @@ hitting the branch points that differ across implementations:
   - depthwise scalar-FMA path (cpg=1)
 
 Requires a ROCm GPU (gfx942 or gfx950) and torch.  Run:
-    PYTHONPATH=rocke/platform/python <torch-python> -m pytest \
-        rocke/platform/tests/instances/test_direct_conv_correctness.py -v
+    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \
+        rocke/library/tests/test_direct_conv_correctness.py -v
 """
 
 from __future__ import annotations
@@ -29,6 +29,17 @@ from typing import List, Tuple
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+if _HAS_TORCH:
+    # Claim the process HIP context for torch before rocke's runtime touches it.
+    # rocke's HIP runtime and torch's fight over the context and whichever
+    # initialises first wins; rocke-first leaves torch with "No HIP GPUs are
+    # available" for the rest of the process, breaking the .cuda() reference
+    # below. See _wgrad_reference_cpu in test_conv_wgrad_correctness.py.
+    import torch
+
+    torch.cuda.is_available()
+
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")
 

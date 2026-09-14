@@ -16,7 +16,7 @@ Requires a ROCm GPU and torch (skip otherwise).
 
 Run:
   PYTHONPATH=rocke/platform/python:rocke/library <torch-python> \
-    rocke/platform/tests/instances/test_conv_dgrad_correctness.py
+    rocke/library/tests/test_conv_dgrad_correctness.py
 """
 
 from __future__ import annotations
@@ -33,6 +33,15 @@ from rocke.runtime.hip_module import get_device_arch
 
 _PYDIR = str(platform_root() / "python")
 _LIB_DIR = str(library_root())
+
+# The assets roots describe the source checkout. In an installed test artifact
+# the packages sit under tests/ and tests/library instead, so lead with this
+# process's own sys.path -- whatever let pytest import rocke and kernels here
+# is by definition enough for the child -- and keep the derived roots as the
+# source-tree fallback.
+_CHILD_PYTHONPATH = os.pathsep.join(
+    dict.fromkeys([p for p in sys.path if p] + [_PYDIR, _LIB_DIR])
+)
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -55,7 +64,7 @@ def _run_benchmark(*extra_args, timeout=600):
     env = {
         **os.environ,
         "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONPATH": os.pathsep.join([_PYDIR, _LIB_DIR]),
+        "PYTHONPATH": _CHILD_PYTHONPATH,
     }
     cmd = [
         sys.executable,

@@ -161,12 +161,14 @@ The epilogue writes `dX` whose last dim is also `C`. Store vector width follows
 | File | Purpose |
 |------|---------|
 | `conv_implicit_gemm_dgrad.py` | Python builder (this instance) |
-| `../../benchmark/benchmark_implicit_gemm_conv.py` | `--direction dgrad` sweep |
-| `../../benchmark/conv_reference.py` | `dgrad_reference()` via `torch.nn.grad.conv2d_input` |
-| `../../dispatch/families/conv_dgrad.py` | Dispatcher family |
-| `../../../cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
-| `../../../cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
-| `../../tests/instances/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
+| `../../benchmarks/common/benchmark_implicit_gemm_conv.py` | `--direction dgrad` sweep |
+| `../../builders/common/conv_reference.py` | `dgrad_reference()` via `torch.nn.grad.conv2d_input` |
+| `../../../platform/cpp/instances/common/conv_implicit_gemm_dgrad.cpp` | C++ port (byte-identical) |
+| `../../../platform/cpp/include/rocke/instance_conv_implicit_gemm_dgrad.h` | C99 header |
+| `../../tests/parity/conv_implicit_gemm_dgrad_emit.{c,py}` | C-vs-Python parity emitters |
+
+There is no dgrad dispatcher family yet — dgrad is built directly, without a
+`dispatch/` selection policy of its own.
 
 ## Differences from Wgrad
 

@@ -253,7 +253,7 @@ knows the pooled-tile coordinates, it passes `(n, ho, wo)` directly and bypasses
 the redundant decode — removing VALU on the operand path (digest lever D).
 
 ### 8.4 Arch-parametric body
-The kernel body lives in `instances/common/deep_fused_conv_pool.py` and is driven
+The kernel body lives in `library/kernels/common/deep_fused_conv_pool.py` and is driven
 by the resolved MMA op, so the same code emits the gfx950 MFMA path (wave64,
 `32×32×16`) and, via a separate sibling example, the gfx1201 WMMA path (wave32,
 `16×16×16`). This example pins the gfx950 geometry and kernel name.

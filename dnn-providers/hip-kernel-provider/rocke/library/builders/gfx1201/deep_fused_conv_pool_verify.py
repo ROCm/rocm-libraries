@@ -6,11 +6,12 @@
 Same fused dataflow as the gfx950 prototype (virtual-concat -> conv0 3x3 -> ReLU
 -> 1x1 conv1 -> ReLU -> 2x2 stride-2 maxpool -> store, no conv0/conv1 HBM
 intermediates), but driven by the gfx12 WMMA 16x16x16 atom on wave32. The kernel
-body is the arch-parametric one in ``instances/common``; this driver only pins
+body is the arch-parametric one in ``kernels/common``; this driver only pins
 the WMMA geometry and reuses the gfx950 harness's numpy reference + verify/bench
 helpers (they are spec-generic). Must run on a gfx1201 device.
 
-  PYTHONPATH=python python3 -m rocke.examples.gfx1201.deep_fused_conv_pool_verify \
+  PYTHONPATH=rocke/platform/python:rocke/library python3 \
+    -m builders.gfx1201.deep_fused_conv_pool_verify \
     --arch gfx1201 --verify --h 16 --w 16 --c 8 --k0 32 --k1 24
 """
 
@@ -34,7 +35,7 @@ from kernels.gfx1201.deep_fused_conv_pool import (
 
 # The reference + launch helpers are arch-neutral (they only read ``spec.problem``
 # / ``spec.block_size`` and the common grid), so reuse them verbatim.
-from rocke.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify import (
+from builders.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify import (
     _verify_artifact,
     _benchmark_artifact,
 )

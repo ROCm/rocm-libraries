@@ -28,7 +28,7 @@ the async-DMA path is excluded. The GPU numeric sweep here is MFMA-only
 path is covered by ``TestConvWgradVectorLoad`` (CPU IR-emission guard) and awaits
 gfx1250 hardware for a numeric sign-off. Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
-        rocke/platform/tests/instances/test_conv_wgrad_correctness.py
+        rocke/library/tests/test_conv_wgrad_correctness.py
 """
 
 from __future__ import annotations

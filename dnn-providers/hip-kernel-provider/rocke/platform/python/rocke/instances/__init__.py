@@ -41,14 +41,6 @@ GEMM family
  single-launch variant is on the
  follow-up list.
 
-Convolution family
- - `build_implicit_gemm_conv` : NHWC × KYXC -> NHWK implicit-GEMM conv.
- - `build_direct_conv_16c` : `cpg=kpg=16` grouped direct conv with
- K=32 folding.
- - `build_direct_conv_4c` : `cpg=kpg=4` grouped direct conv via
- `mfma_f32_4x4x4_f16`.
-
-
 CK Tile small-op counterparts (Tier 1)
  - `build_elementwise` : CK Tile `21_elementwise` counterpart.
  Unary (copy/neg/abs/relu/silu/gelu_tanh
