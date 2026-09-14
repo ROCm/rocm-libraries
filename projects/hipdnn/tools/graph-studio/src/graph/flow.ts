@@ -76,7 +76,9 @@ export function fromGraph(graph: Graph): { nodes: OpNode[]; edges: OpEdge[] } {
     data: {
       opType: n.type,
       title: n.title,
-      params: n.params ?? defaultParams(n.type),
+      // Merge over the catalog defaults so a graph saved before a param existed
+      // still carries every key the node's editors and the engine expect.
+      params: { ...defaultParams(n.type), ...n.params },
     },
   }));
   const edges: OpEdge[] = graph.edges.map((e) => ({

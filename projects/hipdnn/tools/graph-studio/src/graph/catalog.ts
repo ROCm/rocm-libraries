@@ -1,4 +1,4 @@
-import type { OpCatalogEntry, ParamValue } from "./model";
+import type { OpCatalogEntry, ParamSpec, ParamValue } from "./model";
 
 /**
  * The operator catalog: the palette of node kinds a user can place. Kept as
@@ -363,7 +363,16 @@ export const OP_CATALOG: readonly OpCatalogEntry[] = [
     accent: "#ef4444",
     inputs: [{ id: "in", label: "in" }],
     outputs: [],
-    params: [],
+    params: [
+      { key: "use_defaults", label: "Use defaults (inferred shape)", type: "bool", default: true },
+      {
+        key: "shape",
+        label: "Shape",
+        type: "string",
+        default: "1,3,224,224",
+        visibleWhen: { key: "use_defaults", equals: false },
+      },
+    ],
   },
 ];
 
@@ -381,4 +390,23 @@ export function defaultParams(type: string): Record<string, ParamValue> {
   const params: Record<string, ParamValue> = {};
   for (const spec of entry.params) params[spec.key] = spec.default;
   return params;
+}
+
+/**
+ * The params of `entry` that apply to a node currently holding `params`, i.e.
+ * those whose `visibleWhen` condition (if any) is satisfied. A param the node
+ * has never been given falls back to its catalog default, so graphs saved
+ * before a param existed still resolve.
+ */
+export function visibleParams(
+  entry: OpCatalogEntry,
+  params: Record<string, ParamValue>,
+): readonly ParamSpec[] {
+  if (!entry.params.some((spec) => spec.visibleWhen)) return entry.params;
+  return entry.params.filter((spec) => {
+    const cond = spec.visibleWhen;
+    if (!cond) return true;
+    const other = entry.params.find((s) => s.key === cond.key);
+    return (params[cond.key] ?? other?.default) === cond.equals;
+  });
 }
