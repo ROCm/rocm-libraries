@@ -15,11 +15,6 @@ set(HKP_TOOL "${HKP_PKG_DIR}/tools/hkp_pack.py")
 set(HKP_WHEEL_DIGEST_TOOL "${HKP_PKG_DIR}/tools/hkp_wheel_digest.py")
 set(HKP_FIXTURES "${HKP_PKG_DIR}/tests/fixtures")
 
-# The provider's own directory, absolute. The census registration below is DEFERRED to
-# the end of it, so the path has to be one CMake recognizes as a directory it is
-# processing -- a relative `..` would not match.
-get_filename_component(HKP_PROVIDER_DIR "${HKP_PKG_DIR}/.." ABSOLUTE)
-
 # The file every pack writes at the top of its output root to mark that root complete.
 # One name for all of them: a caller installing a staged tree excludes it with a single
 # pattern that never needs a clause per pack. Distinctive enough that the pattern cannot
@@ -163,9 +158,10 @@ endfunction()
 #   multiply. 1 selects the packer's serial path.
 #
 #   NAME is also the source label the packer writes into every descriptor's
-#   provenance. The function records NAME and the absolute SOURCE_ROOT in a
-#   global registry, which hkp_verify_embedded_sources() reads to resolve a
-#   descriptor's authored location.
+#   provenance. The function records NAME, the absolute SOURCE_ROOT, OUT_ROOT and
+#   ARCHES in a global registry, which hkp_verify_embedded_sources() reads to
+#   resolve a descriptor's authored location and hkp_register_census_tests() reads
+#   to address one pack's own per-arch shards.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -319,6 +315,14 @@ function(hkp_wire_pack_target)
     # the two spellings agree and the verify step compares them exactly.
     get_filename_component(_abs_source_root "${ARG_SOURCE_ROOT}" ABSOLUTE)
     set_property(GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_${ARG_NAME} "${_abs_source_root}")
+
+    # Where this root's shards land and which arches it was wired for.
+    # hkp_register_census_tests() reads both to hand a census entry that root's OWN
+    # shard, so a suite is censused against the tree its pack target writes and never
+    # against a parent that another pack also fills.
+    set_property(GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_NAME} "${ARG_OUT_ROOT}")
+    set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_NAME} "${ARG_ARCHES}")
+
     set_property(GLOBAL APPEND PROPERTY HKP_PACK_LABELS "${ARG_NAME}")
 endfunction()
 
@@ -873,8 +877,9 @@ endfunction()
 #   covered by nothing: production is dormant by default, and the pytest suite
 #   imports rocke from the source tree instead.
 #
-#   Root empty = production packaging dormant. Root set but not a directory =
-#   fatal. The tests are wired regardless.
+#   The root defaults to the provider's in-tree shipped descriptors and is
+#   overridable. Root empty, or holding no descriptor = production packaging
+#   dormant. Root set but not a directory = fatal. The tests are wired regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -882,11 +887,13 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_require_ingestor_toolchain(_arches)
 
-    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT "" CACHE PATH
-        "The authored source root the production pack step compiles from. \
-Walked recursively; child folders under it scope the content (hip/, rocKE/, \
-per-integration folders) and each descriptor's authored subpath is preserved \
-into the staged and installed trees. Empty leaves production packaging dormant.")
+    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+        "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
+        "The authored source root the production pack step compiles from, \
+defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
+folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
+descriptor's authored subpath is preserved into the staged and installed trees. A root \
+holding no descriptor, like an empty value, leaves production packaging dormant.")
     set(_source_root "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
         if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
@@ -936,8 +943,37 @@ loaded is the one named here.")
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
     endif()
 
-    # Production descriptors.
+    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship
+    # and packing it fails rather than shipping an empty tree. Standalone UKD/UMD/UED/
+    # UDD/KMD/UHD files, kernel sources and READMEs do not make a pack. A KDP that is
+    # present but pruned on every arch stays a hard failure: this distinguishes
+    # "nothing to ship" from "something to ship that did not".
+    #
+    # CONFIGURE_DEPENDS so adding the first KDP re-runs configure and wires the target.
+    # Dot-prefixed segments are dropped the way load_flat_input() skips them, so a
+    # `.git/` or an editor's dot-directory under a user-supplied root is not content.
+    set(_product_has_content FALSE)
     if(_source_root)
+        file(GLOB_RECURSE _product_kdps CONFIGURE_DEPENDS "${_source_root}/*.kdp.json")
+        foreach(_product_kdp IN LISTS _product_kdps)
+            file(RELATIVE_PATH _product_kdp_rel "${_source_root}" "${_product_kdp}")
+            string(REPLACE "/" ";" _product_kdp_segments "${_product_kdp_rel}")
+            set(_product_kdp_hidden FALSE)
+            foreach(_product_kdp_segment IN LISTS _product_kdp_segments)
+                if(_product_kdp_segment MATCHES "^\\.")
+                    set(_product_kdp_hidden TRUE)
+                    break()
+                endif()
+            endforeach()
+            if(NOT _product_kdp_hidden)
+                set(_product_has_content TRUE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    # Production descriptors.
+    if(_source_root AND _product_has_content)
         hkp_wire_pack_target(
             NAME product
             SOURCE_ROOT "${_source_root}"
@@ -945,7 +981,8 @@ loaded is the one named here.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args})
+            ${_rocke_args}
+            PACK_JOBS 2)
     else()
         # A tree left over from an earlier configuration that did pack keeps
         # being loaded: the engine selects the plugin-relative directory on
@@ -955,9 +992,9 @@ loaded is the one named here.")
             file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
         endif()
         message(STATUS
-            "hkp: no production source root set "
-            "(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty); production "
-            "packaging dormant (tests still run against the fixtures).")
+            "hkp: no *.kdp.json under "
+            "'${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}'; production packaging "
+            "dormant (tests still run against the fixtures).")
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
@@ -1021,27 +1058,6 @@ loaded is the one named here.")
         PACK_JOBS 1)
 
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_defer_census_registration(<arches>)
-#   Schedule per-arch/per-suite census registration for the END of the provider
-#   directory, after add_subdirectory(src) creates hip_kernel_provider_tests.
-#
-#   Wrapped in EVAL CODE because a deferred CALL's arguments are expanded when the
-#   call RUNS, in the deferred directory's scope, where none of these locals exist.
-#   EVAL bakes today's values into the recorded call as bracket arguments instead.
-# ---------------------------------------------------------------------------
-function(hkp_defer_census_registration arches)
-    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
-        return()
-    endif()
-    cmake_language(EVAL CODE "
-        cmake_language(DEFER DIRECTORY [[${HKP_PROVIDER_DIR}]]
-            CALL hkp_register_census_tests
-                 [[${HIPDNN_DESCRIPTOR_BUILD_DIR}]]
-                 [[${arches}]])
-    ")
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1123,55 +1139,102 @@ endfunction()
 # native-implementation check: a pack whose symbols do not register drops its
 # descriptors at load and the census sees them missing.
 #
-# The architecture is supplied EXPLICITLY. `arches` is the configured packaging
-# list (GPU_TARGETS/AMDGPU_TARGETS, normalized by hkp_selected_arches) -- the same
-# list the pack step lowered for -- so each suite gets an entry per selected arch
-# against that arch's own shard under HIPDNN_DESCRIPTOR_BUILD_DIR. Nothing here
-# probes a device and nothing reads the descriptors to decide what to expect: a
-# bundle cannot be its own expectation, and a host census must not depend on which
-# card is in the machine.
+# The architecture is supplied EXPLICITLY, from the registry rather than from a
+# probe: HKP_PACK_ARCHES_<name> is the list that pack was wired with (GPU_TARGETS/
+# AMDGPU_TARGETS, normalized by hkp_selected_arches) and the same list its pack step
+# lowered for, so each suite gets an entry per selected arch against that arch's own
+# shard under HKP_PACK_OUT_ROOT_<name>. Nothing here probes a device and nothing reads
+# the descriptors to decide what to expect: a bundle cannot be its own expectation,
+# and a host census must not depend on which card is in the machine.
 #
-# Rows are literal GTest suite names, one per generated packaged-engine census
+# SUITES are literal GTest suite names, one per generated packaged-engine census
 # spliced into the test binary. The native execution guard requires every registered
-# case in that suite to pass without skipping in every completed iteration. The
-# list is empty until an integration appends its suite name (see the generator's
-# cmake_test_sources fragment). Direct-load engines use ordinary host tests.
+# case in that suite to pass without skipping in every completed iteration. A suite is
+# declarable only where it reads exactly one pack's shard, because an entry hands the
+# binary exactly one directory. Direct-load engines use ordinary host tests.
 #
-# CALLED DEFERRED, from the end of the provider directory, after the test target
-# exists. descriptor_build_dir and arches are captured before local scope expires.
-# Declared suites require both the target and a nonempty arch list.
+# hkp_register_census_tests(TARGET <t> PACK_NAME <name> SUITES <suite>...)
+#   ONE call per packed target, made where <t> is defined and after it exists, beside
+#   hkp_verify_embedded_sources(): the same attachment point, reading the same registry
+#   hkp_wire_pack_target() fills. PACK_NAME selects the pack whose OUT_ROOT and ARCHES
+#   the entries address, so each entry reads that target's own shard.
+#
+#   Declaring a suite requires a wired PACK_NAME, an existing TARGET and a nonempty
+#   recorded arch list; each missing prerequisite is fatal rather than a silent drop,
+#   because a census that registers nothing is indistinguishable from one that passed.
 # ---------------------------------------------------------------------------
-function(hkp_register_census_tests descriptor_build_dir arches)
-    set(HKP_CENSUS_TEST_SUITES)
-
-    if(NOT HKP_CENSUS_TEST_SUITES)
+function(hkp_register_census_tests)
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
 
-    # A declared census with missing prerequisites is a configuration error.
-    if(NOT TARGET hip_kernel_provider_tests)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES")
+    if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
-            "hkp: census suites are declared (${HKP_CENSUS_TEST_SUITES}) but "
-            "hip_kernel_provider_tests does not exist, so no census could be "
-            "registered. This function must run after the provider's src/ subdirectory.")
+            "hkp_register_census_tests: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
     endif()
-    if(NOT arches)
-        message(FATAL_ERROR
-            "hkp: census suites are declared (${HKP_CENSUS_TEST_SUITES}) but the "
-            "configured packaging architecture list is empty, so no shard exists to "
-            "census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    if(NOT ARG_SUITES)
+        return()
     endif()
 
-    foreach(_census_arch IN LISTS arches)
-        foreach(_suite IN LISTS HKP_CENSUS_TEST_SUITES)
+    if(NOT ARG_TARGET)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) without a TARGET, so "
+            "no binary could run them.")
+    endif()
+    if(NOT ARG_PACK_NAME)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) without a PACK_NAME, "
+            "so no shard could be named.")
+    endif()
+    if(NOT TARGET ${ARG_TARGET})
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) but the target "
+            "${ARG_TARGET} does not exist, so no census could be registered. This "
+            "call must run after that target is created.")
+    endif()
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT ARG_PACK_NAME IN_LIST _labels)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which no hkp_wire_pack_target() call wired, so "
+            "there is no shard to census. Wired roots: ${_labels}.")
+    endif()
+
+    get_property(_out_root GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_PACK_NAME})
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_PACK_NAME})
+    if(NOT _arches)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which was wired with an empty architecture list, "
+            "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    endif()
+
+    foreach(_suite IN LISTS ARG_SUITES)
+        # The entry name carries the arch and the suite and nothing of the pack, so the
+        # same suite declared at a second pack target would ask CTest for one name twice
+        # -- and the second registration would silently take the first one's shard.
+        get_property(_owner GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite})
+        if(_owner)
+            message(FATAL_ERROR
+                "hkp: census suite '${_suite}' is declared at two pack targets, "
+                "'${_owner}' and '${ARG_PACK_NAME}'. A census entry is named for its "
+                "suite and arch alone, so the two collide. Declare the suite at the "
+                "one pack whose shard it reads.")
+        endif()
+        set_property(GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite} "${ARG_PACK_NAME}")
+
+        foreach(_census_arch IN LISTS _arches)
             set(_census_name "hip-kernel-provider-hkp-census-${_census_arch}-${_suite}")
             add_test(
                 NAME "${_census_name}"
-                COMMAND "$<TARGET_FILE:hip_kernel_provider_tests>"
+                COMMAND "$<TARGET_FILE:${ARG_TARGET}>"
                         "--gtest_filter=${_suite}.*")
             set_tests_properties("${_census_name}" PROPERTIES
                 ENVIRONMENT
-                    "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_census_arch};HIPDNN_DESCRIPTOR_DIR=${descriptor_build_dir}/${_census_arch}"
+                    "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_census_arch};HIPDNN_DESCRIPTOR_DIR=${_out_root}/${_census_arch}"
                 LABELS "unit_test;hip-kernel-provider;host")
         endforeach()
     endforeach()
