@@ -15,10 +15,21 @@ unrankable, where the numbers inside the string are the knobs that actually move
 a model can generalise over them.
 
 The positions mean different things for different kernels -- one solver's descriptor is a
-36-field tuple, another's a template with six numbers. That is sound because these features are
-read by a *grouped* model, whose per-group trees only ever see rows from one group, so a slot
-need only be consistent within a group. It is not sound to feed them to a single flat model,
-where slot 3 would be a tile width for one kernel and a stage count for another.
+36-field tuple, another's a template with six numbers -- so slot 3 is a tile width for one and a
+stage count for another. `scope_by` resolves that by giving each group its own columns, which
+costs width and buys columns that mean one thing. Measured on a gfx942 corpus it moved total
+regret from 0.1007 to 0.0889 on 1,095 unseen problems, effectively all of it in the *group*
+decision: the first layer sees every row, so it was the one being asked to split on a column
+with no consistent meaning.
+
+Unscoped is still correct for an engine whose configuration schema does not vary, and for a
+grouped model the second layer is unaffected either way -- its trees only ever see one group's
+rows, where the positions were already consistent.
+
+Which positions a group uses is read from the corpus, never from the library that produced it.
+A column named `s107_f12` says "group 107's twelfth number" and claims nothing about what that
+number means; the tuning dataset is the whole input, and a schema recovered from a library's
+headers or its shipped metadata would be a second source to keep in step with it.
 
 **The non-numeric part stays a string.** The words in a descriptor (`Default`, `OddC`,
 `Filter1x1Pad0`) are a category, and RFC 0019 §6.5 already says what happens to one: the
@@ -36,7 +47,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-__all__ = ["ABSENT", "numeric_slots", "word_key", "required_slots", "expand"]
+__all__ = ["ABSENT", "numeric_slots", "word_key", "required_slots", "expand", "slots_used_by"]
 
 #: A missing slot. Not NaN: "this kernel has no such field" is a real state a tree can split on,
 #: where NaN is routed by the learner's own default direction and so cannot be distinguished
@@ -76,6 +87,24 @@ def required_slots(descriptors: Iterable[str]) -> int:
     is not silently truncated to fit a number chosen when the tool was written.
     """
     return max((len(_NUMBER.findall(text or "")) for text in descriptors), default=0)
+
+
+def slots_used_by(rows: Iterable[list[int]], groups: Iterable) -> dict[object, list[int]]:
+    """Which positions each group actually fills, observed from the corpus.
+
+    A group's schema is whatever its descriptors turned out to carry -- a position no member
+    ever fills is not part of it. Read here rather than declared, because the tuning dataset is
+    the whole input: a schema taken from the producing library would be a second source that has
+    to be kept in step with the corpus, and would be wrong for exactly the corpus that predates
+    a library change.
+    """
+    used: dict[object, set[int]] = {}
+    for row, group in zip(rows, groups):
+        seen = used.setdefault(group, set())
+        for index, value in enumerate(row):
+            if value != ABSENT:
+                seen.add(index)
+    return {group: sorted(positions) for group, positions in used.items()}
 
 
 def expand(

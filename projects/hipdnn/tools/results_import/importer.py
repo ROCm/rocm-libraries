@@ -27,7 +27,7 @@ from typing import Iterable
 import pandas as pd
 
 from results_import.derive import derive_metrics
-from results_import.descriptor import expand
+from results_import.descriptor import ABSENT, expand, slots_used_by
 
 __all__ = [
     "ValidationError",
@@ -193,7 +193,11 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def expand_descriptors(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+def expand_descriptors(
+    frame: pd.DataFrame,
+    columns: Iterable[str],
+    scope_by: str | None = None,
+) -> pd.DataFrame:
     """Replace opaque configuration strings with features a grouped model can select on.
 
     The source column is kept: it is the human-readable identity of a configuration, and every
@@ -202,9 +206,14 @@ def expand_descriptors(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFr
     `<column>.variant` is emitted as the descriptor's *word shape*, a string. RFC 0019 §6.5
     gives numbering to the training tool, which observes the values, ships the map in the UHD's
     `categorical_encoding`, and has it covered by `features_hash` -- so a code cannot change
-    underneath a trained model without the contract check seeing it. Numbering here instead
-    would be per-corpus and unhashed, and re-deriving it on a corpus with one extra kernel
-    would renumber every code silently.
+    underneath a trained model without the contract check seeing it.
+
+    With `scope_by`, each group gets its own columns (`<column>.s<group>_f<n>`) instead of one
+    shared set of positions. A configuration schema that varies with the kernel makes a shared
+    position meaningless -- slot 3 a tile width for one group and a stage count for another --
+    and it is the *first* layer of a grouped model that pays, because it is the one that sees
+    every row. Which positions a group uses is observed from the corpus; nothing here consults
+    the library that produced the descriptors.
     """
     frame = frame.copy()
     for column in columns:
@@ -214,8 +223,24 @@ def expand_descriptors(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFr
                 f"(it has {', '.join(_kernel_columns(frame)) or 'no kernel.* columns'})"
             )
         rows, shapes, slots = expand(frame[column].tolist())
-        for index in range(slots):
-            frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
+
+        if scope_by is None:
+            for index in range(slots):
+                frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
+        else:
+            if scope_by not in frame.columns:
+                raise ValidationError(
+                    f"--scope-by names {scope_by!r}, which this corpus does not carry"
+                )
+            groups = frame[scope_by].tolist()
+            for group, positions in sorted(slots_used_by(rows, groups).items(), key=str):
+                for index in positions:
+                    # A row outside this group takes the absent value, which is what a kernel
+                    # with no such field means -- the same state an unfilled slot already has.
+                    frame[f"{column}.s{group}_f{index}"] = [
+                        row[index] if member == group else ABSENT
+                        for row, member in zip(rows, groups)
+                    ]
         frame[f"{column}.variant"] = shapes
     return frame
 
@@ -296,6 +321,13 @@ def main(argv: list[str] | None = None) -> int:
              "RFC 0019 §6.5 has the training tool number it and ship the map). Repeatable.",
     )
     parser.add_argument(
+        "--scope-by", default=None, dest="scope_by", metavar="COLUMN",
+        help="give each value of COLUMN (e.g. kernel.solver_id) its own expanded columns, for "
+             "an engine whose configuration schema varies by kernel. Without it one set of "
+             "positions is shared, and a position then means different things in different "
+             "groups.",
+    )
+    parser.add_argument(
         "--resolve-duplicates", default=None, dest="resolve_duplicates", metavar="COLUMN",
         help="keep, per problem, only the most recent occasion it was measured, ordered by "
              "COLUMN (e.g. date_run), breaking ties within it by --best-column. Without this "
@@ -324,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             frame = resolve_duplicates(frame, args.resolve_duplicates, args.best_column)
         dataset = build_dataset(frame, opmeta)
         if args.expand_descriptor:
-            dataset = expand_descriptors(dataset, args.expand_descriptor)
+            dataset = expand_descriptors(dataset, args.expand_descriptor, args.scope_by)
     except ValidationError as error:
         print(f"results_import: {error}", file=sys.stderr)
         return 1
