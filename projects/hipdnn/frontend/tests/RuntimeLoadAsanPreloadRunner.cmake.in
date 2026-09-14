@@ -1,26 +1,120 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Runs the runtime-load tests in a fresh process, under two independent switches:
+#
+#   HIPDNN_TEST_PRELOAD    -- inject an ASan runtime, which takes the loader's implicit
+#                             search away so a bare-soname resolution cannot pass.
+#   HIPDNN_TEST_STAGE_ROOT -- copy the real executable and the real backend into a
+#                             <fixture>/bin plus <fixture>/<libdir> topology and require
+#                             the resolver to select exactly the backend staged there.
+#                             This is what makes the self-relative expectation
+#                             independent of the build's CMAKE_INSTALL_LIBDIR.
+#
+# CMAKE_COMMAND here is this script's own interpreter, not the configure host's tool,
+# so it is the right thing to launch the child with in both trees.
+
 if(NOT DEFINED HIPDNN_TEST_EXECUTABLE OR NOT EXISTS "${HIPDNN_TEST_EXECUTABLE}")
     message(FATAL_ERROR "The runtime-load test executable is unavailable: ${HIPDNN_TEST_EXECUTABLE}")
 endif()
+if(NOT DEFINED HIPDNN_TEST_FILTER)
+    message(FATAL_ERROR "HIPDNN_TEST_FILTER must name the cases this entry runs")
+endif()
 
-set(_preload "$ENV{LD_PRELOAD}")
-if(_preload STREQUAL "")
-    set(_preload "@_asan_preload_runtime@")
-    if(_preload STREQUAL "" OR NOT EXISTS "${_preload}")
-        message(FATAL_ERROR "No runner LD_PRELOAD or configured ASan runtime is available")
+get_filename_component(_executable "${HIPDNN_TEST_EXECUTABLE}" ABSOLUTE)
+get_filename_component(_executable_directory "${_executable}" DIRECTORY)
+
+# Entries that run the executable where it was built change nothing about the child's
+# environment; staging below adds exactly what relocating the image requires.
+set(_environment)
+
+if(HIPDNN_TEST_PRELOAD)
+    set(_preload "$ENV{LD_PRELOAD}")
+    if(_preload STREQUAL "")
+        set(_preload "@_asan_preload_runtime@")
+        if(_preload STREQUAL "" OR NOT EXISTS "${_preload}")
+            message(FATAL_ERROR "No runner LD_PRELOAD or configured ASan runtime is available")
+        endif()
     endif()
+    list(APPEND _environment
+         "LD_PRELOAD=${_preload}"
+         "ASAN_OPTIONS=detect_leaks=0:verify_asan_link_order=0"
+         "HIPDNN_TEST_EXPECT_ASAN_PRELOAD=1")
+endif()
+
+set(_command "${_executable}")
+set(_fixture "")
+
+if(DEFINED HIPDNN_TEST_STAGE_ROOT)
+    if(NOT DEFINED HIPDNN_TEST_BACKEND OR NOT EXISTS "${HIPDNN_TEST_BACKEND}")
+        message(FATAL_ERROR "The backend to stage is unavailable: ${HIPDNN_TEST_BACKEND}")
+    endif()
+    if(NOT DEFINED HIPDNN_TEST_STAGE_LIBDIR)
+        message(FATAL_ERROR "HIPDNN_TEST_STAGE_LIBDIR must name the staged library directory")
+    endif()
+
+    get_filename_component(_stage_root "${HIPDNN_TEST_STAGE_ROOT}" ABSOLUTE)
+    get_filename_component(_backend "${HIPDNN_TEST_BACKEND}" ABSOLUTE)
+    get_filename_component(_executable_name "${_executable}" NAME)
+    get_filename_component(_backend_name "${_backend}" NAME)
+
+    # The lock lives beside the staging area rather than inside it, so it is never in
+    # the tree this invocation removes. Concurrent runs of this one entry serialize
+    # here; no other entry and no other build shares either the lock or the root.
+    file(MAKE_DIRECTORY "${_stage_root}")
+    file(LOCK "${_stage_root}.lock" GUARD PROCESS TIMEOUT 600)
+
+    # Claim a name that does not exist yet. Anything already present belongs to another
+    # owner -- a runner killed before cleanup leaves only its own disposable fixture --
+    # and is never removed on its behalf.
+    set(_index 0)
+    while(EXISTS "${_stage_root}/run_${_index}")
+        math(EXPR _index "${_index} + 1")
+    endwhile()
+    set(_fixture "${_stage_root}/run_${_index}")
+
+    file(MAKE_DIRECTORY "${_fixture}/bin" "${_fixture}/${HIPDNN_TEST_STAGE_LIBDIR}")
+    # Copied, never symlinked: a symlink leaves the image at its original location, and
+    # the self-relative tier would then resolve back into the tree this is meant to be
+    # independent of.
+    file(COPY "${_executable}" DESTINATION "${_fixture}/bin")
+    file(COPY "${_backend}" DESTINATION "${_fixture}/${HIPDNN_TEST_STAGE_LIBDIR}")
+
+    set(_command "${_fixture}/bin/${_executable_name}")
+
+    # The copied image still needs the dependencies of the tree it was built in, so its
+    # original directory joins the loader's own search -- the tier the resolver consults
+    # last, and only after the staged backend has already been found.
+    set(_library_path "${_executable_directory}")
+    if(NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
+        set(_library_path "${_library_path}:$ENV{LD_LIBRARY_PATH}")
+    endif()
+
+    list(APPEND _environment
+         # Clear only the backend override: an inherited one would decide the very
+         # answer this entry exists to observe. Nothing else is taken from the child.
+         --unset=HIPDNN_BACKEND_LIBRARY_PATH
+         "LD_LIBRARY_PATH=${_library_path}"
+         # Supplied independently of anything the resolver computes, so the child
+         # compares its answer against a path this script chose.
+         "HIPDNN_TEST_STAGED_BACKEND=${_fixture}/${HIPDNN_TEST_STAGE_LIBDIR}/${_backend_name}")
+endif()
+
+set(_arguments "--gtest_filter=${HIPDNN_TEST_FILTER}")
+if(HIPDNN_TEST_RUN_DISABLED)
+    list(APPEND _arguments --gtest_also_run_disabled_tests)
 endif()
 
 execute_process(
-    COMMAND "${CMAKE_COMMAND}" -E env
-            "LD_PRELOAD=${_preload}"
-            "ASAN_OPTIONS=detect_leaks=0:verify_asan_link_order=0"
-            "HIPDNN_TEST_EXPECT_ASAN_PRELOAD=1"
-            "${HIPDNN_TEST_EXECUTABLE}" "--gtest_filter=TestRuntimeLoadBackendFactory.*"
+    COMMAND "${CMAKE_COMMAND}" -E env ${_environment} "${_command}" ${_arguments}
     RESULT_VARIABLE _result
 )
+
+# Remove this invocation's own fixture whether the child passed or failed, and nothing else.
+if(NOT _fixture STREQUAL "")
+    file(REMOVE_RECURSE "${_fixture}")
+endif()
+
 if(NOT _result STREQUAL "0")
-    message(FATAL_ERROR "ASan-preloaded runtime-load tests failed: ${_result}")
+    message(FATAL_ERROR "Runtime-load tests failed: ${_result}")
 endif()

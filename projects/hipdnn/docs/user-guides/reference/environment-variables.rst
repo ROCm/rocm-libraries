@@ -115,6 +115,9 @@ hipDNN computes the path itself, in this order:
 #. The directory the HIP runtime was loaded from.
 #. The bare library name, left to the system loader.
 
+Locations 2 and 3 require the calling module's own directory.
+When the loader reports no origin for it, or one that cannot be trusted -- a relative name, which would be interpreted against whatever working directory the process happens to have -- both are skipped and resolution continues with the remaining locations.
+
 ``HIPDNN_BACKEND_LIBRARY_PATH``
 -------------------------------
 

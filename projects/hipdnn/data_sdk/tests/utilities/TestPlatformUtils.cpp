@@ -1,15 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <iostream>
 #include <memory>
+#include <string>
+#include <system_error>
+#include <type_traits>
 
 #if defined(__linux__)
-#include <array>
 #include <climits>
 #include <link.h>
 #include <unistd.h>
@@ -536,6 +539,33 @@ TEST_F(TestPlatformUtilsLibraryOrigin, RejectsRelativeLoaderName)
     EXPECT_THROW(utilities::getLoadedLibraryOrigin(handle.get()), std::runtime_error);
 }
 
+// The self tier is computed from this helper, so a relative owner name must be
+// refused here too: canonicalizing it would name whatever tree the process has
+// since chdir'd into.
+TEST_F(TestPlatformUtilsLibraryOrigin, RejectsRelativeAddressOwner)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> sourceHandle(
+        utilities::openLibrary("libm.so.6"), &utilities::closeLibrary);
+    link_map* sourceMap = nullptr;
+    ASSERT_EQ(dlinfo(sourceHandle.get(), RTLD_DI_LINKMAP, static_cast<void*>(&sourceMap)), 0);
+    ASSERT_NE(sourceMap, nullptr);
+    ASSERT_NE(sourceMap->l_name, nullptr);
+    const std::filesystem::path source(sourceMap->l_name);
+    ASSERT_TRUE(source.is_absolute());
+    const auto library = _root / "relative-address-owner.so";
+    ASSERT_TRUE(std::filesystem::copy_file(source, library));
+    const auto relative = std::filesystem::relative(library);
+    ASSERT_TRUE(relative.is_relative());
+
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> handle(
+        utilities::openLibrary(relative), &utilities::closeLibrary);
+    const void* symbol = utilities::getSymbol(handle.get(), "cos");
+    ASSERT_NE(symbol, nullptr);
+
+    EXPECT_THROW(utilities::getLoadedLibraryDirectoryForAddress(symbol), std::runtime_error);
+}
+
 TEST(TestPlatformUtils, GetLoadedLibraryOriginRejectsMainExecutable)
 {
     namespace utilities = hipdnn_data_sdk::utilities;
@@ -545,4 +575,133 @@ TEST(TestPlatformUtils, GetLoadedLibraryOriginRejectsMainExecutable)
     EXPECT_THROW(utilities::getLoadedLibraryOrigin(handle.get()), std::runtime_error);
 }
 
+TEST(TestPlatformUtils, GetLoadedLibraryDirectoryForAddressRejectsNullAddress)
+{
+    EXPECT_THROW(hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(nullptr),
+                 std::runtime_error);
+}
+
+TEST(TestPlatformUtils, GetLoadedLibraryDirectoryForAddressResolvesLoadedLibrary)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    const std::unique_ptr<void, decltype(&utilities::closeLibrary)> handle(
+        utilities::openLibrary("libm.so.6"), &utilities::closeLibrary);
+    link_map* map = nullptr;
+    ASSERT_EQ(dlinfo(handle.get(), RTLD_DI_LINKMAP, static_cast<void*>(&map)), 0);
+    ASSERT_NE(map, nullptr);
+    ASSERT_NE(map->l_name, nullptr);
+    const auto expected = std::filesystem::weakly_canonical(map->l_name).parent_path();
+    const void* symbol = utilities::getSymbol(handle.get(), "cos");
+    ASSERT_NE(symbol, nullptr);
+
+    EXPECT_EQ(utilities::getLoadedLibraryDirectoryForAddress(symbol), expected);
+}
+
+TEST(TestPlatformUtils, GetLoadedLibraryDirectoryForSymbolRejectsMissingSymbol)
+{
+    EXPECT_THROW(hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForSymbol(
+                     "hipdnn_test_platform_utils_missing_symbol_12009"),
+                 std::runtime_error);
+}
+
+TEST(TestPlatformUtils, GetLoadedLibraryDirectoryForSymbolClearsPriorLookupError)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+    const void* symbol = dlsym(RTLD_DEFAULT, "malloc");
+    ASSERT_NE(symbol, nullptr);
+    Dl_info info{};
+    ASSERT_NE(dladdr(symbol, &info), 0);
+    ASSERT_NE(info.dli_fname, nullptr);
+    const auto expected = std::filesystem::weakly_canonical(info.dli_fname).parent_path();
+
+    // Leave the failed lookup's dlerror pending for the utility to clear.
+    ASSERT_EQ(
+        utilities::getSymbol(RTLD_DEFAULT, "hipdnn_test_platform_utils_stale_lookup_error_12009"),
+        nullptr);
+
+    EXPECT_EQ(utilities::getLoadedLibraryDirectoryForSymbol("malloc"), expected);
+}
+
 #endif // defined(__linux__)
+
+#ifdef _WIN32
+
+namespace
+{
+
+struct RemoveTreeOnExit
+{
+    std::filesystem::path path;
+
+    ~RemoveTreeOnExit()
+    {
+        std::error_code failed;
+        std::filesystem::remove_all(path, failed);
+    }
+};
+
+} // namespace
+
+// The HIP anchor tier is dropped whenever this helper reports no origin, so a module
+// loaded from an extended-length path must still yield its directory. The test
+// executable itself stays at a short path, keeping this about the helper's buffer
+// rather than any executable-path limit.
+TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+
+    std::array<wchar_t, MAX_PATH> systemDirectory{};
+    const UINT systemLength = GetSystemDirectoryW(systemDirectory.data(), MAX_PATH);
+    ASSERT_GT(systemLength, 0u);
+    ASSERT_LT(systemLength, static_cast<UINT>(MAX_PATH));
+    // version.dll is not a KnownDLL, so the loader honours a copy's own path instead
+    // of redirecting back to the system directory.
+    const std::filesystem::path source
+        = std::filesystem::path(std::wstring(systemDirectory.data(), systemLength)) / "version.dll";
+    ASSERT_TRUE(std::filesystem::is_regular_file(source)) << source;
+
+    // The \\?\ prefix opts these paths out of MAX_PATH regardless of the host's
+    // long-path policy.
+    std::wstring root = L"\\\\?\\" + std::filesystem::temp_directory_path().wstring();
+    if(root.back() != L'\\')
+    {
+        root += L'\\';
+    }
+    root += L"hipdnn_long_origin_" + std::to_wstring(GetCurrentProcessId());
+    const RemoveTreeOnExit cleanup{std::filesystem::path(root)};
+
+    std::wstring longDirectory = root;
+    const std::wstring segment(120, L'o');
+    while(longDirectory.size() < static_cast<size_t>(MAX_PATH) + 64)
+    {
+        longDirectory += L'\\';
+        longDirectory += segment;
+    }
+    const std::filesystem::path directory(longDirectory);
+    std::error_code failed;
+    std::filesystem::create_directories(directory, failed);
+    ASSERT_FALSE(failed) << failed.message();
+
+    const auto library = directory / "version.dll";
+    std::filesystem::copy_file(
+        source, library, std::filesystem::copy_options::overwrite_existing, failed);
+    ASSERT_FALSE(failed) << failed.message();
+    ASSERT_GT(library.native().size(), static_cast<size_t>(MAX_PATH));
+
+    const std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&utilities::closeLibrary)>
+        handle(utilities::openLibrary(library), &utilities::closeLibrary);
+    ASSERT_NE(handle, nullptr);
+
+    const auto expected = [&library] {
+        std::error_code resolveFailed;
+        const auto resolved = std::filesystem::weakly_canonical(library, resolveFailed);
+        return (resolveFailed ? library : resolved).parent_path();
+    }();
+
+    const auto origin = utilities::getLoadedLibraryOrigin(handle.get());
+
+    EXPECT_TRUE(utilities::pathCompEq(origin, expected)) << origin << " != " << expected;
+    EXPECT_GT(origin.native().size(), static_cast<size_t>(MAX_PATH));
+}
+
+#endif // _WIN32

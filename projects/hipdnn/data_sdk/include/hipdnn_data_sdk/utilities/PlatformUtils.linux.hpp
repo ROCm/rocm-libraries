@@ -177,6 +177,8 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
 
 /// The directory of the module owning @p address. Normally launched dynamic
 /// executables use /proc/self/exe; other images use their canonicalized loader path.
+/// Throws when that origin cannot be established, which callers treat as unknown --
+/// never as a directory to search.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     Dl_info info{};
@@ -195,9 +197,13 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
     {
         return getCurrentExecutableDirectory();
     }
-    if(info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    // The loader keeps the name it was given. A relative one would canonicalize
+    // against the current working directory, which the process may have changed
+    // since the module was loaded, naming an unrelated tree.
+    if(info.dli_fname == nullptr || info.dli_fname[0] != '/')
     {
-        throw std::runtime_error("Failed to find loaded library for address");
+        throw std::runtime_error("Failed to find loaded library for address: "
+                                 "no absolute loader path");
     }
 
     // Keep the loader path if best-effort canonicalization fails.

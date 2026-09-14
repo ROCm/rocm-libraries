@@ -46,6 +46,7 @@ export HIPDNN_BACKEND_LIBRARY_PATH=/opt/rocm/lib
 **Notes:**
 - `hipdnn_frontend::setBackendLibraryPath()` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module. Both are read once, at the first backend call; later changes have no effect.
 - On Linux, secure execution (for example, a set-user-ID process) ignores this variable and skips module-relative and HIP-runtime locations. An explicit `setBackendLibraryPath()` override is still honored before the system loader's hardened search.
+- The module-relative locations are used only when hipDNN can establish the calling module's own directory. If the loader reports no origin for it, or reports one that cannot be trusted -- a relative name, which would be interpreted against whatever working directory the process happens to have -- those locations are skipped and resolution continues with the remaining ones.
 
 ### Plugin Discovery
 

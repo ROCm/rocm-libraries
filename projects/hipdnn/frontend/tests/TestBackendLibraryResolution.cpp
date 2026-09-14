@@ -3,11 +3,17 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <system_error>
 
@@ -18,9 +24,28 @@
 namespace
 {
 
+using hipdnn_data_sdk::utilities::detail::pathForDiagnostic;
 using hipdnn_frontend::detail::BackendLibraryResolution;
 using hipdnn_frontend::detail::BackendResolutionInputs;
 using hipdnn_frontend::detail::resolveBackendLibrary;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+/// A temporary-directory name no other invocation of this suite can pick. The stamp
+/// separates concurrent processes that share TMPDIR -- two build configurations
+/// running this binary at once, for instance -- and the counter separates successive
+/// cases within one process. ScopedDirectory then creates the name exclusively and
+/// throws if it is taken, so an invocation only ever owns, and only ever removes, a
+/// directory it created itself. Nothing is deleted before acquisition: a name that
+/// already exists belongs to somebody else.
+std::filesystem::path uniqueResolutionRoot(const std::string& label)
+{
+    static const std::string s_session
+        = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    static unsigned s_counter = 0;
+
+    return std::filesystem::temp_directory_path()
+           / ("hipdnn_resolution_" + label + "_" + s_session + "_" + std::to_string(s_counter++));
+}
 
 const std::string& backendFileName()
 {
@@ -91,25 +116,20 @@ class TestBackendLibraryResolution : public ::testing::Test
 protected:
     void SetUp() override
     {
-        std::error_code failed;
         const auto* const info = ::testing::UnitTest::GetInstance()->current_test_info();
-        _root = std::filesystem::temp_directory_path(failed)
-                / (std::string("hipdnn_resolution_") + info->name());
-        ASSERT_FALSE(failed) << failed.message();
-
-        std::filesystem::remove_all(_root, failed);
-        ASSERT_TRUE(std::filesystem::create_directories(_root, failed)) << failed.message();
+        ASSERT_NO_THROW(_root
+                        = std::make_unique<ScopedDirectory>(uniqueResolutionRoot(info->name())));
     }
 
     void TearDown() override
     {
-        std::error_code failed;
-        std::filesystem::remove_all(_root, failed);
+        // Removes exactly the directory this invocation created, and nothing else.
+        _root.reset();
     }
 
     std::filesystem::path directory(const std::string& name)
     {
-        const std::filesystem::path created = _root / name;
+        const std::filesystem::path created = root() / name;
         std::error_code failed;
         std::filesystem::create_directories(created, failed);
         EXPECT_FALSE(failed) << failed.message();
@@ -143,11 +163,11 @@ protected:
 
     const std::filesystem::path& root() const
     {
-        return _root;
+        return _root->path();
     }
 
 private:
-    std::filesystem::path _root;
+    std::unique_ptr<ScopedDirectory> _root;
 };
 
 } // namespace
@@ -227,15 +247,128 @@ TEST_F(TestBackendLibraryResolution, SecureExecutionStillHonoursTheProgrammaticO
 
 #endif // defined(__linux__)
 
-// Use an empty override so this one-shot resolution cannot cache a stand-in backend.
-TEST_F(TestBackendLibraryResolution, SetterIsRefusedOnceResolutionHasRun)
+namespace
 {
-    EXPECT_TRUE(hipdnn_frontend::setBackendLibraryPath(directory("early")));
 
-    hipdnn_frontend::detail::resolveBackendLibraryPath();
+/// The whole one-shot lifecycle, exercised where nothing has resolved yet.
+/// The override directories are left empty on purpose, so this resolution cannot
+/// cache a stand-in backend. Everything this process owns is destroyed in the scope
+/// above the explicit exit, and any failed expectation becomes a nonzero status.
+[[noreturn]] void runSetterLifecycle()
+{
+    int status = 0;
+    {
+        const ScopedDirectory early(uniqueResolutionRoot("early"));
+        const ScopedDirectory late(uniqueResolutionRoot("late"));
 
-    EXPECT_FALSE(hipdnn_frontend::setBackendLibraryPath(directory("late")));
+        const auto require = [&status](bool held, const char* what) {
+            if(!held)
+            {
+                status = 1;
+                std::fprintf(stderr, "setter lifecycle: %s\n", what);
+            }
+        };
+
+        require(hipdnn_frontend::setBackendLibraryPath(early.path()),
+                "the setter was refused before resolution had run");
+
+        hipdnn_frontend::detail::resolveBackendLibraryPath();
+        const auto& resolution = hipdnn_frontend::detail::backendLibraryResolution();
+        std::fprintf(stderr, "candidates tried:%s\n", resolution.diagnostics.c_str());
+        require(resolution.diagnostics.find(pathForDiagnostic(early.path() / backendFileName()))
+                    != std::string::npos,
+                "the stored override was never offered as a candidate");
+
+        require(!hipdnn_frontend::setBackendLibraryPath(late.path()),
+                "the setter was accepted after resolution had run");
+    }
+    std::exit(status);
 }
+
+} // namespace
+
+// Resolution is a per-process one-shot, so a second iteration in the same process would
+// find it already started and report correct behaviour as a regression. Each iteration
+// runs the lifecycle in a fresh process instead: threadsafe death-test style re-execs
+// this binary, and the child's exit status carries its verdict back.
+TEST(TestBackendLibraryResolutionDeathTest, SetterIsRefusedOnceResolutionHasRun)
+{
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
+    // diagnostic is attributed to this expansion site rather than to the GoogleTest
+    // header, so -isystem does not suppress it and -Werror makes it fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(runSetterLifecycle(), testing::ExitedWithCode(0), "candidates tried:");
+#pragma clang diagnostic pop
+}
+
+#ifdef _WIN32
+
+// A Windows path can hold UTF-16 with no UTF-8 spelling. Formatting such a candidate
+// for the diagnostic must not escape the candidate loop: that would abandon every
+// later candidate and cache the failure for the life of the process.
+TEST_F(TestBackendLibraryResolution, MalformedNativeCandidateDoesNotAbortResolution)
+{
+    // An unpaired high surrogate: a legal Windows filename, not convertible to UTF-8.
+    const std::filesystem::path malformed = root() / (L"malformed_" + std::wstring(1, L'\xD800'));
+    ASSERT_TRUE(malformed.is_absolute());
+
+    BackendResolutionInputs inputs;
+    inputs.overrideDirectory = malformed;
+    inputs.overrideSource = "HIPDNN_BACKEND_LIBRARY_PATH";
+    inputs.selfDirectory = directoryWithUnloadableBackend("self");
+
+    BackendLibraryResolution resolution;
+    ASSERT_NO_THROW(resolution = resolveBackendLibrary(inputs));
+
+    EXPECT_NE(
+        resolution.diagnostics.find(pathForDiagnostic(inputs.selfDirectory / backendFileName())),
+        std::string::npos)
+        << "the candidate after the unconvertible one was never reached: "
+        << resolution.diagnostics;
+    closeResolved(resolution);
+}
+
+// A path that does convert must still reach the diagnostic as its own UTF-8 bytes,
+// not as an active-code-page approximation of them.
+TEST_F(TestBackendLibraryResolution, NonAsciiCandidateIsReportedAsUtf8)
+{
+    const std::filesystem::path missing = root() / std::wstring(L"\u6D4B\u8BD5_\u0416_\u03A9");
+
+    BackendResolutionInputs inputs;
+    inputs.overrideDirectory = missing;
+    inputs.overrideSource = "HIPDNN_BACKEND_LIBRARY_PATH";
+
+    const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
+
+    // Converted with the Win32 API directly, independently of the helper under test.
+    const std::wstring candidate = (missing / backendFileName()).wstring();
+    const int size = WideCharToMultiByte(CP_UTF8,
+                                         0,
+                                         candidate.c_str(),
+                                         static_cast<int>(candidate.size()),
+                                         nullptr,
+                                         0,
+                                         nullptr,
+                                         nullptr);
+    ASSERT_GT(size, 0);
+    std::string utf8(static_cast<size_t>(size), '\0');
+    ASSERT_GT(WideCharToMultiByte(CP_UTF8,
+                                  0,
+                                  candidate.c_str(),
+                                  static_cast<int>(candidate.size()),
+                                  utf8.data(),
+                                  size,
+                                  nullptr,
+                                  nullptr),
+              0);
+
+    EXPECT_NE(resolution.diagnostics.find(utf8), std::string::npos) << resolution.diagnostics;
+    closeResolved(resolution);
+}
+
+#endif // _WIN32
 
 #if defined(__linux__)
 
@@ -286,6 +419,32 @@ TEST_F(TestBackendLibraryResolution, SelfParentLibOutranksHipAnchor)
     closeResolved(resolution);
 }
 
+TEST_F(TestBackendLibraryResolution, SelfParentLib64OutranksHipAnchor)
+{
+    BackendResolutionInputs inputs;
+    inputs.selfDirectory = directory("tree/bin");
+    const std::filesystem::path siblingLib64 = directoryWithLoadableBackend("tree/lib64");
+    inputs.hipAnchorDirectory = directoryWithLoadableBackend("hip");
+
+    const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
+
+    EXPECT_EQ(resolution.path, siblingLib64 / backendFileName());
+    closeResolved(resolution);
+}
+
+TEST_F(TestBackendLibraryResolution, SelfParentLibOutranksLib64)
+{
+    BackendResolutionInputs inputs;
+    inputs.selfDirectory = directory("tree/bin");
+    const std::filesystem::path siblingLib = directoryWithLoadableBackend("tree/lib");
+    directoryWithLoadableBackend("tree/lib64");
+
+    const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
+
+    EXPECT_EQ(resolution.path, siblingLib / backendFileName());
+    closeResolved(resolution);
+}
+
 TEST_F(TestBackendLibraryResolution, HipAnchorUsedWhenNoSelfRelativeCandidateExists)
 {
     BackendResolutionInputs inputs;
@@ -329,6 +488,20 @@ TEST_F(TestBackendLibraryResolution, UnloadableCandidateFallsThroughToTheNextTie
     EXPECT_NE(resolution.diagnostics.find((*inputs.overrideDirectory / backendFileName()).string()),
               std::string::npos)
         << resolution.diagnostics;
+    closeResolved(resolution);
+}
+
+TEST_F(TestBackendLibraryResolution, DuplicateDirectoriesFallThroughToHipAnchor)
+{
+    BackendResolutionInputs inputs;
+    inputs.overrideDirectory = directoryWithUnloadableBackend("shared");
+    inputs.overrideSource = "HIPDNN_BACKEND_LIBRARY_PATH";
+    inputs.selfDirectory = *inputs.overrideDirectory;
+    inputs.hipAnchorDirectory = directoryWithLoadableBackend("hip");
+
+    const BackendLibraryResolution resolution = resolveBackendLibrary(inputs);
+
+    EXPECT_EQ(resolution.path, inputs.hipAnchorDirectory / backendFileName());
     closeResolved(resolution);
 }
 

@@ -154,6 +154,89 @@ add_hipdnn_test(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+# A downstream consumer compiling the shipped runtime-load headers as C++20. Under that
+# standard std::filesystem::path::u8string() returns std::u8string, so a diagnostic that
+# concatenated it with a narrow literal would break every C++20 consumer at include time.
+# This compiles the real shipped header rather than a copy; there is nothing to run, so
+# the target is object-only and links nothing -- in particular not the backend, which
+# runtime-load mode must never require. hipdnn_frontend_dynamic_load_tests above is the
+# C++17 control.
+if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    add_library(hipdnn_frontend_runtime_load_header_cpp20 OBJECT TestRuntimeLoadHeaderCpp20.cpp)
+    target_compile_features(hipdnn_frontend_runtime_load_header_cpp20 PRIVATE cxx_std_20)
+    set_target_properties(
+        hipdnn_frontend_runtime_load_header_cpp20
+        PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    )
+    target_compile_options(
+        hipdnn_frontend_runtime_load_header_cpp20 PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    )
+    target_link_libraries(
+        hipdnn_frontend_runtime_load_header_cpp20 PRIVATE hipdnn_frontend_dynamic
+    )
+    # Attached to the runtime-load test build so targeted validation cannot omit the gate.
+    add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_frontend_runtime_load_header_cpp20)
+else()
+    message(STATUS "hipDNN: this C++ compiler advertises no cxx_std_20; the C++20 runtime-load "
+                   "header compile target is not created")
+endif()
+
+# Registers one runner invocation in both trees. The build entry names the configure
+# host's CMake and its target files; the installed entry names a bare "cmake" that the
+# runner's own host resolves, plus paths relative to ctest's installed working
+# directory -- the same shape install_hipdnn_ctest_files() emits for every other
+# installed test, and what plugin_sdk/tests/CMakeLists.txt already does by hand.
+function(_hipdnn_add_runtime_load_entry name)
+    cmake_parse_arguments(ARG "PRELOAD;RUN_DISABLED" "FILTER;STAGE_LIBDIR" "" ${ARGN})
+
+    set(_build_options
+        "-DHIPDNN_TEST_EXECUTABLE=$<TARGET_FILE:hipdnn_frontend_dynamic_load_tests>"
+        "-DHIPDNN_TEST_FILTER=${ARG_FILTER}")
+    set(_installed_options
+        "-DHIPDNN_TEST_EXECUTABLE=../hipdnn_frontend_dynamic_load_tests"
+        "-DHIPDNN_TEST_FILTER=${ARG_FILTER}")
+    if(ARG_PRELOAD)
+        list(APPEND _build_options "-DHIPDNN_TEST_PRELOAD=ON")
+        list(APPEND _installed_options "-DHIPDNN_TEST_PRELOAD=ON")
+    endif()
+    if(ARG_RUN_DISABLED)
+        list(APPEND _build_options "-DHIPDNN_TEST_RUN_DISABLED=ON")
+        list(APPEND _installed_options "-DHIPDNN_TEST_RUN_DISABLED=ON")
+    endif()
+    if(ARG_STAGE_LIBDIR)
+        # The fixture is disposable output, so it is staged under the writable work
+        # area ctest runs in, one root per entry so no two entries can collide.
+        list(APPEND _build_options
+             "-DHIPDNN_TEST_BACKEND=$<TARGET_FILE:hipdnn_backend>"
+             "-DHIPDNN_TEST_STAGE_ROOT=${CMAKE_CURRENT_BINARY_DIR}/runtime_load_fixtures/${name}"
+             "-DHIPDNN_TEST_STAGE_LIBDIR=${ARG_STAGE_LIBDIR}")
+        list(APPEND _installed_options
+             "-DHIPDNN_TEST_BACKEND=../../${CMAKE_INSTALL_LIBDIR}/${_hipdnn_backend_file_name}"
+             "-DHIPDNN_TEST_STAGE_ROOT=runtime_load_fixtures/${name}"
+             "-DHIPDNN_TEST_STAGE_LIBDIR=${ARG_STAGE_LIBDIR}")
+    endif()
+
+    add_test(NAME ${name}
+             COMMAND ${CMAKE_COMMAND} ${_build_options} -P "${_runtime_load_runner}"
+             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    # One call per test name: the helper takes a single explicit name, so a second one
+    # here would reach the parser as a stray argument and leave every name unlabelled.
+    _apply_hipdnn_test_category_labels(${name})
+
+    set(_snippet_body "add_test(${name} \"cmake\"")
+    foreach(_option IN LISTS _installed_options)
+        string(APPEND _snippet_body "\n    \"${_option}\"")
+    endforeach()
+    string(APPEND _snippet_body "\n    -P \"RuntimeLoadAsanPreloadRunner.cmake\")\n")
+
+    get_test_property(${name} LABELS _labels)
+    if(_labels)
+        string(APPEND _snippet_body
+               "set_tests_properties(${name} PROPERTIES LABELS \"${_labels}\")\n")
+    endif()
+    file(APPEND "${_runtime_load_snippet}" "${_snippet_body}\n")
+endfunction()
+
 # The runner owns runtime selection; compiler discovery supplies only a same-image fallback.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     execute_process(
@@ -166,28 +249,63 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(_clang_resource_result EQUAL 0 AND NOT _clang_resource_dir STREQUAL "")
         set(_asan_preload_runtime "${_clang_resource_dir}/lib/linux/libclang_rt.asan-x86_64.so")
     endif()
-    set(_asan_preload_test hipdnn_frontend_dynamic_load_tests_asan_preload)
-    set(_asan_preload_runner "${CMAKE_CURRENT_BINARY_DIR}/RuntimeLoadAsanPreloadRunner.cmake")
-    configure_file(RuntimeLoadAsanPreloadRunner.cmake.in "${_asan_preload_runner}" @ONLY)
 
-    add_test(NAME ${_asan_preload_test}
-             COMMAND ${CMAKE_COMMAND}
-                     "-DHIPDNN_TEST_EXECUTABLE=$<TARGET_FILE:hipdnn_frontend_dynamic_load_tests>"
-                     -P "${_asan_preload_runner}"
-             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-    _apply_hipdnn_test_category_labels(${_asan_preload_test})
+    set(_runtime_load_runner "${CMAKE_CURRENT_BINARY_DIR}/RuntimeLoadAsanPreloadRunner.cmake")
+    configure_file(RuntimeLoadAsanPreloadRunner.cmake.in "${_runtime_load_runner}" @ONLY)
+    set(_runtime_load_snippet "${CMAKE_CURRENT_BINARY_DIR}/RuntimeLoadAsanPreloadTest.cmake")
+    file(WRITE "${_runtime_load_snippet}"
+         "# Autogenerated: installed-tree copies of the runtime-load runner entries in\n"
+         "# projects/hipdnn/frontend/tests/CMakeLists.txt -- do not hand-edit.\n\n")
+    set(_hipdnn_backend_file_name
+        "${CMAKE_SHARED_LIBRARY_PREFIX}hipdnn_backend${CMAKE_SHARED_LIBRARY_SUFFIX}")
 
-    set(_asan_preload_snippet "${CMAKE_CURRENT_BINARY_DIR}/RuntimeLoadAsanPreloadTest.cmake")
-    file(WRITE "${_asan_preload_snippet}"
-         "add_test(${_asan_preload_test} \"${CMAKE_COMMAND}\"\n"
-         "    \"-DHIPDNN_TEST_EXECUTABLE=../hipdnn_frontend_dynamic_load_tests\"\n"
-         "    -P \"RuntimeLoadAsanPreloadRunner.cmake\")\n")
-    get_test_property(${_asan_preload_test} LABELS _asan_preload_labels)
-    if(_asan_preload_labels)
-        file(APPEND "${_asan_preload_snippet}"
-             "set_tests_properties(${_asan_preload_test} PROPERTIES LABELS \"${_asan_preload_labels}\")\n")
+    set(_runtime_load_ordinary_filter "TestRuntimeLoadBackendFactory.*")
+    set(_runtime_load_staged_filter
+        "TestRuntimeLoadBackendFactory.DISABLED_ResolvesTheStagedSelfRelativeBackend")
+
+    # Preloading ASan activates its dlopen interceptor, which takes the loader's
+    # implicit search away: these entries pass only if the resolver computed the path.
+    # Instrumenting the same binary with ThreadSanitizer makes that pairing impossible,
+    # so those two configurations register no preload entry. A missing ASan runtime
+    # anywhere else remains a run-time failure, never a quiet configure-time omission.
+    set(_runtime_load_thread_sanitized OFF)
+    if(BUILD_THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN")
+        set(_runtime_load_thread_sanitized ON)
     endif()
-    install(FILES "${_asan_preload_snippet}" "${_asan_preload_runner}"
+
+    if(NOT _runtime_load_thread_sanitized)
+        _hipdnn_add_runtime_load_entry(
+            hipdnn_frontend_dynamic_load_tests_asan_preload
+            PRELOAD FILTER "${_runtime_load_ordinary_filter}"
+        )
+    endif()
+
+    # The exact self-relative expectation lives here rather than in the ordinary cases,
+    # which must stay valid for any CMAKE_INSTALL_LIBDIR. The runner copies the real
+    # executable and the real backend into a fixture of its own and requires that exact
+    # backend, so neither a custom install layout nor a RUNPATH fallback can satisfy it.
+    # lib and lib64 are separate runs because they are separate resolver candidates.
+    if(TARGET hipdnn_backend)
+        _hipdnn_add_runtime_load_entry(
+            hipdnn_frontend_dynamic_load_tests_staged_lib
+            RUN_DISABLED FILTER "${_runtime_load_staged_filter}" STAGE_LIBDIR lib
+        )
+        _hipdnn_add_runtime_load_entry(
+            hipdnn_frontend_dynamic_load_tests_staged_lib64
+            RUN_DISABLED FILTER "${_runtime_load_staged_filter}" STAGE_LIBDIR lib64
+        )
+        if(NOT _runtime_load_thread_sanitized)
+            _hipdnn_add_runtime_load_entry(
+                hipdnn_frontend_dynamic_load_tests_staged_asan_preload
+                PRELOAD RUN_DISABLED FILTER "${_runtime_load_staged_filter}" STAGE_LIBDIR lib
+            )
+        endif()
+    else()
+        message(STATUS "hipDNN: hipdnn_backend is not built here, so the staged "
+                       "self-relative runtime-load entries are not registered")
+    endif()
+
+    install(FILES "${_runtime_load_snippet}" "${_runtime_load_runner}"
             DESTINATION ${CMAKE_INSTALL_BINDIR}/hipdnn)
     set_property(GLOBAL APPEND PROPERTY HIPDNN_INSTALLED_CTEST_INCLUDES
                  RuntimeLoadAsanPreloadTest.cmake)
@@ -210,14 +328,17 @@ if(WIN32)
                          FIXTURES_REQUIRED ${_native_override_fixture})
     set_tests_properties(${_native_override_cleanup} PROPERTIES
                          FIXTURES_CLEANUP ${_native_override_fixture})
-    _apply_hipdnn_test_category_labels(${_native_override_test} ${_native_override_cleanup})
+    # One call per test name: the helper takes a single explicit name, so passing both
+    # at once reaches the parser as a stray argument and leaves neither name labelled.
+    _apply_hipdnn_test_category_labels(${_native_override_test})
+    _apply_hipdnn_test_category_labels(${_native_override_cleanup})
 
     set(_native_override_snippet "${CMAKE_CURRENT_BINARY_DIR}/RuntimeLoadNativeOverrideTest.cmake")
     file(WRITE "${_native_override_snippet}"
          "add_test(${_native_override_test}\n"
          "    \"../hipdnn_frontend_dynamic_load_tests${CMAKE_EXECUTABLE_SUFFIX}\"\n"
          "    \"${_native_override_filter}\" --gtest_also_run_disabled_tests)\n"
-         "add_test(${_native_override_cleanup} \"${CMAKE_COMMAND}\" -E rm -rf\n"
+         "add_test(${_native_override_cleanup} \"cmake\" -E rm -rf\n"
          "    \"../hipdnn_native_override_fixture\")\n"
          "set_tests_properties(${_native_override_test} PROPERTIES\n"
          "    FIXTURES_REQUIRED ${_native_override_fixture})\n"

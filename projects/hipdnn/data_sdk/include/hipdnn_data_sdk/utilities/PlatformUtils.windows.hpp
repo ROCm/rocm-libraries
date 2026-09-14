@@ -28,6 +28,7 @@
 #include <array>
 #include <cwctype>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -190,7 +191,8 @@ inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
     if(handle == nullptr)
     {
         const DWORD error = GetLastError();
-        throw std::runtime_error("Failed to load library: " + libraryPath.u8string()
+        // The error code is captured above, before any formatting that could fail.
+        throw std::runtime_error("Failed to load library: " + detail::pathForDiagnostic(libraryPath)
                                  + " (Error Code: " + std::to_string(error) + ")");
     }
     return handle;
@@ -214,18 +216,47 @@ inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
         throw std::runtime_error("Failed to get library origin: null handle");
     }
 
-    std::array<wchar_t, MAX_PATH> result{};
-    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
-    if(length == 0 || length >= result.size())
+    // Extended-length paths exceed MAX_PATH, and GetModuleFileNameW reports truncation
+    // by filling the buffer rather than failing. Retry with a larger one instead of
+    // discarding an origin this module genuinely has.
+    std::array<wchar_t, MAX_PATH> shortPath{};
+    DWORD capacity = static_cast<DWORD>(shortPath.size());
+    DWORD length = GetModuleFileNameW(handle, shortPath.data(), capacity);
+    if(length == 0)
     {
         throw std::runtime_error(
             "Failed to get library origin (Error Code: " + std::to_string(GetLastError()) + ")");
     }
 
+    const wchar_t* modulePath = shortPath.data();
+    std::wstring grownPath;
+    while(length >= capacity)
+    {
+        constexpr DWORD MAX_CAPACITY = (std::numeric_limits<DWORD>::max)() / 2;
+        if(capacity > MAX_CAPACITY)
+        {
+            throw std::runtime_error("Failed to get library origin: path is implausibly long");
+        }
+        capacity *= 2;
+
+        grownPath.assign(capacity, L'\0');
+        length = GetModuleFileNameW(handle, grownPath.data(), capacity);
+        if(length == 0)
+        {
+            throw std::runtime_error("Failed to get library origin (Error Code: "
+                                     + std::to_string(GetLastError()) + ")");
+        }
+    }
+    if(!grownPath.empty())
+    {
+        grownPath.resize(length);
+        modulePath = grownPath.c_str();
+    }
+
     // Resolve symlinks to find siblings; retain the module path on failure.
     std::error_code failed;
-    const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
-    return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();
+    const auto resolved = std::filesystem::weakly_canonical(modulePath, failed);
+    return (failed ? std::filesystem::path(modulePath) : resolved).parent_path();
 }
 
 inline void closeLibrary(SharedLibraryHandle handle)

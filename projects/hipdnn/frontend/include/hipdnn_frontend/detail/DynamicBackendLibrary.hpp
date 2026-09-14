@@ -32,6 +32,7 @@
 
 #include <hipdnn_data_sdk/Visibility.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_frontend::detail
 {
@@ -184,7 +185,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
                          "hipDNN: ignoring %s: expected a non-empty absolute directory, got "
                          "\"%s\"\n",
                          inputs.overrideSource.c_str(),
-                         inputs.overrideDirectory->u8string().c_str());
+                         utilities::detail::pathForDiagnostic(*inputs.overrideDirectory).c_str());
         }
         else
         {
@@ -215,7 +216,9 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
             std::error_code failed;
             if(!std::filesystem::exists(candidate.path, failed) || failed)
             {
-                resolution.diagnostics += "\n  " + candidate.path.u8string() + ": not present";
+                resolution.diagnostics += "\n  "
+                                          + utilities::detail::pathForDiagnostic(candidate.path)
+                                          + ": not present";
                 continue;
             }
         }
@@ -232,7 +235,8 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
         }
         catch(...)
         {
-            resolution.diagnostics += "\n  " + candidate.path.u8string() + ": unknown error";
+            resolution.diagnostics += "\n  " + utilities::detail::pathForDiagnostic(candidate.path)
+                                      + ": unknown error";
         }
     }
 
