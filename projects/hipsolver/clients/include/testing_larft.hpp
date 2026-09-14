@@ -982,7 +982,7 @@ void testing_larft(Arguments& argus)
         ROCSOLVER_TEST_CHECK(T, max_error, n);
 
     // output results for rocsolver test
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
     {
         if(!argus.perf)
         {
