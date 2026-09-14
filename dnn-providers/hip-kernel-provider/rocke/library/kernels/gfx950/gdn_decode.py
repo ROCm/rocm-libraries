@@ -75,6 +75,7 @@ LOG2E = 1.4426950408889634
 LN2 = 0.6931471805599453
 NORM_EPS = 1e-6
 SOFTPLUS_THRESHOLD = 20.0
+EXP2_CLAMP = 126.0  # f32 exp2 argument range; keeps exp2_fast inside its contract
 STATE_VEC = 8  # 16B bf16 vector load/store width
 # State element size in bytes; is_valid_spec bars any state dtype but these.
 _STATE_BYTES = {"f16": 2, "bf16": 2}
@@ -253,8 +254,24 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     )
     with b.scf_if(active):
         # ---- exp/sigmoid/softplus composed from exp2/log2/rcp (no native) ----
+        # exp2_fast emits no range guard, so its contract is that the *caller*
+        # bounds the argument. Every other exp2_fast in this repo is a softmax,
+        # whose argument is <= 0 by construction; a gate argument is not -- a,
+        # dt_bias, A_log and b come straight from caller tensors and nothing
+        # bounds them. We meet the contract explicitly instead, with the same
+        # fmin/fmax clamp the KDA emitter uses (``ex2``, kda_chunkwise.py).
+        #
+        # Measured on gfx950: unclamped exp2_fast and the guarded b.exp2 agree
+        # bit-for-bit on the whole positive range (both saturate to +inf past
+        # ~88) and differ only in the f32 denormal window, where exp2_fast
+        # flushes to 0 and exp2 returns the denormal. That difference cannot
+        # survive into a bf16 state, so this clamp buys contract compliance
+        # rather than accuracy -- which is why it is a 2-op clamp and not the
+        # ~5-op guarded lowering (that costs 2.7% at batch 1, this costs 0.8%).
         def exp_f32(x):
-            return b.exp2_fast(b.fmul(x, b.const_f32(LOG2E)))
+            arg = b.fmul(x, b.const_f32(LOG2E))
+            arg = b.fmin(b.fmax(arg, b.const_f32(-EXP2_CLAMP)), b.const_f32(EXP2_CLAMP))
+            return b.exp2_fast(arg)
 
         def log1p_f32(x):
             return b.fmul(b.log2(b.fadd(b.const_f32(1.0), x)), b.const_f32(LN2))
@@ -415,8 +432,10 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     )
     with b.scf_if(active):
 
-        def exp_f32(x):
-            return b.exp2_fast(b.fmul(x, b.const_f32(LOG2E)))
+        def exp_f32(x):  # clamped exp2_fast; see the simple path
+            arg = b.fmul(x, b.const_f32(LOG2E))
+            arg = b.fmin(b.fmax(arg, b.const_f32(-EXP2_CLAMP)), b.const_f32(EXP2_CLAMP))
+            return b.exp2_fast(arg)
 
         def log1p_f32(x):
             return b.fmul(b.log2(b.fadd(b.const_f32(1.0), x)), b.const_f32(LN2))
