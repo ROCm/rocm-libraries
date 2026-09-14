@@ -2,7 +2,11 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+<<<<<<< HEAD
 ## rocPRIM 5.0.0 for ROCM 10.2.0
+=======
+## rocPRIM 5.0.0 for ROCm 10.2.0
+>>>>>>> f5dd6287fc1 (Move changes to ROCm 10.2)
 
 ### Optimizations
 
