@@ -19,7 +19,7 @@ left_nav_title = f"hipBLASLt {version_number} Documentation"
 # for PDF output on Read the Docs
 project = "hipBLASLt Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -35,3 +35,6 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
