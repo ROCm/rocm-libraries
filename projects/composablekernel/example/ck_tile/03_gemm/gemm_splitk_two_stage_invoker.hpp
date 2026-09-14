@@ -79,7 +79,10 @@ struct SplitKTwoStageInvoker
                                                   ck_tile::element_wise::PassThrough,
                                                   ck_tile::element_wise::PassThrough,
                                                   AComputeDataType,
-                                                  BComputeDataType>;
+                                                  BComputeDataType,
+                                                  GemmConfig::FixedVectorSize,
+                                                  GemmConfig::VectorSizeA,
+                                                  GemmConfig::VectorSizeB>;
         using WorkspaceType = ck_tile::remove_cvref_t<typename GemmConfig::WorkspaceType>;
 
         using GemmPipeline = typename PipelineTypeTraits<
