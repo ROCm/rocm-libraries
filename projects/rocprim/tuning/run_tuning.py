@@ -80,7 +80,8 @@ def get_available_algorithms() -> List[str]:
         "device_segmented_reduce",
         "device_reduce_by_key",
         "device_scan",
-        "device_scan_by_key"
+        "device_scan_by_key",
+        "device_histogram"
         # Add new algorithms here
     ]
 
