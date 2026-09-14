@@ -229,7 +229,7 @@ protected:
     IngestorKernelCode(std::unique_ptr<compilation::ICompiledProgram> program,
                        std::unique_ptr<compilation::IRunnableKernel> kernel,
                        int deviceOrdinal,
-                       std::string strippedArch)
+                       const std::string& strippedArch)
         : _memo(std::make_unique<Memo>())
     {
         requireRealOrdinal(deviceOrdinal);
