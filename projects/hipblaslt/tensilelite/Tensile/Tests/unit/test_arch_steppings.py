@@ -129,22 +129,36 @@ def test_an_isa_naming_no_architecture_yields_no_macro():
     assert archMacroNames(None) == []
 
 
-def test_all_keeps_architectures_its_expansion_does_not_cover():
-    """``all`` cannot name v0, so an explicit ``gfx1250-strict`` alongside it has to
-    survive rather than be dropped -- being dropped would turn a request for an
-    stepping that cannot be built together with v1 into a silent v1-only build.
-    Kept, it reaches the mixed-build guard and reports the conflict."""
-    expanded = expandAllArchitectures(["all", GFX1250_STRICT])
-    assert GFX1250_STRICT in expanded
-    assert set(SUPPORTED_GFX).issubset(expanded)
+def test_all_covers_the_steppings_of_the_architectures_it_covers():
+    """``all`` means every supported architecture, and a stepping is one. Leaving
+    it out made the default build -- ``install.sh`` passes ``all`` -- ship no
+    gfx1250-strict code objects at all, on a request that named everything."""
+    assert expandAllArchitectures(["all"]) == SUPPORTED_GFX + [GFX1250_STRICT]
+
+
+def test_a_stepping_named_beside_all_is_absorbed_rather_than_repeated():
+    """It is covered now, so naming it too says nothing new; repeating it would
+    hand the partitioner a duplicate and buy a third build run for it."""
+    assert expandAllArchitectures(["all", GFX1250_STRICT]) == SUPPORTED_GFX + [GFX1250_STRICT]
 
 
 def test_all_expansion_does_not_duplicate_covered_architectures():
-    assert expandAllArchitectures(["all", "gfx942"]) == SUPPORTED_GFX
+    assert expandAllArchitectures(["all", "gfx942"]) == SUPPORTED_GFX + [GFX1250_STRICT]
 
 
 def test_expansion_is_a_passthrough_without_the_all_keyword():
     assert expandAllArchitectures([GFX1250_STRICT, "gfx942"]) == [GFX1250_STRICT, "gfx942"]
+
+
+def test_only_steppings_of_covered_architectures_are_supported():
+    """``architectureMap`` is the source of stepping names, and it carries
+    entries that are not steppings at all -- ``all`` among them. Reading it
+    without that filter would put the keyword into the expansion of itself."""
+    from Tensile.Common.Architectures import supportedSteppings
+
+    steppings = supportedSteppings()
+    assert steppings == [GFX1250_STRICT]
+    assert all(steppingArchOf(s) in SUPPORTED_GFX for s in steppings)
 
 
 @pytest.mark.parametrize("spec", ["gfx950[cu=64]", "gfx942:xnack+", "gfx942[id=74a0]"])
@@ -153,7 +167,7 @@ def test_all_absorbs_qualified_specs_of_architectures_it_covers(spec):
     xnack spec names an architecture the expansion already covers, so keeping it
     would both change behavior for architectures unrelated to the stepping split
     and hand the predicate splitter a duplicate of that architecture."""
-    assert expandAllArchitectures(["all", spec]) == SUPPORTED_GFX
+    assert expandAllArchitectures(["all", spec]) == SUPPORTED_GFX + [GFX1250_STRICT]
 
 
 @pytest.mark.parametrize("padding", ["", " ", "\t"])
@@ -163,7 +177,7 @@ def test_all_tolerates_empty_entries(padding):
     discarded, empty entries included; keeping only genuinely uncoverable names
     must not turn that into a hard build failure, since the predicate splitter
     rejects any spec it cannot recognize."""
-    assert expandAllArchitectures(["all", padding]) == SUPPORTED_GFX
+    assert expandAllArchitectures(["all", padding]) == SUPPORTED_GFX + [GFX1250_STRICT]
 
 
 @pytest.mark.parametrize("padding", ["", " ", "\t"])
@@ -180,7 +194,7 @@ def test_all_is_recognized_despite_surrounding_whitespace(keyword):
     """Membership was tested on the raw entry while the filter compared the
     stripped one, so a padded keyword skipped expansion and was handed to the
     predicate splitter as an architecture named ``all``."""
-    assert expandAllArchitectures([keyword, GFX1250_STRICT]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures([keyword]) == SUPPORTED_GFX + [GFX1250_STRICT]
 
 
 # =========================================================================== #
@@ -1505,6 +1519,11 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     every expensive step stubbed. ``logicFiles`` writes minimal logic files
     (arch name, schedule name) into the logic dir; the real glob and filter run,
     so the selection observed is the production wiring's.
+
+    A request covering two architectures that share an ISA takes the fan-out
+    instead, which ``run()`` returns straight after: the groups are recorded and
+    the spawning stubbed out, since the real one would hand a child pytest's own
+    argv. Stubbed unconditionally so no test can spawn a build by accident.
     """
     from unittest.mock import MagicMock
 
@@ -1594,8 +1613,16 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     monkeypatch.setattr(RunModule, "copyStaticFiles", lambda *a, **kw: [])
     monkeypatch.setattr(RunModule, "writeSolutionsAndKernelsTCL", _capture_archs)
 
-    with pytest.raises(_Stop):
+    monkeypatch.setattr(
+        RunModule,
+        "_buildGroupsSeparately",
+        lambda groups, _jobs: captured.__setitem__("groups", groups),
+    )
+
+    try:
         RunModule.run()
+    except _Stop:
+        pass
 
     return captured
 
@@ -1680,13 +1707,16 @@ def test_gfx1250_build_selects_only_the_architectures_logic(
     assert captured["logicFiles"] == [_logicFileName(*_ARCH_LOGIC)]
 
 
-def test_all_build_excludes_the_steppings_logic(
+def test_all_build_fans_out_to_cover_the_stepping(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """``all`` is the default distribution build and reaches the selection as the
-    architectures it expands to -- a list built from ISAs, which cannot name a
-    stepping. The stepping's logic must therefore be excluded from it, and every
-    other architecture's must survive.
+    """``all`` is the default distribution build -- ``install.sh`` passes it --
+    and it covers the stepping, which no single run can name beside the
+    architecture it steps from. So it must reach the selection twice, once per
+    group, rather than once with the stepping quietly dropped: dropped, the
+    default build ships no gfx1250-strict code objects at all.
+
+    What each of those runs then selects is pinned by the two tests above.
     """
     captured = _run_createlibrary(
         monkeypatch,
@@ -1695,9 +1725,10 @@ def test_all_build_excludes_the_steppings_logic(
         logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC, _OTHER_ARCH_LOGIC],
     )
 
-    assert sorted(captured["logicFiles"]) == sorted(
-        [_logicFileName(*_ARCH_LOGIC), _logicFileName(*_OTHER_ARCH_LOGIC)]
-    )
+    groups = captured["groups"]
+    assert len(groups) == 2
+    assert GFX1250 in groups[0] and "gfx942" in groups[0]
+    assert groups[1] == [GFX1250_STRICT]
 
 
 def test_stepping_selection_spares_other_architectures(

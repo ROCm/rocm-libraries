@@ -135,12 +135,12 @@ function(create_device_library)
     set(_one
         TARGET LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
         ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL GEMM_A2A_FUSION LAZY_LOAD ASM_COMMENTS
-        KEEP_BUILD_TMP ASM_DEBUG REQUIRE_GFX1250V0_OVERLAY)
+        KEEP_BUILD_TMP ASM_DEBUG)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
     if(_cdl_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, REQUIRE_GFX1250V0_OVERLAY; multi-value keyword: ARCHES)")
+        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG; multi-value keyword: ARCHES)")
     endif()
     if(NOT _cdl_LOGIC_PATH)
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is required")
@@ -301,9 +301,6 @@ function(create_device_library)
         --use-bundled-known-bugs
         --check-all
     )
-    if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
-        list(APPEND _tensile_logic_args --require-gfx1250v0-overlay)
-    endif()
     set(_codegen_dependencies "${_known_bugs_resource}")
     if(TARGET _rocisa)
         list(APPEND _codegen_dependencies _rocisa)

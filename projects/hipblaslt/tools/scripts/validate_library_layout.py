@@ -57,14 +57,18 @@ def _arch_dir_name_is_base(name: str) -> bool:
 def _stepping_base(name: str) -> Optional[str]:
     """The architecture a stepping subtree belongs to, or None if it is not one.
 
-    Subtree names are otherwise bare -- target features never reach them -- so a
-    hyphen is the stepping, as in library/gfx1250-strict/. The architecture it
-    returns is only for rules that are about the shared ISA; the files inside are
-    validated against the subtree's own name, since that is the name the runtime
-    reports for the silicon and therefore the one it forms filenames from.
+    A hyphen alone does not make one: library/gfx942-xnack+/ carries a target
+    feature, which a subtree may not, and exempting it here would be the only
+    thing standing between it and the check that reports it. The sign tells the
+    two apart, as it does for filenames. The architecture returned is only for
+    rules that are about the shared ISA; the files inside are validated against
+    the subtree's own name, since that is the name the runtime reports for the
+    silicon and therefore the one it forms filenames from.
     """
-    base, sep, _ = name.partition("-")
-    return base if sep and _arch_dir_name_is_base(base) else None
+    base, sep, suffix = name.partition("-")
+    if not sep or not _arch_dir_name_is_base(base):
+        return None
+    return None if _TARGET_FEATURE_RE.match(suffix) else base
 
 
 _ARCH_IN_FILENAME_RE = re.compile(

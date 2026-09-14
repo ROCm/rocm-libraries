@@ -214,6 +214,29 @@ def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
     return bool(globalParameters["CheckASMCodeSize"]) and isaToGfx(isa) == "gfx1250"
 
 
+def _alignAmdgcnTargetToStepping(sPath, isa, targetGfx: str) -> None:
+    """Make the ``.amdgcn_target`` directive match the assembler ``-mcpu``.
+
+    rocisa derives the directive from the ISA alone (``isaToGfx(isa)``), so for a
+    stepping that shares its base architecture's ISA -- e.g. ``gfx1250-strict``
+    spells ISA 12.5.0 like ``gfx1250`` -- it emits the base name. But the build
+    assembles that stepping with ``-mcpu=<stepping>`` (from ``archNamesByIsa``),
+    and the assembler rejects the base target id against the stepping subarch:
+        target id '...--gfx1250' specifies a processor that is not valid for
+        subarch 'amdgpu12.50s'
+    Rewrite the directive to the stepping name so the two agree. No-op for
+    ordinary architectures, where ``targetGfx == isaToGfx(isa)``.
+    """
+    derived = isaToGfx(isa)
+    if targetGfx == derived:
+        return
+    old = f'.amdgcn_target "amdgcn-amd-amdhsa--{derived}"'
+    new = f'.amdgcn_target "amdgcn-amd-amdhsa--{targetGfx}"'
+    text = Path(sPath).read_text()
+    if old in text:
+        Path(sPath).write_text(text.replace(old, new, 1))
+
+
 def _stinky_out(msg: str) -> None:
     """Emit one user-visible log line for Stinky verify.
 
@@ -576,8 +599,10 @@ def writeSolutionsAndKernels(
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
+        targetGfx = archNames.get(isa) or isaToGfx(isa)
+        _alignAmdgcnTargetToStepping(p, isa, targetGfx)
         try:
-            asmToolchain.assembler(archNames.get(isa) or isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+            asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
             printWarning(f"Failed to assemble {p}: {e}")
             return
@@ -715,7 +740,9 @@ def writeSolutionsAndKernelsTCL(
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
-        asmToolchain.assembler(archNames.get(isa) or isaToGfx(isa), wavefrontsize, str(asmPath), str(o_path))
+        targetGfx = archNames.get(isa) or isaToGfx(isa)
+        _alignAmdgcnTargetToStepping(asmPath, isa, targetGfx)
+        asmToolchain.assembler(targetGfx, wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
         if removeTemporaries:
