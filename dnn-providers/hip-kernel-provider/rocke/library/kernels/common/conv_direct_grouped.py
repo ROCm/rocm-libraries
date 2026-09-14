@@ -1168,7 +1168,7 @@ class DirectConv8cSpec:
         return self.block_groups * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -1199,7 +1199,7 @@ def is_valid_spec_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Tuple[bool
     The 8c kernel folds two S-positions into the K=16 dimension of
     ``mfma_f32_16x16x16_f16``, which is present on both gfx942 and gfx950.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
@@ -1610,7 +1610,7 @@ class DirectConv32cSpec:
         return self.block_groups * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -1643,7 +1643,7 @@ def is_valid_spec_32c(
     The 32c kernel uses ``mfma_f32_32x32x8_f16``, which is present in the
     rocke MMA catalog for both gfx942 and gfx950.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -2028,7 +2028,7 @@ class DirectConvSpec:
         return self.block_groups * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -2064,7 +2064,7 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
     Checks cpg divisibility, block geometry, and MFMA atom availability
     (``mfma_f32_16x16x16_f16`` must be present on the target).
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -2516,7 +2516,7 @@ class DirectDepthwiseSpec:
         return self.block_waves * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -2550,7 +2550,7 @@ def is_valid_depthwise_spec(
     Only validates geometry constraints; no MFMA atom check is needed because
     the kernel uses only scalar ``fma`` operations.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
@@ -2591,7 +2591,7 @@ def build_direct_depthwise(
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseSpec for {arch}: {why}")
 
-    from ...core.ir import F32
+    from rocke.core.ir import F32
 
     p = spec.problem
     BLOCK_W = spec.block_w
