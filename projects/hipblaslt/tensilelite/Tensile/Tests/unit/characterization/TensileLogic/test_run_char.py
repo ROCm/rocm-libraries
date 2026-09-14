@@ -264,7 +264,7 @@ def _stub_main(monkeypatch, results, *, verbose=2, known_bugs=frozenset(),
     if files is None:
         files = [Path("lib/a.yaml")]
     args = SimpleNamespace(
-        KnownBugs=None, Verbose=verbose, Architecture="all", RequireGfx1250v0Overlay=False
+        KnownBugs=None, Verbose=verbose, Architecture="all"
     )
     check = Run.Check(OnlyCustomKernels=False, All=True)
     monkeypatch.setattr(

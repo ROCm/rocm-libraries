@@ -163,6 +163,23 @@ def test_an_unrelated_arch_is_not_treated_as_a_stepping_subtree(tmp_path):
     assert any("extop_gfx942.co" in v for v in violations), violations
 
 
+def test_a_feature_suffixed_subtree_name_is_still_rejected(tmp_path):
+    """The stepping exemption must not become a way in for a target feature.
+
+    Both spellings hang a hyphenated token off a bare architecture, so an
+    exemption that reads any hyphen as a stepping hands library/gfx942-xnack+/
+    the pass meant for library/gfx1250-strict/ -- and that directory is the one
+    thing the bare-name rule exists to report.
+    """
+    feature_dir = tmp_path / "lib" / "hipblaslt" / "library" / "gfx942-xnack+"
+    feature_dir.mkdir(parents=True)
+    (feature_dir / "TensileLibrary_gfx942-xnack+.dat.zlib").write_bytes(b"x")
+
+    violations = validate_library_layout.validate(tmp_path)
+    assert any("gfx942-xnack+" in v and "carries target features" in v
+               for v in violations), violations
+
+
 def test_the_subtree_name_regex_accepts_every_real_spelling():
     """Names this validator will meet in an install tree, and names it must refuse.
 
