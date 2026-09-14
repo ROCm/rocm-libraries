@@ -316,3 +316,291 @@ rocke_status_t rocke_direct_conv_4c_lower_to_llvm(const rocke_direct_conv_4c_spe
     rocke_ir_builder_free(&b);
     return st;
 }
+
+/* ===================================================================== *
+ *  8c BUILD ENTRY
+ * ===================================================================== */
+rocke_kernel_def_t* rocke_build_direct_conv_8c(rocke_ir_builder_t* b,
+                                               const rocke_direct_conv_8c_spec_t* spec,
+                                               const char* arch)
+{
+    rocke_dconv_8c_ctx_t ctx;
+
+    if(b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.b = b;
+    ctx.spec = spec;
+    ctx.arch = arch;
+    ctx.p = spec->problem;
+
+    if(!rocke_dconv8c_prologue(&ctx))
+    {
+        return NULL;
+    }
+    rocke_dconv8c_load_weights(&ctx);
+    rocke_dconv8c_build_chunk_meta(&ctx);
+    rocke_dconv8c_build_descriptors(&ctx);
+    rocke_dconv8c_prologue_prefetch(&ctx);
+    return rocke_dconv8c_stream_h_loop(&ctx);
+}
+
+rocke_kernel_def_t* rocke_build_direct_conv_8c_new(rocke_ir_builder_t* b,
+                                                   const rocke_direct_conv_8c_spec_t* spec,
+                                                   const char* arch)
+{
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char name[256];
+        if(b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if(rocke_direct_conv_8c_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        return rocke_build_direct_conv_8c(b, spec, arch);
+    });
+}
+
+rocke_status_t rocke_direct_conv_8c_lower_to_llvm(const rocke_direct_conv_8c_spec_t* spec,
+                                                  const char* arch,
+                                                  rocke_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
+
+    if(out_ll != NULL)
+    {
+        *out_ll = NULL;
+    }
+    if(spec == NULL || out_ll == NULL)
+    {
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    kernel = rocke_build_direct_conv_8c_new(&b, spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
+            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_8c failed");
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
+    }
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+/* ===================================================================== *
+ *  32c BUILD ENTRY
+ * ===================================================================== */
+rocke_kernel_def_t* rocke_build_direct_conv_32c(rocke_ir_builder_t* b,
+                                                const rocke_direct_conv_32c_spec_t* spec,
+                                                const char* arch)
+{
+    rocke_dconv_32c_ctx_t ctx;
+
+    if(b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.b = b;
+    ctx.spec = spec;
+    ctx.arch = arch;
+    ctx.p = spec->problem;
+
+    if(!rocke_dconv32c_prologue(&ctx))
+    {
+        return NULL;
+    }
+    rocke_dconv32c_load_weights(&ctx);
+    rocke_dconv32c_build_chunk_meta(&ctx);
+    rocke_dconv32c_build_descriptors(&ctx);
+    rocke_dconv32c_prologue_prefetch(&ctx);
+    return rocke_dconv32c_stream_h_loop(&ctx);
+}
+
+rocke_kernel_def_t* rocke_build_direct_conv_32c_new(rocke_ir_builder_t* b,
+                                                    const rocke_direct_conv_32c_spec_t* spec,
+                                                    const char* arch)
+{
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char name[256];
+        if(b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if(rocke_direct_conv_32c_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        return rocke_build_direct_conv_32c(b, spec, arch);
+    });
+}
+
+rocke_status_t rocke_direct_conv_32c_lower_to_llvm(const rocke_direct_conv_32c_spec_t* spec,
+                                                   const char* arch,
+                                                   rocke_llvm_flavor_t flavor,
+                                                   char** out_ll,
+                                                   char* err,
+                                                   size_t err_cap)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
+
+    if(out_ll != NULL)
+    {
+        *out_ll = NULL;
+    }
+    if(spec == NULL || out_ll == NULL)
+    {
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    kernel = rocke_build_direct_conv_32c_new(&b, spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
+            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_32c failed");
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
+    }
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+/* ===================================================================== *
+ *  Depthwise BUILD ENTRY
+ * ===================================================================== */
+rocke_kernel_def_t* rocke_build_direct_depthwise(rocke_ir_builder_t* b,
+                                                 const rocke_direct_depthwise_spec_t* spec,
+                                                 const char* arch)
+{
+    rocke_dconv_dw_ctx_t ctx;
+
+    if(b == NULL || spec == NULL)
+    {
+        return NULL;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.b = b;
+    ctx.spec = spec;
+    ctx.arch = arch;
+    ctx.p = spec->problem;
+
+    if(!rocke_dconv_dw_prologue(&ctx))
+    {
+        return NULL;
+    }
+    /* Python order: a_desc/b_desc/d_desc built first (2614-2646),
+     * then weight loads which reference b_desc (2648-2662). */
+    rocke_dconv_dw_build_descriptors(&ctx);
+    rocke_dconv_dw_load_weights(&ctx);
+    return rocke_dconv_dw_stream_h_loop(&ctx);
+}
+
+rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_spec_t* spec,
+                                                     const char* arch)
+{
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char name[256];
+        if(b == NULL || spec == NULL)
+        {
+            return NULL;
+        }
+        if(rocke_direct_depthwise_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
+        {
+            return NULL;
+        }
+        return rocke_build_direct_depthwise(b, spec, arch);
+    });
+}
+
+rocke_status_t rocke_direct_depthwise_lower_to_llvm(const rocke_direct_depthwise_spec_t* spec,
+                                                    const char* arch,
+                                                    rocke_llvm_flavor_t flavor,
+                                                    char** out_ll,
+                                                    char* err,
+                                                    size_t err_cap)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
+
+    if(out_ll != NULL)
+    {
+        *out_ll = NULL;
+    }
+    if(spec == NULL || out_ll == NULL)
+    {
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    kernel = rocke_build_direct_depthwise_new(&b, spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
+            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_depthwise failed");
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
+    }
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    return st;
+}

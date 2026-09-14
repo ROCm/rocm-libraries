@@ -23,10 +23,12 @@
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
 #include <climits>
+#include <iterator>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -739,6 +741,47 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     readyQueue.onFinishBB();
 }
 
+// Convert tentative Layer 2 overlap candidates into the published analysis only
+// when every ordering needed for that candidate appears in the final schedule.
+// This also covers cycle-rejected hard constraints: they authorize a merge only
+// if the unconstrained final order happens to satisfy the same safety contract.
+Layer2BarrierOverlapAnalysis::Result validateLayer2BarrierOverlaps(
+    Function& func, const std::vector<Layer2BarrierOverlapCandidate>& candidates) {
+    struct Position {
+        const BasicBlock* bb;
+        unsigned index;
+    };
+    std::unordered_map<const StinkyInstruction*, Position> positions;
+    for (const BasicBlock& bb : func) {
+        unsigned index = 0;
+        for (const IRBase& ir : bb) {
+            if (const auto* inst = dyn_cast<StinkyInstruction>(&ir))
+                positions.emplace(inst, Position{&bb, index++});
+        }
+    }
+
+    Layer2BarrierOverlapAnalysis::Result result;
+    for (const Layer2BarrierOverlapCandidate& candidate : candidates) {
+        bool valid = true;
+        for (const auto& [predecessor, successor] : candidate.requiredConstraints) {
+            auto predecessorIt = positions.find(predecessor);
+            auto successorIt = positions.find(successor);
+            if (predecessorIt == positions.end() || successorIt == positions.end() ||
+                predecessorIt->second.bb != successorIt->second.bb ||
+                predecessorIt->second.index >= successorIt->second.index) {
+                valid = false;
+                break;
+            }
+        }
+        if (!valid) continue;
+
+        for (StinkyInstruction* barrierAfter : candidate.barriersAfter)
+            for (StinkyInstruction* barrierBefore : candidate.barriersBefore)
+                result.record(barrierAfter, barrierBefore);
+    }
+    return result;
+}
+
 std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
     if (passCtx.getGemmTileConfig().arch[0] == 12 && passCtx.getGemmTileConfig().arch[1] == 5) {
         PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
@@ -768,6 +811,8 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates;
+
         // Build def-use chains so we can look up cross-BB WMMA consumers
         // of ds_reads for wmmaAffinity annotation.
         const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
@@ -827,6 +872,10 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
             scheduleInDAG(*bb, rq, wmmaIndex);
             expandExecMaskedGroups(*bb);
+            auto candidates = rq.takeLayer2BarrierOverlapCandidates();
+            layer2BarrierOverlapCandidates.insert(layer2BarrierOverlapCandidates.end(),
+                                                  std::make_move_iterator(candidates.begin()),
+                                                  std::make_move_iterator(candidates.end()));
         };
 
         for (auto* bb : rpo) {
@@ -848,7 +897,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 scheduleBlock(bb, *rq);
             }
         }
-        return preserveCFGAnalyses();
+        AM.getResult<Layer2BarrierOverlapAnalysis>(func) =
+            validateLayer2BarrierOverlaps(func, layer2BarrierOverlapCandidates);
+        auto preserved = preserveCFGAnalyses();
+        preserved.preserve<Layer2BarrierOverlapAnalysis>();
+        return preserved;
     }
 };
 
