@@ -66,6 +66,27 @@ def test_wrong_state_head_dims_are_rejected():
         prepare(spec, inp, batch, validate_indices=False)
 
 
+def test_wrong_state_dtype_is_rejected():
+    """A pool whose element type disagrees with the spec must be refused here.
+
+    ``bf16`` and ``f16`` are both 16 bits, so a mismatched pool has the right
+    shape *and* the right byte size: every address the kernel computes is
+    identical and nothing faults. The kernel is compiled with a fixed pointer
+    element type and gets no dtype tag at runtime, so it simply decodes the
+    bits under the wrong rule -- and decode writes that value back into the
+    pool, compounding it over the whole generation. Nothing on device can
+    catch it, which is why the host guard must.
+    """
+    spec = GdnDecodeSpec()
+    assert spec.state_dtype == "bf16", "test assumes the default spec state dtype"
+    batch = 8
+    inp = make_inputs(spec, batch, device=DEVICE)
+    inp["state"] = inp["state"].to(torch.float16)
+    # Same shape, same byte count -- only the element type differs.
+    with pytest.raises(ValueError, match="state dtype"):
+        prepare(spec, inp, batch, validate_indices=False)
+
+
 def test_validate_indices_flag_skips_the_range_check():
     """The value-range check reads the index extrema (a device sync on GPU), so
     it is flag-gated for the hot path.

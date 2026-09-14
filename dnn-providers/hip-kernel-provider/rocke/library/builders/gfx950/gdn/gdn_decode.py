@@ -54,6 +54,11 @@ TOL = 1e-2
 _ARCH = "gfx950"
 _LAUNCHER_CACHE: Dict[Tuple, KernelLauncher] = {}
 
+# Spec dtype name -> the torch dtype the kernel is compiled against. The kernel
+# receives a raw pointer, so this mapping is the only thing tying a caller's
+# tensor to the element type frozen into the machine code.
+_TORCH_DT = {"bf16": torch.bfloat16, "f16": torch.float16}
+
 
 def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
     """Compile ``spec`` and wrap it in a launcher, memoised per spec.
@@ -81,8 +86,8 @@ def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
 
 def make_inputs(spec: GdnDecodeSpec, batch: int, seed: int = 0, device: str = "cuda"):
     """Deterministic inputs matching the kernel's packed decode contract."""
-    torch_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
-    state_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.state_dtype]
+    torch_dtype = _TORCH_DT[spec.dtype]
+    state_dtype = _TORCH_DT[spec.state_dtype]
     gen = torch.Generator(device=device).manual_seed(seed)
 
     def rnd(*shape, dtype=torch_dtype, scale=1.0):
@@ -158,10 +163,14 @@ def _validate_decode_inputs(
     hardware-bounds the index against the pool depth, so an out-of-range index
     is an out-of-bounds load/store. These host checks catch that before launch.
 
-    Shape and dtype checks are sync-free and always run. The index *value* range
-    check reads the index extrema, forcing a device->host sync, so it is gated
-    by ``validate_indices`` (default on; a hot re-prepare loop whose indices are
-    already known good may pass ``False``).
+    Shape and dtype checks are sync-free and always run -- including the state's
+    element type, which no device-side check can catch: ``bf16`` and ``f16`` are
+    both 16 bits, so a mismatched pool computes every address identically and
+    merely decodes the bits under the wrong rule, silently corrupting the
+    recurrence it feeds back. The index *value* range check reads the index
+    extrema, forcing a device->host sync, so it is gated by ``validate_indices``
+    (default on; a hot re-prepare loop whose indices are already known good may
+    pass ``False``).
     """
     state = inp["state"]
     if state.ndim != 4:
@@ -170,6 +179,13 @@ def _validate_decode_inputs(
     want = (spec.num_v_heads, spec.head_v_dim, spec.head_k_dim)
     if tuple(state.shape[1:]) != want:
         raise ValueError(f"state head dims {tuple(state.shape[1:])} != spec {want}")
+    want_dt = _TORCH_DT[spec.state_dtype]
+    if state.dtype is not want_dt:
+        raise ValueError(
+            f"state dtype {state.dtype} != spec.state_dtype "
+            f"{spec.state_dtype} ({want_dt}); the kernel is compiled with a "
+            f"{spec.state_dtype} pointer and would reinterpret these bytes"
+        )
     for name in ("read_indices", "write_indices"):
         idx = inp[name]
         if idx.dtype != torch.int32:
@@ -200,7 +216,7 @@ def prepare(spec: GdnDecodeSpec, inp, batch: int, *, validate_indices: bool = Tr
     once and then only launches.
     """
     _validate_decode_inputs(spec, inp, batch, validate_indices=validate_indices)
-    torch_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
+    torch_dtype = _TORCH_DT[spec.dtype]
     out = torch.zeros(
         batch,
         1,
