@@ -876,17 +876,17 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t block_size = NAIVE_CONV_BLOCK_SIZE;
     size_t grid_size  = static_cast<size_t>(k);
 
-    // Cross-block spatial tiling for WRW uses atomicAdd on the weight buffer.
-    // float/double have native hardware atomicAdd; half/hip_bfloat16 use
-    // CAS-based atomicAdd (portable across all GPUs and ROCm versions).
-    // half/hip_bfloat16 round the running sum to 16-bit precision after
-    // every block's contribution, which can silently lose later contributions
-    // once the sum grows large — so those output types skip tiling. Not implemented for
-    // fp8 kernels either.
+    // Cross-block WRW tiling accumulates partial sums into the weight buffer via atomicAdd
+    // across gridDim.y tile-blocks. Only fp32 is safe: naive_atomic_add<float> (naive_conv.hpp)
+    // forwards to hardware atomicAdd, exact, no rounding. Everything else is excluded:
+    //  - int32 (int8-input) and fp8: unimplemented — no naive_atomic_add<int32_t> overload
+    //    (would race), and fp8_naive_conv.cpp never reads gridDim.y.
+    //  - fp16/bf16: implemented but unsafe — CAS-based atomicAdd rounds to 16-bit per block,
+    //    causing catastrophic cancellation once the running sum is large.
+    // IsOutputFp32 also matches int8-in/int8-weights/float-out, so !IsAccInt32 must stay too.
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
-       !IsFp8Kernel(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
@@ -1046,8 +1046,7 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     // Cross-block spatial tiling for WRW — see 2D WRW comment for details.
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
-    if(!IsAccInt32(problem) && !IsOutputFp16(problem) && !IsOutputBfp16(problem) &&
-       !IsFp8Kernel(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
+    if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
         num_spatial_tiles = (spatial + block_size - 1) / block_size;
 
     KernelInfo kernel;
