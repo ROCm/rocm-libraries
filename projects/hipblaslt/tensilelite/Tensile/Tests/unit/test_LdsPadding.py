@@ -134,6 +134,27 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               xf32EmuPack=False) == pad
 
 
+@pytest.mark.parametrize(
+    "mt, miWaveGroup, miWaveTile, componentBytes, oldBlock, perBlock, pad",
+    [
+        (320, 4, 5, 1280, 512, 256, 2),
+        ( 96, 2, 3,  384, 256, 128, 4),
+    ],
+)
+def test_fp32_wave_separated_tdm_component_phase(
+        mt, miWaveGroup, miWaveTile, componentBytes, oldBlock, perBlock, pad):
+    kwargs = {"tdmComponentBytes": componentBytes, "tdmNumComponents": 4}
+    assert get_fp32_mt_config(
+        mt, "perBlock", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs) == perBlock
+    assert get_fp32_mt_config(
+        mt, "pad", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs) == pad
+    assert oldBlock not in _L.get_fp32_valid_blocks(
+        mt, 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs)
+
+
 # XF32 (xf32EmuPack=True)
 #   MT=32  from [16,16,32,1,1,1,1,2,2]
 #   MT=64  from [16,16,32,1,1,2,2,2,2]
@@ -414,6 +435,21 @@ def test_valid_blocks_divide_the_tail_loop_step():
         for b in _L._LDS_PAD_BLOCK_BYTES:
             if incBytes % b:
                 assert b not in blocks, (incBytes, b)
+
+
+def test_valid_blocks_preserve_wave_separated_tdm_component_phase():
+    blocks = _L._valid_blocks(
+        5120, readBases=(0,), readOffs=(0,), writeMinBytes=0,
+        writeRowBytes=0, tdmComponentBytes=1280, tdmNumComponents=4)
+    assert 256 in blocks
+    assert 512 not in blocks
+
+    # A non-aligned component is still safe when it ends before the next
+    # tensor-relative block boundary, so the exact check keeps this case.
+    blocks = _L._valid_blocks(
+        512, readBases=(0,), readOffs=(0,), writeMinBytes=0,
+        writeRowBytes=0, tdmComponentBytes=64, tdmNumComponents=4)
+    assert 512 in blocks
 
 
 def test_chosen_block_divides_the_tail_loop_step():

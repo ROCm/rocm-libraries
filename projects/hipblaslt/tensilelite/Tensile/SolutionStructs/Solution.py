@@ -3505,6 +3505,29 @@ class Solution(collections.abc.Mapping):
       else:
         state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
+      def getLdsBpe(tc: str) -> float:
+        return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
+
+      def tdmTileMajorComponentLayout(tc: str, mt: int) -> Tuple[int, int]:
+        """Raw equal-component layout used by wave-separated TDM."""
+        if (not (state["enableTDMA"] and state["enableTDMB"])
+            or state["NumWaves"] <= 1
+            or state.get("UseSubtileImpl", False)):
+          return 0, 1
+
+        numComponents = state["NumWaves"] // 2
+        du = state["_DepthU%s" % tc]
+        sparse = state["ProblemType"]["Sparse"]
+        dim1Divisor = 2 if state["TDMSplit"] and not sparse else 1
+
+        # _DepthU{tc} is the effective A/B storage depth: it equals DepthU for
+        # dense tensors and already accounts for the compressed sparse operand.
+        # TDMSplit divides each dense component once more in the descriptor.
+        bpeTimesFour = int(getLdsBpe(tc) * 4)
+        componentBytes = (mt // numComponents * du * bpeTimesFour
+                          // (4 * dim1Divisor))
+        return componentBytes, numComponents
+
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
         # SubtileImpl: LDS padding is disabled.
         # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
@@ -3559,6 +3582,8 @@ class Solution(collections.abc.Mapping):
           tdm       = state.get(f"enableTDM{tc}", False)
           macDtype  = state["ProblemType"][f"MacDataType{tc}"]
           tlu       = state["ProblemType"][f"TLU{tc}"]
+          (tdmComponentBytes, tdmNumComponents) = (
+              tdmTileMajorComponentLayout(tc, mt))
 
           ldsPad = 0
           if not state[f"UnrollMajorLDS{tc}"]:
@@ -3577,11 +3602,15 @@ class Solution(collections.abc.Mapping):
                 miwt = state["MIWaveTile"][idx]
                 miwg = state["MIWaveGroup"][idx]
                 if macDtype.numBytes() == 0.5 and ldstr:
-                  ldsPad = get_fp4_mt_config(mt, "pad", miwt, miwg, state["MatrixInstK"],
-                              state.get(f"enableTDM{tc}", False))
+                  ldsPad = get_fp4_mt_config(
+                      mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
+                      tdmComponentBytes=tdmComponentBytes,
+                      tdmNumComponents=tdmNumComponents)
                 elif macDtype.is8bitFloat() and ldstr:
-                  ldsPad = get_fp8_mt_config(mt, "pad", miwt, miwg, state["MatrixInstK"],
-                              state.get(f"enableTDM{tc}", False))
+                  ldsPad = get_fp8_mt_config(
+                      mt, "pad", miwt, miwg, state["MatrixInstK"], tdm,
+                      tdmComponentBytes=tdmComponentBytes,
+                      tdmNumComponents=tdmNumComponents)
                 elif macDtype.numBytes() == 2 and ldstr:
                   ldsPad = get_fp16_mt_config(mt, "pad", miwg,
                               miInputPerThUnroll=state["MIInputPerThread"],
@@ -3589,7 +3618,9 @@ class Solution(collections.abc.Mapping):
                               miWaveTile=miwt,
                               vw=vw,
                               matrixInstK=state["MatrixInstK"],
-                              usesTDM=state.get(f"enableTDM{tc}", False))
+                              usesTDM=tdm,
+                              tdmComponentBytes=tdmComponentBytes,
+                              tdmNumComponents=tdmNumComponents)
                 # isLDSTrEnabled has no arm for fp32, so TDM decides here.
                 elif macDtype.numBytes() == 4 and tdm:
                   ldsPad = get_fp32_mt_config(mt, "pad",
@@ -3597,8 +3628,10 @@ class Solution(collections.abc.Mapping):
                               miInputPerThread=state["MIInputPerThread"],
                               miWaveTile=miwt,
                               matrixInstK=state["MatrixInstK"],
-                              usesTDM=state.get(f"enableTDM{tc}", False),
-                              xf32EmuPack=state.get("UseF32XEmulation", False))
+                              usesTDM=tdm,
+                              xf32EmuPack=state.get("UseF32XEmulation", False),
+                              tdmComponentBytes=tdmComponentBytes,
+                              tdmNumComponents=tdmNumComponents)
               if state[f"DirectToLds{tc}"]:
                 # TODO: Check if there are cases which benefit from padding, currently set to zero by default
                 ldsPad = state["MatrixInstM"] if ldstr else 0
@@ -3758,9 +3791,6 @@ class Solution(collections.abc.Mapping):
                                    state["VectorWidth%s"%subTc], "perBlock")
         return 0
 
-      def getLdsBpe(tc: str) -> float:
-        return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
-
       def calcMetadataLdsBlockSizePerPad() -> int:
         """Auto-resolve LdsBlockSizePerPadMetadata when left on -1.
           - UnrollMajorLDS (K-major): same roundUpToNearestMultiple(DepthU*bpe)
@@ -3820,12 +3850,18 @@ class Solution(collections.abc.Mapping):
                   ldsType = state["ProblemType"]["DataType%s"%tc] if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc]
                   miwt = state["MIWaveTile"][miWaveTileIdx]
                   miwg = state["MIWaveGroup"][miWaveTileIdx]
+                  (tdmComponentBytes, tdmNumComponents) = (
+                      tdmTileMajorComponentLayout(tc, mt))
                   if tmpBpe == 0.5 and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp4_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
-                                            state.get(f"enableTDM{tc}", False))
+                                            state.get(f"enableTDM{tc}", False),
+                                            tdmComponentBytes=tdmComponentBytes,
+                                            tdmNumComponents=tdmNumComponents)
                   elif tmpBpe == 1 and ldsType.is8bitFloat() and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp8_mt_config(mt, "perBlock", miwt, miwg, state["MatrixInstK"],
-                                            state.get(f"enableTDM{tc}", False))
+                                            state.get(f"enableTDM{tc}", False),
+                                            tdmComponentBytes=tdmComponentBytes,
+                                            tdmNumComponents=tdmNumComponents)
                   elif tmpBpe == 2 and state.get("enableLDSTr%s"%tc, False):
                     LdsBlockSizePerPad = get_fp16_mt_config(mt, "perBlock", miwg,
                                             miInputPerThUnroll=state["MIInputPerThread"],
@@ -3833,7 +3869,9 @@ class Solution(collections.abc.Mapping):
                                             miWaveTile=miwt,
                                             vw=state[f"VectorWidth{tc}"],
                                             matrixInstK=state["MatrixInstK"],
-                                            usesTDM=state.get(f"enableTDM{tc}", False))
+                                            usesTDM=state.get(f"enableTDM{tc}", False),
+                                            tdmComponentBytes=tdmComponentBytes,
+                                            tdmNumComponents=tdmNumComponents)
                   # Same rule as the pad above.
                   elif tmpBpe == 4 and state.get(f"enableTDM{tc}", False):
                     LdsBlockSizePerPad = get_fp32_mt_config(mt, "perBlock",
@@ -3841,8 +3879,10 @@ class Solution(collections.abc.Mapping):
                                             miInputPerThread=state["MIInputPerThread"],
                                             miWaveTile=miwt,
                                             matrixInstK=state["MatrixInstK"],
-                                            usesTDM=state.get(f"enableTDM{tc}", False),
-                                            xf32EmuPack=state.get("UseF32XEmulation", False))
+                                            usesTDM=True,
+                                            xf32EmuPack=state.get("UseF32XEmulation", False),
+                                            tdmComponentBytes=tdmComponentBytes,
+                                            tdmNumComponents=tdmNumComponents)
               else:
                 LdsBlockSizePerPad = 0
           else:
@@ -5428,19 +5468,31 @@ class Solution(collections.abc.Mapping):
       miwt = state["MIWaveTile"][idx]
       miwg = state["MIWaveGroup"][idx]
       k = state["MatrixInstK"]
+      (tdmComponentBytes, tdmNumComponents) = (
+          tdmTileMajorComponentLayout(tc, mt))
       if dtype.numBytes() == 0.5 and ldstr:
-        return get_fp4_valid_blocks(mt, miwt, miwg, k, tdm)
+        return get_fp4_valid_blocks(
+            mt, miwt, miwg, k, tdm,
+            tdmComponentBytes=tdmComponentBytes,
+            tdmNumComponents=tdmNumComponents)
       if dtype.numBytes() == 1 and dtype.is8bitFloat() and ldstr:
-        return get_fp8_valid_blocks(mt, miwt, miwg, k, tdm)
+        return get_fp8_valid_blocks(
+            mt, miwt, miwg, k, tdm,
+            tdmComponentBytes=tdmComponentBytes,
+            tdmNumComponents=tdmNumComponents)
       if dtype.numBytes() == 2 and ldstr:
         return get_fp16_valid_blocks(mt, miwg, state["MIInputPerThread"],
                                      state["LocalReadVectorWidth%s"%tc],
-                                     miwt, state["VectorWidth%s"%tc], k, tdm)
+                                     miwt, state["VectorWidth%s"%tc], k, tdm,
+                                     tdmComponentBytes=tdmComponentBytes,
+                                     tdmNumComponents=tdmNumComponents)
       if dtype.numBytes() == 4 and tdm:
         return get_fp32_valid_blocks(mt, state["VectorWidth%s"%tc],
                                      state["LocalReadVectorWidth%s"%tc], miwg,
                                      state["MIInputPerThread"], miwt, k, tdm,
-                                     state.get("UseF32XEmulation", False))
+                                     state.get("UseF32XEmulation", False),
+                                     tdmComponentBytes=tdmComponentBytes,
+                                     tdmNumComponents=tdmNumComponents)
       return None
 
     def solverPadStepBytes(tc):
@@ -5494,7 +5546,8 @@ class Solution(collections.abc.Mapping):
       if blocks is not None and state["LdsBlockSizePerPad%s"%tc] not in blocks:
         reject(state, printRejectionReason,
                "LdsBlockSizePerPad%s=%d cannot be addressed for this tile; "
-               "the padded base and instruction offset would disagree. "
+               "the padded base/offset or a wave-separated TDM component "
+               "padding phase would disagree. "
                "Usable values here: %s"
                % (tc, state["LdsBlockSizePerPad%s"%tc], list(blocks)))
         return

@@ -134,7 +134,8 @@ def _write_row_bytes(mt: int, bpeDS: float, usesTDM: bool) -> int:
   """Row stride of the local write. 0 for TDM, which has no per-thread write."""
   return 0 if usesTDM else int(mt * bpeDS)
 
-def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
+def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes,
+                  tdmComponentBytes=0, tdmNumComponents=1):
   """Block sizes the code generator can address correctly.
 
   Padding is phi(x) = x + (x // b) * P, applied to the base and to the
@@ -147,6 +148,11 @@ def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
   writeRowBytes  the LDS row; keep it and the block from cutting each other
   writeMinBytes  one ds_store has to fit inside a block
 
+  tdmComponentBytes,
+  tdmNumComponents
+                  equal wave-separated TDM components; each descriptor
+                  restarts padding at its own base, so no component may cross
+                  a tensor-relative block boundary from a non-zero phase
   Both write terms are 0 under TDM, which emits no local write.
   """
   def usable(b):
@@ -156,6 +162,10 @@ def _valid_blocks(incBytes, readBases, readOffs, writeMinBytes, writeRowBytes):
       return False
     if writeRowBytes and writeRowBytes % b and b % writeRowBytes:
       return False
+    for component in range(1, tdmNumComponents):
+      startPhase = (component * tdmComponentBytes) % b
+      if startPhase and tdmComponentBytes > b - startPhase:
+        return False
     return _no_block_carry(readBases, readOffs, b)
   return [b for b in _LDS_PAD_BLOCK_BYTES if usable(b)]
 
@@ -246,20 +256,23 @@ def _b64_wave_costs(rawAddrs, B, P, instOffs, wOffsets):
 _Shape = namedtuple("_Shape",
                     "rawAddrs instOffs wOffsets incBytes minBlockBytes writeRowBytes")
 
-def _valid_blocks_for(shape: _Shape) -> list:
+def _valid_blocks_for(shape: _Shape, tdmComponentBytes=0,
+                      tdmNumComponents=1) -> list:
   """Block sizes the code generator can address correctly for this operand."""
   bases = [a + wOff for a in shape.rawAddrs for wOff in shape.wOffsets]
   return _valid_blocks(shape.incBytes, bases, shape.instOffs,
-                       shape.minBlockBytes, shape.writeRowBytes)
+                       shape.minBlockBytes, shape.writeRowBytes,
+                       tdmComponentBytes, tdmNumComponents)
 
-def _b64_compute_config(shape: _Shape) -> Dict[str, int]:
+def _b64_compute_config(shape: _Shape, tdmComponentBytes=0,
+                        tdmNumComponents=1) -> Dict[str, int]:
   """Pick (B, P) by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
   with pad in bytes.
   """
   best = _search_padding(
-    _valid_blocks_for(shape),
+    _valid_blocks_for(shape, tdmComponentBytes, tdmNumComponents),
     _LDS_PAD_STEP_BYTES,
     lambda: len(shape.instOffs),   # one thread per bank on every instruction
     lambda cand: _b64_wave_costs(shape.rawAddrs, cand[0], cand[1],
@@ -311,21 +324,30 @@ def _fp4_shape(mt: int, miWaveTile: int, miWaveGroup: int,
 
 @lru_cache(maxsize=None)
 def _compute_fp4_config(mt: int, miWaveTile: int, miWaveGroup: int,
-                        matrixInstK: int, usesTDM: bool) -> Dict[str, int]:
+                        matrixInstK: int, usesTDM: bool,
+                        tdmComponentBytes: int = 0,
+                        tdmNumComponents: int = 1) -> Dict[str, int]:
   result = _b64_compute_config(
-    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM))
+    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM),
+    tdmComponentBytes, tdmNumComponents)
   # bpeDS=0.5 -> convert pad from bytes to elements
   return {"perBlock": result["perBlock"], "pad": result["pad"] * 2}
 
 def get_fp4_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
-                      matrixInstK: int, usesTDM: bool) -> int:
+                      matrixInstK: int, usesTDM: bool,
+                      tdmComponentBytes: int = 0,
+                      tdmNumComponents: int = 1) -> int:
   return _even_dword_only(
-    _compute_fp4_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM), 0.5)[key]
+    _compute_fp4_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM,
+                        tdmComponentBytes, tdmNumComponents), 0.5)[key]
 
 def get_fp4_valid_blocks(mt: int, miWaveTile: int, miWaveGroup: int,
-                         matrixInstK: int, usesTDM: bool) -> tuple:
+                         matrixInstK: int, usesTDM: bool,
+                         tdmComponentBytes: int = 0,
+                         tdmNumComponents: int = 1) -> tuple:
   return tuple(_valid_blocks_for(
-    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM)))
+    _fp4_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM),
+    tdmComponentBytes, tdmNumComponents))
 
 @lru_cache(maxsize=None)
 def _fp8_shape(mt: int, miWaveTile: int, miWaveGroup: int,
@@ -346,20 +368,30 @@ def _compute_fp8_config(mt: int, miWaveTile: int, miWaveGroup: int,
                         matrixInstK: int, usesTDM: bool,
                         incDivisor: int = 1,
                         lrvw: int = 16,
-                        miInputPerThread: int = 64) -> Dict[str, int]:
+                        miInputPerThread: int = 64,
+                        tdmComponentBytes: int = 0,
+                        tdmNumComponents: int = 1) -> Dict[str, int]:
   return _b64_compute_config(
     _fp8_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM,
-               incDivisor, lrvw, miInputPerThread))
+               incDivisor, lrvw, miInputPerThread),
+    tdmComponentBytes, tdmNumComponents)
 
 def get_fp8_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
-                      matrixInstK: int, usesTDM: bool) -> int:
+                      matrixInstK: int, usesTDM: bool,
+                      tdmComponentBytes: int = 0,
+                      tdmNumComponents: int = 1) -> int:
   return _even_dword_only(
-    _compute_fp8_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM), 1.0)[key]
+    _compute_fp8_config(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM,
+                        tdmComponentBytes=tdmComponentBytes,
+                        tdmNumComponents=tdmNumComponents), 1.0)[key]
 
 def get_fp8_valid_blocks(mt: int, miWaveTile: int, miWaveGroup: int,
-                         matrixInstK: int, usesTDM: bool) -> tuple:
+                         matrixInstK: int, usesTDM: bool,
+                         tdmComponentBytes: int = 0,
+                         tdmNumComponents: int = 1) -> tuple:
   return tuple(_valid_blocks_for(
-    _fp8_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM)))
+    _fp8_shape(mt, miWaveTile, miWaveGroup, matrixInstK, usesTDM),
+    tdmComponentBytes, tdmNumComponents))
 
 def get_metadata_mt_config(mt: int, key: str, miWaveTile: int, miWaveGroup: int,
                            lrvwBytes: int, miInputPerThreadBytes: int,
@@ -439,7 +471,9 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
                          lrvw: int,
                          miWaveTile: int,
                          vw: int,
-                         matrixInstK: int, usesTDM: bool) -> Dict[str, int]:
+                         matrixInstK: int, usesTDM: bool,
+                         tdmComponentBytes: int = 0,
+                         tdmNumComponents: int = 1) -> Dict[str, int]:
   """Pick (B, P) for ds_load_tr16_b128 by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
@@ -451,7 +485,7 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
   shape = _fp16_shape(mt, miWaveGroup, miInputPerThUnroll, lrvw,
                       miWaveTile, vw, matrixInstK, usesTDM)
   best = _search_padding(
-    _valid_blocks_for(shape),
+    _valid_blocks_for(shape, tdmComponentBytes, tdmNumComponents),
     16,
     lambda: len(shape.instOffs),   # one thread per bank on every instruction
     lambda cand: _b128_wave_costs(shape.rawAddrs, cand[0], cand[1],
@@ -463,21 +497,27 @@ def _compute_fp16_config(mt: int, miWaveGroup: int,
 def get_fp16_mt_config(mt: int, key: str, miWaveGroup: int,
                        miInputPerThUnroll: int, lrvw: int,
                        miWaveTile: int, vw: int, matrixInstK: int,
-                       usesTDM: bool) -> int:
+                       usesTDM: bool, tdmComponentBytes: int = 0,
+                       tdmNumComponents: int = 1) -> int:
   return _even_dword_only(_compute_fp16_config(mt, miWaveGroup,
                                                miInputPerThUnroll=miInputPerThUnroll,
                                                lrvw=lrvw,
                                                miWaveTile=miWaveTile,
                                                vw=vw,
                                                matrixInstK=matrixInstK,
-                                               usesTDM=usesTDM), 2.0)[key]
+                                               usesTDM=usesTDM,
+                                               tdmComponentBytes=tdmComponentBytes,
+                                               tdmNumComponents=tdmNumComponents), 2.0)[key]
 
 def get_fp16_valid_blocks(mt: int, miWaveGroup: int, miInputPerThUnroll: int,
                           lrvw: int, miWaveTile: int, vw: int,
-                          matrixInstK: int, usesTDM: bool) -> tuple:
+                          matrixInstK: int, usesTDM: bool,
+                          tdmComponentBytes: int = 0,
+                          tdmNumComponents: int = 1) -> tuple:
   return tuple(_valid_blocks_for(
     _fp16_shape(mt, miWaveGroup, miInputPerThUnroll, lrvw,
-                miWaveTile, vw, matrixInstK, usesTDM)))
+                miWaveTile, vw, matrixInstK, usesTDM),
+    tdmComponentBytes, tdmNumComponents))
 
 # -- FP32 b32 padding ------------------------------------------------
 
@@ -547,7 +587,9 @@ def _compute_fp32_config(mt: int, vw: int, lrvw: int,
                          miInputPerThread: int,
                          miWaveTile: int,
                          matrixInstK: int, usesTDM: bool,
-                         xf32EmuPack: bool = False) -> Dict[str, int]:
+                         xf32EmuPack: bool = False,
+                         tdmComponentBytes: int = 0,
+                         tdmNumComponents: int = 1) -> Dict[str, int]:
   """Pick (B, P) for ds_load_b32 by ranking every legal candidate.
 
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
@@ -556,7 +598,7 @@ def _compute_fp32_config(mt: int, vw: int, lrvw: int,
   shape = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                       matrixInstK, usesTDM, xf32EmuPack)
   best = _search_padding(
-    _valid_blocks_for(shape),
+    _valid_blocks_for(shape, tdmComponentBytes, tdmNumComponents),
     _LDS_PAD_STEP_BYTES,
     lambda: len(shape.instOffs),   # one thread per bank on every instruction
     lambda cand: _b32_wave_costs(shape.rawAddrs, cand[0], cand[1],
@@ -570,21 +612,28 @@ def get_fp32_mt_config(mt: int, key: str, vw: int, lrvw: int,
                        miInputPerThread: int,
                        miWaveTile: int,
                        matrixInstK: int, usesTDM: bool,
-                       xf32EmuPack: bool = False) -> int:
+                       xf32EmuPack: bool = False,
+                       tdmComponentBytes: int = 0,
+                       tdmNumComponents: int = 1) -> int:
   return _even_dword_only(_compute_fp32_config(mt, vw, lrvw, miWaveGroup,
                                                miInputPerThread=miInputPerThread,
                                                miWaveTile=miWaveTile,
                                                matrixInstK=matrixInstK,
                                                usesTDM=usesTDM,
-                                               xf32EmuPack=xf32EmuPack), 4.0)[key]
+                                               xf32EmuPack=xf32EmuPack,
+                                               tdmComponentBytes=tdmComponentBytes,
+                                               tdmNumComponents=tdmNumComponents), 4.0)[key]
 
 def get_fp32_valid_blocks(mt: int, vw: int, lrvw: int, miWaveGroup: int,
                           miInputPerThread: int, miWaveTile: int,
                           matrixInstK: int, usesTDM: bool,
-                          xf32EmuPack: bool = False) -> tuple:
+                          xf32EmuPack: bool = False,
+                          tdmComponentBytes: int = 0,
+                          tdmNumComponents: int = 1) -> tuple:
   return tuple(_valid_blocks_for(
     _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
-                matrixInstK, usesTDM, xf32EmuPack)))
+                matrixInstK, usesTDM, xf32EmuPack),
+    tdmComponentBytes, tdmNumComponents))
 
 # The one pair the MX scale layout uses when it pads at all.
 MXS_LDS_BLOCK_BYTES = 256
