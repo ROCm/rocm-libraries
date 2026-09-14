@@ -38,6 +38,11 @@ if(BUILD_WITH_CSC_TRSM)
   add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
 endif()
 
+if(BUILD_WITH_TRSM_REFACTORING)
+  add_compile_options(-DROCSPARSE_WITH_TRSM_REFACTORING)
+endif()
+
+
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp
@@ -85,6 +90,7 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_clients_matrices_dir.cpp
   ../common/rocsparse_clients_spmat_descr.cpp
   ../common/rocsparse_clients_dnvec_descr.cpp
+  ../common/rocsparse_clients_dnmat_descr.cpp
   ../common/rocsparseio.cpp
 )
 
@@ -234,6 +240,12 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
 )
+
+if(BUILD_WITH_TRSM_REFACTORING)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_copy_data.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_transpose.cpp)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_sptrsm.cpp)
+endif()
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)

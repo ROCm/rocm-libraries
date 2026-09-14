@@ -193,6 +193,11 @@ constexpr const char* rocsparse_routine::to_string() const
     return s_routine_names[this->value];
 }
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+#include "testing_dnmat_copy_data.hpp"
+#include "testing_dnmat_transpose.hpp"
+#endif
+
 // Level1
 #include "testing_axpyi.hpp"
 #include "testing_dotci.hpp"
@@ -601,6 +606,10 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(gebsr2csr);
         DEFINE_CASE_T(gebsr2gebsr);
         DEFINE_CASE_T(gthr);
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        DEFINE_CASE_T(dnmat_copy_data);
+        DEFINE_CASE_T(dnmat_transpose);
+#endif
         DEFINE_CASE_T(gthrz);
         DEFINE_CASE_T(gebsr2gebsc);
         DEFINE_CASE_T(gebsrmv);
