@@ -79,12 +79,12 @@ class Tuner(BaseTuner):
         def validate(params):
             bs = params['block_size_x']
             ipt = params['ipt']
-            warp_small_lw = params['warp_small_lw']
+            warp_small_lws = params['warp_small_lws']
             warp_small_ipt = params['warp_small_ipt']
             warp_medium_lws = params['warp_medium_lws']
             warp_medium_ipt = params['warp_medium_ipt']
 
-            if warp_small_lw * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
+            if warp_small_lws * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
                 return False
 
             if not val_type:
