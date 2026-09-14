@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250] # gfx11 WMMA only
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # gfx11 WMMA only
 
 # Tensor swizzling on gfx11 WMMA. Separate from the gfx942 swizzleA/swizzleB configs
 # because those fork LocalReadVectorWidth over [2,4,8], all rejected here: gfx10/gfx11
