@@ -1266,17 +1266,14 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) >= 4)
+    if constexpr(sizeof(Ti) != 2)
     {
         if(!prob.handle->isHipBLASLtForcedOn())
         {
-            // gfx950: hipBLASLt is used for all types except complex.
-            // TODO remove after complex support is enabled
-            if constexpr(rocblas_is_complex<Ti>)
-            {
-                if(rocblas_internal_get_arch(prob.handle) == 950)
-                    return false; // complex won't default to hipBLASLt
-            }
+            // gfx950: hipBLASLt is used only for fp16/bf16
+            // TODO remove after all types are supported
+            if(rocblas_internal_get_arch(prob.handle) == 950)
+                return false;
         }
     }
 

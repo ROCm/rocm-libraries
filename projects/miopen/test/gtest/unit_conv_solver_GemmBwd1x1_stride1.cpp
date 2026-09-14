@@ -39,6 +39,27 @@ auto GetConvTestCases(miopenDataType_t datatype)
     };
 }
 
+// Channel-last pointwise shapes, which take the single unbatched GEMM path.
+auto GetConvTestCasesNhwc(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{datatype, miopenTensorNHWC, {4, 16, 14, 14}},
+                 {datatype, miopenTensorNHWC, {32, 16, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}}},
+        TestCase{{datatype, miopenTensorNDHWC, {4, 16, 4, 4, 4}},
+                 {datatype, miopenTensorNDHWC, {32, 16, 1, 1, 1}},
+                 datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}},
+        // A 1x1 input is also point-output, so GemmBwdRest claims it as well.
+        TestCase{{datatype, miopenTensorNHWC, {4, 16, 1, 1}},
+                 {datatype, miopenTensorNHWC, {32, 16, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}}},
+        // clang-format on
+    };
+}
+
 const auto& GetTestParams()
 {
     static const auto params = [] {
@@ -97,8 +118,32 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
+// Channel-last smoke tests
+INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+                         GPU_UnitTestConvSolverGemmBwd1x1_Stride1Bwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesNhwc(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+                         GPU_UnitTestConvSolverGemmBwd1x1_Stride1Bwd_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesNhwc(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+                         GPU_UnitTestConvSolverGemmBwd1x1_Stride1Bwd_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesNhwc(miopenFloat))));
+
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverGemmBwd1x1_Stride1DevApplicabilityBwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
+
+INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+                         CPU_UnitTestConvSolverGemmBwd1x1_Stride1DevApplicabilityBwd_NONE,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(GetConvTestCasesNhwc(miopenFloat)[0])));

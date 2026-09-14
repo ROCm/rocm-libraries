@@ -241,19 +241,21 @@ public:
         return catalog;
     }
 
-    /// Records @p record under @p key, replacing any earlier ranking for it: a later
-    /// sweep measured the current candidate set, and the coverage gate only widens.
+    /// Records @p record under @p key. Whether an existing on-disk ranking for @p key is
+    /// kept or replaced depends on @p cause -- see the full rule below.
     ///
     /// Write-back: if this manager has an engine name, the record is also appended to
     /// the on-disk shard. Unlike the in-memory-only read-through path below, this holds
     /// the shard's own file lock across the whole read-then-append sequence as one
     /// critical section -- `_winnerCacheMutex` alone cannot serialize against a second
-    /// process sharing the file. If the shard's current ranking for this key already
-    /// matches, nothing is written and the on-disk record is adopted; if it differs, the
-    /// new ranking is appended and supersedes the old one under the reader's
-    /// last-line-wins merge. Any disk failure degrades to in-memory-only, keeping the
-    /// measurement just taken, logged once per manager.
-    void recordWinner(const WinnerKey& key, const WinnerRecord& record) const
+    /// process sharing the file. @p cause selects the write-back rule and is required,
+    /// not defaulted: an existing on-disk entry for the key is adopted as-is and nothing
+    /// is written on a fresh miss; on a coverage-triggered re-benchmark, the new ranking
+    /// is always appended and supersedes the old one under the reader's last-line-wins
+    /// merge, even if the ranking happens to be unchanged. Any disk failure degrades to
+    /// in-memory-only, keeping the measurement just taken, logged once per manager.
+    void
+        recordWinner(const WinnerKey& key, const WinnerRecord& record, WinnerWriteCause cause) const
     {
         if(record.empty())
         {
@@ -271,7 +273,7 @@ public:
             return;
         }
 
-        WinnerRecord adopted = writeBackToShard(key, record);
+        WinnerRecord adopted = writeBackToShard(key, record, cause);
 
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         _winnerCache[key] = std::move(adopted);
@@ -843,11 +845,13 @@ private:
         }
     }
 
-    /// Write-back: re-reads @p key's shard under its LineStore lock and appends
-    /// @p record unless the shard's current ranking for @p key already matches it, as
-    /// one critical section under the shard's own lock (mirrors
-    /// `LineStoreLockHelper.cpp`). The file lock rather than `_winnerCacheMutex`,
-    /// because the racing writer may be another process.
+    /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
+    /// @p cause's rule, as one critical section under the shard's own lock (mirrors
+    /// `LineStoreLockHelper.cpp`). A fresh miss adopts any existing on-disk record for
+    /// @p key as-is and appends nothing; a coverage-triggered re-benchmark always appends
+    /// @p record, superseding the old entry under the reader's last-line-wins merge. The
+    /// file lock is used rather than `_winnerCacheMutex`, because the racing writer may
+    /// be another process.
     ///
     /// A record is never immutable: a shard may hold several lines for one key, and the
     /// reader resolves them last-line-wins (see `loadShardIfAbsent()`), so appending a
@@ -855,12 +859,13 @@ private:
     /// kernel could never satisfy the coverage gate again, and every later run would
     /// re-benchmark and discard the result forever.
     ///
-    /// @return The on-disk record, if its ranked ids already match @p record's -- an
-    ///     unchanged catalog, so nothing is written; otherwise @p record itself, both
+    /// @return The on-disk record for @p key, if one already exists AND @p cause is a fresh
+    ///     miss -- adopted as-is, so nothing is written; otherwise @p record itself, both
     ///     when it was appended and on every disk failure, since write-back is
     ///     best-effort and the caller's own measurement is the right value to keep in
     ///     memory.
-    WinnerRecord writeBackToShard(const WinnerKey& key, WinnerRecord record) const
+    WinnerRecord
+        writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
         if(_engineName.empty())
         {
@@ -908,20 +913,23 @@ private:
             }
         }
 
-        if(onDiskWinner != nullptr && rankedIdsEqual(*onDiskWinner, record))
+        if(onDiskWinner != nullptr && cause == WinnerWriteCause::FRESH_MISS)
         {
-            // Same ranking already on disk: adopt it rather than appending a duplicate
-            // line for an unchanged catalog.
+            // Presence, not equality. Two writers racing the same fresh key measure the same
+            // candidates and rank them the same way up to noise, so comparing rankings let both
+            // append and the shard kept two lines for one graph. A re-benchmark forced by a record
+            // that no longer covers the candidate set is the only writer that supersedes.
             hipdnn_data_sdk::utilities::unlockLineStore(*shard);
             return *onDiskWinner;
         }
 
-        if(hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record))
-           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        const auto appendStatus
+            = hipdnn_data_sdk::utilities::appendLine(*shard, encodeWinnerRecordLine(key, record));
+        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        if(appendStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
         {
             logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
         }
-        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
         return record;
     }
 

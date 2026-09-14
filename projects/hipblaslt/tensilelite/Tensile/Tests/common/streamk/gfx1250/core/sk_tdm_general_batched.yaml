@@ -1,0 +1,82 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, ffm_fail] # gfx1250 only
+
+GlobalParameters:
+  Architecture: gfx1250
+  BatchMode: 1 # General-batched pointer arrays (ArgType == 3).
+  BoundsCheck: 0
+  CodeObjectVersion: "4"
+  CpuThreads: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  EnqueuesPerSync: 1
+  KernelTime: False
+  NumElementsToValidate: -1
+  NumWarmups: 0
+  # 0 -> static work assignment, 1 -> dynamic per-XCD work queue. Each base
+  # problem is replayed once per value so both sub-paths are validated.
+  StreamKHybridMode: [0, 1]
+  SyncsPerBenchmark: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+
+BenchmarkProblems:
+  -
+    - # BF16 TN using the runtime pointer-array ABI of universal kernels.
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - StreamK: [3, 4, 5]
+        - StreamKForceDPOnly: [0]
+        - TDMIterateMode: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0, 4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 3, 12544]
