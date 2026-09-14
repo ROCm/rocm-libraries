@@ -188,6 +188,7 @@ enum class target_arch : unsigned int
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250,
+    gfx1250-strict = 1250,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
@@ -258,7 +259,8 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1153: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
-        case target_arch::gfx1250: return gen::cdna5;
+        case target_arch::gfx1250:
+        case target_arch::gfx1250-strict: return gen::cdna5;
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
@@ -334,6 +336,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
     ROCPRIM_RETURN_IF_ARCH(gfx1250);
+    ROCPRIM_RETURN_IF_ARCH(gfx1250-strict);
 
     return target_arch::unknown;
 }
