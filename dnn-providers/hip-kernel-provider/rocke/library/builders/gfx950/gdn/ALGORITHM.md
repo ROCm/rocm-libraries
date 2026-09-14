@@ -357,17 +357,26 @@ before launch.
 
 ### 4.6 Tile selection by batch
 
-`(num_warps, warp_threads_k, blocks_per_v_dim)` is chosen from a batch-banded table (four bands:
-`b4`, `b32`, `b128`, `b_large`). The trend it encodes: **as batch grows, `BPV` is spent down —
-`8` at the smallest band to `1` by the `b128` band — because a larger natural grid needs less
-manufactured parallelism; only at the largest band (`b_large`), where `BPV` is already `1`, is the
-workgroup widened (to `num_warps = 8`) for throughput.** `num_warps` is therefore not monotone in
-batch — the `b128` band is the narrowest workgroup.
+`(num_warps, warp_threads_k, blocks_per_v_dim)` is chosen from a batch-banded table:
+
+| Band | batch | `num_warps` | `warp_threads_k` | `blocks_per_v_dim` |
+| --- | --- | --- | --- | --- |
+| `b4` | ≤ 4 | 4 | 16 | 8 |
+| `b32` | ≤ 32 | 2 | 8 | 2 |
+| `b128` | ≤ 128 | 1 | 8 | 1 |
+| `b_large` | > 128 | 8 | 16 | 1 |
+
+The trend it encodes: **as batch grows, `BPV` is spent down — `8` at the smallest band to `1` by
+the `b128` band — because a larger natural grid needs less manufactured parallelism; only at the
+largest band (`b_large`), where `BPV` is already `1`, is the workgroup widened (to `num_warps = 8`)
+for throughput.** `num_warps` is therefore not monotone in batch — it falls `4 → 2 → 1` and then
+jumps to `8`, so the `b128` band is the narrowest workgroup.
 
 The bands are deliberately coarse. Adjacent legal configurations sit within run-to-run variation of
 each other, so a finer table would encode noise rather than signal. The table was produced by an
-exhaustive sweep of the legal tile space, correctness-gated at every point, with the band edges
-interpolated between measured anchors.
+exhaustive sweep of all 54 legal tile configurations, correctness-gated at every point. Only the
+four batch anchors `1 / 16 / 64 / 256` were measured; the band edges between them are
+interpolated, chosen to place each anchor inside its own band rather than on a boundary.
 
 ### 4.7 The reference path
 
@@ -416,6 +425,11 @@ no workgroup barrier, only explicit `lgkmcnt` waits, which is cheaper; and on th
 (`overlap_solve`, always set for GDN) the *other*, idle waves are given the `Kt` tile to build — it
 depends only on `k` and the decay, none of the solve's live tiles. (The 256-thread fused path runs
 the solve without this overlap.)
+
+This is enforced in `kernels/gfx950/kda_chunkwise.py`: the block loop sits inside a `tid < 64`
+`scf_if`, the barrier/`lgkmcnt` rationale is in the comment immediately above it, and the
+idle-wave `Kt` work is in `_emit_idle_during_solve`. Follow-up 4 in §8 — a shorter serial
+chain — would have to change this constraint.
 
 The solved block is written back transposed, in the operand order the next block's rank update
 wants.
@@ -485,7 +499,7 @@ a follow-up (§8).
 The scan's natural grid is `BH` workgroups, which starves at small `BH`. The value extent of `S` is
 independent across rows, so it is banded into `value_splits` slices, each its own workgroup:
 
-- grid becomes `BH × value_splits`; each band owns `ev_slice = DV / value_splits` rows;
+- grid becomes `BH × value_splits`; each band owns `EV = DV / value_splits` rows (§0);
 - the state base and the `V`/`O` addresses are offset by the band, so bands do not overlap and need
   **no reduction** afterwards;
 - the scan's LDS request shrinks with the split, which is what keeps a high split inside the
@@ -544,8 +558,10 @@ Both kernels are validated against **independent oracles**, not against each oth
 - **Decode** — a token-serial `f32` reference, checking *both* the output and the written state
   pages, across the decode batch range, mixed state dtype, determinism, negative-index padding, and
   a deep-pool case that crosses the 32-bit offset boundary on device.
-- **Prefill** — an `f64` oracle, checking output and final state across MHA and GQA head shapes, the
-  gate range, and with and without an initial state.
+- **Prefill** — an `f64` oracle, checking output and final state across head shapes
+  `(Hv, Hk) = (4, 4)` (MHA), `(8, 4)` (`kv_group = 2`, the shipping grouping) and `(32, 8)`
+  (`kv_group = 4`, a stress point above any deployed config), the gate range, and with and
+  without an initial state.
 - **IR stability** — GDN golden IR entries are pinned and SHA-stable across the supported lowerer
   flavours, while **all pre-existing KDA golden hashes remain unchanged**, which is what makes the
   "byte-identical" claim in §2.3 testable rather than asserted.
