@@ -46,72 +46,8 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, BinaryFunction scan_op)
     {
-        const unsigned int lane_id     = ::rocprim::lane_id();
-        const unsigned int row_lane_id = lane_id % ::rocprim::min(16u, VirtualWaveSize);
-
         output = input;
-
-        if(VirtualWaveSize > 1)
-        {
-            T t = warp_move_dpp<T, 0x111>(output); // row_shr:1
-            if(row_lane_id >= 1)
-                output = scan_op(t, output);
-        }
-        if(VirtualWaveSize > 2)
-        {
-            T t = warp_move_dpp<T, 0x112>(output); // row_shr:2
-            if(row_lane_id >= 2)
-                output = scan_op(t, output);
-        }
-        if(VirtualWaveSize > 4)
-        {
-            T t = warp_move_dpp<T, 0x114>(output); // row_shr:4
-            if(row_lane_id >= 4)
-                output = scan_op(t, output);
-        }
-        if(VirtualWaveSize > 8)
-        {
-            T t = warp_move_dpp<T, 0x118>(output); // row_shr:8
-            if(row_lane_id >= 8)
-                output = scan_op(t, output);
-        }
-
-        // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
-        // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
-        if(ROCPRIM_HAS_PERMLANE())
-        {
-            if(VirtualWaveSize > 16)
-            {
-                T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
-                if(lane_id % 32 >= 16)
-                    output = scan_op(t, output);
-            }
-
-            if constexpr(VirtualWaveSize > 32)
-            {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-                return;
-            }
-        }
-        else
-        {
-            if(VirtualWaveSize > 16)
-            {
-                T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
-                if(lane_id % 32 >= 16)
-                    output = scan_op(t, output);
-            }
-            if(VirtualWaveSize > 32)
-            {
-                T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
-                if(lane_id >= 32)
-                    output = scan_op(t, output);
-            }
-#if !ROCPRIM_TARGET_SPIRV
-            static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
-#endif
-        }
+        common_inclusive_scan(output, scan_op);
     }
 
     template<class BinaryFunction>
@@ -124,11 +60,34 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op)
+    {
+        const unsigned int lane_id  = detail::logical_lane_id<VirtualWaveSize>();
+        const bool         is_valid = (static_cast<int>(lane_id) < valid_items);
+
+        if(is_valid)
+        {
+            output = input;
+        }
+
+        common_inclusive_scan(output, scan_op, is_valid);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, storage_type& storage, BinaryFunction scan_op)
+    {
+        (void)storage; // disables unused parameter warning
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, BinaryFunction scan_op, T init)
     {
         inclusive_scan(input, output, scan_op);
-        // Include init value in scan results
-        output = scan_op(init, output);
+        include_init(output, output, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -141,11 +100,27 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T input, T& output, int valid_items, BinaryFunction scan_op, T init)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+        include_init(output, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        (void)storage; // disables unused parameter warning
+        partial_inclusive_scan(input, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in the warp
-        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
+        compute_reduction(output, reduction);
     }
 
     template<class BinaryFunction>
@@ -159,13 +134,33 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+        compute_reduction(output, valid_items, reduction);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op)
+    {
+        (void)storage; // disables unused parameter warning
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op, T init)
     {
         inclusive_scan(input, output, scan_op);
-        // Broadcast value from the last thread in the warp
-        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
-        // Include init value in scan results
-        output = scan_op(init, output);
+        compute_reduction(output, reduction);
+        include_init(output, output, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -175,6 +170,30 @@ public:
     {
         (void)storage;
         inclusive_scan(input, output, reduction, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(
+        T input, T& output, int valid_items, T& reduction, BinaryFunction scan_op, T init)
+    {
+        partial_inclusive_scan(input, output, valid_items, scan_op);
+        compute_reduction(output, valid_items, reduction);
+        include_init(output, output, valid_items, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op,
+                                T              init)
+    {
+        (void)storage; // disables unused parameter warning
+        partial_inclusive_scan(input, output, valid_items, reduction, scan_op, init);
     }
 
     template<class BinaryFunction>
@@ -316,15 +335,32 @@ public:
     }
 
 private:
+    // Include init value in scan results
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void include_init(T input, T& output, BinaryFunction scan_op, T init)
+    {
+        output = scan_op(init, input);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void include_init(T input, T& output, int valid_items, BinaryFunction scan_op, T init)
+    {
+        const unsigned int lid = detail::logical_lane_id<VirtualWaveSize>();
+        if(static_cast<int>(lid) < valid_items)
+        {
+            output = scan_op(init, input);
+        }
+    }
+
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_exclusive(T inclusive_input, T& exclusive_output, T init, BinaryFunction scan_op)
     {
-        // include init value in scan results
-        exclusive_output = scan_op(init, inclusive_input);
-        // get exclusive results
-        exclusive_output = warp_shuffle_up(exclusive_output, 1, VirtualWaveSize);
+        include_init(inclusive_input, exclusive_output, scan_op, init);
+        to_exclusive(exclusive_output, exclusive_output);
         if(detail::logical_lane_id<VirtualWaveSize>() == 0)
         {
             exclusive_output = init;
@@ -336,6 +372,92 @@ private:
     {
         // shift to get exclusive results
         exclusive_output = warp_shuffle_up(inclusive_input, 1, VirtualWaveSize);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void common_inclusive_scan(T& output, BinaryFunction scan_op, bool extra_cond = true)
+    {
+        const unsigned int     lane_id              = ::rocprim::lane_id();
+        constexpr unsigned int BoundVirtualWaveSize = rocprim::min(16u, VirtualWaveSize);
+        const unsigned int     row_lane_id = detail::logical_lane_id<BoundVirtualWaveSize>(lane_id);
+
+        if(VirtualWaveSize > 1)
+        {
+            T t = warp_move_dpp<T, 0x111>(output); // row_shr:1
+            if(row_lane_id >= 1 && extra_cond)
+                output = scan_op(t, output);
+        }
+        if(VirtualWaveSize > 2)
+        {
+            T t = warp_move_dpp<T, 0x112>(output); // row_shr:2
+            if(row_lane_id >= 2 && extra_cond)
+                output = scan_op(t, output);
+        }
+        if(VirtualWaveSize > 4)
+        {
+            T t = warp_move_dpp<T, 0x114>(output); // row_shr:4
+            if(row_lane_id >= 4 && extra_cond)
+                output = scan_op(t, output);
+        }
+        if(VirtualWaveSize > 8)
+        {
+            T t = warp_move_dpp<T, 0x118>(output); // row_shr:8
+            if(row_lane_id >= 8 && extra_cond)
+                output = scan_op(t, output);
+        }
+
+        // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
+        // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
+        if(ROCPRIM_HAS_PERMLANE())
+        {
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
+                if(lane_id % 32 >= 16 && extra_cond)
+                    output = scan_op(t, output);
+            }
+
+            if constexpr(VirtualWaveSize > 32)
+            {
+                ROCPRIM_PRINT_ERROR_ONCE(
+                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                return;
+            }
+        }
+        else
+        {
+            if(VirtualWaveSize > 16)
+            {
+                T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
+                if(lane_id % 32 >= 16 && extra_cond)
+                    output = scan_op(t, output);
+            }
+            if(VirtualWaveSize > 32)
+            {
+                T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
+                if(lane_id >= 32 && extra_cond)
+                    output = scan_op(t, output);
+            }
+#if !ROCPRIM_TARGET_SPIRV
+            static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
+#endif
+        }
+    }
+
+    // Broadcast reduction from the last valid thread in the warp
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void compute_reduction(T& output, T& reduction)
+    {
+        reduction = warp_shuffle(output, VirtualWaveSize - 1, VirtualWaveSize);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void compute_reduction(T& output, int valid_items, T& reduction)
+    {
+        const int last_valid_src_lane
+            = ::rocprim::clamp(valid_items - 1, 0, static_cast<int>(VirtualWaveSize - 1));
+        reduction = warp_shuffle(output, last_valid_src_lane, VirtualWaveSize);
     }
 };
 
