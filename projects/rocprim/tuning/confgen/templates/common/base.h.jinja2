@@ -64,7 +64,9 @@
 {% if is_generic -%}
     {#- For generic-fallback we can just use variadic templates. This
         saves us from having to unpack the available types. -#}
+    {%- block target_tparams_generic -%}
     template<class Target, class... Args>
+    {%- endblock -%}
 {%- else -%}
     {#- Expose the type parameters as a block so they can be easily 
         overridden. -#}
@@ -152,7 +154,7 @@ namespace detail
     return {{ mk_target_symbol() }}
     {{- '<' -}}
     {{- mk_comp_target(default_target) -}}
-    {{- ', Args...>();\n' -}}
+    {%- block generic_forwarding -%}, Args...>();{% endblock -%}
 {%- endcall %}
 
 {# We need to declare what the default target is if the current target is unknown. 
