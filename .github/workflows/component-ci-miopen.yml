@@ -221,8 +221,11 @@ jobs:
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           export CXX=/opt/rocm/llvm/bin/clang++
-          # CMake already configured with CLANG_TIDY_EXE via cmake_extra_flags
-          ninja -C build -k 0 analyze
+          # CMake already configured with CLANG_TIDY_EXE via cmake_extra_flags.
+          # -j$(nproc): ninja's default job count can undercount CPUs visible
+          # to a container on a shared runner; pin it explicitly since this
+          # target is almost entirely parallel per-file analysis.
+          ninja -C build -k 0 -j$(nproc) analyze
 
       # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
       # exported public C API symbol set, and no _impl symbol leakage. This is a
