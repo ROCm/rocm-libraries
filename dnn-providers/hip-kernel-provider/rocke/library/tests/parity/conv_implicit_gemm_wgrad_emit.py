@@ -23,12 +23,15 @@
 #   10 -- chiplet swizzle enabled, gfx950
 #   11 -- K-outer LDS + ds_read_b64_tr_b16 transpose reads, gfx950
 #   12 -- K-outer + async_dma (direct global->LDS load), gfx950
+#   15 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx950
+#   16 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
 # Negative cases (configs 100+) verify that invalid specs are rejected:
 #   100 -- odd C with fp16 split-K (must raise ValueError)
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
+#   103 -- two_stage=True with split_k=1 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
 # 0-10, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)

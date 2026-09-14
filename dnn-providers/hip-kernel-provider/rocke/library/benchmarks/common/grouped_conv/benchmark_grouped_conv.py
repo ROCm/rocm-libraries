@@ -952,7 +952,7 @@ def _run_fwd(
 
     ref_out: torch.Tensor | None = None
     if args.verify:
-        from rocke.benchmark.conv_reference import (
+        from builders.common.conv_reference import (
             conv_reference,
             conv_reference_gfx1250,
         )
@@ -1183,7 +1183,7 @@ def _run_wgrad(
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import wgrad_reference
+        from builders.common.conv_reference import wgrad_reference
 
         ref_out = wgrad_reference(_X_f32, _dY_f32, p)
         print(

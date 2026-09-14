@@ -148,7 +148,7 @@ def _u8(t):
 def _wgrad_reference_cpu(X_f32, dY_f32, p):
     """float32 weight-gradient reference computed entirely on the CPU.
 
-    Mirrors ``rocke.benchmark.conv_reference.wgrad_reference`` but never touches
+    Mirrors ``builders.common.conv_reference.wgrad_reference`` but never touches
     ``torch.cuda``: rocke's HIP runtime (used by the kernel launcher) and torch's
     HIP runtime fight over the process HIP context in-process — whichever
     initialises first wins, and rocke-first (our module-level ``get_device_arch``)
