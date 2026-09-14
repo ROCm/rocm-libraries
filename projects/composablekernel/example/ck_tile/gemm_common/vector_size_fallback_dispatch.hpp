@@ -196,10 +196,20 @@ float dispatch_vector_size_fallback(ck_tile::index_t M,
 
     // Tile-size alignment is a separate, coarser boundary than the vector-size one above: a
     // shape can be vector-aligned yet still not be a multiple of the tile size. K's alignment
-    // only matters when AB can fall back; M/N's only when C can.
-    const bool needsPadK = ab_reducible && (K % (GemmConfig::K_Tile * kbatch) != 0);
-    const bool needsPadMN =
-        c_reducible && ((M % GemmConfig::M_Tile != 0) || (N % GemmConfig::N_Tile != 0));
+    // only matters when AB can fall back; M/N's only when C can. GemmConfig may not even define
+    // M_Tile/N_Tile/K_Tile when fallback is disabled, so these must stay inside if constexpr.
+    const bool needsPadK = [&] {
+        if constexpr(ab_reducible)
+            return K % (GemmConfig::K_Tile * kbatch) != 0;
+        else
+            return false;
+    }();
+    const bool needsPadMN = [&] {
+        if constexpr(c_reducible)
+            return (M % GemmConfig::M_Tile != 0) || (N % GemmConfig::N_Tile != 0);
+        else
+            return false;
+    }();
     const bool needsPad = needsPadK || needsPadMN;
 
     // Report details about the GemmConfig this shape ended up dispatching
