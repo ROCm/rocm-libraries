@@ -186,7 +186,6 @@ jobs:
           cp projects/miopen/rbuild.ini /tmp/rbuild.ini
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
           sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
-          cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m pip install -r requirements.txt
           cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m rbuild prepare -s develop -d /tmp/miopen-deps
       - name: Configure build
         run: |
