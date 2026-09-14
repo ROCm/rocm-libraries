@@ -28,11 +28,11 @@ import subprocess
 import sys
 import unittest
 
+from rocke.assets import library_root, platform_root
 from rocke.runtime.hip_module import get_device_arch
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_PYDIR = os.path.abspath(os.path.join(_HERE, "../../../../platform/python"))
-_LIB_DIR = os.path.abspath(os.path.join(_HERE, "../../../../library"))
+_PYDIR = str(platform_root() / "python")
+_LIB_DIR = str(library_root())
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None

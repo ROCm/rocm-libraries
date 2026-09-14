@@ -15,7 +15,7 @@ against a float32 torch reference (``torch.nn.grad.conv2d_input``).  Covers:
 Requires a ROCm GPU and torch (skip otherwise).
 
 Run:
-  PYTHONPATH=rocke/platform/python <torch-python> \
+  PYTHONPATH=rocke/platform/python:rocke/library <torch-python> \
     rocke/platform/tests/instances/test_conv_dgrad_correctness.py
 """
 
@@ -28,9 +28,11 @@ import subprocess
 import sys
 import unittest
 
+from rocke.assets import library_root, platform_root
 from rocke.runtime.hip_module import get_device_arch
 
-_PYDIR = os.path.join(os.path.dirname(__file__), "..", "..", "python")
+_PYDIR = str(platform_root() / "python")
+_LIB_DIR = str(library_root())
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -50,7 +52,11 @@ def _run_benchmark(*extra_args, timeout=600):
     """Run benchmark_implicit_gemm_conv in a subprocess and return (rc, output)."""
     import io
 
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": _PYDIR}
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": os.pathsep.join([_PYDIR, _LIB_DIR]),
+    }
     cmd = [
         sys.executable,
         "-m",
