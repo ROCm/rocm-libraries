@@ -1,0 +1,43 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::histogram_config<rocprim::kernel_config<{{ config.block_size_x }}, {{ config.ipt }}>, {{ config.max_grid_size }}, {{ config.shared_impl_max_bins }}, {{ config.shared_impl_histograms }}, rocprim::kernel_config<1024, 4>>
+{%- endblock %}
+{% block type_definitions %}
+using value_type = {{ value_type }};
+constexpr unsigned int channels = {{ channels }};
+constexpr unsigned int active_channels = {{ active_channels }};
+{% endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_multi_histogram_even_benchmark<value_type, channels, active_channels, false, config>;
+{% endblock %}
+
+{% block benchmark_queue %}
+std::vector<unsigned int> m_cases;
+if constexpr(std::is_same<value_type, int8_t>::value)
+{
+    m_cases = {16, 127};
+}
+else
+{
+    m_cases = {
+        10,
+        100,
+        1000,
+        10000 // Multiple bins to trigger a global memory implementation
+    };
+}
+
+for(const size_t& bins : m_cases)
+{
+    for(int entropy_reduction : {0, 2, 4, 6})
+    {
+
+        executor.queue<benchmark_type>(bins, 1, entropy_reduction);
+    }
+}
+{% endblock %}
+
+{% block get_time %}
+std::vector<double> all_bytes_per_second = executor.get_all_bytes_per_second();
+return (1000.0 * primbench::GiB) / (std::reduce(all_bytes_per_second.begin(), all_bytes_per_second.end()) / all_bytes_per_second.size());
+{% endblock %}

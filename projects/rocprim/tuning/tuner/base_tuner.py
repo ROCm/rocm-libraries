@@ -326,7 +326,7 @@ class BaseTuner(ABC):
         types: Dict[str, Any],
     ) -> None:
         """Performs auto-tuning for a specific type combination."""
-        print(f"\nTuning for {' '.join(types.values())}")
+        print(f"\nTuning for {' '.join([str(x) for x in types.values()])}")
         print(f"Using size: {self.bytes_size} bytes")
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
@@ -347,7 +347,7 @@ class BaseTuner(ABC):
             self._save_output(cache_file_path, types, results)
 
         except Exception as e:
-            print(f"Failed tuning for {' '.join(types.values())}")
+            print(f"Failed tuning for {' '.join([str(x) for x in types.values()])}")
             print(f"Error: {str(e)}")
             raise
 
