@@ -6,7 +6,9 @@
 # additional build configurations that MIOpen must support but TheRock CI does
 # not exercise: the HIPNOGPU backend (used for offline kernel tuning without
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
-# no-CK UBSan debug build, and gtest binary naming convention validation.
+# no-CK UBSan debug build, and gtest binary naming convention validation. It
+# also runs clang-tidy static analysis, migrated in from the shared
+# .github/workflows/clang-tidy.yml so it can be made a required check.
 #
 # The HIP package job additionally carries the two gates on the public/private
 # split: a source-only cross-check of its five hand-maintained files, and the
@@ -89,10 +91,16 @@ jobs:
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
+          # clang-tidy's custom "analyze" target (defined in
+          # projects/miopen/cmake/ClangTidy.cmake) is only wired up for the
+          # Ninja generator, and "ninja -k 0" (keep going past failures) below
+          # depends on it -- hence -G Ninja here, unlike the other entries in
+          # this matrix which build with the container's default generator.
+          # TODO: remove -DMIOPEN_USE_MLIR=OFF once rocMLIR is removed from MIOpen.
           - name: MIOpen clang-tidy
             job_id: clang-tidy
             cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=release
+              -G Ninja
               -DBUILD_DEV=ON
               -DMIOPEN_USE_MLIR=OFF
               -DMIOPEN_BACKEND=HIP
@@ -172,11 +180,12 @@ jobs:
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'
         run: |
-          # Install clang-tidy-23
+          # Install clang-tidy-23 and ninja-build (analyze target requires the
+          # Ninja generator; this container is not guaranteed to ship ninja).
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-23
+          sudo apt-get install -y clang-tidy-23 ninja-build
           # Prepare MIOpen deps for clang-tidy in a venv
           python3 -m venv .venv
           VENV_BIN="$(pwd)/.venv/bin"
@@ -187,11 +196,17 @@ jobs:
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
           sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
           cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/rbuild prepare -s develop -d /tmp/miopen-deps
+
       - name: Configure build
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           export CXX=/opt/rocm/llvm/bin/clang++
-          export CXXFLAGS=-Werror
+          # -Werror is skipped for clang-tidy: that job's job is to surface lint
+          # findings, not to fail the configure/analyze step on unrelated
+          # compiler warnings-as-errors.
+          if [[ "${{ matrix.job_id }}" != "clang-tidy" ]]; then
+            export CXXFLAGS=-Werror
+          fi
           rm -rf projects/miopen/install
           mkdir projects/miopen/install
           cmake -S projects/miopen -B build \
