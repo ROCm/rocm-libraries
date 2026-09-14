@@ -46,7 +46,6 @@ extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
 html_theme_options = {
     "flavor": "rocm",
     "repository_url": "https://github.com/ROCm/rocm-libraries",
-    "repository_branch": "develop",
     "path_to_docs": "projects/hiprand/docs",
     "use_repository_button": True,
     "use_issues_button": True,
