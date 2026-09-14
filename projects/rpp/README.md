@@ -201,8 +201,8 @@ RPP supports various 2D image, 3D image (voxel), and audio augmentations and pri
 | audio tensor multiply scalar | ✅ | ✅ |
 
 > [!NOTE]
-> Audio augmentations use FFTS on the CPU (HOST) backend when it is found, otherwise an in-house FFT
-> implementation. On the GPU (HIP) backend they use rocFFT when available, otherwise a manual DFT fallback.
+> Audio augmentations use an in-house FFT implementation on the CPU (HOST) backend and rocFFT on the
+> GPU (HIP) backend.
 
 </details>
 
@@ -300,8 +300,7 @@ Install RPP runtime, development, and test packages.
 > installed explicitly on a standard ROCm installation.
 
 > [!NOTE]
-> Audio augmentations are enabled by default (`RPP_AUDIO_SUPPORT=ON`).
-> Set `-DRPP_AUDIO_SUPPORT=OFF` to disable if not needed.
+> Audio augmentations are always enabled.
 
 #### Ubuntu
 

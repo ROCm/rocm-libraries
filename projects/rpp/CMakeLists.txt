@@ -181,11 +181,6 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-# For HIP backend, rocFFT is required for audio support
-if("${BACKEND}" STREQUAL "HIP")
-    find_package(ROCFFT REQUIRED)
-endif()
-
 # Audio augmentations support is always enabled
 set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)                    # For cmakedefine01 in rpp_audio_augmentations_support.h.in
 
@@ -284,6 +279,10 @@ if("${BACKEND}" STREQUAL "HIP")
     set (HIP_PLATFORM amd CACHE STRING "HIP platform")
     find_package(HIP QUIET)
     if(HIP_FOUND)
+        # rocFFT is required for audio support on HIP backend
+        find_package(ROCFFT REQUIRED)
+        message("-- ${White}${PROJECT_NAME} -- Using rocFFT - Path:" ${ROCFFT_INCLUDE_DIR}${ColourReset})
+
         message("-- ${White}${PROJECT_NAME} -- Using HIP - Path:" ${HIP_PATH} "\tVersion:" ${HIP_VERSION} "\tCompiler:" ${HIP_COMPILER}${ColourReset})
         # TBD: Set external flag to notify GPU_SUPPORT and HIP backend availability - Compatible with rocAL and MIVisionX
         add_definitions(-DGPU_SUPPORT)

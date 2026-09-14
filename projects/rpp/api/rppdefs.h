@@ -104,8 +104,11 @@ const float ONE_OVER_255 = 1.0f / 255;
 const uint MMS_MAX_SCRATCH_MEMORY = 115293120;  // maximum scratch memory size (in number of floats)
                                                 // needed for MMS buffer in RNNT training
 const uint SPECTROGRAM_MAX_SCRATCH_MEMORY =
-    372877312;  // maximum scratch memory size (in number of floats) needed for spectrogram HIP
-                // kernel in RNNT training
+    742413440;  // maximum scratch memory size (in number of floats) needed for spectrogram HIP
+                // kernel in RNNT training with rocFFT:
+                // = windowLength + windowOutput + fftOutput(complex)
+                // = 512 + (512 * 3754 * 192) + (257 * 3754 * 192 * 2)
+                // = 512 + 371,392,512 + 371,020,416 = 742,413,440
 #define DROPOUT_FIXED_SEED 42  // Constant fixed seed for reproducing the dropout output
 #define RANDOM_ERASE_NOISE_BUFFER_SIDE \
     255  // Random erase spatial noise buffer height and width. Changing this constant will result

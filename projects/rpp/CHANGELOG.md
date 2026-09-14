@@ -11,7 +11,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 ### Changed
 
-- Audio augmentations (`RPP_AUDIO_SUPPORT`) now enabled by default
+- Audio augmentations are now always enabled; the `RPP_AUDIO_SUPPORT` CMake option has been removed
 
 
 ## (Unreleased) RPP 3.2.0

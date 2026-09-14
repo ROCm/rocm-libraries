@@ -125,10 +125,9 @@ The available CMake options are:
 
 * ``BACKEND``: Set to ``CPU`` for CPU-only builds. ``HIP`` by default.
 * ``CMAKE_BUILD_TYPE``: Set to ``Debug`` or ``Release``. ``Release`` by default.
-* ``RPP_AUDIO_SUPPORT``: Set to ``OFF`` to disable audio augmentations. ``ON`` by
-  default. Audio augmentations use FFTS on the CPU backend when it is found, otherwise an
-  in-house FFT implementation. On the GPU (HIP) backend they use rocFFT when available,
-  otherwise a manual DFT fallback.
+
+Audio augmentations are always enabled. They use an in-house FFT implementation on the
+CPU backend and rocFFT on the GPU (HIP) backend.
 
 .. _verify-install:
 

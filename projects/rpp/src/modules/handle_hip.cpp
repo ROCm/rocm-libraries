@@ -102,6 +102,10 @@ struct HandleImpl {
     // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
     std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
 
+    // Audio scratch buffer (lazily allocated on first audio function call)
+    Rpp32f* audioScratchBufferHip = nullptr;
+    size_t audioScratchBufferSize = 0;
+
     HandleImpl() : ctx(get_ctx()) {}
 
     static StreamPtr reference_stream(hipStream_t s) {
@@ -136,33 +140,38 @@ struct HandleImpl {
     void PreInitializeBuffer() {
         this->PreInitializeBufferCPU();
 
-        // Audio support requires larger scratch buffers for RNNT training.
-        // Current max allocation size = sizeof(Rpp32f) * 372877312, which is based on
-        // Spectrogram requirements:
-        // 1. Spectrogram requirements:
-        //      - 372877312 = (512 * 3754 * 192) + (512 * 3754 * 2)
-        //      - Above is the maximum scratch memory required for Spectrogram HIP kernel used in
-        //      RNNT training (uses a batchsize 192)
-        //      - (512 * 3754 * 192) is the maximum size that will be required for window output
-        //      based on Librispeech dataset in RNNT training
-        //      - (512 * 3754 * 2) is the size required for storing sin and cos coefficients
-        //      required for FFT computation in Spectrogram HIP kernel in RNNT training
-        // 2. Non Silent Region Detection requirements:
-        //      - 115293120 = (600000 + 293 + 192) * 192
-        //      - Above is the maximum scratch memory required for Non Silent Region Detection HIP
-        //      kernel used in RNNT training (uses a batchsize 192)
-        //      - 600000 is the maximum size that will be required for MMS buffer based on
-        //      Librispeech dataset
-        //      - 293 is the size required for storing reduction outputs for 600000 size sample
-        //      - 192 is the size required for storing cutOffDB values for batch size 192
+        // Default scratch buffer sized for image processing (4K resolution: 3840 x 2160)
+        // Audio functions will reallocate to larger size when needed via EnsureAudioScratchBuffer()
         auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
-                                sizeof(Rpp32f) * 372877312);
+                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipMalloc failed for scratchBufferHip");
+        this->audioScratchBufferSize = 8294400;
         status = hipHostMalloc(&(this->initHandle->mem.mgpu.scratchBufferPinned.floatmem),
                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipHostMalloc failed for scratchBufferPinned");
+    }
+
+    // Ensure scratch buffer is large enough for audio operations.
+    // Called lazily by audio functions when they need more scratch memory.
+    // Returns RPP_SUCCESS if buffer is sufficient or was successfully reallocated.
+    RppStatus EnsureAudioScratchBuffer(size_t requiredFloats) {
+        if (requiredFloats <= this->audioScratchBufferSize) return RPP_SUCCESS;
+
+        // Free existing buffer and allocate larger one
+        auto status = hipFree(this->initHandle->mem.mgpu.scratchBufferHip.floatmem);
+        if (status != hipSuccess) return RPP_ERROR_HIP_RUNTIME;
+
+        status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
+                           sizeof(Rpp32f) * requiredFloats);
+        if (status != hipSuccess) {
+            this->initHandle->mem.mgpu.scratchBufferHip.floatmem = nullptr;
+            this->audioScratchBufferSize = 0;
+            return RPP_ERROR_NOT_ENOUGH_MEMORY;
+        }
+        this->audioScratchBufferSize = requiredFloats;
+        return RPP_SUCCESS;
     }
 };
 
@@ -314,6 +323,10 @@ std::size_t Handle::GetMaxComputeUnits() {
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status);
 
     return result;
+}
+
+RppStatus Handle::EnsureAudioScratchBuffer(size_t requiredFloats) {
+    return this->impl->EnsureAudioScratchBuffer(requiredFloats);
 }
 
 // Get or create a cached rocFFT plan for the given nfft size and batch count

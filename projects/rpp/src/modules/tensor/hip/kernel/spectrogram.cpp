@@ -211,6 +211,10 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     if (rocfftScratchSize > static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY))
         return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
+    // Ensure scratch buffer is large enough for audio workload (lazily reallocated if needed)
+    RppStatus scratchStatus = handle.EnsureAudioScratchBuffer(rocfftScratchSize);
+    if (scratchStatus != RPP_SUCCESS) return scratchStatus;
+
     // Generate hanning window
     Rpp32f* windowFn;
     if (windowFunction == NULL) {
