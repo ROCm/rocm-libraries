@@ -87,9 +87,33 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE
+    inline void InclusiveScanPartial(T input, T& inclusive_output, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
     inline void InclusiveScan(T input, T& inclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::inclusive_scan(input, inclusive_output, temp_storage_, initial_value, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScanPartial(
+        T input, T& inclusive_output, T initial_value, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          initial_value,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -104,6 +128,19 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE
+    inline void InclusiveScanPartial(
+        T input, T& inclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
     inline void InclusiveScan(
         T input, T& inclusive_output, T initial_value, ScanOp scan_op, T& warp_aggregate)
     {
@@ -113,6 +150,24 @@ public:
                                   temp_storage_,
                                   initial_value,
                                   scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScanPartial(T      input,
+                                     T&     inclusive_output,
+                                     T      initial_value,
+                                     ScanOp scan_op,
+                                     int    valid_items,
+                                     T&     warp_aggregate)
+    {
+        base_type::partial_inclusive_scan(input,
+                                          inclusive_output,
+                                          valid_items,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          initial_value,
+                                          scan_op);
     }
 
     template<typename ScanOp>
