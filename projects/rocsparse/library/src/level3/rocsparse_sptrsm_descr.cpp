@@ -25,6 +25,15 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_logging.hpp"
 
+void _rocsparse_sptrsm_descr::set_batch_count(int64_t value)
+{
+    this->m_batch_count = value;
+}
+int64_t _rocsparse_sptrsm_descr::get_batch_count() const
+{
+    return this->m_batch_count;
+};
+
 void _rocsparse_sptrsm_descr::set_csrsm_info(rocsparse_csrsm_info value)
 {
     this->m_csrsm_info = std::shared_ptr<_rocsparse_csrsm_info>(value);
