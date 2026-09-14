@@ -24,6 +24,8 @@ from typing import Optional, OrderedDict, Callable
 import sys
 import os
 
+from pytest import param
+
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS, BASE_DIR
@@ -77,6 +79,13 @@ class Tuner(BaseTuner):
         def validate(params):
             bs = params['block_size_x']
             ipt = params['ipt']
+            warp_small_lw = params['warp_small_lw']
+            warp_small_ipt = params['warp_small_ipt']
+            warp_medium_lws = params['warp_medium_lws']
+            warp_medium_ipt = params['warp_medium_ipt']
+
+            if warp_small_lw * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
+                return False
 
             if not val_type:
                 return key_size * bs * ipt < TUNING_SHARED_MAX 
