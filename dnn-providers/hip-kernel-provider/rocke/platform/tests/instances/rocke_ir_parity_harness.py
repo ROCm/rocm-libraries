@@ -779,7 +779,7 @@ def build_direct_16c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv16cSpec,
             DirectConvProblem,
             build_direct_conv_16c,
@@ -824,7 +824,7 @@ def build_direct_4c(
     block_groups=16,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
             build_direct_conv_4c,
@@ -868,7 +868,7 @@ def build_direct_8c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv8cSpec,
             DirectConvProblem,
             build_direct_conv_8c,
@@ -913,7 +913,7 @@ def build_direct_32c(
     double_buffer=True,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv32cSpec,
             DirectConvProblem,
             build_direct_conv_32c,
@@ -957,7 +957,7 @@ def build_direct_depthwise(
     block_waves=2,
 ):
     def _build():
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectConvProblem,
             DirectDepthwiseSpec,
             build_direct_depthwise as _build_dw,
