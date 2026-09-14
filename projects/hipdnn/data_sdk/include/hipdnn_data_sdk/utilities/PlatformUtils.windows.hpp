@@ -45,8 +45,10 @@ using SharedLibraryHandle = HMODULE;
 
 inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
-    // The sizing call counts the terminator, the fetching call does not. Any process can
-    // replace the value between the two calls; when the new value no longer fits, the
+    // The sizing call counts the terminator, the fetching call does not, so a fetch that
+    // fits always reports less than it was given -- including zero for a variable that is
+    // set to an empty value, which is a successful read and not an absent one. Any process
+    // can replace the value between the two calls; when the new value no longer fits, the
     // fetch writes nothing and returns the size it now requires, terminator included, so
     // retry with that size until the fetch reports a length that fits.
     DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
@@ -54,10 +56,6 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
     {
         std::string value(size, '\0');
         const DWORD copied = GetEnvironmentVariableA(var, value.data(), size);
-        if(copied == 0)
-        {
-            break; // Unset or failed between the calls; same meaning as a zero sizing call.
-        }
         if(copied < size)
         {
             value.resize(copied);
@@ -73,16 +71,13 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 /// Use for native Windows paths.
 inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
 {
-    // Sized and retried exactly as getEnv() above; see that comment for the growth race.
+    // Sized and retried exactly as getEnv() above; see that comment for the growth race
+    // and for why a zero-length fetch is an empty value rather than an absent one.
     DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
     while(size != 0)
     {
         std::wstring value(size, L'\0');
         const DWORD copied = GetEnvironmentVariableW(var, value.data(), size);
-        if(copied == 0)
-        {
-            break; // Unset or failed between the calls; same meaning as a zero sizing call.
-        }
         if(copied < size)
         {
             value.resize(copied);
