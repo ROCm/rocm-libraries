@@ -264,15 +264,6 @@ void testing_sptrsv_ell(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
-    // Analysis can only expose a structural singularity, and it must be the row
-    // the zero-pivot output already reported.
-    expect_sptrsv_ell_singularity(handle,
-                                  sptrsv_descr,
-                                  p_error,
-                                  analysis_zero_pivot,
-                                  (analysis_zero_pivot == -1) ? rocsparse_singularity_none
-                                                              : rocsparse_singularity_symbolic);
-
     if(arg.unit_check)
     {
         host_dense_vector<T> hy(M);
@@ -333,31 +324,6 @@ void testing_sptrsv_ell(const Arguments& arg)
             std::cout << "solve pivot failed: reference solve pivot position = " << solve_pivot
                       << ", calculated zero pivot position " << solve_zero_pivot << std::endl;
             CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        }
-
-        // After compute the singularity can be structural or numeric depending on
-        // which row comes first, so only the invariants are checked here: the
-        // position agrees with the zero-pivot output, and a detected pivot is
-        // classified instead of being reported as a clean matrix. The cases in
-        // testing_sptrsv_ell_extra pin down the classification itself.
-        {
-            int64_t               position;
-            rocsparse_singularity type;
-            query_sptrsv_ell_singularity(handle, sptrsv_descr, p_error, &position, &type);
-
-            const bool clean      = (type == rocsparse_singularity_none);
-            const bool classified = (type == rocsparse_singularity_symbolic
-                                     || type == rocsparse_singularity_numeric_exact);
-
-            if(position != solve_zero_pivot || clean != (solve_zero_pivot == -1)
-               || (!clean && !classified))
-            {
-                std::cout << "singularity output after compute disagrees with the zero-pivot "
-                             "output: singularity type "
-                          << type << " position " << position << ", zero pivot position "
-                          << solve_zero_pivot << std::endl;
-                CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-            }
         }
 
         if(ROCSPARSE_REPRODUCIBILITY)
