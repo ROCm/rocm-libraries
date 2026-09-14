@@ -624,7 +624,7 @@ class LocalReadMFMA(LocalRead):
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
         if tilePerRead == 0:
-            raise Exception(
+            raise RuntimeError(
                 "localReadMX: unsupported M-major MX-scale local read for tc=%s "
                 "(blockWidth=%s stridePerRead=%s < mxUnit=%s => tilePerRead=0); "
                 "UnrollMajorLDS%s==0 with MXBlock%s>0 has no implemented scale layout"
