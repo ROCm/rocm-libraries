@@ -47,6 +47,7 @@
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
@@ -57,6 +58,7 @@ void init_logical_count(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
     BackendRegistry::registerAllBackends();
+    AllocationRulesRegistry::registerAll();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
 
     // ========================================================================
@@ -155,6 +157,9 @@ NB_MODULE(_stinkytofu, m) {
 #define SET_MODULE_OPTION_LLM(name, type) \
     if (options.contains(#name)) nb::try_cast<type>(options[#name], moduleOptions.name);
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION_LLM)
+#define SET_MODULE_OPTION_WITH_DEFAULT_LLM(name, type, value) SET_MODULE_OPTION_LLM(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT_LLM)
+#undef SET_MODULE_OPTION_WITH_DEFAULT_LLM
 #undef SET_MODULE_OPTION_LLM
             }
             return lowerLogicalModuleToAsm(module, arch, moduleOptions);

@@ -2,7 +2,12 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## hipTensor 2.4.0
+## hipTensor 2.5.0
+
+### Resolved issues
+* Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.
+
+## hipTensor 2.4.0 for ROCm 10.1
 
 ### Added
 * Added `ffm-quick` and `ffm-full` test categories for emulation tests.

@@ -152,6 +152,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     # Refresh the python tree so local code edits (e.g. diff output in
     # run_manifest) propagate to the held node.
     alloc._remote_pkg = slurm.push_rocke_tree()
+    alloc._remote_lib = slurm.push_library_tree()
     env = {"ROCKE_NBITS_DEBUG": "1"} if args.debug else None
     rc = alloc.run_test(env=env)
     print(f"[exec:{arch}] test exit code: {rc}")

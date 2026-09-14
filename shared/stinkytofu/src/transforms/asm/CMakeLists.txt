@@ -53,3 +53,6 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )
+
+add_subdirectory(ra)
+add_subdirectory(ssa)

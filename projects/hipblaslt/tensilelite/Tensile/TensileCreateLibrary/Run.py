@@ -36,7 +36,7 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile import SOURCE_PATH, LibraryIO
+from Tensile import LibraryIO
 from Tensile.Common import (
     CHeader,
     DebugConfig,
@@ -67,6 +67,7 @@ from Tensile.KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
 )
+from Tensile.resources import copy_static_headers
 from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Solution import (
@@ -712,19 +713,7 @@ def writeSolutionsAndKernelsTCL(
 
 @timing
 def copyStaticFiles(outputPath):
-    libraryStaticFiles = [
-        "TensileTypes.h",
-        "tensile_bfloat16.h",
-        "tensile_float8_bfloat8.h",
-        "KernelHeader.h",
-        "ReductionTemplate.h",
-        "memory_gfx.h",
-    ]
-
-    for fileName in libraryStaticFiles:
-        shutil.copy(os.path.join(SOURCE_PATH, fileName), outputPath)
-
-    return libraryStaticFiles
+    return copy_static_headers(outputPath)
 
 
 @timing

@@ -3,7 +3,7 @@
 How SSA is represented on asm IR, and the contract every pass that reads or writes it must hold to.
 
 The types live under `ir/asm/ssa/`.
-[`LiftAsmRegistersToSSAPass`](lift-asm-registers-to-ssa-pass.md) is the only thing that builds them; allocation, destruction, and legacy replay consume them; and `AsmPrinterOptions::ssaForm` prints them (section 10.1).
+[`LiftAsmRegistersToSSAPass`](lift-asm-registers-to-ssa-pass.md) is the only thing that builds them; allocation and destruction consume them; and `AsmPrinterOptions::ssaForm` prints them (section 10.1).
 A function with no attached SSA is the valid pre-lift state, so every invariant here is conditional on SSA being present.
 
 ## 1. Purpose
@@ -273,7 +273,7 @@ Contract:
 Both vectors are flat and per DWORD, not per operand.
 A lifted operand occupies one slot per DWORD; an operand that was not lifted occupies exactly one operand slot holding its immediate payload, and a destination that was not lifted occupies no result slot at all.
 
-Recovering "which values does source operand 2 bind" therefore means walking `getSrcRegs()` and the slot list together, stepping by `liftedSSAUnits(reg)` from `ir/asm/ssa/SSAOperandUnits.hpp`.
+Recovering "which values does source operand 2 bind" therefore means walking `getSrcRegs()` and the slot list together, stepping by `liftedSSAUnits(reg, classes)` from `ir/asm/ssa/SSAOperandUnits.hpp`, where `classes` is the lift scope on the arena.
 That helper is the single definition of the step size, because lifting, destruction, and the `ssaForm` printer all do this walk and disagreeing by one silently shifts every later operand onto the wrong value.
 
 ### 4.5. `SSAArena` and `Function`
@@ -375,7 +375,8 @@ Exact use counts still work, because the nodes are per slot and never deduplicat
 ### 4.8. Operand slots are flat
 
 `AttachedSSA.operands` is indexed by value slot, not by instruction operand, so `operands[k]` is not source operand `k`.
-Each source operand contributes `liftedSSAUnits(reg)` slots, one per DWORD, and a source that is not lifted contributes exactly one slot carrying its immediate payload instead, whatever its width.
+Each source operand contributes `liftedSSAUnits(reg, classes)` slots, one per DWORD, and a source that is not lifted contributes exactly one slot carrying its immediate payload instead, whatever its width.
+"Not lifted" covers a class the lifter cannot model, a literal or special register, and a class this lift deliberately left physical.
 `results` works the same way for destinations, except that a destination which is not lifted contributes no slot at all: it defines no value, so there is nothing for a slot to hold.
 
 For `v[4:5] = v_add_f64(v[10:11], 0x3ff0000000000000)`, two source operands produce three slots:
@@ -394,7 +395,11 @@ destRegs                       results
 `SCC0 = v_cmp_eq_u32(v10, v11)` is the destination case: `destRegs` holds one entry, and `results` is empty, because SCC is not an allocatable class.
 
 Recovering "which values does source operand 1 bind" therefore means walking `srcRegs` and the slot list together, accumulating each operand's step.
-`liftedSSAUnits()` in `ir/asm/ssa/SSAOperandUnits.hpp` is the single definition of that step size, so lifting, destruction, and the `ssaForm` printer cannot disagree about it; disagreeing by one silently shifts every later operand onto the wrong value.
+`liftedSSAUnits(reg, classes)` in `ir/asm/ssa/SSAOperandUnits.hpp` is the single definition of that step size, so lifting, destruction, and the `ssaForm` printer cannot disagree about it; disagreeing by one silently shifts every later operand onto the wrong value.
+
+`classes` is the lift scope and is required rather than defaulted, precisely so a defaulted call site cannot keep an older answer while the rest move on.
+Read it from `SSAArena::liftedClasses()`, which records the classes the arena's SSA was built for.
+It cannot be inferred from the shape fingerprint: that hashes the physical program, which is identical whichever classes were lifted.
 
 Worked example for `v2 = v_add_f32 v0, v1` where `v0` and `v1` arrive as live-ins:
 
@@ -555,7 +560,8 @@ A region-scoped pipeline can therefore lift and inspect SSA, but cannot hand it 
 Nothing tracks IR revisions, and mutation happens on `BasicBlock` and on instruction operands, neither of which notifies the `Function`.
 A fingerprint of the program a lift was built from is therefore what tells a later consumer whether the SSA it is holding still describes the function in front of it.
 
-`computeFunctionShape()` hashes everything attached SSA depends on: block count, per-block edge counts, instruction count and order, opcodes, and every register operand.
+`computeFunctionShape()`, in `analysis/asm/ssa/SSAFunctionShape.hpp`, hashes everything attached SSA depends on: block count, per-block edge counts, instruction count and order, opcodes, and every register operand.
+Computing it walks the whole function, which is why it sits in the analysis layer, while the `kUnstampedShape` sentinel ships with the value type in `ir/asm/ssa/` because the arena itself has to store a shape.
 The lifter stamps it into the `SSAArena`, and `AllocationResult` copies it from the arena it was computed against.
 
 Two checks use it, and both reject rather than proceed.
@@ -565,21 +571,19 @@ Hand-built SSA, as the unit tests construct, carries `kUnstampedShape` and is ex
 ### 5.3. Leaving SSA
 
 Destruction writes a colouring into the physical operands and then detaches.
-`AllocationResult` is that colouring, mapping each value to a physical register; `createLegacyColoring()` fills it from each value's `PhysicalBinding`, which reproduces the registers the function was lifted from.
+`AllocationResult` is that colouring, mapping each value to a physical register; `createLegacyColoring()`, in `transforms/asm/ra/LegacyColoring.hpp`, fills it from each value's `PhysicalBinding`, which reproduces the registers the function was lifted from.
+The colouring type lives in `ir/asm/ssa/AllocationResult.hpp`, beside the data model rather than with the allocators, because it is the SSA subsystem's exit interface and not anyone's policy.
 
 ```cpp
-// transforms/ssa/SSADestruction.hpp
+// transforms/asm/ssa/SSADestruction.hpp
 SSADestructionResult destroyAttachedSSA(Function&, const AllocationResult&);
-
-// transforms/ssa/ReplayLegacyColoringPass.hpp
-SSADestructionResult replayLegacyColoring(Function&);
 ```
 
-`destroyAttachedSSA` is the only component that writes a register operand, and `replayLegacyColoring` is just it applied to `createLegacyColoring()`.
+`destroyAttachedSSA` is the only component that writes a register operand. Pairing it with `createLegacyColoring()` puts every register back where it was lifted from, which is what `RegisterAllocationPass` does when asked for the `legacy` policy with `apply`.
 
 Value IDs mean something only relative to one arena, so `AllocationResult` carries the arena shape it was computed against.
 On success, destruction clears attached SSA after rewriting operands.
-`ReplayLegacyColoringPass` is a no-op when the function has no attached SSA.
+A function with no attached SSA is left alone.
 
 The rewrite is atomic: every operand is validated before any is modified, so a rejected colouring leaves the function with its original registers, exactly like a rejected lift.
 
@@ -589,7 +593,7 @@ Five things are rejected rather than mis-lowered:
 - an allocation whose fingerprint does not match the arena, meaning it was computed against a different lift;
 - a value with no assigned register;
 - a range operand whose units are not consecutive in operand order, which no physical operand can encode;
-- a block argument whose inputs and result do not all land on the same register. Lowering that needs a copy on the incoming edge, and copy insertion, parallel-copy sequencing, and critical-edge splitting are not implemented. Legacy replay never reaches this case.
+- a block argument whose inputs and result do not all land on the same register. Lowering that needs a copy on the incoming edge, and copy insertion, parallel-copy sequencing, and critical-edge splitting are not implemented. The producer's colouring never reaches this case, since every version of a register colours back to that same register.
 
 The first two run before anything else touches the IR, since stale SSA cannot be walked safely.
 
@@ -619,7 +623,7 @@ The same per-unit treatment covers overlapping source ranges, where the shared u
 ### 6.1. Where tuple constraints live
 
 Per-DWORD SSA does not remove tuple constraints, but it does not need a new field to carry them either.
-The physical operand is the grouping record: the slots `liftedSSAUnits(reg)` covers are the units of that operand, in operand order, and each unit's `PhysicalBinding` is that operand's corresponding physical unit.
+The physical operand is the grouping record: the slots `liftedSSAUnits(reg, classes)` covers are the units of that operand, in operand order, and each unit's `PhysicalBinding` is that operand's corresponding physical unit.
 Allocation reads the slots together with the original instruction operand, so "these four values occupy four consecutive registers in this order" is fully represented.
 
 Deliberately not added:
@@ -832,10 +836,10 @@ The parser accepts the physical form, so an `ssaForm` dump does not round-trip, 
 --RemoveDefUseAnalysisPass
 --LiftAsmRegistersToSSAPass[=strictLiveIns,noVerify]
 --DumpStinkyModulePass=ssaForm,stdout
---ReplayLegacyColoringPass
+--RegisterAllocationPass=allocator=legacy,apply
 ```
 
-Replay clears attached SSA on success, so a dump placed after it shows the physical program again.
+Applying the legacy colouring clears attached SSA on success, so a dump placed after it shows the physical program again.
 That is the point of the round-trip test: the same printer, asked for SSA, has nothing left to substitute.
 
 The in-memory checker is `verifyAttachedSSA`.
